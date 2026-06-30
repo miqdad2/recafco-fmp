@@ -20,6 +20,9 @@ out/
 *.log
 pnpm-debug.log*
 
+# Prisma generated client
+packages/database/src/generated/
+
 # TypeScript incremental builds
 *.tsbuildinfo
 

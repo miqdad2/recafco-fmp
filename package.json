@@ -12,7 +12,14 @@
     "lint": "eslint .",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "dev": "turbo dev"
+    "dev": "turbo dev",
+    "db:validate": "pnpm --filter @recafco/database run db:validate",
+    "db:format": "pnpm --filter @recafco/database run db:format",
+    "db:generate": "pnpm --filter @recafco/database run db:generate",
+    "db:migrate:dev": "pnpm --filter @recafco/database run db:migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @recafco/database run db:migrate:deploy",
+    "db:migrate:status": "pnpm --filter @recafco/database run db:migrate:status",
+    "db:studio": "pnpm --filter @recafco/database run db:studio"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

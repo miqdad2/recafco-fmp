@@ -16,6 +16,9 @@
       "dependsOn": ["^build"],
       "persistent": true,
       "cache": false
+    },
+    "db:generate": {
+      "cache": false
     }
   }
 }

@@ -1,17 +1,22 @@
 import pino from 'pino';
+import { getRequestId } from './request-context';
 
-type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
-
-const VALID_LEVELS: readonly LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-
-function resolveLogLevel(): LogLevel {
-  const raw = process.env['LOG_LEVEL'];
-  if (raw !== undefined && (VALID_LEVELS as readonly string[]).includes(raw)) {
-    return raw as LogLevel;
-  }
-  return 'info';
+export interface LoggerOptions {
+  level?: string;
+  environment?: string;
 }
 
-export function createLogger(name: string): pino.Logger {
-  return pino({ name, level: resolveLogLevel() });
+export function createLogger(name: string, options: LoggerOptions = {}): pino.Logger {
+  const level = options.level ?? 'info';
+  const environment = options.environment;
+
+  return pino({
+    name,
+    level,
+    ...(environment !== undefined ? { base: { pid: process.pid, env: environment } } : {}),
+    mixin() {
+      const requestId = getRequestId();
+      return requestId !== undefined ? { requestId } : {};
+    },
+  });
 }

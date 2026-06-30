@@ -1,10 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
-
-interface ApiResponse<T> {
-  data: T;
-  meta: Record<string, unknown>;
-  error: null;
-}
+import { getRequestId } from '@recafco/observability';
+import type { ApiSuccessResponse } from '@recafco/shared';
 
 interface HealthData {
   status: 'ok';
@@ -14,13 +10,11 @@ interface HealthData {
 @Controller('health')
 export class HealthController {
   @Get()
-  getHealth(): ApiResponse<HealthData> {
+  getHealth(): ApiSuccessResponse<HealthData> {
+    const requestId = getRequestId();
     return {
-      data: {
-        status: 'ok',
-        service: 'recafco-fmp-api',
-      },
-      meta: {},
+      data: { status: 'ok', service: 'recafco-fmp-api' },
+      meta: requestId !== undefined ? { requestId } : {},
       error: null,
     };
   }

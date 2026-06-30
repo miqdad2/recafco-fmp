@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@recafco/config": "workspace:*",
     "@recafco/observability": "workspace:*"
   },
   "devDependencies": {

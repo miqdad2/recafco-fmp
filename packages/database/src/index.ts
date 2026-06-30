@@ -1,3 +1,7 @@
-// Database package foundation.
-// Prisma schema and client will be added in Unit 03 (PostgreSQL and Prisma).
-export {};
+export { createPrismaClient } from './prisma-client';
+export type { DatabaseClientConfig } from './prisma-client';
+
+export { checkDatabaseHealth } from './database-health';
+export type { DatabaseHealthResult, DatabaseHealthOk, DatabaseHealthUnavailable } from './database-health';
+
+export type { PrismaClient } from './generated/prisma/client';
