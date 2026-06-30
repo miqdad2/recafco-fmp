@@ -39,6 +39,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  getClient(): ReturnType<typeof createPrismaClient> {
+    return this.client;
+  }
+
   async checkHealth(timeoutMs = 3_000): Promise<DatabaseHealthResult> {
     const result = await checkDatabaseHealth(this.client, timeoutMs);
     if (result.status === 'unavailable') {

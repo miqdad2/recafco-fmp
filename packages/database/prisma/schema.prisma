@@ -1,6 +1,5 @@
 // RECAFCO FMP — Prisma Schema
 // Managed by packages/database. Do not instantiate PrismaClient outside this package.
-// Domain models will be added in later units when real requirements are confirmed.
 // Never run prisma migrate reset against any company database.
 //
 // Prisma 7: connection URL lives in prisma.config.ts (not here).
@@ -13,4 +12,53 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Organization Reference Data
+// Unit 04 — added 2026-06-30
+// Departments and Plants are flat and company-wide (no hierarchy).
+// Locations may optionally belong to a Plant (plantId is nullable).
+// Check constraints for code format and non-empty names are enforced at
+// the database level via custom SQL in the migration file.
+// ---------------------------------------------------------------------------
+
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(32)
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("departments")
+}
+
+model Plant {
+  id          String     @id @default(uuid()) @db.Uuid
+  code        String     @unique @db.VarChar(32)
+  name        String     @db.VarChar(200)
+  description String?    @db.VarChar(500)
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  locations   Location[]
+
+  @@map("plants")
+}
+
+model Location {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(32)
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  plantId     String?  @map("plant_id") @db.Uuid
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  plant       Plant?   @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@index([plantId])
+  @@map("locations")
 }

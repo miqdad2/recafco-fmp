@@ -49,4 +49,59 @@ describe('GlobalExceptionFilter', () => {
     expect(body.error.code).toBeDefined();
     expect(body.error.message).toBeDefined();
   });
+
+  it('prefers code field over error field in exception response', () => {
+    filter.catch(
+      new HttpException({ code: 'DUPLICATE_CODE', message: 'Code already exists' }, HttpStatus.CONFLICT),
+      makeMockHost(response),
+    );
+    const body = (jsonFn.mock.calls[0] as [ReturnType<typeof jsonFn>])[0];
+    expect(body.error.code).toBe('DUPLICATE_CODE');
+    expect(body.error.message).toBe('Code already exists');
+    expect(statusFn).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+  });
+
+  it('includes details in error response when provided', () => {
+    filter.catch(
+      new HttpException(
+        { code: 'VALIDATION_ERROR', message: 'Validation failed', details: { fields: { code: ['too short'] } } },
+        HttpStatus.BAD_REQUEST,
+      ),
+      makeMockHost(response),
+    );
+    const body = (jsonFn.mock.calls[0] as [ReturnType<typeof jsonFn>])[0];
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.details).toEqual({ fields: { code: ['too short'] } });
+  });
+
+  it('omits details when not provided', () => {
+    filter.catch(
+      new HttpException({ code: 'NOT_FOUND', message: 'Not found' }, HttpStatus.NOT_FOUND),
+      makeMockHost(response),
+    );
+    const body = (jsonFn.mock.calls[0] as [ReturnType<typeof jsonFn>])[0];
+    expect('details' in body.error).toBe(false);
+  });
+
+  it('maps generic NestJS NotFoundException (no explicit code field) to NOT_FOUND', () => {
+    // NestJS produces { statusCode: 404, message: "Not Found", error: "Not Found" }
+    // The human-readable error phrase must not be used verbatim as the code.
+    filter.catch(
+      new HttpException({ statusCode: 404, message: 'Not Found', error: 'Not Found' }, HttpStatus.NOT_FOUND),
+      makeMockHost(response),
+    );
+    const body = (jsonFn.mock.calls[0] as [ReturnType<typeof jsonFn>])[0];
+    expect(statusFn).toHaveBeenCalledWith(HttpStatus.NOT_FOUND);
+    expect(body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('maps generic NestJS MethodNotAllowedException to METHOD_NOT_ALLOWED', () => {
+    filter.catch(
+      new HttpException({ statusCode: 405, message: 'Method Not Allowed', error: 'Method Not Allowed' }, 405),
+      makeMockHost(response),
+    );
+    const body = (jsonFn.mock.calls[0] as [ReturnType<typeof jsonFn>])[0];
+    expect(statusFn).toHaveBeenCalledWith(405);
+    expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+  });
 });

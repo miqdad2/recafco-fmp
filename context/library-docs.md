@@ -61,6 +61,84 @@ One module per business boundary, thin controllers, guards/policies, OpenAPI, an
 
 Schema and migrations live in `packages/database/prisma/`. Reviewed SQL, no production reset, exact numeric types, constraints, transactions. See `docs/runbooks/local-postgresql.md` and `docs/runbooks/database-migrations.md`.
 
+## class-validator / class-transformer
+
+**class-validator version: ^0.14.1.** **class-transformer version: ^0.5.1.** Installed in `apps/api` only.
+
+**Decorator execution order:** class-transformer's `@Transform` runs during `plainToInstance` BEFORE class-validator validators fire. Use `@Transform` to normalize (trim, uppercase) before `@Matches` / `@Length` validate.
+
+**Key decorators used:**
+- `@IsString()`, `@IsNotEmpty()`, `@Length(min, max)`, `@Matches(regex)` — field validation
+- `@IsUUID(4)` — UUID format validation on ID fields
+- `@IsOptional()` — allows field to be absent from the request body (not present at all)
+- `@IsBoolean()`, `@IsInt()`, `@Min(n)`, `@Max(n)` — typed numeric/boolean validation
+- `@Transform(({ value }) => ...)` from class-transformer — normalize before validate
+
+**Normalization pattern for code fields:**
+```typescript
+@Transform(({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim().toUpperCase() : value
+)
+@Matches(/^[A-Z0-9_-]{2,32}$/)
+@Length(2, 32)
+code: string;
+```
+
+**exactOptionalPropertyTypes incompatibility:** With `exactOptionalPropertyTypes: true` in tsconfig, optional DTO fields typed as `description?: string` cannot receive `undefined` — only `string` or absent. When building update data objects from Prisma results, use conditional spread:
+```typescript
+// WRONG — fails with exactOptionalPropertyTypes:
+defaultValues={{ description: record.description ?? undefined }}
+// CORRECT:
+defaultValues={{ ...(record.description !== null ? { description: record.description } : {}) }}
+```
+
+**ValidationPipe setup (`apps/api/src/main.ts`):**
+```typescript
+app.useGlobalPipes(new ValidationPipe({
+  whitelist: true,
+  forbidNonWhitelisted: true,
+  transform: true,
+  exceptionFactory: (errors: ValidationError[]) => {
+    const fields: Record<string, string[]> = {};
+    for (const e of errors) {
+      if (e.property && e.constraints) {
+        fields[e.property] = Object.values(e.constraints);
+      }
+    }
+    return new BadRequestException({ code: 'VALIDATION_ERROR', message: 'Validation failed', details: { fields } });
+  },
+}));
+```
+
+## Tailwind CSS v4
+
+**Version: ^4.0.0.** Installed in `apps/web` as a devDependency. PostCSS plugin: `@tailwindcss/postcss@^4.0.0`.
+
+**Key breaking changes from v3:**
+- No `tailwind.config.js` — configuration moves to CSS via `@theme {}` blocks.
+- PostCSS config uses `@tailwindcss/postcss` not `tailwindcss` directly.
+- Import in CSS: `@import "tailwindcss"` (not `@tailwind base/components/utilities`).
+- Semantic tokens defined in `@theme {}` auto-generate utility classes: `bg-background`, `text-text-primary`, etc.
+
+**PostCSS config (`apps/web/postcss.config.mjs`):**
+```javascript
+const config = { plugins: { '@tailwindcss/postcss': {} } };
+export default config;
+```
+
+**CSS setup (`apps/web/src/app/globals.css`):**
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-background: ...;
+  --color-text-primary: ...;
+  /* all tokens from ui-tokens.md */
+}
+```
+
+**Rule:** All color usage must use semantic token utilities (e.g., `bg-background`, `text-text-muted`). No hardcoded hex values or Tailwind palette utilities (e.g., no `bg-gray-100`).
+
 ## Redis-Compatible Server/BullMQ
 Queues, retries, locks, and short-lived cache only. PostgreSQL remains authoritative. Use bounded retries, stable job IDs, and visible failed jobs.
 

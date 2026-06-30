@@ -1,10 +1,11 @@
 import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { HealthModule } from './health/health.module';
+import { OrganizationsModule } from './organizations/organizations.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLogMiddleware } from './common/middleware/request-log.middleware';
 
 @Module({
-  imports: [HealthModule],
+  imports: [HealthModule, OrganizationsModule],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

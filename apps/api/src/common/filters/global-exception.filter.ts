@@ -23,14 +23,21 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let statusCode: number;
     let code: string;
     let message: string;
+    let details: unknown;
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const exceptionResponse = exception.getResponse();
       if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
         const resp = exceptionResponse as Record<string, unknown>;
-        code = typeof resp['error'] === 'string' ? resp['error'] : HttpStatus[statusCode] ?? 'HTTP_ERROR';
+        // Use explicit 'code' from domain errors; fall back to HttpStatus enum name (e.g. NOT_FOUND).
+        // NestJS's built-in 'error' field contains human phrases ("Not Found") so it is intentionally skipped.
+        code =
+          typeof resp['code'] === 'string'
+            ? resp['code']
+            : (HttpStatus[statusCode] ?? 'HTTP_ERROR');
         message = typeof resp['message'] === 'string' ? resp['message'] : exception.message;
+        details = 'details' in resp ? resp['details'] : undefined;
       } else {
         code = HttpStatus[statusCode] ?? 'HTTP_ERROR';
         message = exception.message;
@@ -45,7 +52,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const body: ApiErrorResponse = {
       data: null,
       meta: { requestId },
-      error: { code, message },
+      error: { code, message, ...(details !== undefined ? { details } : {}) },
     };
 
     response.status(statusCode).json(body);

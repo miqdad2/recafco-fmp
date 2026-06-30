@@ -5,8 +5,8 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Phase 1 — Repository and Runtime
-- **Last completed:** Unit 03 — PostgreSQL and Prisma Foundation (2026-06-30)
-- **Next:** Unit 04 (TBD per build plan)
+- **Last completed:** Unit 04 — Organization Reference Data (2026-06-30)
+- **Next:** Unit 05 (TBD per build plan)
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
 - **Licensing:** open-source/self-hosted-first
@@ -21,6 +21,7 @@
 - **Unit 01 — Monorepo Foundation** ✓
 - **Unit 02 — Environment, Logging, Request IDs, Health** ✓
 - **Unit 03 — PostgreSQL and Prisma Foundation** ✓
+- **Unit 04 — Organization Reference Data** ✓
 
 ## Unit 01 — Monorepo Foundation (Completed 2026-06-30)
 
@@ -174,9 +175,98 @@
 - Generated entry point is `client.ts` not `index.ts`; imports must reference `./generated/prisma/client`
 - `pnpm-workspace.yaml` `allowBuilds` required for `@prisma/engines` and `prisma` (pnpm v11 security policy)
 
+## Unit 04 — Organization Reference Data (Completed 2026-06-30)
+
+### Acceptance Criteria — All Met
+
+- [x] Prisma schema — `Department`, `Plant`, `Location` models with `@map` snake_case columns, `@db.Timestamptz(3)`, varchar limits, nullable `plantId` on Location, `onDelete: Restrict` FK, `@@index([plantId])`
+- [x] `packages/database/src/index.ts` — re-exports `Department`, `Plant`, `Location`, `Prisma` from generated client
+- [x] `pnpm db:validate` — PASSED; `pnpm db:format` — PASSED; `pnpm db:generate` — PASSED
+- [x] Migration SQL applied to `recafco_fmp_dev`; migration status verified up to date
+- [x] `GlobalExceptionFilter` updated — prefers `code` field over `error` field; passes through `details`
+- [x] `DatabaseService.getClient()` method added
+- [x] `ValidationPipe` with `whitelist`, `forbidNonWhitelisted`, `transform`, custom `exceptionFactory` returning `VALIDATION_ERROR` with `details.fields`
+- [x] `PendingAuthGuard` — 503 `AUTH_NOT_IMPLEMENTED` in production; passes in dev/test
+- [x] `isPrismaError(err, code)` utility for duck-type P2002/P2003 detection
+- [x] `OrgListQueryDto` — shared pagination (page 1, pageSize 20, max 100), search, isActive
+- [x] Departments — DTOs (create/update with `@Transform` normalization), service, 18 service tests, controller (6 routes, `ParseUUIDPipe`, `getRequestId()` meta)
+- [x] Plants — identical structure to Departments; 10 service tests
+- [x] Locations — extended DTOs with optional `plantId`; service with `requirePlantExists()`; 14 service tests; controller with `plantId` list filter
+- [x] `OrganizationsModule` — imports `DatabaseModule`, declares all 3 controllers, provides all 3 services
+- [x] `AppModule` — imports `OrganizationsModule`
+- [x] Tailwind CSS v4 — `postcss.config.mjs`, `globals.css` with `@import "tailwindcss"` + `@theme {}` from `ui-tokens.md`; `layout.tsx` imports CSS
+- [x] `apps/web/src/lib/organizations-api.ts` — typed API client with `apiFetch<T>`, three namespaces
+- [x] Administration landing page — 3 entity cards
+- [x] Departments: list page (server component, table, StatusBadge), new page, edit page
+- [x] Plants: same structure as Departments
+- [x] Locations: same structure with Plant column and plant selector
+- [x] Shared components registered: `StatusBadge`, `PageHeader`, `EmptyState`, `ErrorState`, `OrgEntityForm`, `LocationForm`
+- [x] `docs/data-dictionary/organization-reference-data.md` — table definitions, column types, expected migration SQL
+- [x] `docs/api/organization-reference-data.md` — all routes, request/response shapes, error codes
+- [x] `context/library-docs.md` — class-validator, class-transformer, Tailwind CSS v4 sections added
+- [x] `context/ui-registry.md` — 6 new components registered
+
+### Correction Notes
+
+27 corrections were applied from the approval phase. Key ones:
+- `Location.plantId` nullable; no `Location.departmentId`; no `locationType`
+- Departments company-wide (no plant FK); flat hierarchy only
+- Code regex `^[A-Z0-9_-]{2,32}$`; normalized via `@Transform` before validation
+- Server Actions → NestJS API (never Prisma directly)
+- Mutation endpoints guarded by `PendingAuthGuard`; controllers never touch Prisma
+
+### Verification Results (2026-06-30)
+
+| Command | Result |
+|---|---|
+| `pnpm db:validate` | ✓ Schema valid |
+| `pnpm db:format` | ✓ No changes needed |
+| `pnpm db:generate` | ✓ Prisma Client 7.8.0 generated |
+| `pnpm lint` | ✓ No errors |
+| `pnpm typecheck` | ✓ 12/12 tasks (including 3 exactOptionalPropertyTypes fixes) |
+| `pnpm test` | ✓ 88 tests (44 new organization service/filter tests + 44 existing) |
+| `pnpm build` | ✓ 8/8 tasks; 10 administration pages emit |
+| `pnpm db:migrate:status` | ✓ Migration applied; `recafco_fmp_dev` up to date |
+
+### Live Database Verification (2026-06-30)
+
+All checks performed against `recafco_fmp_dev` via the running API:
+
+| Scenario | Result |
+|---|---|
+| First migration applied to `recafco_fmp_dev` | ✓ |
+| `departments`, `plants`, `locations` tables present | ✓ |
+| Department code normalized to uppercase on create | ✓ |
+| Plant code normalized to uppercase on create | ✓ |
+| Duplicate code rejected with 409 `DUPLICATE_CODE` | ✓ |
+| Location created without plant (`plantId` null) | ✓ |
+| Location created with plant (`plantId` set) | ✓ |
+| Invalid `plantId` rejected with 400 `INVALID_PLANT_ID` | ✓ |
+| Activate/deactivate idempotent (repeated calls succeed) | ✓ |
+| Search filter (name and code, case-insensitive) | ✓ |
+| `isActive` filter | ✓ |
+| `plantId` filter on locations list | ✓ |
+| Pagination (`page`, `pageSize`, `totalPages` correct) | ✓ |
+| `pageSize` > 100 rejected with 400 `VALIDATION_ERROR` | ✓ |
+| No hard-delete endpoint exists | ✓ |
+| DB `code` format CHECK constraint enforced | ✓ |
+| DB non-blank `name` CHECK constraint enforced | ✓ |
+| QA records removed; tables clean | ✓ |
+| Unmatched route (e.g. `DELETE /:id`) returns `NOT_FOUND` | ✓ |
+| Mutation endpoints return 503 in production env (dev: pass-through) | ✓ |
+
+### New Dependencies
+
+| Package | Location | Purpose |
+|---|---|---|
+| `class-validator@^0.14.1` | `apps/api` | DTO field validation decorators |
+| `class-transformer@^0.5.1` | `apps/api` | DTO field normalization (trim, uppercase) |
+| `tailwindcss@^4.0.0` | `apps/web` (devDep) | CSS utility framework v4 |
+| `@tailwindcss/postcss@^4.0.0` | `apps/web` (devDep) | Tailwind v4 PostCSS plugin |
+
 ## Current Unit
 
-### Unit 04 — TBD
+### Unit 05 — TBD
 
 See `context/build-plan.md` for next phase item.
 
