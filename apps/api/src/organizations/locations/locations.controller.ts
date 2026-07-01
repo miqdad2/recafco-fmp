@@ -15,7 +15,9 @@ import { LocationsService } from './locations.service';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { OrgListQueryDto } from '../dto/org-list-query.dto';
-import { PendingAuthGuard } from '../../common/guards/pending-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { PermissionGuard } from '../../common/guards/permission.guard';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { PaginatedResult } from '../dto/org-list-query.dto';
@@ -32,16 +34,19 @@ function meta(): { requestId?: string } {
 }
 
 @Controller('organizations/locations')
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class LocationsController {
   constructor(private readonly locationsService: LocationsService) {}
 
   @Get()
+  @Permissions('org.locations.read')
   async list(@Query() query: LocationListQueryDto): Promise<ApiSuccessResponse<PaginatedResult<unknown>>> {
     const result = await this.locationsService.findAll(query);
     return { data: result, meta: meta(), error: null };
   }
 
   @Get(':id')
+  @Permissions('org.locations.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<unknown>> {
@@ -51,14 +56,14 @@ export class LocationsController {
 
   @Post()
   @HttpCode(201)
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.locations.write')
   async create(@Body() dto: CreateLocationDto): Promise<ApiSuccessResponse<unknown>> {
     const location = await this.locationsService.create(dto);
     return { data: location, meta: meta(), error: null };
   }
 
   @Patch(':id')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.locations.write')
   async update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateLocationDto,
@@ -68,7 +73,7 @@ export class LocationsController {
   }
 
   @Post(':id/activate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.locations.write')
   async activate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<unknown>> {
@@ -77,7 +82,7 @@ export class LocationsController {
   }
 
   @Post(':id/deactivate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.locations.write')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<unknown>> {

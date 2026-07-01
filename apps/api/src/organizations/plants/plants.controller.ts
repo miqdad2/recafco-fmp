@@ -14,7 +14,9 @@ import { PlantsService } from './plants.service';
 import { CreatePlantDto } from './dto/create-plant.dto';
 import { UpdatePlantDto } from './dto/update-plant.dto';
 import { OrgListQueryDto } from '../dto/org-list-query.dto';
-import { PendingAuthGuard } from '../../common/guards/pending-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { PermissionGuard } from '../../common/guards/permission.guard';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { Plant } from '@recafco/database';
@@ -26,16 +28,19 @@ function meta(): { requestId?: string } {
 }
 
 @Controller('organizations/plants')
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class PlantsController {
   constructor(private readonly plantsService: PlantsService) {}
 
   @Get()
+  @Permissions('org.plants.read')
   async list(@Query() query: OrgListQueryDto): Promise<ApiSuccessResponse<PaginatedResult<Plant>>> {
     const result = await this.plantsService.findAll(query);
     return { data: result, meta: meta(), error: null };
   }
 
   @Get(':id')
+  @Permissions('org.plants.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Plant>> {
@@ -45,14 +50,14 @@ export class PlantsController {
 
   @Post()
   @HttpCode(201)
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.plants.write')
   async create(@Body() dto: CreatePlantDto): Promise<ApiSuccessResponse<Plant>> {
     const plant = await this.plantsService.create(dto);
     return { data: plant, meta: meta(), error: null };
   }
 
   @Patch(':id')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.plants.write')
   async update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdatePlantDto,
@@ -62,7 +67,7 @@ export class PlantsController {
   }
 
   @Post(':id/activate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.plants.write')
   async activate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Plant>> {
@@ -71,7 +76,7 @@ export class PlantsController {
   }
 
   @Post(':id/deactivate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.plants.write')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Plant>> {

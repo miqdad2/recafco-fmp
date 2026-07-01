@@ -1,3 +1,5 @@
+import { cookies } from 'next/headers';
+
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
 export interface OrgEntity {
@@ -53,9 +55,17 @@ export interface ListQuery {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  let authHeader: Record<string, string> = {};
+  try {
+    const store = await cookies();
+    const token = store.get('recafco_access')?.value;
+    if (token) authHeader = { Authorization: `Bearer ${token}` };
+  } catch {
+    // Not in a request context (e.g., build time) — proceed without auth.
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeader, ...init?.headers },
     cache: 'no-store',
   });
   const body = (await res.json()) as ApiResponse<T> | ApiErrorResponse;

@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint --dir src",
+    "lint": "next lint",
     "test": "vitest run"
   },
   "dependencies": {
     "@recafco/config": "workspace:*",
+    "lucide-react": "^1.22.0",
     "next": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

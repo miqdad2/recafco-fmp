@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { ApiEnvSchema } from '@recafco/config';
 
-const validDb = { DATABASE_URL: 'postgresql://user:pass@localhost:5432/db' };
+const JWT_SECRET = 'test-jwt-access-secret-at-least-32-chars-long!';
+
+const validDb = {
+  DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+  JWT_ACCESS_SECRET: JWT_SECRET,
+};
 
 describe('ApiEnvSchema', () => {
   it('applies defaults when optional vars are absent', () => {
@@ -64,6 +69,7 @@ describe('ApiEnvSchema', () => {
     const result = ApiEnvSchema.parse({
       NODE_ENV: 'development',
       DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
+      JWT_ACCESS_SECRET: JWT_SECRET,
     });
     expect(result.databaseUrl).toBe('postgres://user:pass@localhost:5432/db');
   });
@@ -72,6 +78,7 @@ describe('ApiEnvSchema', () => {
     const result = ApiEnvSchema.parse({
       NODE_ENV: 'development',
       DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+      JWT_ACCESS_SECRET: JWT_SECRET,
       DATABASE_CONNECTION_TIMEOUT_MS: '5000',
       DATABASE_STATEMENT_TIMEOUT_MS: '15000',
       DATABASE_POOL_MAX: '20',

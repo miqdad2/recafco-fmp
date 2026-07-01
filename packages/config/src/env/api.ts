@@ -30,6 +30,9 @@ function isDatabaseUrl(url: string): boolean {
   return url.startsWith('postgresql://') || url.startsWith('postgres://');
 }
 
+const DEFAULT_JWT_ACCESS_EXPIRES_SECONDS = 900; // 15 minutes
+const DEFAULT_REFRESH_TOKEN_EXPIRES_DAYS = 7;
+
 export const ApiEnvSchema = z
   .object({
     NODE_ENV: NodeEnvSchema.default('development'),
@@ -45,6 +48,11 @@ export const ApiEnvSchema = z
     DATABASE_CONNECTION_TIMEOUT_MS: z.string().optional(),
     DATABASE_STATEMENT_TIMEOUT_MS: z.string().optional(),
     DATABASE_POOL_MAX: z.string().optional(),
+    JWT_ACCESS_SECRET: z
+      .string()
+      .min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
+    JWT_ACCESS_EXPIRES_SECONDS: z.string().optional(),
+    REFRESH_TOKEN_EXPIRES_DAYS: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -66,6 +74,15 @@ export const ApiEnvSchema = z
         DEFAULT_STATEMENT_TIMEOUT_MS,
       ),
       databasePoolMax: parseIntWithDefault(raw.DATABASE_POOL_MAX, DEFAULT_POOL_MAX),
+      jwtAccessSecret: raw.JWT_ACCESS_SECRET,
+      jwtAccessExpiresSeconds: parseIntWithDefault(
+        raw.JWT_ACCESS_EXPIRES_SECONDS,
+        DEFAULT_JWT_ACCESS_EXPIRES_SECONDS,
+      ),
+      refreshTokenExpiresDays: parseIntWithDefault(
+        raw.REFRESH_TOKEN_EXPIRES_DAYS,
+        DEFAULT_REFRESH_TOKEN_EXPIRES_DAYS,
+      ),
     };
   });
 

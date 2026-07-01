@@ -1,0 +1,13 @@
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../database/database.module';
+import { AuthModule } from '../auth/auth.module';
+import { SafetyService } from './safety.service';
+import { SafetyRefService } from './safety-ref.service';
+import { SafetyController } from './safety.controller';
+
+@Module({
+  imports: [DatabaseModule, AuthModule],
+  controllers: [SafetyController],
+  providers: [SafetyService, SafetyRefService],
+})
+export class SafetyModule {}

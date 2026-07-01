@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node -r tsconfig-paths/register src/main.ts",
+    "dev": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bootstrap:admin": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/bootstrap-admin.ts",
+    "cleanup:sessions": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/cleanup-sessions.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
+    "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.0.0",
+    "@node-rs/argon2": "^2.0.2",
     "@recafco/config": "workspace:*",
     "@recafco/database": "workspace:*",
     "@recafco/observability": "workspace:*",

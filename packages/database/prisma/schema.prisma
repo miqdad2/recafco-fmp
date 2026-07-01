@@ -24,41 +24,879 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Department {
-  id          String   @id @default(uuid()) @db.Uuid
-  code        String   @unique @db.VarChar(32)
-  name        String   @db.VarChar(200)
-  description String?  @db.VarChar(500)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                  String               @id @default(uuid()) @db.Uuid
+  code                String               @unique @db.VarChar(32)
+  name                String               @db.VarChar(200)
+  description         String?              @db.VarChar(500)
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  users               User[]
+  incidents           Incident[]
+  tasksRequesting     FactoryTask[]        @relation("TaskRequestingDept")
+  tasksResponsible    FactoryTask[]        @relation("TaskResponsibleDept")
+  maintenanceRequests MaintenanceRequest[]
+  safetyInspections   SafetyInspection[]
 
   @@map("departments")
 }
 
 model Plant {
-  id          String     @id @default(uuid()) @db.Uuid
-  code        String     @unique @db.VarChar(32)
-  name        String     @db.VarChar(200)
-  description String?    @db.VarChar(500)
-  isActive    Boolean    @default(true) @map("is_active")
-  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  locations   Location[]
+  id                  String               @id @default(uuid()) @db.Uuid
+  code                String               @unique @db.VarChar(32)
+  name                String               @db.VarChar(200)
+  description         String?              @db.VarChar(500)
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  locations           Location[]
+  users               User[]
+  incidents           Incident[]
+  factoryTasks        FactoryTask[]
+  maintenanceRequests MaintenanceRequest[]
+  safetyInspections   SafetyInspection[]
 
   @@map("plants")
 }
 
 model Location {
-  id          String   @id @default(uuid()) @db.Uuid
-  code        String   @unique @db.VarChar(32)
-  name        String   @db.VarChar(200)
-  description String?  @db.VarChar(500)
-  plantId     String?  @map("plant_id") @db.Uuid
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-  plant       Plant?   @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  id                  String               @id @default(uuid()) @db.Uuid
+  code                String               @unique @db.VarChar(32)
+  name                String               @db.VarChar(200)
+  description         String?              @db.VarChar(500)
+  plantId             String?              @map("plant_id") @db.Uuid
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  plant               Plant?               @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  users               User[]
+  incidents           Incident[]
+  factoryTasks        FactoryTask[]
+  maintenanceRequests MaintenanceRequest[]
+  safetyInspections   SafetyInspection[]
 
   @@index([plantId])
   @@map("locations")
+}
+
+// ---------------------------------------------------------------------------
+// Roles and Permissions Foundation
+// Unit 06 — added 2026-06-30
+// Role codes are stable identifiers (never changed after creation).
+// System roles (isSystem=true) cannot be deleted, deactivated, or renamed.
+// Three system roles: SUPER_ADMIN, ADMIN, VIEWER.
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  isSystem    Boolean  @default(false) @map("is_system")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(100)
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  module      String   @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Users and Authentication Foundation
+// Unit 05 — added 2026-06-30
+// Unit 06 — roleId (NOT NULL) replaces the legacy UserRole enum column,
+//            which was removed in migration 0004.
+// Passwords are hashed with Argon2id via @node-rs/argon2. Never store plain.
+// ---------------------------------------------------------------------------
+
+model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  username            String    @unique @db.VarChar(50)
+  displayName         String    @map("display_name") @db.VarChar(200)
+  email               String?   @unique @db.VarChar(254)
+  employeeNumber      String?   @unique @map("employee_number") @db.VarChar(50)
+  passwordHash        String    @map("password_hash") @db.VarChar(500)
+  roleId              String    @map("role_id") @db.Uuid
+  isActive            Boolean   @default(true) @map("is_active")
+  mustChangePassword  Boolean   @default(true) @map("must_change_password")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz(3)
+  passwordChangedAt   DateTime? @map("password_changed_at") @db.Timestamptz(3)
+  departmentId        String?   @map("department_id") @db.Uuid
+  plantId             String?   @map("plant_id") @db.Uuid
+  locationId          String?   @map("location_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  role       Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  department Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  plant      Plant?        @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location   Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  sessions   UserSession[]
+
+  incidentsReported        Incident[]        @relation("IncidentReportedBy")
+  incidentsReportedFor     Incident[]        @relation("IncidentReportedFor")
+  incidentsAssigned        Incident[]        @relation("IncidentAssignedTo")
+  incidentsReviewed        Incident[]        @relation("IncidentReviewedBy")
+  incidentsResolved        Incident[]        @relation("IncidentResolvedBy")
+  incidentsClosed          Incident[]        @relation("IncidentClosedBy")
+  incidentActionsAssigned  IncidentAction[]  @relation("IncidentActionAssignedTo")
+  incidentActionsCompleted IncidentAction[]  @relation("IncidentActionCompletedBy")
+  incidentActionsCreated   IncidentAction[]  @relation("IncidentActionCreatedBy")
+  incidentComments         IncidentComment[] @relation("IncidentCommentAuthor")
+
+  factoryTasksCreated     FactoryTask[]        @relation("TaskCreatedBy")
+  factoryTasksRequestedBy FactoryTask[]        @relation("TaskRequestedBy")
+  factoryTasksAssigned    FactoryTask[]        @relation("TaskAssignedTo")
+  factoryTasksCompleted   FactoryTask[]        @relation("TaskCompletedBy")
+  factoryTasksClosed      FactoryTask[]        @relation("TaskClosedBy")
+  factoryTasksBlocked     FactoryTask[]        @relation("TaskBlockedBy")
+  factoryTaskComments     FactoryTaskComment[] @relation("TaskCommentAuthor")
+
+  maintenanceRequestsCreated     MaintenanceRequest[]        @relation("MRCreatedBy")
+  maintenanceRequestsRequestedBy MaintenanceRequest[]        @relation("MRRequestedBy")
+  maintenanceRequestsAssigned    MaintenanceRequest[]        @relation("MRAssignedTo")
+  maintenanceRequestsCompleted   MaintenanceRequest[]        @relation("MRCompletedBy")
+  maintenanceRequestsClosed      MaintenanceRequest[]        @relation("MRClosedBy")
+  maintenanceRequestsRejected    MaintenanceRequest[]        @relation("MRRejectedBy")
+  maintenanceRequestsCancelled   MaintenanceRequest[]        @relation("MRCancelledBy")
+  maintenanceComments            MaintenanceRequestComment[] @relation("MRCommentAuthor")
+
+  safetyInspectionsCreated   SafetyInspection[]        @relation("SafetyCreatedBy")
+  safetyInspectionsInspected SafetyInspection[]        @relation("SafetyInspector")
+  safetyInspectionsCompleted SafetyInspection[]        @relation("SafetyCompletedBy")
+  safetyInspectionsClosed    SafetyInspection[]        @relation("SafetyClosedBy")
+  safetyInspectionsCancelled SafetyInspection[]        @relation("SafetyCancelledBy")
+  safetyFindingsCreated      SafetyFinding[]           @relation("FindingCreatedBy")
+  safetyFindingsAssigned     SafetyFinding[]           @relation("FindingAssignedTo")
+  safetyFindingsResolved     SafetyFinding[]           @relation("FindingResolvedBy")
+  safetyFindingsVerified     SafetyFinding[]           @relation("FindingVerifiedBy")
+  safetyFindingsClosed       SafetyFinding[]           @relation("FindingClosedBy")
+  safetyFindingsReopened     SafetyFinding[]           @relation("FindingReopenedBy")
+  safetyInspectionComments   SafetyInspectionComment[] @relation("SafetyCommentAuthor")
+
+  @@index([roleId])
+  @@index([departmentId])
+  @@index([plantId])
+  @@index([locationId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Refresh sessions
+// tokenHash = hex(SHA-256(rawRefreshToken)). Raw token never stored.
+// Deleted on logout, deactivation, or password change.
+// UNIQUE on tokenHash enforces one session per raw token.
+// ---------------------------------------------------------------------------
+
+model UserSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Security audit log
+// Append-only. No FK constraints to prevent cascade deletion of audit history.
+// userId = subject; actorId = who performed the action (may be same as userId).
+// NEVER write passwords, hashes, tokens, or cookies to metadata.
+// ---------------------------------------------------------------------------
+
+model SecurityAuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  event     String   @db.VarChar(100)
+  userId    String?  @map("user_id") @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  metadata  Json?    @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([event, createdAt(sort: Desc)])
+  @@map("security_audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Incident Reporting Foundation
+// Unit 08 — added 2026-07-01
+//
+// Status lifecycle: DRAFT → SUBMITTED → UNDER_REVIEW → INVESTIGATION →
+//   ACTION_REQUIRED → RESOLVED → CLOSED. CANCELLED is terminal from most
+//   open states. RESOLVED/CLOSED can be reopened to UNDER_REVIEW by manage.
+//
+// Reference numbers are INC-YYYY-NNNNNN generated atomically via
+//   IncidentSequence upsert inside the creation transaction (UTC year).
+//
+// onDelete: Restrict on child tables keeps history intact if the incident is
+//   soft-blocked (incidents are never hard-deleted).
+//
+// occurredAt future-check is enforced in application code (not DB) to avoid
+//   time-skew issues with now() in CHECK constraints.
+//
+// affectedDepartmentId = the department in which the incident took place.
+//   responsibleDepartmentId is deferred.
+// ---------------------------------------------------------------------------
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("incident_severity")
+}
+
+enum IncidentStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  INVESTIGATION
+  ACTION_REQUIRED
+  RESOLVED
+  CLOSED
+  CANCELLED
+
+  @@map("incident_status")
+}
+
+enum IncidentActionStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@map("incident_action_status")
+}
+
+model IncidentSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("incident_sequences")
+}
+
+model Incident {
+  id                   String           @id @default(uuid()) @db.Uuid
+  referenceNumber      String           @unique @map("reference_number") @db.VarChar(20)
+  title                String           @db.VarChar(300)
+  description          String           @db.Text
+  severity             IncidentSeverity
+  status               IncidentStatus   @default(DRAFT)
+  occurredAt           DateTime         @map("occurred_at") @db.Timestamptz(3)
+  immediateAction      String?          @map("immediate_action") @db.VarChar(2000)
+  reportedByUserId     String           @map("reported_by_user_id") @db.Uuid
+  reportedForUserId    String?          @map("reported_for_user_id") @db.Uuid
+  affectedPlantId      String?          @map("affected_plant_id") @db.Uuid
+  affectedLocationId   String?          @map("affected_location_id") @db.Uuid
+  affectedDepartmentId String?          @map("affected_department_id") @db.Uuid
+  assignedToUserId     String?          @map("assigned_to_user_id") @db.Uuid
+  reviewedByUserId     String?          @map("reviewed_by_user_id") @db.Uuid
+  rootCause            String?          @map("root_cause") @db.VarChar(2000)
+  investigationSummary String?          @map("investigation_summary") @db.VarChar(4000)
+  resolutionSummary    String?          @map("resolution_summary") @db.VarChar(4000)
+  resolvedByUserId     String?          @map("resolved_by_user_id") @db.Uuid
+  closedByUserId       String?          @map("closed_by_user_id") @db.Uuid
+  resolvedAt           DateTime?        @map("resolved_at") @db.Timestamptz(3)
+  closedAt             DateTime?        @map("closed_at") @db.Timestamptz(3)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  reportedByUser   User        @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id], onDelete: Restrict)
+  reportedForUser  User?       @relation("IncidentReportedFor", fields: [reportedForUserId], references: [id], onDelete: SetNull)
+  affectedPlant    Plant?      @relation(fields: [affectedPlantId], references: [id], onDelete: SetNull)
+  affectedLocation Location?   @relation(fields: [affectedLocationId], references: [id], onDelete: SetNull)
+  affectedDept     Department? @relation(fields: [affectedDepartmentId], references: [id], onDelete: SetNull)
+  assignedToUser   User?       @relation("IncidentAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reviewedByUser   User?       @relation("IncidentReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  resolvedByUser   User?       @relation("IncidentResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  closedByUser     User?       @relation("IncidentClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+
+  actions     IncidentAction[]
+  comments    IncidentComment[]
+  activities  IncidentActivity[]
+  linkedTasks FactoryTask[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([severity, status])
+  @@index([reportedByUserId])
+  @@index([assignedToUserId])
+  @@index([affectedPlantId])
+  @@index([affectedDepartmentId])
+  @@index([resolvedAt])
+  @@map("incidents")
+}
+
+model IncidentAction {
+  id                String               @id @default(uuid()) @db.Uuid
+  incidentId        String               @map("incident_id") @db.Uuid
+  title             String               @db.VarChar(300)
+  description       String?              @db.VarChar(2000)
+  status            IncidentActionStatus @default(OPEN)
+  assignedToUserId  String?              @map("assigned_to_user_id") @db.Uuid
+  dueDate           DateTime?            @map("due_date") @db.Date
+  completedAt       DateTime?            @map("completed_at") @db.Timestamptz(3)
+  completedByUserId String?              @map("completed_by_user_id") @db.Uuid
+  createdByUserId   String               @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  incident        Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  assignedToUser  User?    @relation("IncidentActionAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  completedByUser User?    @relation("IncidentActionCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("IncidentActionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId])
+  @@map("incident_actions")
+}
+
+model IncidentComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  incidentId   String   @map("incident_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  authorUser User     @relation("IncidentCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId, createdAt(sort: Asc)])
+  @@map("incident_comments")
+}
+
+// actorUserId has no FK — mirrors SecurityAuditEvent so deactivating a user
+// does not corrupt the incident timeline.
+model IncidentActivity {
+  id             String          @id @default(uuid()) @db.Uuid
+  incidentId     String          @map("incident_id") @db.Uuid
+  actorUserId    String?         @map("actor_user_id") @db.Uuid
+  actorName      String?         @map("actor_name") @db.VarChar(200)
+  event          String          @db.VarChar(100)
+  previousStatus IncidentStatus? @map("previous_status")
+  newStatus      IncidentStatus? @map("new_status")
+  metadata       Json?           @db.JsonB
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@index([incidentId, createdAt(sort: Asc)])
+  @@map("incident_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Factory Tasks Management Foundation
+// Unit 09 — added 2026-07-01
+//
+// Status lifecycle: DRAFT → OPEN → ASSIGNED → IN_PROGRESS ⇆ BLOCKED
+//   → COMPLETED → CLOSED.  CANCELLED is terminal from non-terminal states.
+//   COMPLETED/CLOSED may be reopened to IN_PROGRESS by tasks.manage.
+//
+// Reference numbers are TASK-YYYY-NNNNNN generated atomically via
+//   TaskSequence upsert inside the creation transaction (UTC year).
+//   Sequence CHECK: last_seq BETWEEN 0 AND 999999.
+//
+// onDelete: Restrict on createdByUser and on incidentId to prevent silent
+//   deletion of linked incidents; SetNull on nullable assignee/lifecycle FKs.
+//
+// actorUserId in FactoryTaskActivity has no FK — mirrors IncidentActivity.
+//   actorName is denormalized to preserve history when users are deactivated.
+//
+// Assignee ownership rule: start/block/unblock/progress/complete require
+//   assignedToUserId = actor.id unless actor has tasks.manage.
+// ---------------------------------------------------------------------------
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+
+  @@map("task_priority")
+}
+
+enum TaskStatus {
+  DRAFT
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CLOSED
+  CANCELLED
+
+  @@map("task_status")
+}
+
+model TaskSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("task_sequences")
+}
+
+model FactoryTask {
+  id                      String       @id @default(uuid()) @db.Uuid
+  referenceNumber         String       @unique @map("reference_number") @db.VarChar(20)
+  title                   String       @db.VarChar(300)
+  description             String?      @db.Text
+  priority                TaskPriority @default(MEDIUM)
+  status                  TaskStatus   @default(DRAFT)
+  createdByUserId         String       @map("created_by_user_id") @db.Uuid
+  requestedByUserId       String?      @map("requested_by_user_id") @db.Uuid
+  assignedToUserId        String?      @map("assigned_to_user_id") @db.Uuid
+  requestingDepartmentId  String?      @map("requesting_department_id") @db.Uuid
+  responsibleDepartmentId String?      @map("responsible_department_id") @db.Uuid
+  plantId                 String?      @map("plant_id") @db.Uuid
+  locationId              String?      @map("location_id") @db.Uuid
+  incidentId              String?      @map("incident_id") @db.Uuid
+  dueAt                   DateTime?    @map("due_at") @db.Timestamptz(3)
+  startedAt               DateTime?    @map("started_at") @db.Timestamptz(3)
+  completedAt             DateTime?    @map("completed_at") @db.Timestamptz(3)
+  completedByUserId       String?      @map("completed_by_user_id") @db.Uuid
+  closedAt                DateTime?    @map("closed_at") @db.Timestamptz(3)
+  closedByUserId          String?      @map("closed_by_user_id") @db.Uuid
+  blockedAt               DateTime?    @map("blocked_at") @db.Timestamptz(3)
+  blockedByUserId         String?      @map("blocked_by_user_id") @db.Uuid
+  blockedReason           String?      @map("blocked_reason") @db.VarChar(2000)
+  completionSummary       String?      @map("completion_summary") @db.VarChar(4000)
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser         User        @relation("TaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  requestedByUser       User?       @relation("TaskRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  assignedToUser        User?       @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  completedByUser       User?       @relation("TaskCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  closedByUser          User?       @relation("TaskClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  blockedByUser         User?       @relation("TaskBlockedBy", fields: [blockedByUserId], references: [id], onDelete: SetNull)
+  requestingDepartment  Department? @relation("TaskRequestingDept", fields: [requestingDepartmentId], references: [id], onDelete: SetNull)
+  responsibleDepartment Department? @relation("TaskResponsibleDept", fields: [responsibleDepartmentId], references: [id], onDelete: SetNull)
+  plant                 Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location              Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  incident              Incident?   @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  progress   FactoryTaskProgress[]
+  comments   FactoryTaskComment[]
+  activities FactoryTaskActivity[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([priority, status])
+  @@index([assignedToUserId, status])
+  @@index([createdByUserId])
+  @@index([responsibleDepartmentId])
+  @@index([plantId])
+  @@index([incidentId])
+  @@index([dueAt])
+  @@map("factory_tasks")
+}
+
+model FactoryTaskProgress {
+  id              String   @id @default(uuid()) @db.Uuid
+  taskId          String   @map("task_id") @db.Uuid
+  authorUserId    String   @map("author_user_id") @db.Uuid
+  authorName      String   @map("author_name") @db.VarChar(200)
+  progressPercent Int?     @map("progress_percent")
+  note            String   @db.VarChar(2000)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task FactoryTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  // authorUserId has no FK — mirrors IncidentActivity; history preserved if user deactivated
+
+  @@index([taskId, createdAt(sort: Asc)])
+  @@map("factory_task_progress")
+}
+
+model FactoryTaskComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  taskId       String   @map("task_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task       FactoryTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  authorUser User        @relation("TaskCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt(sort: Asc)])
+  @@map("factory_task_comments")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity; deactivating a user
+// does not corrupt the task timeline.
+model FactoryTaskActivity {
+  id             String      @id @default(uuid()) @db.Uuid
+  taskId         String      @map("task_id") @db.Uuid
+  actorUserId    String?     @map("actor_user_id") @db.Uuid
+  actorName      String?     @map("actor_name") @db.VarChar(200)
+  event          String      @db.VarChar(100)
+  previousStatus TaskStatus? @map("previous_status")
+  newStatus      TaskStatus? @map("new_status")
+  metadata       Json?       @db.JsonB
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task FactoryTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt(sort: Asc)])
+  @@map("factory_task_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance Requests Foundation
+// Unit 10 — added 2026-07-01
+//
+// Status lifecycle: DRAFT → SUBMITTED → UNDER_REVIEW → APPROVED → ASSIGNED
+//   → IN_PROGRESS ⇆ WAITING_FOR_PARTS → COMPLETED → CLOSED.
+//   REJECTED is terminal from UNDER_REVIEW. CANCELLED is terminal from most
+//   open states (DRAFT through WAITING_FOR_PARTS).
+//   COMPLETED/CLOSED may be reopened to IN_PROGRESS by maintenance.manage.
+//
+// Reference numbers are MR-YYYY-NNNNNN generated atomically via
+//   MaintenanceSequence upsert inside the creation transaction (UTC year).
+//   Sequence CHECK: last_seq BETWEEN 0 AND 999999.
+//
+// onDelete: Restrict on createdByUser and child history tables to keep
+//   history intact. SetNull on all nullable FK columns.
+//
+// actorUserId in MaintenanceRequestActivity has no FK — mirrors IncidentActivity.
+//   actorName is denormalized to preserve history when users are deactivated.
+//
+// Assignee ownership rule: start/waitForParts/resume/complete require
+//   assignedToUserId = actor.id unless actor has maintenance.manage.
+// ---------------------------------------------------------------------------
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+
+  @@map("maintenance_priority")
+}
+
+enum MaintenanceStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  ASSIGNED
+  IN_PROGRESS
+  WAITING_FOR_PARTS
+  COMPLETED
+  CLOSED
+  REJECTED
+  CANCELLED
+
+  @@map("maintenance_status")
+}
+
+model MaintenanceSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("maintenance_sequences")
+}
+
+model MaintenanceRequest {
+  id                    String              @id @default(uuid()) @db.Uuid
+  referenceNumber       String              @unique @map("reference_number") @db.VarChar(20)
+  title                 String              @db.VarChar(300)
+  problemDescription    String              @map("problem_description") @db.VarChar(10000)
+  priority              MaintenancePriority @default(MEDIUM)
+  status                MaintenanceStatus   @default(DRAFT)
+  createdByUserId       String              @map("created_by_user_id") @db.Uuid
+  requestedByUserId     String?             @map("requested_by_user_id") @db.Uuid
+  assignedToUserId      String?             @map("assigned_to_user_id") @db.Uuid
+  affectedDepartmentId  String?             @map("affected_department_id") @db.Uuid
+  plantId               String?             @map("plant_id") @db.Uuid
+  locationId            String?             @map("location_id") @db.Uuid
+  equipmentDescription  String?             @map("equipment_description") @db.VarChar(1000)
+  requestedCompletionAt DateTime?           @map("requested_completion_at") @db.Timestamptz(3)
+  startedAt             DateTime?           @map("started_at") @db.Timestamptz(3)
+  waitingForPartsAt     DateTime?           @map("waiting_for_parts_at") @db.Timestamptz(3)
+  waitingForPartsReason String?             @map("waiting_for_parts_reason") @db.VarChar(2000)
+  completedAt           DateTime?           @map("completed_at") @db.Timestamptz(3)
+  completedByUserId     String?             @map("completed_by_user_id") @db.Uuid
+  completionSummary     String?             @map("completion_summary") @db.VarChar(4000)
+  closedAt              DateTime?           @map("closed_at") @db.Timestamptz(3)
+  closedByUserId        String?             @map("closed_by_user_id") @db.Uuid
+  rejectedAt            DateTime?           @map("rejected_at") @db.Timestamptz(3)
+  rejectedByUserId      String?             @map("rejected_by_user_id") @db.Uuid
+  rejectionReason       String?             @map("rejection_reason") @db.VarChar(1000)
+  cancelledAt           DateTime?           @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByUserId     String?             @map("cancelled_by_user_id") @db.Uuid
+  cancellationReason    String?             @map("cancellation_reason") @db.VarChar(1000)
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser      User        @relation("MRCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  requestedByUser    User?       @relation("MRRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  assignedToUser     User?       @relation("MRAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  completedByUser    User?       @relation("MRCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  closedByUser       User?       @relation("MRClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  rejectedByUser     User?       @relation("MRRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser    User?       @relation("MRCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  affectedDepartment Department? @relation(fields: [affectedDepartmentId], references: [id], onDelete: SetNull)
+  plant              Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location           Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  comments   MaintenanceRequestComment[]
+  activities MaintenanceRequestActivity[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([priority, status])
+  @@index([assignedToUserId, status])
+  @@index([createdByUserId])
+  @@index([affectedDepartmentId])
+  @@index([plantId])
+  @@index([requestedCompletionAt])
+  @@map("maintenance_requests")
+}
+
+model MaintenanceRequestComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  requestId    String   @map("request_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request    MaintenanceRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  authorUser User               @relation("MRCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt(sort: Asc)])
+  @@map("maintenance_request_comments")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity; deactivating a user
+// does not corrupt the maintenance request timeline.
+model MaintenanceRequestActivity {
+  id             String             @id @default(uuid()) @db.Uuid
+  requestId      String             @map("request_id") @db.Uuid
+  actorUserId    String?            @map("actor_user_id") @db.Uuid
+  actorName      String?            @map("actor_name") @db.VarChar(200)
+  event          String             @db.VarChar(100)
+  previousStatus MaintenanceStatus? @map("previous_status")
+  newStatus      MaintenanceStatus? @map("new_status")
+  metadata       Json?              @db.JsonB
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  request MaintenanceRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt(sort: Asc)])
+  @@map("maintenance_request_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Safety & Compliance Foundation
+// Unit 11 — added 2026-07-01
+//
+// Status lifecycle: DRAFT → SCHEDULED → IN_PROGRESS → COMPLETED → CLOSED.
+//   CANCELLED is terminal from DRAFT, SCHEDULED, or IN_PROGRESS.
+//   CLOSED may be reopened to IN_PROGRESS by safety.manage.
+//
+// Reference numbers are SAFE-YYYY-NNNNNN generated atomically via
+//   SafetyInspectionSequence upsert inside the creation transaction (UTC year).
+//   Sequence CHECK: last_seq BETWEEN 0 AND 999999.
+//
+// Findings have their own 5-state lifecycle: OPEN → ACTION_REQUIRED | RESOLVED
+//   → VERIFIED → CLOSED. RESOLVED/VERIFIED/CLOSED may be reopened to
+//   ACTION_REQUIRED by safety.manage.
+//
+// onDelete: Restrict on createdByUser and all child history tables.
+//   SetNull on nullable lifecycle user FKs.
+//
+// actorUserId in SafetyInspectionActivity has no FK — mirrors IncidentActivity.
+//   actorName is denormalized to preserve history when users are deactivated.
+//
+// Inspector ownership rule: start/complete require inspectorUserId = actor.id
+//   unless actor has safety.manage.
+// Verifier separation-of-duties: verifiedByUserId cannot equal resolvedByUserId
+//   unless actor has safety.manage.
+// ---------------------------------------------------------------------------
+
+enum InspectionStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+  CANCELLED
+
+  @@map("inspection_status")
+}
+
+enum FindingSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("finding_severity")
+}
+
+enum FindingStatus {
+  OPEN
+  ACTION_REQUIRED
+  RESOLVED
+  VERIFIED
+  CLOSED
+
+  @@map("finding_status")
+}
+
+model SafetyInspectionSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("safety_inspection_sequences")
+}
+
+model SafetyInspection {
+  id                 String           @id @default(uuid()) @db.Uuid
+  referenceNumber    String           @unique @map("reference_number") @db.VarChar(20)
+  title              String           @db.VarChar(300)
+  summary            String?          @db.VarChar(10000)
+  status             InspectionStatus @default(DRAFT)
+  scheduledAt        DateTime?        @map("scheduled_at") @db.Timestamptz(3)
+  startedAt          DateTime?        @map("started_at") @db.Timestamptz(3)
+  completedAt        DateTime?        @map("completed_at") @db.Timestamptz(3)
+  completedByUserId  String?          @map("completed_by_user_id") @db.Uuid
+  closedAt           DateTime?        @map("closed_at") @db.Timestamptz(3)
+  closedByUserId     String?          @map("closed_by_user_id") @db.Uuid
+  cancelledAt        DateTime?        @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByUserId  String?          @map("cancelled_by_user_id") @db.Uuid
+  cancellationReason String?          @map("cancellation_reason") @db.VarChar(1000)
+  createdByUserId    String           @map("created_by_user_id") @db.Uuid
+  inspectorUserId    String?          @map("inspector_user_id") @db.Uuid
+  departmentId       String?          @map("department_id") @db.Uuid
+  plantId            String?          @map("plant_id") @db.Uuid
+  locationId         String?          @map("location_id") @db.Uuid
+  checklistSummary   String?          @map("checklist_summary") @db.VarChar(10000)
+  conclusion         String?          @db.VarChar(10000)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser   User        @relation("SafetyCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  inspector       User?       @relation("SafetyInspector", fields: [inspectorUserId], references: [id], onDelete: SetNull)
+  completedByUser User?       @relation("SafetyCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  closedByUser    User?       @relation("SafetyClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser User?       @relation("SafetyCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  department      Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  plant           Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location        Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  findings   SafetyFinding[]
+  comments   SafetyInspectionComment[]
+  activities SafetyInspectionActivity[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([inspectorUserId, status])
+  @@index([createdByUserId])
+  @@index([departmentId])
+  @@index([plantId])
+  @@index([scheduledAt])
+  @@map("safety_inspections")
+}
+
+model SafetyFinding {
+  id                String         @id @default(uuid()) @db.Uuid
+  inspectionId      String         @map("inspection_id") @db.Uuid
+  title             String         @db.VarChar(300)
+  description       String         @db.VarChar(10000)
+  severity          FindingSeverity
+  status            FindingStatus  @default(OPEN)
+  assignedToUserId  String?        @map("assigned_to_user_id") @db.Uuid
+  dueAt             DateTime?      @map("due_at") @db.Timestamptz(3)
+  actionRequired    String?        @map("action_required") @db.VarChar(5000)
+  resolutionSummary String?        @map("resolution_summary") @db.VarChar(10000)
+  resolvedAt        DateTime?      @map("resolved_at") @db.Timestamptz(3)
+  resolvedByUserId  String?        @map("resolved_by_user_id") @db.Uuid
+  verifiedAt        DateTime?      @map("verified_at") @db.Timestamptz(3)
+  verifiedByUserId  String?        @map("verified_by_user_id") @db.Uuid
+  closedAt          DateTime?      @map("closed_at") @db.Timestamptz(3)
+  closedByUserId    String?        @map("closed_by_user_id") @db.Uuid
+  reopenedAt        DateTime?      @map("reopened_at") @db.Timestamptz(3)
+  reopenedByUserId  String?        @map("reopened_by_user_id") @db.Uuid
+  reopenReason      String?        @map("reopen_reason") @db.VarChar(1000)
+  createdByUserId   String         @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  inspection     SafetyInspection @relation(fields: [inspectionId], references: [id], onDelete: Restrict)
+  createdByUser  User             @relation("FindingCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignedToUser User?            @relation("FindingAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  resolvedByUser User?            @relation("FindingResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  verifiedByUser User?            @relation("FindingVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  closedByUser   User?            @relation("FindingClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  reopenedByUser User?            @relation("FindingReopenedBy", fields: [reopenedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([inspectionId, status])
+  @@index([severity, status])
+  @@index([assignedToUserId, status])
+  @@index([dueAt, status])
+  @@map("safety_findings")
+}
+
+model SafetyInspectionComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  inspectionId String   @map("inspection_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  inspection SafetyInspection @relation(fields: [inspectionId], references: [id], onDelete: Restrict)
+  authorUser User             @relation("SafetyCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([inspectionId, createdAt(sort: Asc)])
+  @@map("safety_inspection_comments")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity; deactivating a user
+// does not corrupt the inspection timeline.
+model SafetyInspectionActivity {
+  id             String            @id @default(uuid()) @db.Uuid
+  inspectionId   String            @map("inspection_id") @db.Uuid
+  actorUserId    String?           @map("actor_user_id") @db.Uuid
+  actorName      String?           @map("actor_name") @db.VarChar(200)
+  event          String            @db.VarChar(100)
+  previousStatus InspectionStatus? @map("previous_status")
+  newStatus      InspectionStatus? @map("new_status")
+  metadata       Json?             @db.JsonB
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  inspection SafetyInspection @relation(fields: [inspectionId], references: [id], onDelete: Restrict)
+
+  @@index([inspectionId, createdAt(sort: Asc)])
+  @@map("safety_inspection_activities")
 }

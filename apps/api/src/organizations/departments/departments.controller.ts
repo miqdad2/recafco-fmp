@@ -14,7 +14,9 @@ import { DepartmentsService } from './departments.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
 import { OrgListQueryDto } from '../dto/org-list-query.dto';
-import { PendingAuthGuard } from '../../common/guards/pending-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { PermissionGuard } from '../../common/guards/permission.guard';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { Department } from '@recafco/database';
@@ -26,10 +28,12 @@ function meta(): { requestId?: string } {
 }
 
 @Controller('organizations/departments')
+@UseGuards(JwtAuthGuard, PermissionGuard)
 export class DepartmentsController {
   constructor(private readonly departmentsService: DepartmentsService) {}
 
   @Get()
+  @Permissions('org.departments.read')
   async list(
     @Query() query: OrgListQueryDto,
   ): Promise<ApiSuccessResponse<PaginatedResult<Department>>> {
@@ -38,6 +42,7 @@ export class DepartmentsController {
   }
 
   @Get(':id')
+  @Permissions('org.departments.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Department>> {
@@ -47,14 +52,14 @@ export class DepartmentsController {
 
   @Post()
   @HttpCode(201)
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.departments.write')
   async create(@Body() dto: CreateDepartmentDto): Promise<ApiSuccessResponse<Department>> {
     const dept = await this.departmentsService.create(dto);
     return { data: dept, meta: meta(), error: null };
   }
 
   @Patch(':id')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.departments.write')
   async update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateDepartmentDto,
@@ -64,7 +69,7 @@ export class DepartmentsController {
   }
 
   @Post(':id/activate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.departments.write')
   async activate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Department>> {
@@ -73,7 +78,7 @@ export class DepartmentsController {
   }
 
   @Post(':id/deactivate')
-  @UseGuards(PendingAuthGuard)
+  @Permissions('org.departments.write')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiSuccessResponse<Department>> {
