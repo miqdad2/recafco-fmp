@@ -38,6 +38,12 @@ export type {
   Contract,
   ContractComment,
   ContractActivity,
+  ProductionSequence,
+  ProductionLine,
+  ProductionOrder,
+  ProductionEntry,
+  ProductionComment,
+  ProductionActivity,
 } from './generated/prisma/client';
 export {
   Prisma,
@@ -52,4 +58,6 @@ export {
   FindingSeverity,
   FindingStatus,
   ContractStatus,
+  ProductionOrderStatus,
+  ProductionEntryType,
 } from './generated/prisma/client';

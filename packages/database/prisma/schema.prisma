@@ -38,6 +38,7 @@ model Department {
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
   contracts           Contract[]
+  productionOrders    ProductionOrder[]
 
   @@map("departments")
 }
@@ -57,6 +58,8 @@ model Plant {
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
   contracts           Contract[]
+  productionLines     ProductionLine[]
+  productionOrders    ProductionOrder[]
 
   @@map("plants")
 }
@@ -77,6 +80,7 @@ model Location {
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
   contracts           Contract[]
+  productionLines     ProductionLine[]
 
   @@index([plantId])
   @@map("locations")
@@ -213,6 +217,15 @@ model User {
   contractsTerminated  Contract[]        @relation("ContractTerminatedBy")
   contractsClosed      Contract[]        @relation("ContractClosedBy")
   contractComments     ContractComment[] @relation("ContractCommentAuthor")
+
+  productionOrdersCreated   ProductionOrder[] @relation("ProdOrderCreatedBy")
+  productionOrdersSupervised ProductionOrder[] @relation("ProdOrderSupervisor")
+  productionOrdersStarted   ProductionOrder[] @relation("ProdOrderStartedBy")
+  productionOrdersPaused    ProductionOrder[] @relation("ProdOrderPausedBy")
+  productionOrdersResumed   ProductionOrder[] @relation("ProdOrderResumedBy")
+  productionOrdersCompleted ProductionOrder[] @relation("ProdOrderCompletedBy")
+  productionOrdersCancelled ProductionOrder[] @relation("ProdOrderCancelledBy")
+  productionComments        ProductionComment[] @relation("ProdCommentAuthor")
 
   @@index([roleId])
   @@index([departmentId])
@@ -1033,4 +1046,196 @@ model ContractActivity {
 
   @@index([contractId, createdAt(sort: Asc)])
   @@map("contract_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Production Management Foundation
+// Unit 13 — added 2026-07-02
+//
+// Status lifecycle: DRAFT → SCHEDULED → IN_PROGRESS ⇆ PAUSED → COMPLETED.
+//   CANCELLED is terminal from DRAFT, SCHEDULED, IN_PROGRESS, or PAUSED.
+//
+// Reference numbers are PROD-YYYY-NNNNNN generated atomically via
+//   ProductionSequence upsert inside the creation transaction (UTC year).
+//   Sequence CHECK: last_seq BETWEEN 0 AND 999999.
+//
+// ProductionLine has version for optimistic concurrency on updates.
+// ProductionOrder has version for optimistic concurrency on all state mutations.
+//
+// ProductionEntry is append-only (no update/delete). Entries may be added
+//   when status = IN_PROGRESS or PAUSED. Three types:
+//   OUTPUT: quantityProduced / quantityAccepted / quantityRejected
+//   DOWNTIME: downtimeMinutes
+//   ADJUSTMENT: adjustmentQty (positive correction / negative reject correction)
+//
+// Derived metrics are computed from entries, never stored.
+//
+// authorUserId in ProductionEntry has no FK — mirrors IncidentActivity.
+// actorUserId in ProductionActivity has no FK — mirrors IncidentActivity.
+//
+// onDelete: Restrict on createdByUser and child history tables.
+//   SetNull on nullable lifecycle user FKs.
+// ---------------------------------------------------------------------------
+
+enum ProductionOrderStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELLED
+
+  @@map("production_order_status")
+}
+
+enum ProductionEntryType {
+  OUTPUT
+  DOWNTIME
+  ADJUSTMENT
+
+  @@map("production_entry_type")
+}
+
+model ProductionSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("production_sequences")
+}
+
+model ProductionLine {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(32)
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  plantId     String?  @map("plant_id") @db.Uuid
+  locationId  String?  @map("location_id") @db.Uuid
+  capacity    Int?
+  isActive    Boolean  @default(true) @map("is_active")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  plant    Plant?    @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  productionOrders ProductionOrder[]
+
+  @@index([isActive, plantId])
+  @@map("production_lines")
+}
+
+model ProductionOrder {
+  id                 String                @id @default(uuid()) @db.Uuid
+  referenceNumber    String                @unique @map("reference_number") @db.VarChar(20)
+  title              String                @db.VarChar(300)
+  description        String?               @db.VarChar(10000)
+  status             ProductionOrderStatus @default(DRAFT)
+  version            Int                   @default(1)
+  productionLineId   String?               @map("production_line_id") @db.Uuid
+  departmentId       String?               @map("department_id") @db.Uuid
+  plantId            String?               @map("plant_id") @db.Uuid
+  productCode        String?               @map("product_code") @db.VarChar(100)
+  productName        String?               @map("product_name") @db.VarChar(300)
+  targetQuantity     Int                   @map("target_quantity")
+  unit               String                @db.VarChar(50)
+  scheduledStartAt   DateTime?             @map("scheduled_start_at") @db.Timestamptz(3)
+  scheduledEndAt     DateTime?             @map("scheduled_end_at") @db.Timestamptz(3)
+  startedAt          DateTime?             @map("started_at") @db.Timestamptz(3)
+  startedByUserId    String?               @map("started_by_user_id") @db.Uuid
+  pausedAt           DateTime?             @map("paused_at") @db.Timestamptz(3)
+  pausedByUserId     String?               @map("paused_by_user_id") @db.Uuid
+  pauseReason        String?               @map("pause_reason") @db.VarChar(1000)
+  resumedAt          DateTime?             @map("resumed_at") @db.Timestamptz(3)
+  resumedByUserId    String?               @map("resumed_by_user_id") @db.Uuid
+  completedAt        DateTime?             @map("completed_at") @db.Timestamptz(3)
+  completedByUserId  String?               @map("completed_by_user_id") @db.Uuid
+  completionNote     String?               @map("completion_note") @db.VarChar(4000)
+  cancelledAt        DateTime?             @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByUserId  String?               @map("cancelled_by_user_id") @db.Uuid
+  cancellationReason String?               @map("cancellation_reason") @db.VarChar(1000)
+  supervisorUserId   String?               @map("supervisor_user_id") @db.Uuid
+  createdByUserId    String                @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  productionLine  ProductionLine? @relation(fields: [productionLineId], references: [id], onDelete: SetNull)
+  department      Department?     @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  plant           Plant?          @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  createdByUser   User            @relation("ProdOrderCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  supervisorUser  User?           @relation("ProdOrderSupervisor", fields: [supervisorUserId], references: [id], onDelete: SetNull)
+  startedByUser   User?           @relation("ProdOrderStartedBy", fields: [startedByUserId], references: [id], onDelete: SetNull)
+  pausedByUser    User?           @relation("ProdOrderPausedBy", fields: [pausedByUserId], references: [id], onDelete: SetNull)
+  resumedByUser   User?           @relation("ProdOrderResumedBy", fields: [resumedByUserId], references: [id], onDelete: SetNull)
+  completedByUser User?           @relation("ProdOrderCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser User?           @relation("ProdOrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  entries    ProductionEntry[]
+  comments   ProductionComment[]
+  activities ProductionActivity[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([productionLineId, status])
+  @@index([departmentId])
+  @@index([plantId])
+  @@index([createdByUserId])
+  @@index([supervisorUserId, status])
+  @@index([scheduledStartAt])
+  @@map("production_orders")
+}
+
+// authorUserId has no FK — mirrors IncidentActivity; history preserved if user deactivated.
+model ProductionEntry {
+  id               String              @id @default(uuid()) @db.Uuid
+  orderId          String              @map("order_id") @db.Uuid
+  type             ProductionEntryType
+  authorUserId     String              @map("author_user_id") @db.Uuid
+  authorName       String              @map("author_name") @db.VarChar(200)
+  quantityProduced Int?                @map("quantity_produced")
+  quantityAccepted Int?                @map("quantity_accepted")
+  quantityRejected Int?                @map("quantity_rejected")
+  downtimeMinutes  Int?                @map("downtime_minutes")
+  adjustmentQty    Int?                @map("adjustment_qty")
+  note             String?             @db.VarChar(2000)
+  recordedAt       DateTime            @map("recorded_at") @db.Timestamptz(3)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt(sort: Asc)])
+  @@index([orderId, type])
+  @@map("production_entries")
+}
+
+model ProductionComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  orderId      String   @map("order_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order      ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  authorUser User            @relation("ProdCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt(sort: Asc)])
+  @@map("production_comments")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity; deactivating a user
+// does not corrupt the production order timeline.
+model ProductionActivity {
+  id             String                 @id @default(uuid()) @db.Uuid
+  orderId        String                 @map("order_id") @db.Uuid
+  actorUserId    String?                @map("actor_user_id") @db.Uuid
+  actorName      String?                @map("actor_name") @db.VarChar(200)
+  event          String                 @db.VarChar(100)
+  previousStatus ProductionOrderStatus? @map("previous_status")
+  newStatus      ProductionOrderStatus? @map("new_status")
+  metadata       Json?                  @db.JsonB
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt(sort: Asc)])
+  @@map("production_activities")
 }

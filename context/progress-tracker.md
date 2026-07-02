@@ -4,9 +4,9 @@
 
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
-- **Phase:** Phase 8 — Contracts Management
-- **Last completed:** Unit 12 — Contracts Management Foundation (2026-07-01)
-- **Next:** Unit 13 (TBD per build plan)
+- **Phase:** Phase 9 — Production Management
+- **Last completed:** Unit 13 — Production Management Foundation (2026-07-02)
+- **Next:** Unit 14 (TBD per build plan)
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
 - **Licensing:** open-source/self-hosted-first
@@ -30,6 +30,104 @@
 - **Unit 10 — Maintenance Requests Foundation** ✓
 - **Unit 11 — Safety & Compliance Foundation** ✓
 - **Unit 12 — Contracts Management Foundation** ✓
+- **Unit 13 — Production Management Foundation** ✓
+
+## Unit 13 — Production Management Foundation (Completed 2026-07-02)
+
+### Acceptance Criteria — All Met
+
+- [x] `ProductionOrderStatus` enum: DRAFT, SCHEDULED, IN_PROGRESS, PAUSED, COMPLETED, CANCELLED
+- [x] `ProductionEntryType` enum: OUTPUT, DOWNTIME, ADJUSTMENT
+- [x] `ProductionSequence` model — atomic upsert `PROD-YYYY-NNNNNN` (year UTC); exhaustion at 999,999
+- [x] `ProductionLine` model — 10 columns; `version` Int for optimistic concurrency; `isActive` boolean; optional `capacity` Int
+- [x] `ProductionOrder` model — 34 columns; 7 user FKs (named); `version` Int; `targetQuantity > 0` CHECK constraint
+- [x] `ProductionEntry` model — append-only; no FK on `authorUserId` (mirrors IncidentActivity pattern); indexed by `(orderId, createdAt)` and `(orderId, type)`
+- [x] `ProductionComment` model — append-only; FK on `authorUserId`
+- [x] `ProductionActivity` model — append-only; no FK on `actorUserId`; stores `previousStatus`, `newStatus`, `metadata` Json
+- [x] Back-relations: `productionLines` on Plant and Location; `productionOrders` on Plant and Department; 8 back-relations on User
+- [x] Migration `20260702000000_add_production_management_foundation` — applied via shadow DB workaround; 16 permissions seeded with `production.lines.*` format (not `production_lines.*` — underscore not allowed in first permission segment)
+- [x] `packages/database/src/index.ts` — exports 6 new model types + `ProductionOrderStatus` + `ProductionEntryType`; database package rebuilt
+- [x] `ProductionRefService` — atomic `$queryRaw INSERT ... ON CONFLICT ... RETURNING last_seq`
+- [x] 13 DTO files — create/update/list/lifecycle/entry/comment/line DTOs with class-validator
+- [x] `ProductionLinesService` — CRUD + activate/deactivate + listActive; version-based optimistic concurrency on update; `deactivate` requires stricter `production.lines.manage` (vs `production.lines.update` for activate); P2002 → 409 DUPLICATE_CODE
+- [x] `computeMetrics()` exported pure function — 9 derived metrics from entries (no DB); importable for unit tests
+- [x] `ProductionOrdersService` — 19 methods; unified `transition()` private helper; `cancel()` handles multi-status IN clause; `addEntry` validates type-specific fields (OUTPUT: quantityProduced required; accepted+rejected ≤ produced; DOWNTIME: downtimeMinutes; ADJUSTMENT: adjustmentQty); entries accepted only when IN_PROGRESS or PAUSED; org selectors: `listDepartments`, `listPlants`, `listPeople`
+- [x] `ProductionController` — 28 endpoints; static routes (`/production/lines`, `/production/lines/active`, `/production/locations`) declared before parametric (`:id`, `:lineId`); entry endpoints split into 3 typed routes (`/entries/output`, `/entries/downtime`, `/entries/adjustment`)
+- [x] `ProductionModule` — imports `[DatabaseModule, AuthModule]`; present in `AppModule`
+- [x] 16 permission codes seeded: 12 `production.*` + 4 `production.lines.*`; SUPER_ADMIN/ADMIN assigned all 16; VIEWER assigned `production.read` + `production.lines.read` + `production.comment` (migration `20260702000001_add_production_role_permissions`)
+- [x] `production-api.ts` — typed web client with `productionApi` namespace (14 methods incl. `locations()`)
+- [x] `actions.ts` — 13 server actions covering all lifecycle transitions, 3 typed entry endpoints, comment, line create, line update
+- [x] 8 frontend routes: `/production`, `/production/new`, `/production/[id]`, `/production/[id]/edit`, `/production/[id]/entries/new`, `/production/lines`, `/production/lines/new`, `/production/lines/[id]/edit`
+- [x] `[id]/page.tsx` — inline server actions use `(formData: FormData) => Promise<void>` (not state-returning signature) for direct form `action=` compatibility in server components
+- [x] `[id]/edit/page.tsx` — uses `.catch(() => notFound())` pattern for correct TypeScript type narrowing
+- [x] `[id]/entries/new/page.tsx` — import path corrected to `'../../../actions'` (3 levels up, not 4)
+- [x] `ProductionOrderStatus[]` and `ProductionEntryType[]` type annotations on CANCELLABLE/ENTERABLE arrays to satisfy `Array.includes()` TypeScript constraint
+- [x] `listActivities()` return type annotated as `Promise<unknown[]>` to avoid Prisma client runtime reference in portable type
+- [x] Typecheck: 0 errors (12/12 tasks)
+- [x] 490 tests total (104 new: 27 production-lines + 77 production-orders incl. 8 `computeMetrics` pure function tests)
+- [x] Build: 8/8 tasks; 8 new production routes emitted
+
+### Verification Results (2026-07-02)
+
+| Command | Result |
+|---|---|
+| `pnpm db:validate` | ✓ Schema valid |
+| `pnpm db:generate` | ✓ Prisma Client 7.8.0 regenerated |
+| `pnpm db:migrate:status` | ✓ 11 migrations applied, schema up to date |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm test` | ✓ 490/490 tests (19 files) |
+| `pnpm build` | ✓ 8/8 tasks; `/production/lines/[id]/edit` emitted |
+
+### 16 Permissions Seeded
+
+| Code | Name |
+|---|---|
+| `production.read` | List and view production orders |
+| `production.create` | Create production orders |
+| `production.update` | Edit DRAFT production orders |
+| `production.schedule` | DRAFT → SCHEDULED |
+| `production.start` | SCHEDULED → IN_PROGRESS |
+| `production.pause` | IN_PROGRESS → PAUSED |
+| `production.resume` | PAUSED → IN_PROGRESS |
+| `production.complete` | IN_PROGRESS → COMPLETED |
+| `production.cancel` | Cancel from cancellable statuses |
+| `production.comment` | Add comments |
+| `production.entries.create` | Add production entries |
+| `production.manage` | Admin override (all transitions) |
+| `production.lines.read` | List and view production lines |
+| `production.lines.create` | Create production lines |
+| `production.lines.update` | Update production lines / activate |
+| `production.lines.manage` | Deactivate production lines |
+
+### Error Codes
+
+| Code | HTTP | Description |
+|---|---|---|
+| `PRODUCTION_ORDER_NOT_FOUND` | 404 | Order does not exist |
+| `PRODUCTION_LINE_NOT_FOUND` | 404 | Line does not exist |
+| `PRODUCTION_ORDER_VERSION_CONFLICT` | 409 | Optimistic concurrency failure on order |
+| `PRODUCTION_LINE_VERSION_CONFLICT` | 409 | Optimistic concurrency failure on line |
+| `PRODUCTION_ORDER_INVALID_STATUS` | 422 | Wrong source status for transition or entry |
+| `PRODUCTION_ENTRY_INVALID` | 422 | Entry field validation failure |
+| `PRODUCTION_SEQUENCE_EXHAUSTED` | 422 | Year sequence > 999,999 |
+| `DUPLICATE_CODE` | 409 | Production line code already exists |
+
+### Key Notes
+
+- Shadow DB workaround still required: pipe SQL via `prisma db execute --stdin`, then `prisma migrate resolve --applied`
+- Permission code format: first segment cannot have underscores — `production.lines.read` correct, `production_lines.read` would violate DB CHECK constraint
+- NestJS route ordering: static routes (`/production/lines`, `/production/lines/active`) must be declared before parametric routes (`/production/lines/:lineId`) in the same controller
+- `computeMetrics()` is a pure named export — importable in tests without DB; `remainingQuantity` is NOT clamped (may be negative for overproduction)
+- `ProductionEntry.authorUserId` and `ProductionActivity.actorUserId` have no FK — mirrors IncidentActivity pattern; history preserved if user is deactivated
+- Optimistic concurrency: `updateMany(WHERE id AND status AND version=dto.version)` + count check; distinguish not-found vs wrong-status vs version conflict
+- `cancel()` uses `WHERE status IN (DRAFT, SCHEDULED, IN_PROGRESS, PAUSED)` — multi-status cancel
+- `deactivate()` requires `production.lines.manage`; `activate()` only requires `production.lines.update`
+- Entry rules (post-audit): OUTPUT → IN_PROGRESS only; accepted+rejected EXACTLY EQUALS produced; DOWNTIME → IN_PROGRESS or PAUSED, note required; ADJUSTMENT → requires `production.manage`, IN_PROGRESS/PAUSED/COMPLETED, non-zero adjustmentQty, note required, resulting effectiveProduced >= 0
+- 3 typed entry endpoints: `POST /:id/entries/output` (production.entries.create), `POST /:id/entries/downtime` (production.entries.create), `POST /:id/entries/adjustment` (production.manage)
+- Server component form actions: use `(formData: FormData) => Promise<void>` for direct `action=` attachment; state-returning `(prev, formData)` pattern requires client component `useActionState`
+- Database package rebuilt after adding new enum/type exports to `packages/database/src/index.ts`
+- Role assignment migration (`20260702000001`) applied separately; original migration lacked role_permissions INSERT
 
 ## Unit 12 — Contracts Management Foundation (Completed 2026-07-01)
 

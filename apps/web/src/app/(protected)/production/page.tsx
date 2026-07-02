@@ -1,108 +1,267 @@
+import Link from 'next/link';
 import type { Metadata } from 'next';
-import { Factory, Link2, BarChart3, RefreshCw, ShieldAlert, CheckCircle2, Circle, Database } from 'lucide-react';
+import { cookies } from 'next/headers';
+import { Breadcrumbs } from '../_components/breadcrumbs';
+import { PageHeader } from '../administration/_components/page-header';
+import { productionApi } from '../../../lib/production-api';
+
+type PageSearchParams = Record<string, string | string[] | undefined>;
 
 export const metadata: Metadata = { title: 'Production — RECAFCO FMP' };
 
-const CAPABILITIES = [
-  { icon: Link2, label: 'SAP read integration', detail: 'Read-only connection to SAP Business One 9.3 via the SAP Service Layer. No writes to SAP.' },
-  { icon: RefreshCw, label: 'Master data synchronisation', detail: 'Sync items, business partners, warehouses, and production resources from SAP on schedule.' },
-  { icon: Factory, label: 'Production order monitoring', detail: 'View open and completed production orders with quantities, status, and routing.' },
-  { icon: BarChart3, label: 'Performance dashboard', detail: 'Production KPIs (output, efficiency, downtime) derived from SAP transaction data.' },
-  { icon: Database, label: 'SAP sync administration', detail: 'Monitor last sync time, error log, and trigger manual reconciliation.' },
-  { icon: ShieldAlert, label: 'Read-only safeguards', detail: 'No FMP component writes to SAP HANA tables. All mutations remain in SAP itself.' },
-];
+async function getUserPermissions(): Promise<string[]> {
+  try {
+    const store = await cookies();
+    const token = store.get('recafco_access')?.value;
+    if (!token) return [];
+    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString());
+    return Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [];
+  } catch {
+    return [];
+  }
+}
 
-const PHASES = [
-  { label: 'SAP discovery', items: ['Assess SAP Business One 9.3 Service Layer availability and test company', 'Identify accessible production, inventory, and master data endpoints', 'Confirm read-only credential setup with IT'], done: false },
-  { label: 'SAP connection and health', items: ['Service Layer client with health monitoring', 'Connection status page in Administration', 'No SAP write operations — enforced at code level'], done: false },
-  { label: 'Master data sync', items: ['Item master, business partners, warehouses', 'Scheduled sync jobs (configurable interval)', 'Delta-sync and conflict detection'], done: false },
-  { label: 'Production dashboard', items: ['Production order list and detail', 'KPI calculations from SAP data', 'Reconciliation and error reporting'], done: false },
-];
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'Draft',
+  SCHEDULED: 'Scheduled',
+  IN_PROGRESS: 'In Progress',
+  PAUSED: 'Paused',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+};
 
-export default function ProductionPage(): React.JSX.Element {
+const STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-surface border border-border text-text-secondary',
+  SCHEDULED: 'bg-blue-50 text-blue-700 border border-blue-200',
+  IN_PROGRESS: 'bg-success-light text-success border border-success/30',
+  PAUSED: 'bg-warning-light text-warning border border-warning/30',
+  COMPLETED: 'bg-surface text-text-muted border border-border',
+  CANCELLED: 'bg-danger-light text-danger border border-danger/30',
+};
+
+function StatusBadge({ status }: { status: string }): React.JSX.Element {
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-8">
-      <div className="flex items-start gap-4">
-        <span className="shrink-0 p-3 bg-accent-light rounded-lg">
-          <Factory className="size-6 text-accent" aria-hidden="true" />
-        </span>
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-semibold text-text-primary">Production</h1>
-            <span className="text-xs font-medium bg-secondary-accent-light text-secondary-accent px-2 py-0.5 rounded-full uppercase tracking-wide">
-              Phase 9 — Planned
-            </span>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status] ?? ''}`}>
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+interface PageProps {
+  searchParams: Promise<PageSearchParams>;
+}
+
+export default async function ProductionPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
+  const params = await searchParams;
+  const permissions = await getUserPermissions();
+  const canCreate = permissions.includes('production.create');
+  const canManageLines = permissions.includes('production.lines.read');
+
+  const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
+  const search = typeof params['search'] === 'string' ? params['search'] : undefined;
+  const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
+
+  const [listRes, summaryRes] = await Promise.allSettled([
+    productionApi.list({ page, pageSize: 25, ...(statusFilter ? { status: statusFilter } : {}), ...(search ? { search } : {}) }),
+    productionApi.summary(),
+  ]);
+
+  const result = listRes.status === 'fulfilled' ? listRes.value : null;
+  const error = listRes.status === 'rejected'
+    ? (listRes.reason instanceof Error ? listRes.reason.message : 'Failed to load production orders')
+    : null;
+
+  const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : null;
+  const orders = result?.items ?? [];
+  const total = result?.total ?? 0;
+  const totalPages = result?.totalPages ?? 1;
+
+  const quickFilters: { label: string; status?: string }[] = [
+    { label: 'All' },
+    { label: 'Draft', status: 'DRAFT' },
+    { label: 'Scheduled', status: 'SCHEDULED' },
+    { label: 'In Progress', status: 'IN_PROGRESS' },
+    { label: 'Paused', status: 'PAUSED' },
+  ];
+
+  function buildHref(overrides: Record<string, string | undefined>): string {
+    const q = new URLSearchParams();
+    const merged = { status: statusFilter, search, page: page > 1 ? String(page) : undefined, ...overrides };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v !== undefined && v !== '') q.set(k, v);
+    }
+    const str = q.toString();
+    return str ? `/production?${str}` : '/production';
+  }
+
+  return (
+    <div className="min-h-full p-8">
+      <div className="max-w-6xl mx-auto">
+        <Breadcrumbs items={[{ label: 'Production' }]} />
+
+        <div className="mb-6">
+          <PageHeader
+            title="Production"
+            description="Production orders and manufacturing runs. Ref format: PROD-YYYY-NNNNNN"
+            action={
+              <div className="flex gap-2">
+                {canManageLines && (
+                  <Link
+                    href="/production/lines"
+                    className="inline-flex items-center rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+                  >
+                    Production Lines
+                  </Link>
+                )}
+                {canCreate && (
+                  <Link
+                    href="/production/new"
+                    className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+                  >
+                    New Order
+                  </Link>
+                )}
+              </div>
+            }
+          />
+        </div>
+
+        {summary && (
+          <div className="flex flex-wrap gap-3 mb-6">
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">In Progress</p>
+              <p className="text-xl font-semibold text-success">{summary.totalInProgress}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Scheduled</p>
+              <p className="text-xl font-semibold text-blue-600">{summary.totalScheduled}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Paused</p>
+              <p className="text-xl font-semibold text-warning">{summary.totalPaused}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Completed</p>
+              <p className="text-xl font-semibold text-text-secondary">{summary.totalCompleted}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Draft</p>
+              <p className="text-xl font-semibold text-text-primary">{summary.totalDraft}</p>
+            </div>
           </div>
-          <p className="mt-1 text-text-secondary">
-            Production order monitoring and performance metrics via SAP Business One 9.3 read integration.
-          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {quickFilters.map((f) => {
+            const active = f.status !== undefined ? statusFilter === f.status : !statusFilter;
+            return (
+              <Link
+                key={f.label}
+                href={buildHref({ status: f.status, page: undefined })}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-accent text-white' : 'bg-surface border border-border text-text-secondary hover:border-border-strong'}`}
+              >
+                {f.label}
+              </Link>
+            );
+          })}
         </div>
+
+        <form method="GET" action="/production" className="mb-6 flex gap-2">
+          {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+          <input
+            name="search"
+            type="search"
+            defaultValue={search}
+            placeholder="Search by reference, title or product…"
+            className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <button type="submit" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus">
+            Search
+          </button>
+        </form>
+
+        {error && (
+          <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">{error}</div>
+        )}
+
+        {orders.length === 0 && !error ? (
+          <div className="rounded-lg border border-border bg-surface p-12 text-center">
+            <p className="text-sm text-text-secondary">
+              {search ?? statusFilter ? 'No orders match the current filters.' : 'No production orders yet.'}
+            </p>
+            {canCreate && !(search ?? statusFilter) && (
+              <Link href="/production/new" className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90">
+                Create first order
+              </Link>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              <table className="min-w-full divide-y divide-border">
+                <thead>
+                  <tr className="bg-surface-secondary">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Reference</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Title</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">Product</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden md:table-cell">Line</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Target</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Scheduled Start</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {orders.map((order) => (
+                    <tr key={order.id} className="hover:bg-surface-secondary/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link href={`/production/${order.id}`} className="font-mono text-xs font-medium text-accent hover:underline">
+                          {order.referenceNumber}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link href={`/production/${order.id}`} className="text-sm font-medium text-text-primary hover:text-accent">
+                          {order.title}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={order.status} /></td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden sm:table-cell">
+                        {order.productName ?? order.productCode ?? <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden md:table-cell">
+                        {order.productionLine ? order.productionLine.name : <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
+                        {order.targetQuantity} {order.unit}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden xl:table-cell">
+                        {order.scheduledStartAt ? formatDate(order.scheduledStartAt) : <span className="text-text-muted">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
+                <span>Showing {orders.length} of {total}</span>
+                <div className="flex gap-2">
+                  {page > 1 && (
+                    <Link href={buildHref({ page: String(page - 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">Previous</Link>
+                  )}
+                  {page < totalPages && (
+                    <Link href={buildHref({ page: String(page + 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">Next</Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Purpose</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          The Production module connects FMP to SAP Business One 9.3 (for HANA) in a read-only capacity,
-          surfacing production orders, shop-floor quantities, and key performance indicators without
-          duplicating the ERP or risking data integrity. SAP remains the authoritative system of record
-          for all production, inventory, purchasing, and financial data. FMP only reads and displays.
-        </p>
-        <div className="mt-3 p-3 bg-warning-light border border-warning/30 rounded-md">
-          <p className="text-xs text-warning font-medium">
-            No write operations to SAP HANA — FMP reads only. All production transactions remain in SAP.
-          </p>
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Planned Capabilities
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CAPABILITIES.map((cap) => (
-            <div key={cap.label} className="bg-surface rounded-lg border border-border p-4 flex items-start gap-3">
-              <cap.icon className="size-4 text-accent shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium text-text-primary">{cap.label}</p>
-                <p className="text-xs text-text-secondary mt-0.5">{cap.detail}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Current Status</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Production is planned for Phase 9 — the final operational phase before operations hardening.
-          Before any integration work begins, the SAP Service Layer must be discovered, tested, and
-          confirmed accessible with a read-only credential. No SAP data is currently connected to FMP.
-          No production records exist in the FMP database.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Build Sequence
-        </h2>
-        <div className="space-y-3">
-          {PHASES.map((phase) => (
-            <div key={phase.label} className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 mb-2">
-                {phase.done
-                  ? <CheckCircle2 className="size-4 text-success shrink-0" />
-                  : <Circle className="size-4 text-border-strong shrink-0" />}
-                <p className="text-sm font-medium text-text-primary">{phase.label}</p>
-              </div>
-              <ul className="ml-6 space-y-1">
-                {phase.items.map((item) => (
-                  <li key={item} className="text-xs text-text-muted list-disc">{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

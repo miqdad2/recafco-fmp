@@ -504,6 +504,68 @@ Living document. Update after every reusable component or established visual pat
 
 ---
 
+---
+
+## Production Management Components (Unit 13)
+
+### ProductionOrderStatusBadge (inline)
+- Path: `apps/web/src/app/(protected)/production/[id]/page.tsx` (inline `StatusBadge` component)
+- Purpose: Pill badge for the 6 production order lifecycle statuses.
+- Variants: DRAFT (surface/border/text-secondary), SCHEDULED (blue-50/text-blue-700/border-blue-200), IN_PROGRESS (success-light/text-success/border-success/30), PAUSED (warning-light/text-warning/border-warning/30), COMPLETED (surface/text-muted/border), CANCELLED (danger-light/text-danger/border-danger/30).
+- Key tokens/classes: `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium`
+- Accessibility behavior: Pure component; no additional aria attributes.
+- Used by: `production/page.tsx`, `production/[id]/page.tsx`
+- Notes: Defined inline on the detail page using `STATUS_COLORS: Record<string, string>` lookup. Status label replaces `_` with space.
+
+### AddEntryForm (Production)
+- Path: `apps/web/src/app/(protected)/production/[id]/entries/new/_components/add-entry-form.tsx`
+- Purpose: Client form to record production entries; renders different fields based on selected entry type.
+- Variants: OUTPUT (quantityProduced required + optional accepted/rejected grid), DOWNTIME (downtimeMinutes required), ADJUSTMENT (adjustmentQty required, can be negative). Radio buttons switch between types; unrelated fields are hidden (not rendered) — no stale data submitted.
+- Key tokens/classes: Standard form tokens; radio inputs use `accent-accent`.
+- Accessibility behavior: Labelled inputs; required fields marked; radio group with per-option labels.
+- Used by: `production/[id]/entries/new/page.tsx`
+- Notes: `'use client'`; `useState` for entryType + `useActionState` for form state. `boundAction` prop passed from server component parent. Type-specific fields conditionally rendered (not hidden via CSS) to avoid submitting stale values.
+
+### EditOrderForm (Production)
+- Path: `apps/web/src/app/(protected)/production/[id]/edit/_components/edit-order-form.tsx`
+- Purpose: Edit form for DRAFT production orders — title, description, product code/name, targetQuantity, unit, scheduled start/end.
+- Variants: Single variant (DRAFT only — server component redirects non-DRAFT to 404).
+- Key tokens/classes: Standard form tokens; grid-cols-2 for code/name and quantity/unit pairs.
+- Accessibility behavior: Labelled inputs; required fields marked.
+- Used by: `production/[id]/edit/page.tsx`
+- Notes: `'use client'`; `useActionState`; `defaultValues` prop carries existing order field values; `boundAction` from server component.
+
+---
+
+## API Patterns (Unit 13)
+
+### ProductionOrdersService — Unified Transition Helper
+- Pattern: Private `transition(id, version, fromStatus, toStatus, actor, event, extraData)` handles all simple binary transitions: `updateMany(WHERE id AND status=fromStatus AND version)` + count check + inside-transaction `findUnique` disambiguation (not-found → 404, wrong-status → 422, stale version → 409).
+- Used by: `schedule()`, `start()`, `pause()`, `resume()`, `complete()`. `cancel()` has its own `IN clause` variant for multi-source statuses.
+- Notes: `extraData` carries lifecycle timestamp fields (e.g. `startedAt`, `startedByUserId`) set per-transition. Activity record created in same transaction with `previousStatus` and `newStatus`.
+
+### ProductionOrdersService — cancel() Multi-status Pattern
+- Pattern: `cancel()` uses `WHERE status IN [DRAFT, SCHEDULED, IN_PROGRESS, PAUSED]` with version check. After count=0: `tx.findUnique` to check if order exists (→ 404 if not), then `CANCELLABLE.includes(order.status)` (→ 422 if status is COMPLETED/CANCELLED), otherwise → 409 version conflict.
+- Used by: `ProductionOrdersService.cancel()`.
+- Notes: `CANCELLABLE` and `ENTERABLE` arrays must be typed as `ProductionOrderStatus[]` for TypeScript `Array.includes()` to accept `ProductionOrderStatus` values from the WHERE clause result.
+
+### computeMetrics() — Pure Exported Function
+- Pattern: `export function computeMetrics(entries: RawEntry[], targetQuantity: number): ProductionMetrics` in `production-orders.service.ts`. Accumulates OUTPUT (totalProduced/accepted/rejected), DOWNTIME (totalDowntimeMinutes), ADJUSTMENT (adjustmentTotal); derives `effectiveProduced = totalProduced + adjustmentTotal`; `completionPercentage` and `rejectionRate` rounded to 2 decimal places; `remainingQuantity` clamped to 0 minimum.
+- Used by: `ProductionOrdersService.getMetrics()`, unit tests directly.
+- Notes: Never stored in DB — computed at read time. Import directly in tests for pure function coverage without DB mocks.
+
+### Server Component Form Actions — Signature Constraint
+- Pattern: Inline server actions in RSC pages that are passed directly to `<form action={...}>` must use `(formData: FormData) => Promise<void>` signature. The `(prev, formData) => Promise<State>` signature is only valid when passed to `useActionState()` in a client component.
+- Used by: `production/[id]/page.tsx` (`handlePause`, `handleCancel`, `handleComment`).
+- Notes: Workaround: call the `(prev, formData)` action from the `(formData)` wrapper with a static initial state: `await pauseOrderAction(id, version, { error: null }, formData)`. Errors from these transitions are not surfaced to UI in this pattern; use a dedicated client component with `useActionState` for error feedback.
+
+### Inline notFound() with .catch() Pattern
+- Pattern: `const order = await productionApi.get(id).catch(() => notFound())`. Because `notFound()` returns `never`, TypeScript infers the result as `Awaited<ReturnType<typeof productionApi.get>>` (the non-never branch). This avoids `let order: T | undefined` + subsequent non-null assertion and correctly narrows the type for the rest of the function.
+- Used by: `production/[id]/edit/page.tsx`.
+- Notes: Preferable to `try { ... } catch { notFound() }` + `if (!order) notFound()` because TypeScript cannot always narrow through the latter pattern.
+
+---
+
 Expected future components (not yet built):
 
 - DataSourceBadge
