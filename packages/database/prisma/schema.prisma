@@ -37,6 +37,7 @@ model Department {
   tasksResponsible    FactoryTask[]        @relation("TaskResponsibleDept")
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
+  contracts           Contract[]
 
   @@map("departments")
 }
@@ -55,6 +56,7 @@ model Plant {
   factoryTasks        FactoryTask[]
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
+  contracts           Contract[]
 
   @@map("plants")
 }
@@ -74,6 +76,7 @@ model Location {
   factoryTasks        FactoryTask[]
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
+  contracts           Contract[]
 
   @@index([plantId])
   @@map("locations")
@@ -203,6 +206,13 @@ model User {
   safetyFindingsClosed       SafetyFinding[]           @relation("FindingClosedBy")
   safetyFindingsReopened     SafetyFinding[]           @relation("FindingReopenedBy")
   safetyInspectionComments   SafetyInspectionComment[] @relation("SafetyCommentAuthor")
+
+  contractsOwned       Contract[]        @relation("ContractOwner")
+  contractsCreated     Contract[]        @relation("ContractCreatedBy")
+  contractsActivated   Contract[]        @relation("ContractActivatedBy")
+  contractsTerminated  Contract[]        @relation("ContractTerminatedBy")
+  contractsClosed      Contract[]        @relation("ContractClosedBy")
+  contractComments     ContractComment[] @relation("ContractCommentAuthor")
 
   @@index([roleId])
   @@index([departmentId])
@@ -899,4 +909,128 @@ model SafetyInspectionActivity {
 
   @@index([inspectionId, createdAt(sort: Asc)])
   @@map("safety_inspection_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Contracts Management Foundation
+// Unit 12 — added 2026-07-01
+//
+// Stored status lifecycle: DRAFT → ACTIVE → TERMINATED | CLOSED
+// Derived display states (computed server-side, no background job):
+//   EXPIRING = stored ACTIVE + renewalNoticeDate ≤ today ≤ endDate
+//   EXPIRED  = stored ACTIVE + endDate < today
+//
+// Reference numbers are CONTRACT-YYYY-NNNNNN generated atomically via
+//   ContractSequence upsert inside the creation transaction (UTC year).
+//   Sequence CHECK: last_seq BETWEEN 0 AND 999999.
+//
+// Optimistic concurrency: every mutating transition increments version.
+//   updateMany(WHERE id AND status AND version) + count check → CONTRACT_VERSION_CONFLICT.
+//
+// onDelete: Restrict on ownerUser, createdByUser, and all child history tables.
+//   SetNull on nullable lifecycle user FKs.
+//
+// actorUserId in ContractActivity has no FK — mirrors IncidentActivity.
+//   actorName is denormalized to preserve history when users are deactivated.
+// ---------------------------------------------------------------------------
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  TERMINATED
+  CLOSED
+
+  @@map("contract_status")
+}
+
+model ContractSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("contract_sequences")
+}
+
+model Contract {
+  id                  String         @id @default(uuid()) @db.Uuid
+  referenceNumber     String         @unique @map("reference_number") @db.VarChar(25)
+  title               String         @db.VarChar(300)
+  description         String?        @db.Text
+  status              ContractStatus @default(DRAFT)
+  version             Int            @default(1)
+  counterpartyName    String         @map("counterparty_name") @db.VarChar(300)
+  counterpartyContact String?        @map("counterparty_contact") @db.VarChar(500)
+  contractValue       Decimal?       @map("contract_value") @db.Decimal(18, 2)
+  currency            String?        @db.VarChar(3)
+  startDate           DateTime?      @map("start_date") @db.Date
+  endDate             DateTime?      @map("end_date") @db.Date
+  renewalNoticeDate   DateTime?      @map("renewal_notice_date") @db.Date
+  ownerUserId         String         @map("owner_user_id") @db.Uuid
+  departmentId        String?        @map("department_id") @db.Uuid
+  plantId             String?        @map("plant_id") @db.Uuid
+  locationId          String?        @map("location_id") @db.Uuid
+  notes               String?        @db.Text
+  createdByUserId     String         @map("created_by_user_id") @db.Uuid
+  activatedAt         DateTime?      @map("activated_at") @db.Timestamptz(3)
+  activatedByUserId   String?        @map("activated_by_user_id") @db.Uuid
+  terminatedAt        DateTime?      @map("terminated_at") @db.Timestamptz(3)
+  terminatedByUserId  String?        @map("terminated_by_user_id") @db.Uuid
+  terminationReason   String?        @map("termination_reason") @db.VarChar(1000)
+  closedAt            DateTime?      @map("closed_at") @db.Timestamptz(3)
+  closedByUserId      String?        @map("closed_by_user_id") @db.Uuid
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  ownerUser        User        @relation("ContractOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdByUser    User        @relation("ContractCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  activatedByUser  User?       @relation("ContractActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
+  terminatedByUser User?       @relation("ContractTerminatedBy", fields: [terminatedByUserId], references: [id], onDelete: SetNull)
+  closedByUser     User?       @relation("ContractClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  comments   ContractComment[]
+  activities ContractActivity[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([ownerUserId, status])
+  @@index([createdByUserId])
+  @@index([departmentId])
+  @@index([plantId])
+  @@index([endDate, status])
+  @@index([renewalNoticeDate, status])
+  @@map("contracts")
+}
+
+model ContractComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  contractId   String   @map("contract_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String   @db.VarChar(5000)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  authorUser User     @relation("ContractCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([contractId, createdAt(sort: Asc)])
+  @@map("contract_comments")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity; deactivating a user
+// does not corrupt the contract timeline.
+model ContractActivity {
+  id             String          @id @default(uuid()) @db.Uuid
+  contractId     String          @map("contract_id") @db.Uuid
+  actorUserId    String?         @map("actor_user_id") @db.Uuid
+  actorName      String?         @map("actor_name") @db.VarChar(200)
+  event          String          @db.VarChar(100)
+  previousStatus ContractStatus? @map("previous_status")
+  newStatus      ContractStatus? @map("new_status")
+  metadata       Json?           @db.JsonB
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@index([contractId, createdAt(sort: Asc)])
+  @@map("contract_activities")
 }

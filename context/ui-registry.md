@@ -420,6 +420,90 @@ Living document. Update after every reusable component or established visual pat
 
 ---
 
+## Safety & Compliance Components (Unit 11)
+
+### InspectionStatusBadge
+- Path: `apps/web/src/app/(protected)/safety-compliance/_components/inspection-status-badge.tsx`
+- Purpose: Pill badge for the 6 inspection lifecycle statuses.
+- Variants: DRAFT (surface-secondary/muted), SCHEDULED (info-light/text-info), IN_PROGRESS (warning-light/text-warning), COMPLETED (success-light/text-success), CLOSED (surface-secondary/text-secondary), CANCELLED (surface-secondary/muted).
+- Key tokens/classes: `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium`
+- Accessibility behavior: Pure RSC; no additional aria.
+- Used by: `safety-compliance/page.tsx`, `safety-compliance/[id]/page.tsx`
+- Notes: Props: `status: InspectionStatus`.
+
+### FindingSeverityBadge
+- Path: `apps/web/src/app/(protected)/safety-compliance/_components/finding-severity-badge.tsx`
+- Purpose: Pill badge for 4 finding severity levels.
+- Variants: LOW (success-light/text-success), MEDIUM (warning-light/text-warning), HIGH (orange-100/text-orange-700), CRITICAL (danger-light/text-danger).
+- Key tokens/classes: `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium`
+- Used by: `safety-compliance/[id]/page.tsx`
+- Notes: Props: `severity: FindingSeverity`.
+
+### FindingStatusBadge
+- Path: `apps/web/src/app/(protected)/safety-compliance/_components/finding-status-badge.tsx`
+- Purpose: Pill badge for 5 finding lifecycle statuses.
+- Variants: OPEN (info-light/text-info), ACTION_REQUIRED (warning-light/text-warning), RESOLVED (accent-light/text-accent), VERIFIED (success-light/text-success), CLOSED (surface-secondary/text-secondary).
+- Key tokens/classes: `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium`
+- Used by: `safety-compliance/[id]/page.tsx`
+- Notes: Props: `status: FindingStatus`.
+
+---
+
+## API Patterns (Unit 11)
+
+### SafetyService — Inspector Ownership Rule
+- Pattern: `start()` and `complete()` require `inspectorUserId === actor.id` OR actor has `safety.manage`. Both check via private `requireInspectorOwnership()` helper before the `updateMany` transition.
+- Used by: `SafetyService.start()`, `SafetyService.complete()`.
+- Notes: Inspector set at schedule time; null inspector means no-one can start without `safety.manage`.
+
+### SafetyService — Verifier Separation of Duties
+- Pattern: `verifyFinding()` rejects if `finding.resolvedByUserId === actor.id` unless actor has `safety.manage`. Prevents resolver from self-verifying.
+- Used by: `SafetyService.verifyFinding()`.
+- Notes: Throws `SAFETY_VERIFIER_SAME_AS_RESOLVER` (ForbiddenException) when violated.
+
+### SafetyService — Finding Reopen Target
+- Pattern: Reopening a RESOLVED/VERIFIED/CLOSED finding goes to `ACTION_REQUIRED` (not OPEN). Clears resolvedAt/verifiedAt/closedAt and their userId fields. Preserves `resolutionSummary`. Sets `reopenedAt`, `reopenedByUserId`, `reopenReason`.
+- Used by: `SafetyService.reopenFinding()`.
+- Notes: Same concurrency guard as other transitions.
+
+### SafetyService — Inspection Reopen
+- Pattern: CLOSED → IN_PROGRESS. Clears `completedAt`, `completedByUserId`, `closedAt`, `closedByUserId`. Preserves `conclusion`. Mandatory `reason` (non-blank). Requires `safety.manage`.
+- Used by: `SafetyService.reopen()`.
+
+---
+
+## Contract Components (Unit 12)
+
+### ContractLifecycleBadge
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-lifecycle-badge.tsx`
+- Purpose: Pill badge for the 6 derived contract lifecycle display states.
+- Variants: DRAFT (surface-secondary/muted), ACTIVE (success-light/text-success), EXPIRING (warning-light/text-warning), EXPIRED (danger-light/text-danger), TERMINATED (surface-secondary/text-secondary), CLOSED (surface-secondary/text-secondary).
+- Key tokens/classes: `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium`
+- Accessibility behavior: Pure RSC; no additional aria attributes.
+- Used by: `contracts/page.tsx`, `contracts/[id]/page.tsx`
+- Notes: Props: `status: DerivedLifecycleStatus`. Note: displays derived lifecycle status (6 states), not stored `ContractStatus` (4 states). EXPIRING = ACTIVE with `renewalNoticeDate ≤ today AND endDate not passed`. EXPIRED = ACTIVE with `endDate < today`. Color mapping is explicit (no dynamic Tailwind key construction).
+
+---
+
+## API Patterns (Unit 12)
+
+### ContractsService — Optimistic Concurrency via Version Field
+- Pattern: `updateMany(where: { id, status: currentStatus, version: dto.version })` for ALL mutations (update/activate/terminate/close); `version` field incremented on every mutation. After count=0: `findUnique` inside transaction distinguishes not-found (→ 404) from conflict (→ 409 `CONTRACT_VERSION_CONFLICT`).
+- Used by: `ContractsService.update()`, `activate()`, `terminate()`, `close()`.
+- Notes: `UpdateContractDto` requires `version: number` (Int, min 1). The WHERE clause always uses the client-submitted `dto.version`, never a DB-refetched version. A preliminary read may be used for existence, status, and permission checks, but the concurrency gate is always `dto.version`. Frontend receives "Contract was changed by another user; please refresh and retry" on 409.
+
+### ContractsService — Derived Lifecycle Status
+- Pattern: `getDerivedLifecycleStatus(contract, today)` is a named exported function (not a method). Computes: EXPIRING = stored ACTIVE + `renewalNoticeDate ≤ today AND (endDate IS NULL OR endDate ≥ today)`; EXPIRED = stored ACTIVE + `endDate < today`. All other stored statuses pass through. `utcToday()` = `new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))`.
+- Used by: `ContractsService.withLifecycle()` (all response builders), and importable in tests.
+- Notes: EXPIRING and EXPIRED are derived at read time — no background job, no stored field. `buildListWhere()` also exported for testability; handles `lifecycleStatus=EXPIRING/EXPIRED` by translating to date-range WHERE clauses.
+
+### Inline Server Action Wrappers — Next.js 15 Pattern
+- Pattern: Server component declares `async function handleAction(formData?: FormData): Promise<void> { 'use server'; ... }` inline, closing over component-scope variables (`id`, `version`). This avoids `.bind()` whose return types are incompatible with React form `action` prop, and correctly passes `formData` as the last argument to `useActionState`-style actions.
+- Used by: `contracts/[id]/page.tsx` (`handleActivate`, `handleClose`, `handleTerminate`, `handleComment`).
+- Notes: Actions with `useActionState` signature (`(prev, formData) => Promise<State>`) require `{ error: null }` passed as `_prev` when called from inline wrappers: `await terminateContractAction(id, contract.version, { error: null }, formData)`.
+
+---
+
 Expected future components (not yet built):
 
 - DataSourceBadge

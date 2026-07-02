@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -45,7 +45,8 @@ async function actionFetch(
   if (res.ok) {
     try {
       const json = (await res.json()) as { data?: { id?: string } };
-      return { ok: true, id: json.data?.id };
+      const id = json.data?.id;
+      return id !== undefined ? { ok: true, id } : { ok: true };
     } catch {
       return { ok: true };
     }
@@ -438,3 +439,4 @@ export async function addCommentAction(
   revalidatePath('/safety-compliance');
   return { error: null };
 }
+

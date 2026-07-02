@@ -34,6 +34,10 @@ export type {
   SafetyFinding,
   SafetyInspectionComment,
   SafetyInspectionActivity,
+  ContractSequence,
+  Contract,
+  ContractComment,
+  ContractActivity,
 } from './generated/prisma/client';
 export {
   Prisma,
@@ -47,4 +51,5 @@ export {
   InspectionStatus,
   FindingSeverity,
   FindingStatus,
+  ContractStatus,
 } from './generated/prisma/client';

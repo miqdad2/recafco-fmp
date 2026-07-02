@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -48,10 +48,8 @@ export class SafetyController {
 
   @Get('summary')
   @Permissions('safety.read')
-  async summary(
-    @CurrentUser() actor: AuthUser,
-  ): Promise<ApiSuccessResponse<unknown>> {
-    const data = await this.safetyService.getSummary(actor);
+  async summary(): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.safetyService.getSummary();
     return { data, meta: meta(), error: null };
   }
 
@@ -68,9 +66,8 @@ export class SafetyController {
   @Permissions('safety.read')
   async list(
     @Query() query: InspectionListQueryDto,
-    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const result = await this.safetyService.findAll(query, actor);
+    const result = await this.safetyService.findAll(query);
     return { data: result, meta: meta(), error: null };
   }
 
@@ -302,3 +299,6 @@ export class SafetyController {
     return { data: activities, meta: meta(), error: null };
   }
 }
+
+
+

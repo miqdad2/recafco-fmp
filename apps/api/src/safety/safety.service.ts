@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -216,7 +216,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Schedule: DRAFT → SCHEDULED
+  // Schedule: DRAFT â†’ SCHEDULED
   // ---------------------------------------------------------------------------
 
   async schedule(id: string, dto: ScheduleInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
@@ -282,7 +282,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Start: SCHEDULED → IN_PROGRESS
+  // Start: SCHEDULED â†’ IN_PROGRESS
   // ---------------------------------------------------------------------------
 
   async start(id: string, actor: AuthUser): Promise<InspectionRecord> {
@@ -330,7 +330,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Complete: IN_PROGRESS → COMPLETED
+  // Complete: IN_PROGRESS â†’ COMPLETED
   // ---------------------------------------------------------------------------
 
   async complete(id: string, dto: CompleteInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
@@ -400,7 +400,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Close: COMPLETED → CLOSED
+  // Close: COMPLETED â†’ CLOSED
   // ---------------------------------------------------------------------------
 
   async close(id: string, actor: AuthUser): Promise<InspectionRecord> {
@@ -455,7 +455,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Cancel: DRAFT/SCHEDULED/IN_PROGRESS → CANCELLED
+  // Cancel: DRAFT/SCHEDULED/IN_PROGRESS â†’ CANCELLED
   // ---------------------------------------------------------------------------
 
   async cancel(id: string, dto: CancelInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
@@ -540,7 +540,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Reopen: CLOSED → IN_PROGRESS
+  // Reopen: CLOSED â†’ IN_PROGRESS
   // ---------------------------------------------------------------------------
 
   async reopen(id: string, dto: ReopenInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
@@ -609,7 +609,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Create
+  // Findings â€” Create
   // ---------------------------------------------------------------------------
 
   async createFinding(inspectionId: string, dto: CreateFindingDto, actor: AuthUser): Promise<FindingRecord> {
@@ -672,7 +672,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — List
+  // Findings â€” List
   // ---------------------------------------------------------------------------
 
   async listFindings(inspectionId: string): Promise<FindingRecord[]> {
@@ -685,7 +685,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Assign
+  // Findings â€” Assign
   // ---------------------------------------------------------------------------
 
   async assignFinding(
@@ -749,7 +749,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Require Action: OPEN → ACTION_REQUIRED
+  // Findings â€” Require Action: OPEN â†’ ACTION_REQUIRED
   // ---------------------------------------------------------------------------
 
   async requireAction(
@@ -805,7 +805,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Resolve: OPEN | ACTION_REQUIRED → RESOLVED
+  // Findings â€” Resolve: OPEN | ACTION_REQUIRED â†’ RESOLVED
   // ---------------------------------------------------------------------------
 
   async resolveFinding(
@@ -881,7 +881,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Verify: RESOLVED → VERIFIED
+  // Findings â€” Verify: RESOLVED â†’ VERIFIED
   // ---------------------------------------------------------------------------
 
   async verifyFinding(
@@ -955,7 +955,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Close: VERIFIED → CLOSED
+  // Findings â€” Close: VERIFIED â†’ CLOSED
   // ---------------------------------------------------------------------------
 
   async closeFinding(
@@ -1008,7 +1008,7 @@ export class SafetyService {
   }
 
   // ---------------------------------------------------------------------------
-  // Findings — Reopen: RESOLVED/VERIFIED/CLOSED → ACTION_REQUIRED
+  // Findings â€” Reopen: RESOLVED/VERIFIED/CLOSED â†’ ACTION_REQUIRED
   // ---------------------------------------------------------------------------
 
   async reopenFinding(
@@ -1164,13 +1164,12 @@ export class SafetyService {
 
   async findAll(
     query: InspectionListQueryDto,
-    actor: AuthUser,
   ): Promise<PaginatedResult<InspectionRecord>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
 
-    const where = buildListWhere(query, actor);
+    const where = buildListWhere(query);
 
     const [items, total] = await Promise.all([
       this.db.getClient().safetyInspection.findMany({
@@ -1200,7 +1199,7 @@ export class SafetyService {
     return this.findOneOrThrow(id);
   }
 
-  async getSummary(_actor: AuthUser): Promise<{
+  async getSummary(): Promise<{
     scheduledInspections: number;
     openFindings: number;
     criticalFindings: number;
@@ -1374,7 +1373,6 @@ export class SafetyService {
 
 export function buildListWhere(
   query: InspectionListQueryDto,
-  _actor: AuthUser,
 ): Record<string, unknown> {
   const where: Record<string, unknown> = {};
 
@@ -1406,3 +1404,5 @@ export function buildListWhere(
 
   return where;
 }
+
+

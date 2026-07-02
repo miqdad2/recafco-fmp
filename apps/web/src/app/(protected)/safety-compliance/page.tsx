@@ -1,102 +1,237 @@
+import Link from 'next/link';
 import type { Metadata } from 'next';
-import { ShieldCheck, ClipboardList, Leaf, Calendar, Smartphone, CheckCircle2, Circle, BarChart3 } from 'lucide-react';
+import { cookies } from 'next/headers';
+import { Breadcrumbs } from '../_components/breadcrumbs';
+import { PageHeader } from '../administration/_components/page-header';
+import { InspectionStatusBadge } from './_components/inspection-status-badge';
+import { safetyApi } from '../../../lib/safety-api';
+
+type PageSearchParams = Record<string, string | string[] | undefined>;
 
 export const metadata: Metadata = { title: 'Safety & Compliance — RECAFCO FMP' };
 
-const CAPABILITIES = [
-  { icon: ClipboardList, label: 'Inspection checklists', detail: 'Build reusable checklist templates; assign to inspection types, frequencies, and locations.' },
-  { icon: Smartphone, label: 'Shop-floor inspections', detail: 'Inspectors complete checklists on mobile; flag non-conformances with photos and notes.' },
-  { icon: Leaf, label: 'Environmental monitoring', detail: 'Log and track environmental readings (air quality, waste, noise) against thresholds.' },
-  { icon: Calendar, label: 'Compliance calendar', detail: 'Schedule required compliance activities with advance notifications and overdue tracking.' },
-  { icon: BarChart3, label: 'Compliance reports', detail: 'Generate compliance status summaries by location, category, and period.' },
-  { icon: ShieldCheck, label: 'Non-conformance management', detail: 'Track open non-conformances to resolution; link to corrective actions in Incidents.' },
-];
+async function getUserPermissions(): Promise<string[]> {
+  try {
+    const store = await cookies();
+    const token = store.get('recafco_access')?.value;
+    if (!token) return [];
+    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString());
+    return Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [];
+  } catch {
+    return [];
+  }
+}
 
-const PHASES = [
-  { label: 'Workflow confirmation', items: ['Confirm checklist categories, frequencies, and inspection types with stakeholders', 'Agree environmental parameters and thresholds', 'Confirm compliance calendar requirements'], done: false },
-  { label: 'Checklist templates', items: ['Template builder with configurable question types', 'Assignment rules: location, frequency, responsible role', 'Version history for templates'], done: false },
-  { label: 'Shop-floor inspections', items: ['Mobile inspection form with offline capability (future)', 'Non-conformance flagging with photo evidence', 'Supervisor review and sign-off'], done: false },
-  { label: 'Environmental monitoring and calendar', items: ['Measurement log with threshold alerts', 'Compliance calendar with auto-scheduling', 'Summary report generation'], done: false },
-];
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+}
 
-export default function SafetyCompliancePage(): React.JSX.Element {
+
+interface PageProps {
+  searchParams: Promise<PageSearchParams>;
+}
+
+export default async function SafetyCompliancePage({ searchParams }: PageProps): Promise<React.JSX.Element> {
+  const params = await searchParams;
+  const permissions = await getUserPermissions();
+  const canCreate = permissions.includes('safety.create');
+
+  const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
+  const search = typeof params['search'] === 'string' ? params['search'] : undefined;
+  const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
+
+  let result: Awaited<ReturnType<typeof safetyApi.list>> | null = null;
+  let error: string | null = null;
+
+  try {
+    result = await safetyApi.list({
+      page,
+      pageSize: 25,
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(search ? { search } : {}),
+    });
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Failed to load inspections';
+  }
+
+  const inspections = result?.items ?? [];
+  const total = result?.total ?? 0;
+  const totalPages = result?.totalPages ?? 1;
+
+  const quickFilters: { label: string; value: string | undefined }[] = [
+    { label: 'All', value: undefined },
+    { label: 'Scheduled', value: 'SCHEDULED' },
+    { label: 'In Progress', value: 'IN_PROGRESS' },
+    { label: 'Completed', value: 'COMPLETED' },
+  ];
+
+  function buildHref(overrides: Record<string, string | undefined>): string {
+    const q = new URLSearchParams();
+    const merged = { status: statusFilter, search, page: page > 1 ? String(page) : undefined, ...overrides };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v !== undefined && v !== '') q.set(k, v);
+    }
+    const str = q.toString();
+    return str ? `/safety-compliance?${str}` : '/safety-compliance';
+  }
+
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-8">
-      <div className="flex items-start gap-4">
-        <span className="shrink-0 p-3 bg-success-light rounded-lg">
-          <ShieldCheck className="size-6 text-success" aria-hidden="true" />
-        </span>
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-semibold text-text-primary">Safety & Compliance</h1>
-            <span className="text-xs font-medium bg-secondary-accent-light text-secondary-accent px-2 py-0.5 rounded-full uppercase tracking-wide">
-              Phase 7 — Planned
-            </span>
+    <div className="min-h-full p-8">
+      <div className="max-w-6xl mx-auto">
+        <Breadcrumbs items={[{ label: 'Safety & Compliance' }]} />
+
+        <div className="mb-6">
+          <PageHeader
+            title="Safety & Compliance"
+            description="Safety inspections, findings, and compliance tracking. Ref format: SAFE-YYYY-NNNNNN"
+            action={
+              canCreate ? (
+                <Link
+                  href="/safety-compliance/new"
+                  className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+                >
+                  New Inspection
+                </Link>
+              ) : undefined
+            }
+          />
+        </div>
+
+        {/* Quick filters */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {quickFilters.map((f) => {
+            const active = statusFilter === f.value;
+            return (
+              <Link
+                key={f.label}
+                href={buildHref({ status: f.value, page: undefined })}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-accent text-white' : 'bg-surface border border-border text-text-secondary hover:border-border-strong'}`}
+              >
+                {f.label}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Search */}
+        <form method="GET" action="/safety-compliance" className="mb-6 flex gap-2">
+          {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+          <input
+            name="search"
+            type="search"
+            defaultValue={search}
+            placeholder="Search by reference or title…"
+            className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <button
+            type="submit"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Search
+          </button>
+        </form>
+
+        {error && (
+          <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+            {error}
           </div>
-          <p className="mt-1 text-text-secondary">
-            Shop-floor inspection checklists, environmental monitoring, and compliance calendar management.
-          </p>
-        </div>
+        )}
+
+        {/* Table */}
+        {inspections.length === 0 && !error ? (
+          <div className="rounded-lg border border-border bg-surface p-12 text-center">
+            <p className="text-sm text-text-secondary">
+              {search ?? statusFilter ? 'No inspections match the current filters.' : 'No safety inspections yet.'}
+            </p>
+            {canCreate && !(search ?? statusFilter) && (
+              <Link
+                href="/safety-compliance/new"
+                className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+              >
+                Create first inspection
+              </Link>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              <table className="min-w-full divide-y divide-border">
+                <thead>
+                  <tr className="bg-surface-secondary">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Reference</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Title</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">Scheduled</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden md:table-cell">Inspector</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Department</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {inspections.map((insp) => (
+                    <tr key={insp.id} className="hover:bg-surface-secondary/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/safety-compliance/${insp.id}`}
+                          className="font-mono text-xs font-medium text-accent hover:underline"
+                        >
+                          {insp.referenceNumber}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/safety-compliance/${insp.id}`}
+                          className="text-sm font-medium text-text-primary hover:text-accent"
+                        >
+                          {insp.title}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <InspectionStatusBadge status={insp.status} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden sm:table-cell">
+                        {insp.scheduledAt ? formatDate(insp.scheduledAt) : <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden md:table-cell">
+                        {insp.inspector ? insp.inspector.displayName : <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
+                        {insp.department ? insp.department.name : <span className="text-text-muted">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
+                <span>Showing {inspections.length} of {total}</span>
+                <div className="flex gap-2">
+                  {page > 1 && (
+                    <Link
+                      href={buildHref({ page: String(page - 1) })}
+                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                    >
+                      Previous
+                    </Link>
+                  )}
+                  {page < totalPages && (
+                    <Link
+                      href={buildHref({ page: String(page + 1) })}
+                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                    >
+                      Next
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Purpose</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          The Safety & Compliance module provides structured tools for conducting routine inspections,
-          monitoring environmental conditions, and maintaining a compliance calendar. It ensures required
-          checks are never missed, non-conformances are tracked to resolution, and compliance evidence is
-          always available for internal and external audits.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Planned Capabilities
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CAPABILITIES.map((cap) => (
-            <div key={cap.label} className="bg-surface rounded-lg border border-border p-4 flex items-start gap-3">
-              <cap.icon className="size-4 text-success shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium text-text-primary">{cap.label}</p>
-                <p className="text-xs text-text-secondary mt-0.5">{cap.detail}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Current Status</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Safety & Compliance is planned for Phase 7. Specific workflow details, checklist categories,
-          and compliance requirements will be confirmed with RECAFCO stakeholders before the build
-          begins. No compliance records exist in FMP yet.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Build Sequence
-        </h2>
-        <div className="space-y-3">
-          {PHASES.map((phase) => (
-            <div key={phase.label} className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 mb-2">
-                {phase.done
-                  ? <CheckCircle2 className="size-4 text-success shrink-0" />
-                  : <Circle className="size-4 text-border-strong shrink-0" />}
-                <p className="text-sm font-medium text-text-primary">{phase.label}</p>
-              </div>
-              <ul className="ml-6 space-y-1">
-                {phase.items.map((item) => (
-                  <li key={item} className="text-xs text-text-muted list-disc">{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

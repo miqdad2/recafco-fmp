@@ -1,103 +1,286 @@
+import Link from 'next/link';
 import type { Metadata } from 'next';
-import { FileText, Bell, Users, GitBranch, CheckCircle2, Circle, Search } from 'lucide-react';
+import { cookies } from 'next/headers';
+import { Breadcrumbs } from '../_components/breadcrumbs';
+import { PageHeader } from '../administration/_components/page-header';
+import { ContractLifecycleBadge } from './_components/contract-lifecycle-badge';
+import { contractsApi } from '../../../lib/contracts-api';
+
+type PageSearchParams = Record<string, string | string[] | undefined>;
 
 export const metadata: Metadata = { title: 'Contracts — RECAFCO FMP' };
 
-const CAPABILITIES = [
-  { icon: FileText, label: 'Contract register', detail: 'Maintain a structured register of all vendor, service, and supplier contracts with key terms.' },
-  { icon: Bell, label: 'Renewal alerts', detail: 'Automated notifications before contract expiry dates to ensure timely renewal decisions.' },
-  { icon: GitBranch, label: 'Approval workflow', detail: 'Route new contracts and amendments through a configurable approval chain before activation.' },
-  { icon: Users, label: 'Vendor management', detail: 'Link contracts to vendors; track performance notes and escalation history.' },
-  { icon: Search, label: 'Contract search', detail: 'Find contracts by vendor, type, status, or expiry period with full-text search.' },
-  { icon: FileText, label: 'Document storage', detail: 'Attach signed contract documents and amendments; versioned file storage.' },
-];
+async function getUserPermissions(): Promise<string[]> {
+  try {
+    const store = await cookies();
+    const token = store.get('recafco_access')?.value;
+    if (!token) return [];
+    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString());
+    return Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [];
+  } catch {
+    return [];
+  }
+}
 
-const PHASES = [
-  { label: 'Workflow confirmation', items: ['Confirm contract categories and approval chains with stakeholders', 'Agree on contract lifecycle statuses', 'Confirm regulatory or compliance storage requirements'], done: false },
-  { label: 'Contract register', items: ['Contract entity with vendor, type, dates, value, status', 'Document attachment (depends on file attachment service)', 'Search and filter'], done: false },
-  { label: 'Approval workflow', items: ['Configurable approval chain per contract type', 'Notification on approval request and decision', 'Audit trail of approvals'], done: false },
-  { label: 'Renewals and reporting', items: ['Renewal alert scheduler', 'Contract expiry dashboard', 'Export for procurement records'], done: false },
-];
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+}
 
-export default function ContractsPage(): React.JSX.Element {
+interface PageProps {
+  searchParams: Promise<PageSearchParams>;
+}
+
+export default async function ContractsPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
+  const params = await searchParams;
+  const permissions = await getUserPermissions();
+  const canCreate = permissions.includes('contracts.create');
+
+  const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
+  const lifecycleFilter = typeof params['lifecycleStatus'] === 'string' ? params['lifecycleStatus'] : undefined;
+  const search = typeof params['search'] === 'string' ? params['search'] : undefined;
+  const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
+
+  const [listRes, summaryRes] = await Promise.allSettled([
+    contractsApi.list({
+      page,
+      pageSize: 25,
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
+      ...(search ? { search } : {}),
+    }),
+    contractsApi.summary(),
+  ]);
+
+  let error: string | null = null;
+  const result = listRes.status === 'fulfilled' ? listRes.value : null;
+  if (listRes.status === 'rejected') {
+    error = listRes.reason instanceof Error ? listRes.reason.message : 'Failed to load contracts';
+  }
+
+  const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : null;
+  const contracts = result?.items ?? [];
+  const total = result?.total ?? 0;
+  const totalPages = result?.totalPages ?? 1;
+
+  const quickFilters: { label: string; lifecycle?: string; status?: string }[] = [
+    { label: 'All' },
+    { label: 'Draft', status: 'DRAFT' },
+    { label: 'Active', status: 'ACTIVE' },
+    { label: 'Expiring', lifecycle: 'EXPIRING' },
+    { label: 'Expired', lifecycle: 'EXPIRED' },
+  ];
+
+  function buildHref(overrides: Record<string, string | undefined>): string {
+    const q = new URLSearchParams();
+    const merged = {
+      status: statusFilter,
+      lifecycleStatus: lifecycleFilter,
+      search,
+      page: page > 1 ? String(page) : undefined,
+      ...overrides,
+    };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v !== undefined && v !== '') q.set(k, v);
+    }
+    const str = q.toString();
+    return str ? `/contracts?${str}` : '/contracts';
+  }
+
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-8">
-      <div className="flex items-start gap-4">
-        <span className="shrink-0 p-3 bg-surface-secondary rounded-lg">
-          <FileText className="size-6 text-text-secondary" aria-hidden="true" />
-        </span>
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-semibold text-text-primary">Contracts</h1>
-            <span className="text-xs font-medium bg-secondary-accent-light text-secondary-accent px-2 py-0.5 rounded-full uppercase tracking-wide">
-              Phase 8 — Planned
-            </span>
+    <div className="min-h-full p-8">
+      <div className="max-w-6xl mx-auto">
+        <Breadcrumbs items={[{ label: 'Contracts' }]} />
+
+        <div className="mb-6">
+          <PageHeader
+            title="Contracts"
+            description="Vendor and service contracts. Ref format: CONTRACT-YYYY-NNNNNN"
+            action={
+              canCreate ? (
+                <Link
+                  href="/contracts/new"
+                  className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+                >
+                  New Contract
+                </Link>
+              ) : undefined
+            }
+          />
+        </div>
+
+        {/* Summary stat cards */}
+        {summary && (
+          <div className="flex flex-wrap gap-3 mb-6">
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Active</p>
+              <p className="text-xl font-semibold text-success">{summary.totalActive}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Expiring</p>
+              <p className="text-xl font-semibold text-warning">{summary.totalExpiring}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Expired</p>
+              <p className="text-xl font-semibold text-danger">{summary.totalExpired}</p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
+              <p className="text-xs text-text-muted mb-0.5">Draft</p>
+              <p className="text-xl font-semibold text-text-primary">{summary.totalDraft}</p>
+            </div>
           </div>
-          <p className="mt-1 text-text-secondary">
-            Vendor and service contract register with lifecycle tracking and approval workflow.
-          </p>
+        )}
+
+        {/* Quick filters */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {quickFilters.map((f) => {
+            const active =
+              f.lifecycle !== undefined
+                ? lifecycleFilter === f.lifecycle
+                : f.status !== undefined
+                  ? statusFilter === f.status && !lifecycleFilter
+                  : !statusFilter && !lifecycleFilter;
+            return (
+              <Link
+                key={f.label}
+                href={buildHref({
+                  status: f.status,
+                  lifecycleStatus: f.lifecycle,
+                  page: undefined,
+                })}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-accent text-white' : 'bg-surface border border-border text-text-secondary hover:border-border-strong'}`}
+              >
+                {f.label}
+              </Link>
+            );
+          })}
         </div>
+
+        {/* Search */}
+        <form method="GET" action="/contracts" className="mb-6 flex gap-2">
+          {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+          {lifecycleFilter && <input type="hidden" name="lifecycleStatus" value={lifecycleFilter} />}
+          <input
+            name="search"
+            type="search"
+            defaultValue={search}
+            placeholder="Search by reference, title or counterparty…"
+            className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <button
+            type="submit"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Search
+          </button>
+        </form>
+
+        {error && (
+          <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+            {error}
+          </div>
+        )}
+
+        {/* Table */}
+        {contracts.length === 0 && !error ? (
+          <div className="rounded-lg border border-border bg-surface p-12 text-center">
+            <p className="text-sm text-text-secondary">
+              {search ?? statusFilter ?? lifecycleFilter
+                ? 'No contracts match the current filters.'
+                : 'No contracts yet.'}
+            </p>
+            {canCreate && !(search ?? statusFilter ?? lifecycleFilter) && (
+              <Link
+                href="/contracts/new"
+                className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+              >
+                Create first contract
+              </Link>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              <table className="min-w-full divide-y divide-border">
+                <thead>
+                  <tr className="bg-surface-secondary">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Reference</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Title</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">End Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden md:table-cell">Counterparty</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Owner</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Department</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {contracts.map((contract) => (
+                    <tr key={contract.id} className="hover:bg-surface-secondary/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/contracts/${contract.id}`}
+                          className="font-mono text-xs font-medium text-accent hover:underline"
+                        >
+                          {contract.referenceNumber}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/contracts/${contract.id}`}
+                          className="text-sm font-medium text-text-primary hover:text-accent"
+                        >
+                          {contract.title}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <ContractLifecycleBadge status={contract.lifecycleStatus} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden sm:table-cell">
+                        {contract.endDate ? formatDate(contract.endDate) : <span className="text-text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden md:table-cell">
+                        {contract.counterpartyName}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
+                        {contract.ownerUser.displayName}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-text-secondary hidden xl:table-cell">
+                        {contract.department ? contract.department.name : <span className="text-text-muted">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
+                <span>Showing {contracts.length} of {total}</span>
+                <div className="flex gap-2">
+                  {page > 1 && (
+                    <Link
+                      href={buildHref({ page: String(page - 1) })}
+                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                    >
+                      Previous
+                    </Link>
+                  )}
+                  {page < totalPages && (
+                    <Link
+                      href={buildHref({ page: String(page + 1) })}
+                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                    >
+                      Next
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Purpose</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          The Contracts module maintains a structured register of all external agreements — vendor
-          contracts, service agreements, and supplier terms. It ensures contracts are tracked from
-          initiation through renewal or termination, that approvals are documented, and that expiring
-          contracts are flagged in advance so no agreement lapses without a decision.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Planned Capabilities
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CAPABILITIES.map((cap) => (
-            <div key={cap.label} className="bg-surface rounded-lg border border-border p-4 flex items-start gap-3">
-              <cap.icon className="size-4 text-text-secondary shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-medium text-text-primary">{cap.label}</p>
-                <p className="text-xs text-text-secondary mt-0.5">{cap.detail}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="bg-surface rounded-lg border border-border p-5">
-        <h2 className="text-base font-semibold text-text-primary mb-2">Current Status</h2>
-        <p className="text-sm text-text-secondary leading-relaxed">
-          Contracts is planned for Phase 8, after the Safety & Compliance module. The specific approval
-          workflow and contract categories will be confirmed with stakeholders before build begins —
-          this module will not be implemented based on assumed workflows. No contract records exist
-          in FMP yet.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
-          Build Sequence
-        </h2>
-        <div className="space-y-3">
-          {PHASES.map((phase) => (
-            <div key={phase.label} className="bg-surface rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2 mb-2">
-                {phase.done
-                  ? <CheckCircle2 className="size-4 text-success shrink-0" />
-                  : <Circle className="size-4 text-border-strong shrink-0" />}
-                <p className="text-sm font-medium text-text-primary">{phase.label}</p>
-              </div>
-              <ul className="ml-6 space-y-1">
-                {phase.items.map((item) => (
-                  <li key={item} className="text-xs text-text-muted list-disc">{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

@@ -27,6 +27,8 @@ import { departments, plants, locations } from '@/lib/organizations-api';
 import { incidentsApi } from '@/lib/incidents-api';
 import { tasksApi } from '@/lib/factory-tasks-api';
 import { maintenanceApi } from '@/lib/maintenance-api';
+import { safetyApi } from '@/lib/safety-api';
+import { contractsApi } from '@/lib/contracts-api';
 import { MetricCard } from './_components/metric-card';
 import type { MetricStatus } from './_components/metric-card';
 import { ModuleCard } from './_components/module-card';
@@ -66,7 +68,9 @@ const PROGRESS_STEPS = [
   { label: 'Factory Tasks', detail: 'Full lifecycle: Draft → Open → Assigned → In Progress → Completed → Closed', done: true },
   { label: 'Incidents', detail: 'Incident reporting, investigation workflow, corrective actions', done: true },
   { label: 'Maintenance Requests', detail: 'Full 11-status lifecycle: Draft → Submitted → Approved → Assigned → In Progress → Completed → Closed', done: true },
-  { label: 'Operational Modules', detail: 'Safety, Contracts, Production (SAP read)', current: true },
+  { label: 'Safety & Compliance', detail: 'Safety inspections with findings, verification, and compliance lifecycle', done: true },
+  { label: 'Contracts', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
+  { label: 'Remaining Operational Modules', detail: 'Production (SAP read)', current: true },
 ];
 
 const MODULE_CARDS = [
@@ -96,11 +100,11 @@ const MODULE_CARDS = [
   },
   {
     title: 'Safety & Compliance',
-    description: 'Shop-floor inspections, checklists, and environmental monitoring.',
+    description: 'Safety inspections, findings tracking, and compliance lifecycle management.',
     href: '/safety-compliance',
     icon: ShieldCheck,
     phase: 'Phase 7',
-    status: 'planned' as const,
+    status: 'available' as const,
   },
   {
     title: 'Contracts',
@@ -108,7 +112,7 @@ const MODULE_CARDS = [
     href: '/contracts',
     icon: FileText,
     phase: 'Phase 8',
-    status: 'planned' as const,
+    status: 'available' as const,
   },
   {
     title: 'Production',
@@ -145,9 +149,11 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
   const canReadIncidents = permissions.includes('incidents.read');
   const canReadTasks = permissions.includes('tasks.read');
   const canReadMaintenance = permissions.includes('maintenance.read');
+  const canReadSafety = permissions.includes('safety.read');
+  const canReadContracts = permissions.includes('contracts.read');
 
   // Parallel fetches
-  const [apiStatus, dbStatus, usersRes, deptsRes, plantsRes, locsRes, rolesRes, incidentSummaryRes, taskSummaryRes, mrSummaryRes] =
+  const [apiStatus, dbStatus, usersRes, deptsRes, plantsRes, locsRes, rolesRes, incidentSummaryRes, taskSummaryRes, mrSummaryRes, safetySummaryRes, contractSummaryRes] =
     await Promise.allSettled([
       fetchApiStatus(),
       fetchDbStatus(),
@@ -174,6 +180,12 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
         : Promise.resolve(null),
       canReadMaintenance
         ? maintenanceApi.summary()
+        : Promise.resolve(null),
+      canReadSafety
+        ? safetyApi.summary()
+        : Promise.resolve(null),
+      canReadContracts
+        ? contractsApi.summary()
         : Promise.resolve(null),
     ]);
 
@@ -293,6 +305,39 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
   const mrWaitingMetric = resolveMrMetric('waitingForParts');
   const mrCompletedMetric = resolveMrMetric('completedThisMonth');
 
+  type SafetySummaryShape = { scheduledInspections: number; openFindings: number; criticalFindings: number; overdueFindings: number; inProgressInspections: number };
+  function resolveSafetyMetric(
+    key: keyof SafetySummaryShape,
+  ): { status: MetricStatus; value?: number } {
+    if (!canReadSafety) return { status: 'restricted' };
+    if (safetySummaryRes.status === 'rejected') return { status: 'unavailable' };
+    const val = safetySummaryRes.value;
+    if (val === null) return { status: 'restricted' };
+    return { status: 'ok', value: (val as SafetySummaryShape)[key] };
+  }
+
+  const safetyScheduledMetric = resolveSafetyMetric('scheduledInspections');
+  const safetyInProgressMetric = resolveSafetyMetric('inProgressInspections');
+  const safetyOpenFindingsMetric = resolveSafetyMetric('openFindings');
+  const safetyCriticalFindingsMetric = resolveSafetyMetric('criticalFindings');
+  const safetyOverdueFindingsMetric = resolveSafetyMetric('overdueFindings');
+
+  type ContractSummaryShape = { totalDraft: number; totalActive: number; totalExpiring: number; totalExpired: number; totalTerminated: number; totalClosed: number };
+  function resolveContractMetric(
+    key: keyof ContractSummaryShape,
+  ): { status: MetricStatus; value?: number } {
+    if (!canReadContracts) return { status: 'restricted' };
+    if (contractSummaryRes.status === 'rejected') return { status: 'unavailable' };
+    const val = contractSummaryRes.value;
+    if (val === null) return { status: 'restricted' };
+    return { status: 'ok', value: (val as ContractSummaryShape)[key] };
+  }
+
+  const contractActiveMetric = resolveContractMetric('totalActive');
+  const contractExpiringMetric = resolveContractMetric('totalExpiring');
+  const contractExpiredMetric = resolveContractMetric('totalExpired');
+  const contractDraftMetric = resolveContractMetric('totalDraft');
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-8">
       {/* Welcome */}
@@ -372,11 +417,11 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
           />
           <MetricCard
             label="Platform Modules"
-            value={6}
+            value={7}
             icon={Boxes}
             iconColor="text-text-secondary"
             status="ok"
-            source="8 planned phases"
+            source="9 planned phases"
           />
         </div>
       </section>
@@ -529,6 +574,105 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
             iconColor="text-success"
             href="/maintenance?status=COMPLETED"
             status={mrCompletedMetric.status}
+            source="Source: FMP Database"
+          />
+        </div>
+      </section>
+
+      {/* Safety & Compliance */}
+      <section aria-labelledby="safety-heading">
+        <h2 id="safety-heading" className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
+          Safety & Compliance
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard
+            label="Scheduled"
+            value={safetyScheduledMetric.value}
+            icon={ShieldCheck}
+            iconColor="text-info"
+            href="/safety-compliance?status=SCHEDULED"
+            status={safetyScheduledMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="In Progress"
+            value={safetyInProgressMetric.value}
+            icon={ShieldCheck}
+            iconColor="text-warning"
+            href="/safety-compliance?status=IN_PROGRESS"
+            status={safetyInProgressMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Open Findings"
+            value={safetyOpenFindingsMetric.value}
+            icon={AlertTriangle}
+            iconColor="text-accent"
+            href="/safety-compliance"
+            status={safetyOpenFindingsMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Critical Findings"
+            value={safetyCriticalFindingsMetric.value}
+            icon={AlertOctagon}
+            iconColor="text-danger"
+            href="/safety-compliance"
+            status={safetyCriticalFindingsMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Overdue Findings"
+            value={safetyOverdueFindingsMetric.value}
+            icon={AlertTriangle}
+            iconColor="text-warning"
+            href="/safety-compliance"
+            status={safetyOverdueFindingsMetric.status}
+            source="Source: FMP Database"
+          />
+        </div>
+      </section>
+
+      {/* Contracts */}
+      <section aria-labelledby="contracts-heading">
+        <h2 id="contracts-heading" className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">
+          Contracts
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard
+            label="Active Contracts"
+            value={contractActiveMetric.value}
+            icon={FileText}
+            iconColor="text-success"
+            href="/contracts?status=ACTIVE"
+            status={contractActiveMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Expiring Soon"
+            value={contractExpiringMetric.value}
+            icon={FileText}
+            iconColor="text-warning"
+            href="/contracts?lifecycleStatus=EXPIRING"
+            status={contractExpiringMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Expired"
+            value={contractExpiredMetric.value}
+            icon={FileText}
+            iconColor="text-danger"
+            href="/contracts?lifecycleStatus=EXPIRED"
+            status={contractExpiredMetric.status}
+            source="Source: FMP Database"
+          />
+          <MetricCard
+            label="Draft"
+            value={contractDraftMetric.value}
+            icon={FileText}
+            iconColor="text-text-secondary"
+            href="/contracts?status=DRAFT"
+            status={contractDraftMetric.status}
             source="Source: FMP Database"
           />
         </div>

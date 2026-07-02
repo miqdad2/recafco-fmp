@@ -4,9 +4,9 @@
 
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
-- **Phase:** Phase 5 — Maintenance Requests
-- **Last completed:** Unit 10 — Maintenance Requests Foundation (2026-07-01)
-- **Next:** Unit 11 (TBD per build plan)
+- **Phase:** Phase 8 — Contracts Management
+- **Last completed:** Unit 12 — Contracts Management Foundation (2026-07-01)
+- **Next:** Unit 13 (TBD per build plan)
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
 - **Licensing:** open-source/self-hosted-first
@@ -28,6 +28,138 @@
 - **Unit 08 — Incident Reporting Foundation** ✓
 - **Unit 09 — Factory Tasks Foundation** ✓
 - **Unit 10 — Maintenance Requests Foundation** ✓
+- **Unit 11 — Safety & Compliance Foundation** ✓
+- **Unit 12 — Contracts Management Foundation** ✓
+
+## Unit 12 — Contracts Management Foundation (Completed 2026-07-01)
+
+### Acceptance Criteria — All Met
+
+- [x] `ContractStatus` enum (DRAFT, ACTIVE, TERMINATED, CLOSED) in schema and `@recafco/database` barrel
+- [x] `ContractSequence` model — atomic upsert `CONTRACT-YYYY-NNNNNN`; exhaustion → `CONTRACT_SEQUENCE_EXHAUSTED`
+- [x] `Contract` model — 30 columns; named FKs: `ContractOwner`, `ContractCreatedBy`, `ContractActivatedBy`, `ContractTerminatedBy`, `ContractClosedBy`; optimistic concurrency via `version` Int
+- [x] `ContractComment`, `ContractActivity` models — append-only; no FK on `ContractActivity.actorUserId`
+- [x] Back-relations added to Department, Plant, Location, User (5 named contract FKs)
+- [x] `packages/database/src/index.ts` — exports `ContractSequence`, `Contract`, `ContractComment`, `ContractActivity`, `ContractStatus`; database package rebuilt
+- [x] `ContractsRefService` — atomic `$queryRaw INSERT ... ON CONFLICT ... RETURNING last_seq`; throws `CONTRACT_SEQUENCE_EXHAUSTED` at 999,999
+- [x] 8 DTOs — `CreateContractDto`, `UpdateContractDto` (requires `version`), `ContractListQueryDto`, `ActivateContractDto`, `TerminateContractDto`, `CloseContractDto`, `AddCommentDto`
+- [x] Derived lifecycle status — `getDerivedLifecycleStatus()` exported named function; `utcToday()` uses UTC start-of-day; EXPIRING/EXPIRED computed from date fields
+- [x] `CONTRACT_SELECT` const with all scalar fields + 7 user relations + 3 org relations
+- [x] `ContractsService` — 15 methods; real optimistic concurrency: `updateMany(WHERE id AND status AND version=dto.version)` — client-submitted version, not DB-refetched; `CONTRACT_VERSION_CONFLICT` (409); lifecycle transitions: DRAFT→ACTIVE, ACTIVE→TERMINATED, ACTIVE|TERMINATED→CLOSED; org selectors: `listDepartments`, `listPlants`, `listLocations`
+- [x] `buildListWhere()` exported for tests; `lifecycleStatus` EXPIRING/EXPIRED translates to date-based where clauses
+- [x] `getSummary()` — 6 counts via `Promise.all`: totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed
+- [x] `ContractsController` — 15 endpoints; `summary`, `people`, `departments`, `plants`, `locations` all declared before `/:id`; correct HTTP codes
+- [x] `ContractsModule` — imports `DatabaseModule` + `AuthModule`; present in `AppModule`
+- [x] 8 permission codes: contracts.read, contracts.create, contracts.update, contracts.activate, contracts.terminate, contracts.close, contracts.comment, contracts.manage
+- [x] New/edit contract forms use `GET /contracts/departments` and `GET /contracts/plants` (contract-specific endpoints)
+- [x] Typecheck: 0 errors
+- [x] 386 tests total (10 new: 3 extra update concurrency tests + 7 org-selector tests)
+- [x] Build: 8/8 tasks
+
+### Verification Results (corrected 2026-07-01)
+
+| Command | Result |
+|---|---|
+| `pnpm db:validate` | ✓ Schema valid |
+| `pnpm db:generate` | ✓ Prisma Client 7.8.0 regenerated |
+| `pnpm db:migrate:status` | ✓ 9 migrations applied, schema up to date |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm test` | ✓ 386/386 tests (17 files) |
+| `pnpm build` | ✓ 8/8 tasks |
+
+### Permissions
+
+| Code | Name |
+|---|---|
+| `contracts.read` | List and view contracts |
+| `contracts.create` | Create new contracts |
+| `contracts.update` | Edit DRAFT contracts |
+| `contracts.activate` | DRAFT → ACTIVE |
+| `contracts.terminate` | ACTIVE → TERMINATED |
+| `contracts.close` | ACTIVE or TERMINATED → CLOSED |
+| `contracts.comment` | Add comments |
+| `contracts.manage` | Admin override (change owner, skip restrictions) |
+
+### Error Codes
+
+| Code | HTTP | Description |
+|---|---|---|
+| `CONTRACT_NOT_FOUND` | 404 | Contract does not exist |
+| `CONTRACT_VERSION_CONFLICT` | 409 | Optimistic concurrency failure |
+| `CONTRACT_INVALID_TRANSITION` | 422 | Wrong source status for transition |
+| `CONTRACT_SEQUENCE_EXHAUSTED` | 422 | Year sequence > 999,999 |
+
+### Key Notes
+
+- Database package rebuilt after adding `ContractStatus` export to `packages/database/src/index.ts`
+- `getDerivedLifecycleStatus()` is a pure named export (not a method) — importable in tests
+- `listPeople()` returns `{ id, displayName, departmentId }` for owner selector
+- `contracts.manage` required to set a different `ownerUserId` on create or change it on update
+- `lifecycleStatus` field injected into every `Contract` response via `withLifecycle()` helper
+- `buildListWhere()` EXPIRING filter: `renewalNoticeDate <= today AND (endDate IS NULL OR endDate >= today)`
+- **Real optimistic concurrency for PATCH**: `UpdateContractDto` requires `version` (Int, min 1); service conditions `updateMany` WHERE on `dto.version` (client-submitted), never on a DB-refetched version; stale submissions → 409 `CONTRACT_VERSION_CONFLICT`
+- **15 endpoints total** including `GET /contracts/departments`, `GET /contracts/plants`, `GET /contracts/locations` (all declared before `/:id`); new/edit forms use these contract-specific endpoints
+- Frontend advises user to refresh on 409 (conflict message: "Contract was changed by another user; please refresh and retry")
+
+## Unit 11 — Safety & Compliance Foundation (Completed 2026-07-01)
+
+### Acceptance Criteria — All Met
+
+- [x] Migration `20260701000004_add_safety_foundation` applied — 8 migrations total
+- [x] 3 enums: `InspectionStatus`, `FindingSeverity`, `FindingStatus`
+- [x] 5 models: `SafetyInspectionSequence`, `SafetyInspection`, `SafetyFinding`, `SafetyInspectionComment`, `SafetyInspectionActivity`
+- [x] Concurrency-safe status transitions (updateMany + count check → `SAFETY_CONCURRENT_MODIFICATION`)
+- [x] Inspection lifecycle: DRAFT → SCHEDULED → IN_PROGRESS → COMPLETED → CLOSED; CLOSED → IN_PROGRESS (reopen)
+- [x] Cancellation from DRAFT/SCHEDULED/IN_PROGRESS with mandatory reason
+- [x] Finding lifecycle: OPEN → ACTION_REQUIRED → RESOLVED → VERIFIED → CLOSED; RESOLVED/VERIFIED/CLOSED → ACTION_REQUIRED (reopen)
+- [x] Inspector ownership rule (start/complete require inspector or safety.manage)
+- [x] Verifier separation-of-duties (verifiedByUserId ≠ resolvedByUserId unless safety.manage)
+- [x] Finding reopen goes to ACTION_REQUIRED (not OPEN), clears lifecycle timestamps, preserves resolutionSummary
+- [x] Inspection reopen goes to IN_PROGRESS, clears completedAt/closedAt, preserves conclusion
+- [x] Reference format: `SAFE-YYYY-NNNNNN` (CHECK constraint); exhaustion error `SAFETY_SEQUENCE_EXHAUSTED`
+- [x] 11 permissions seeded; SUPER_ADMIN+ADMIN get all 11; VIEWER gets 3 (read/create/comment)
+- [x] 23 API endpoints under `/safety-compliance`
+- [x] 4 web routes: list, new, [id] detail, [id]/edit
+- [x] 5 dashboard metrics (Scheduled, In Progress, Open Findings, Critical Findings, Overdue Findings)
+- [x] Dashboard Safety & Compliance module card updated to `status: 'available'`
+- [x] Comments and activities append-only
+- [x] No hard deletion
+
+### Permissions
+
+| Code | Name | SUPER_ADMIN | ADMIN | VIEWER |
+|---|---|---|---|---|
+| safety.read | Read safety inspections | ✓ | ✓ | ✓ |
+| safety.create | Create safety inspections | ✓ | ✓ | ✓ |
+| safety.schedule | Schedule safety inspections | ✓ | ✓ | — |
+| safety.inspect | Conduct safety inspections | ✓ | ✓ | — |
+| safety.finding_create | Create safety findings | ✓ | ✓ | — |
+| safety.finding_assign | Assign safety findings | ✓ | ✓ | — |
+| safety.finding_resolve | Resolve safety findings | ✓ | ✓ | — |
+| safety.verify | Verify resolved findings | ✓ | ✓ | — |
+| safety.close | Close inspections and findings | ✓ | ✓ | — |
+| safety.comment | Comment on inspections | ✓ | ✓ | ✓ |
+| safety.manage | Manage safety inspections | ✓ | ✓ | — |
+
+### Verification Results (2026-07-01)
+
+| Command | Result |
+|---|---|
+| `pnpm db:validate` | ✓ Schema valid |
+| `pnpm db:generate` | ✓ Prisma Client regenerated |
+| `pnpm db:migrate:status` | ✓ 8 migrations applied, schema up to date |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12) |
+| `pnpm test` | ✓ 306/306 tests (55 new safety tests) |
+| `pnpm build` | ✓ 8/8 tasks; all 4 safety routes emitted |
+
+### Key Notes
+
+- Shadow DB workaround still required: pipe SQL via `prisma db execute --stdin`, then `prisma migrate resolve --applied`
+- Database dist must be rebuilt after schema changes (`pnpm --filter @recafco/database build`)
+- Finding reopen destination is `ACTION_REQUIRED` (not `OPEN`)
+- Verifier separation-of-duties is bypassed with `safety.manage` only
 
 ## Unit 01 — Monorepo Foundation (Completed 2026-06-30)
 
@@ -642,11 +774,9 @@ None in Unit 06 — all used packages were already installed.
 
 None — all used packages were already installed.
 
-## Current Unit
+## Next Unit
 
-### Unit 09 — TBD
-
-See `context/build-plan.md` for next phase item.
+See `context/build-plan.md` for Unit 13 details.
 
 ## Open Questions
 
