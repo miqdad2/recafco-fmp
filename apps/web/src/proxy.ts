@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type { NextProxy, ProxyConfig } from 'next/server';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 const LOGIN_PATH = '/login';
@@ -61,7 +60,7 @@ function redirectToLogin(request: NextRequest): NextResponse {
   return NextResponse.redirect(new URL(LOGIN_PATH, request.url));
 }
 
-export const proxy: NextProxy = async (request: NextRequest): Promise<NextResponse> => {
+export const proxy = async (request: NextRequest): Promise<NextResponse> => {
   const { pathname } = request.nextUrl;
 
   // Pass public paths through without auth check.
@@ -108,6 +107,6 @@ export const proxy: NextProxy = async (request: NextRequest): Promise<NextRespon
   return NextResponse.next();
 };
 
-export const config: ProxyConfig = {
+export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };

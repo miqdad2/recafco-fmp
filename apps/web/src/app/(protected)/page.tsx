@@ -18,7 +18,6 @@ import {
   FileText,
   CheckCircle2,
   Circle,
-  ArrowRight as ArrowRightIcon,
 } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
 import { rolesApi } from '@/lib/roles-api';
@@ -70,7 +69,8 @@ const PROGRESS_STEPS = [
   { label: 'Maintenance Requests', detail: 'Full 11-status lifecycle: Draft → Submitted → Approved → Assigned → In Progress → Completed → Closed', done: true },
   { label: 'Safety & Compliance', detail: 'Safety inspections with findings, verification, and compliance lifecycle', done: true },
   { label: 'Contracts', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
-  { label: 'Remaining Operational Modules', detail: 'Production (SAP read)', current: true },
+  { label: 'Production', detail: 'Production orders, production lines, entries (Output/Downtime/Adjustment), KPI metrics', done: true },
+  { label: 'Platform Hardening', detail: 'Security regression tests, PM2 deployment config, release documentation', done: true },
 ];
 
 const MODULE_CARDS = [
@@ -116,11 +116,11 @@ const MODULE_CARDS = [
   },
   {
     title: 'Production',
-    description: 'SAP Business One read integration: production orders, KPIs, and floor data.',
+    description: 'Production orders and lines: Output, Downtime, and Adjustment entries with live KPI metrics.',
     href: '/production',
     icon: Factory,
     phase: 'Phase 9',
-    status: 'planned' as const,
+    status: 'available' as const,
   },
 ];
 
@@ -710,20 +710,13 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
                 <span className="shrink-0 mt-0.5">
                   {step.done ? (
                     <CheckCircle2 className="size-5 text-success" aria-label="Complete" />
-                  ) : step.current ? (
-                    <ArrowRightIcon className="size-5 text-accent" aria-label="Current" />
                   ) : (
                     <Circle className="size-5 text-border-strong" aria-label="Planned" />
                   )}
                 </span>
                 <div>
-                  <p className={`text-sm font-medium ${step.current ? 'text-accent' : step.done ? 'text-text-primary' : 'text-text-muted'}`}>
+                  <p className={`text-sm font-medium ${step.done ? 'text-text-primary' : 'text-text-muted'}`}>
                     {step.label}
-                    {step.current && (
-                      <span className="ml-2 text-[10px] font-medium bg-accent-light text-accent px-1.5 py-0.5 rounded-full uppercase tracking-wide">
-                        Current
-                      </span>
-                    )}
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">{step.detail}</p>
                 </div>

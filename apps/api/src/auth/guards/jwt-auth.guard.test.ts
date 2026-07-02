@@ -109,6 +109,14 @@ describe('JwtAuthGuard', () => {
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 
+  it('throws 401 when user is deactivated (isActive=false excluded by DB where clause)', async () => {
+    // The where clause filters user: { isActive: true }, so a deactivated user's session
+    // returns null regardless of token validity.
+    mockSessionFindFirst.mockResolvedValue(null);
+    const ctx = makeContext('Bearer valid.jwt.token');
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
   it('throws 403 MUST_CHANGE_PASSWORD when mustChangePassword is true and endpoint is not decorated', async () => {
     mockSessionFindFirst.mockResolvedValue({
       ...SESSION,

@@ -4,9 +4,9 @@
 
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
-- **Phase:** Phase 9 — Production Management
-- **Last completed:** Unit 13 — Production Management Foundation (2026-07-02)
-- **Next:** Unit 14 (TBD per build plan)
+- **Phase:** Platform Hardening / Deployment Ready
+- **Last completed:** Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness (2026-07-02)
+- **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
 - **Licensing:** open-source/self-hosted-first
@@ -31,6 +31,120 @@
 - **Unit 11 — Safety & Compliance Foundation** ✓
 - **Unit 12 — Contracts Management Foundation** ✓
 - **Unit 13 — Production Management Foundation** ✓
+- **Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness** ✓
+
+## Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness (Completed 2026-07-02)
+
+### Summary
+
+Full platform audit through Unit 13 and hardening to deployment-readiness for the RECAFCO internal Windows server.
+
+### Audit Results
+
+#### Section 1 — Authentication and Session Audit — PASS
+- All 11 protected modules use `@UseGuards(JwtAuthGuard, PermissionGuard)` at class level
+- JWT guard validates session live from DB (not from JWT claims): checks `expiresAt`, `user.isActive`, loads permissions from DB
+- `mustChangePassword` gating enforced in both Next.js proxy (`proxy.ts`) and `JwtAuthGuard` on every request
+- Auth endpoints: `/auth/login` and `/auth/refresh` use `IpThrottleGuard`; `/auth/me` and `/auth/change-password` allow `mustChangePassword` via `@AllowMustChangePassword`
+- `/health` and `/ready` intentionally public (no auth)
+- Argon2id password hashing; constant-time dummy hash defense for unknown usernames; 5-attempt lockout for 15 min
+- HttpOnly cookies, `Secure` in production, `SameSite: strict`
+
+#### Section 2 — RBAC and Permission Audit — PASS
+- Zero endpoints use role-name authorization — all use permission codes
+- All controller methods have `@Permissions('...')` decorator
+- `PermissionGuard`: routes without `@Permissions` are unguarded by design; any required permission uses `user.permissions.includes()` (array from live DB role)
+- Permission matrix documented: `docs/endpoint-permissions.md`
+
+#### Section 3 — API Response and Error Audit — PASS
+- All controller methods return `{ data, meta: { requestId? }, error: null }`
+- `GlobalExceptionFilter` catches all exceptions, logs unexpected errors, never returns stack traces to clients
+- Stable error codes (e.g., `UNAUTHORIZED`, `FORBIDDEN`, `VALIDATION_ERROR`, `CONFLICT`)
+
+#### Section 4 — Concurrency and Workflow Audit — PASS
+- Production module: version-based optimistic concurrency on all write transitions and updates
+- Contracts: version-based optimistic concurrency
+- Incidents/Tasks/Maintenance/Safety: ownership-checked transitions (no shared-state race conditions)
+- No unsafe read-then-write patterns found
+
+#### Section 5 — Input Validation and Query Safety — PASS
+- Global `ValidationPipe(whitelist: true, forbidNonWhitelisted: true, transform: true)` blocks unknown fields
+- All query DTOs use class-validator with `@IsOptional`, `@IsInt`, `@Min`, `@Max`
+- No raw string interpolation in Prisma queries found
+
+#### Section 6 — Environment and Configuration Hardening — PASS
+- `JWT_ACCESS_SECRET` min 32 chars enforced at startup
+- `CORS_ALLOWED_ORIGINS` wildcard (`*`) blocked in production
+- `DATABASE_URL` must start with `postgresql://` or `postgres://`
+- Fail-fast on invalid env: process exits before accepting connections
+
+#### Section 7 — Health and Readiness Endpoints — PASS
+- `GET /health`: always 200, no auth, `{ status: 'ok', service: 'recafco-fmp-api' }`
+- `GET /ready`: 503 until DB connected and `RuntimeStateService.markInitialized()` called; 200 with uptimeMs and checks
+
+#### Section 8 — Production Logging and Observability — PASS
+- Pino JSON logging via `@recafco/observability`; request IDs propagated through `RequestIdMiddleware` + `AsyncLocalStorage`
+- `RequestLogMiddleware` logs method, url, status, duration, requestId
+- No secrets or PII logged
+
+#### Section 9 — Frontend Release Audit — FIXED
+- **Fixed**: Production module card changed from `status: 'planned'` to `status: 'available'`
+- **Fixed**: `PROGRESS_STEPS` — removed stale `current` step; Production and Platform Hardening added as `done: true`
+- **Fixed**: Removed unused `ArrowRightIcon` import; fixed TypeScript errors from removed `step.current` references
+- Sidebar navigation: Production already wired at `/production` (no `comingSoon` flag)
+- All module links verified to point to implemented routes
+
+#### Section 10 — Dashboard Resilience — PASS
+- All module data fetches use `Promise.allSettled` — failure in one module does not crash dashboard
+- Dedicated resolver functions (`resolveCount`, `resolveIncidentMetric`, etc.) return `{ status: 'unavailable' }` on rejection
+- `MetricCard` renders gracefully for all `MetricStatus` values: `ok`, `restricted`, `unavailable`
+
+#### Section 11 — Database Release Audit — PASS
+- 11 migrations confirmed; all applied
+- No `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, `DELETE` in any migration
+- All migrations are additive (new tables, new columns, permission INSERTs)
+
+#### Section 12 — PM2 and Windows Production Startup — COMPLETE
+- Created `ecosystem.config.js` at repo root
+- 3 processes: `recafco-fmp-api` (port 4000), `recafco-fmp-web` (port 3000), `recafco-fmp-worker` (inactive until BullMQ wired)
+- Log paths: `<repo-root>/logs/`; `autorestart: true` for api and web; `max_restarts: 10`
+
+#### Section 13 — Deployment Scripting — COMPLETE
+- `scripts/pre-deploy-check.ps1`: validates pnpm, .env keys, placeholder detection, built artifacts, pm2, logs dir, git status
+- `scripts/deploy.ps1`: pre-check → git pull → pnpm install → turbo build → `prisma migrate deploy` → `pm2 reload` → health check
+- `scripts/rollback.ps1`: reads `logs/last-deploy-commit.txt`, checks out prior commit, rebuilds, graceful reload
+- All scripts use `pm2 reload` (graceful) — never `pm2 restart` or `taskkill`
+
+#### Section 14 — Release Documentation — COMPLETE
+- `docs/deployment-guide.md`: first-time setup, update flow, rollback, backups, PM2 process table, security notes
+- `docs/environment-variables.md`: all variables with types, defaults, validation rules
+- `docs/endpoint-permissions.md`: complete endpoint–permission matrix for all 11 modules (180+ endpoint rows)
+- `docs/release-checklist.md`: pre-release dev checklist, deployment checklist, security regression table, rollback trigger conditions
+
+#### Section 15 — Security Regression Tests — COMPLETE
+- Added `apps/api/src/common/guards/permission.guard.test.ts` — 8 tests: unguarded route, empty permissions, actor has all, actor missing one, actor has none, admin pass, partial permissions, undefined user
+- Added inactive user test to `apps/api/src/auth/guards/jwt-auth.guard.test.ts` — verifies `isActive=false` yields 401 via the DB where-clause filtering
+
+#### Section 16 — Final Verification — PASS
+- `pnpm typecheck`: ✓ 0 errors (12/12 tasks)
+- `pnpm test`: ✓ 499/499 tests (20 test files)
+- ESLint `apps/api/src`: ✓ 0 errors
+- ESLint `apps/web/src`: ✓ 0 errors
+
+### Key Notes
+
+- `next lint` command does not exist in Next.js 16.2.9; use `eslint` directly via `./node_modules/.bin/eslint apps/web/src`
+- Worker process (`recafco-fmp-worker`) registered in ecosystem.config.js with `autorestart: false` — activates when BullMQ/Redis integration lands
+- Deployment scripts use `pm2 reload` (graceful zero-downtime) not `pm2 restart`; rollback does NOT reverse Prisma migrations
+- Rollback marker written to `logs/last-deploy-commit.txt` at start of every deploy
+
+### Verification Results (2026-07-02)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm test` | ✓ 499/499 tests (20 test files) |
+| ESLint (api + web) | ✓ 0 errors |
 
 ## Unit 13 — Production Management Foundation (Completed 2026-07-02)
 
