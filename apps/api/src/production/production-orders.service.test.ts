@@ -9,6 +9,7 @@ import { ProductionOrdersService, computeMetrics } from './production-orders.ser
 import type { DatabaseService } from '../database/database.service';
 import type { ProductionRefService } from './production-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 
 // ---------------------------------------------------------------------------
 // Transaction mocks
@@ -81,6 +82,16 @@ const mockRef = {
   nextRef: vi.fn().mockResolvedValue('PROD-2026-000001'),
 } as unknown as ProductionRefService;
 
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: vi.fn(),
+  canAccessDepartment: vi.fn().mockResolvedValue(true),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+  canGrantScope: vi.fn().mockReturnValue(true),
+  getUserModuleAccessConfig: vi.fn(),
+  setUserModuleAccess: vi.fn(),
+} as unknown as DepartmentAccessService;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -89,6 +100,7 @@ const ACTOR_VIEWER: AuthUser = {
   id: 'user-1', username: 'viewer', displayName: 'Viewer',
   roleId: 'r1', roleCode: 'VIEWER', roleName: 'Viewer',
   mustChangePassword: false, isActive: true, sessionId: 's1',
+  departmentId: null,
   permissions: ['production.read'],
 };
 
@@ -96,6 +108,7 @@ const ACTOR_NONE: AuthUser = {
   id: 'user-0', username: 'none', displayName: 'None',
   roleId: 'r0', roleCode: 'NONE', roleName: 'None',
   mustChangePassword: false, isActive: true, sessionId: 's0',
+  departmentId: null,
   permissions: [],
 };
 
@@ -103,6 +116,7 @@ const ACTOR_OPERATOR: AuthUser = {
   id: 'user-3', username: 'op', displayName: 'Operator',
   roleId: 'r3', roleCode: 'OP', roleName: 'Operator',
   mustChangePassword: false, isActive: true, sessionId: 's3',
+  departmentId: null,
   permissions: ['production.read', 'production.entries.create'],
 };
 
@@ -110,6 +124,7 @@ const ACTOR_MANAGER: AuthUser = {
   id: 'user-2', username: 'mgr', displayName: 'Manager',
   roleId: 'r2', roleCode: 'MGR', roleName: 'Manager',
   mustChangePassword: false, isActive: true, sessionId: 's2',
+  departmentId: null,
   permissions: [
     'production.read', 'production.create', 'production.update', 'production.schedule',
     'production.start', 'production.pause', 'production.resume', 'production.complete',
@@ -266,7 +281,7 @@ describe('ProductionOrdersService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTransaction.mockImplementation(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
-    service = new ProductionOrdersService(mockDb, mockRef);
+    service = new ProductionOrdersService(mockDb, mockRef, mockDeptAccess);
   });
 
   // ---- create ----

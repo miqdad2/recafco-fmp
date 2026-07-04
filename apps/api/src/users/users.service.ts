@@ -7,8 +7,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import { ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { AuthService } from '../auth/auth.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import type { CreateUserDto } from './dto/create-user.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
 import type { AuthUser } from '../common/types/auth-user';
@@ -115,6 +117,7 @@ export class UsersService {
   constructor(
     private readonly db: DatabaseService,
     private readonly authService: AuthService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   async create(dto: CreateUserDto, actor: AuthUser): Promise<UserCreatedResult> {
@@ -126,6 +129,8 @@ export class UsersService {
     if (displayName.length === 0) {
       throw new BadRequestException({ code: 'VALIDATION_ERROR', message: 'displayName must not be blank' });
     }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, dto.departmentId ?? null);
 
     await this.validateOrgConsistency(dto.plantId, dto.locationId);
 
@@ -177,6 +182,7 @@ export class UsersService {
 
   async findAll(
     query: { page?: number; pageSize?: number; search?: string; isActive?: boolean; roleCode?: string },
+    actor?: AuthUser,
   ): Promise<UserListResult> {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 20, 100);
@@ -192,6 +198,13 @@ export class UsersService {
       ];
     }
 
+    if (actor) {
+      const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.ADMINISTRATION);
+      if (deptFilter !== null) {
+        where['departmentId'] = deptFilter;
+      }
+    }
+
     const [raw, total] = await Promise.all([
       this.db.getClient().user.findMany({ where, select: USER_SELECT, orderBy: { username: 'asc' }, skip, take: pageSize }),
       this.db.getClient().user.count({ where }),
@@ -203,17 +216,21 @@ export class UsersService {
     };
   }
 
-  async findOne(id: string): Promise<UserSummary> {
-    const user = await this.db.getClient().user.findUnique({ where: { id }, select: USER_SELECT });
-    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
+  async findOne(id: string, actor?: AuthUser): Promise<UserSummary> {
+    const user = await this.findOneOrThrow(id, actor);
     return toSummary(user);
   }
 
   async update(id: string, dto: UpdateUserDto, actor: AuthUser): Promise<UserSummary> {
-    await this.findOne(id);
+    const existing = await this.findOneOrThrow(id, actor);
 
     if (dto.displayName !== undefined && dto.displayName.trim().length === 0) {
       throw new BadRequestException({ code: 'VALIDATION_ERROR', message: 'displayName must not be blank' });
+    }
+
+    // If moving to a different department, assert actor can access the new department too
+    if (dto.departmentId !== undefined && dto.departmentId !== existing.departmentId) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, dto.departmentId ?? null);
     }
 
     await this.validateOrgConsistency(dto.plantId, dto.locationId);
@@ -338,8 +355,8 @@ export class UsersService {
       throw new BadRequestException({ code: 'ROLE_INACTIVE', message: 'Cannot assign an inactive role' });
     }
 
-    // Privilege escalation guard (A-9): only SUPER_ADMIN may assign SUPER_ADMIN.
-    if (targetRole.code === SUPER_ADMIN_CODE && actor.roleCode !== SUPER_ADMIN_CODE) {
+    // Privilege escalation guard (A-9): only users with roles.assign_permissions may assign SUPER_ADMIN.
+    if (targetRole.code === SUPER_ADMIN_CODE && !actor.permissions.includes('roles.assign_permissions')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Only a Super Administrator may assign the SUPER_ADMIN role',
@@ -376,6 +393,15 @@ export class UsersService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<UserRecord> {
+    const user = await this.db.getClient().user.findUnique({ where: { id }, select: USER_SELECT });
+    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, user.departmentId);
+    }
+    return user;
+  }
+
   private async resolveNewUserRole(requestedRoleId: string | undefined, actor: AuthUser): Promise<string> {
     if (!requestedRoleId) {
       const viewerRole = await this.db.getClient().role.findUnique({
@@ -398,7 +424,7 @@ export class UsersService {
     if (!role.isActive) {
       throw new BadRequestException({ code: 'ROLE_INACTIVE', message: 'Cannot assign an inactive role' });
     }
-    if (role.code === SUPER_ADMIN_CODE && actor.roleCode !== SUPER_ADMIN_CODE) {
+    if (role.code === SUPER_ADMIN_CODE && !actor.permissions.includes('roles.assign_permissions')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Only a Super Administrator may assign the SUPER_ADMIN role',

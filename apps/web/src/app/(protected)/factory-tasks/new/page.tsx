@@ -35,7 +35,7 @@ export default async function NewTaskPage(): Promise<React.JSX.Element> {
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Factory Tasks', href: '/factory-tasks' },
+          { label: 'Factory Tasks Management', href: '/factory-tasks' },
           { label: 'New Task' },
         ]} />
 

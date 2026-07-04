@@ -5,6 +5,7 @@ import { ContractsService, getDerivedLifecycleStatus, buildListWhere } from './c
 import type { DatabaseService } from '../database/database.service';
 import type { ContractsRefService } from './contracts-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 
 // ---------------------------------------------------------------------------
 // Transaction mocks
@@ -61,6 +62,16 @@ const mockClient = {
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
 const mockRef = { nextRef: vi.fn().mockResolvedValue('CONTRACT-2026-000001') } as unknown as ContractsRefService;
 
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: vi.fn(),
+  canAccessDepartment: vi.fn().mockResolvedValue(true),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+  canGrantScope: vi.fn().mockReturnValue(true),
+  getUserModuleAccessConfig: vi.fn(),
+  setUserModuleAccess: vi.fn(),
+} as unknown as DepartmentAccessService;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -75,6 +86,7 @@ const ACTOR_VIEWER: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-1',
+  departmentId: null,
   permissions: ['contracts.read', 'contracts.create', 'contracts.comment'],
 };
 
@@ -88,6 +100,7 @@ const ACTOR_ADMIN: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-2',
+  departmentId: null,
   permissions: [
     'contracts.read', 'contracts.create', 'contracts.update',
     'contracts.activate', 'contracts.terminate', 'contracts.close',
@@ -145,7 +158,7 @@ let service: ContractsService;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  service = new ContractsService(mockDb, mockRef);
+  service = new ContractsService(mockDb, mockRef, mockDeptAccess);
 });
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import type { TaskStatus, TaskPriority, TaskListQuery } from '../../../lib/facto
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Factory Tasks — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Factory Tasks Management — RECAFCO FMP' };
 
 const ACTIVE_STATUSES: TaskStatus[] = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'];
 
@@ -81,11 +81,11 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Factory Tasks' }]} />
+        <Breadcrumbs items={[{ label: 'Factory Tasks Management' }]} />
 
         <div className="mb-6">
           <PageHeader
-            title="Factory Tasks"
+            title="Factory Tasks Management"
             description="Manage and track operational tasks across all factory facilities."
             action={
               canCreate ? (

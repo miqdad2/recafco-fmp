@@ -5,8 +5,9 @@ import {
   ConflictException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { ProductionOrderStatus, ProductionEntryType } from '@recafco/database';
+import { ProductionOrderStatus, ProductionEntryType, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ProductionRefService } from './production-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateProductionOrderDto } from './dto/create-production-order.dto';
@@ -156,6 +157,7 @@ export class ProductionOrdersService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: ProductionRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---- Create ----
@@ -164,6 +166,8 @@ export class ProductionOrdersService {
     if (!actor.permissions.includes('production.create')) {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.create' });
     }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.PRODUCTION_DASHBOARD, dto.departmentId ?? null);
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -218,7 +222,12 @@ export class ProductionOrdersService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
     const skip = (page - 1) * pageSize;
-    const where = buildOrderWhere(query);
+
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.PRODUCTION_DASHBOARD);
+    const where: Record<string, unknown> = { ...buildOrderWhere(query) };
+    if (deptFilter !== null) {
+      where['departmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().productionOrder.findMany({
@@ -241,9 +250,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.read' });
     }
 
-    const order = await this.db.getClient().productionOrder.findUnique({ where: { id }, select: ORDER_SELECT });
-    if (!order) throw new NotFoundException({ code: 'PRODUCTION_ORDER_NOT_FOUND', message: 'Production order not found' });
-    return order;
+    return this.findOneOrThrow(id, actor);
   }
 
   // ---- Update (DRAFT only) ----
@@ -252,6 +259,8 @@ export class ProductionOrdersService {
     if (!actor.permissions.includes('production.update') && !actor.permissions.includes('production.manage')) {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.update' });
     }
+
+    await this.findOneOrThrow(id, actor);
 
     const data: Record<string, unknown> = { version: { increment: 1 } };
     if (dto.title !== undefined) data['title'] = dto.title;
@@ -299,6 +308,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.schedule' });
     }
 
+    await this.findOneOrThrow(id, actor);
     return this.transition(id, dto.version, ProductionOrderStatus.DRAFT, ProductionOrderStatus.SCHEDULED, actor, 'scheduled', {});
   }
 
@@ -309,6 +319,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.start' });
     }
 
+    await this.findOneOrThrow(id, actor);
     const now = new Date();
     return this.transition(id, dto.version, ProductionOrderStatus.SCHEDULED, ProductionOrderStatus.IN_PROGRESS, actor, 'started', {
       startedAt: now,
@@ -323,6 +334,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.pause' });
     }
 
+    await this.findOneOrThrow(id, actor);
     const now = new Date();
     return this.transition(id, dto.version, ProductionOrderStatus.IN_PROGRESS, ProductionOrderStatus.PAUSED, actor, 'paused', {
       pausedAt: now,
@@ -338,6 +350,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.resume' });
     }
 
+    await this.findOneOrThrow(id, actor);
     const now = new Date();
     return this.transition(id, dto.version, ProductionOrderStatus.PAUSED, ProductionOrderStatus.IN_PROGRESS, actor, 'resumed', {
       resumedAt: now,
@@ -352,6 +365,7 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.complete' });
     }
 
+    await this.findOneOrThrow(id, actor);
     const now = new Date();
     return this.transition(id, dto.version, ProductionOrderStatus.IN_PROGRESS, ProductionOrderStatus.COMPLETED, actor, 'completed', {
       completedAt: now,
@@ -366,6 +380,8 @@ export class ProductionOrdersService {
     if (!actor.permissions.includes('production.cancel') && !actor.permissions.includes('production.manage')) {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.cancel' });
     }
+
+    await this.findOneOrThrow(id, actor);
 
     const CANCELLABLE: ProductionOrderStatus[] = [
       ProductionOrderStatus.DRAFT,
@@ -430,6 +446,8 @@ export class ProductionOrdersService {
         throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.entries.create' });
       }
     }
+
+    await this.findOneOrThrow(id, actor);
 
     const order = await this.db.getClient().productionOrder.findUnique({
       where: { id },
@@ -551,6 +569,8 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.read' });
     }
 
+    await this.findOneOrThrow(id, actor);
+
     const order = await this.db.getClient().productionOrder.findUnique({
       where: { id },
       select: { id: true, targetQuantity: true },
@@ -627,13 +647,16 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.read' });
     }
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.PRODUCTION_DASHBOARD);
+    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
     const [draft, scheduled, inProgress, paused, completed, cancelled] = await Promise.all([
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.DRAFT } }),
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.SCHEDULED } }),
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.IN_PROGRESS } }),
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.PAUSED } }),
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.COMPLETED } }),
-      this.db.getClient().productionOrder.count({ where: { status: ProductionOrderStatus.CANCELLED } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.DRAFT } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.SCHEDULED } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.IN_PROGRESS } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.PAUSED } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.COMPLETED } }),
+      this.db.getClient().productionOrder.count({ where: { ...deptWhere, status: ProductionOrderStatus.CANCELLED } }),
     ]);
 
     return { totalDraft: draft, totalScheduled: scheduled, totalInProgress: inProgress, totalPaused: paused, totalCompleted: completed, totalCancelled: cancelled };
@@ -690,6 +713,15 @@ export class ProductionOrdersService {
   }
 
   // ---- Private helpers ----
+
+  private async findOneOrThrow(id: string, actor?: AuthUser) {
+    const order = await this.db.getClient().productionOrder.findUnique({ where: { id }, select: ORDER_SELECT });
+    if (!order) throw new NotFoundException({ code: 'PRODUCTION_ORDER_NOT_FOUND', message: 'Production order not found' });
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.PRODUCTION_DASHBOARD, order.departmentId as string | null);
+    }
+    return order;
+  }
 
   private async transition(
     id: string,

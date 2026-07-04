@@ -85,6 +85,7 @@ export class JwtAuthGuard implements CanActivate {
               },
               isActive: true,
               mustChangePassword: true,
+              departmentId: true,
             },
           },
         },
@@ -105,6 +106,7 @@ export class JwtAuthGuard implements CanActivate {
       isActive: dbUser.isActive,
       mustChangePassword: dbUser.mustChangePassword,
       sessionId: session.id,
+      departmentId: dbUser.departmentId,
     };
 
     req.user = user;

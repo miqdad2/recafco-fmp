@@ -250,8 +250,9 @@ export class FactoryTasksController {
   @Permissions('tasks.read')
   async listProgress(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const progress = await this.tasksService.listProgress(id);
+    const progress = await this.tasksService.listProgress(id, actor);
     return { data: progress, meta: meta(), error: null };
   }
 
@@ -259,8 +260,9 @@ export class FactoryTasksController {
   @Permissions('tasks.read')
   async listComments(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const comments = await this.tasksService.listComments(id);
+    const comments = await this.tasksService.listComments(id, actor);
     return { data: comments, meta: meta(), error: null };
   }
 
@@ -280,8 +282,9 @@ export class FactoryTasksController {
   @Permissions('tasks.read')
   async listActivities(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const activities = await this.tasksService.listActivities(id);
+    const activities = await this.tasksService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
   }
 }

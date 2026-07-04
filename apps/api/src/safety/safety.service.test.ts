@@ -5,6 +5,7 @@ import { SafetyService } from './safety.service';
 import type { DatabaseService } from '../database/database.service';
 import type { SafetyRefService } from './safety-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 
 // ---------------------------------------------------------------------------
 // Transaction mocks
@@ -74,6 +75,16 @@ const mockClient = {
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
 const mockRef = { nextRef: vi.fn().mockResolvedValue('SAFE-2026-000001') } as unknown as SafetyRefService;
 
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: vi.fn(),
+  canAccessDepartment: vi.fn().mockResolvedValue(true),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+  canGrantScope: vi.fn().mockReturnValue(true),
+  getUserModuleAccessConfig: vi.fn(),
+  setUserModuleAccess: vi.fn(),
+} as unknown as DepartmentAccessService;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -88,6 +99,7 @@ const ACTOR_VIEWER: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-1',
+  departmentId: null,
   permissions: ['safety.read', 'safety.create', 'safety.comment'],
 };
 
@@ -101,6 +113,7 @@ const ACTOR_ADMIN: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-2',
+  departmentId: null,
   permissions: [
     'safety.read', 'safety.create', 'safety.schedule', 'safety.inspect',
     'safety.finding_create', 'safety.finding_assign', 'safety.finding_resolve',
@@ -118,6 +131,7 @@ const ACTOR_INSPECTOR: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-3',
+  departmentId: null,
   permissions: [
     'safety.read', 'safety.create', 'safety.inspect', 'safety.finding_create',
     'safety.finding_resolve', 'safety.comment',
@@ -203,7 +217,7 @@ let service: SafetyService;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  service = new SafetyService(mockDb, mockRef);
+  service = new SafetyService(mockDb, mockRef, mockDeptAccess);
 });
 
 // ---------------------------------------------------------------------------
@@ -998,7 +1012,7 @@ describe('SafetyService.findOne', () => {
   it('throws SAFETY_NOT_FOUND for unknown id', async () => {
     mockInspectionFindUnique.mockResolvedValue(null);
 
-    await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+    await expect(service.findOne('nonexistent', ACTOR_VIEWER)).rejects.toThrow(NotFoundException);
   });
 });
 
@@ -1011,7 +1025,7 @@ describe('SafetyService.getSummary', () => {
     mockInspectionCount.mockResolvedValue(3);
     mockFindingCount.mockResolvedValue(7);
 
-    const result = await service.getSummary();
+    const result = await service.getSummary(ACTOR_ADMIN);
     expect(result).toHaveProperty('scheduledInspections');
     expect(result).toHaveProperty('openFindings');
     expect(result).toHaveProperty('criticalFindings');
@@ -1029,7 +1043,7 @@ describe('SafetyService.findAll', () => {
     mockInspectionFindMany.mockResolvedValue([makeInspection()]);
     mockInspectionCount.mockResolvedValue(1);
 
-    const result = await service.findAll({});
+    const result = await service.findAll({}, ACTOR_ADMIN);
     expect(result.items).toHaveLength(1);
     expect(result.total).toBe(1);
     expect(result.page).toBe(1);
@@ -1040,7 +1054,7 @@ describe('SafetyService.findAll', () => {
     mockInspectionFindMany.mockResolvedValue([]);
     mockInspectionCount.mockResolvedValue(0);
 
-    await service.findAll({ status: 'SCHEDULED' });
+    await service.findAll({ status: 'SCHEDULED' }, ACTOR_ADMIN);
     expect(mockInspectionFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: 'SCHEDULED' }),

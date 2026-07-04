@@ -93,7 +93,7 @@ export default async function IncidentDetailPage({ params }: PageProps): Promise
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Incidents', href: '/incidents' },
+          { label: 'Incident Report', href: '/incidents' },
           { label: incident.referenceNumber },
         ]} />
 

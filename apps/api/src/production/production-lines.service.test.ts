@@ -38,6 +38,7 @@ const ACTOR_READ: AuthUser = {
   id: 'user-1', username: 'u1', displayName: 'U1',
   roleId: 'r1', roleCode: 'OPS', roleName: 'Ops',
   mustChangePassword: false, isActive: true, sessionId: 's1',
+  departmentId: null,
   permissions: ['production.read', 'production.lines.read'],
 };
 
@@ -45,6 +46,7 @@ const ACTOR_MANAGE: AuthUser = {
   id: 'user-2', username: 'u2', displayName: 'U2',
   roleId: 'r2', roleCode: 'MGR', roleName: 'Manager',
   mustChangePassword: false, isActive: true, sessionId: 's2',
+  departmentId: null,
   permissions: [
     'production.read', 'production.lines.read', 'production.lines.create',
     'production.lines.update', 'production.lines.manage',
@@ -55,6 +57,7 @@ const ACTOR_NONE: AuthUser = {
   id: 'user-3', username: 'u3', displayName: 'U3',
   roleId: 'r3', roleCode: 'VIEWER', roleName: 'Viewer',
   mustChangePassword: false, isActive: true, sessionId: 's3',
+  departmentId: null,
   permissions: [],
 };
 

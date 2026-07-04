@@ -39,6 +39,7 @@ model Department {
   safetyInspections   SafetyInspection[]
   contracts           Contract[]
   productionOrders    ProductionOrder[]
+  moduleGrants        UserModuleDepartmentGrant[]
 
   @@map("departments")
 }
@@ -226,6 +227,9 @@ model User {
   productionOrdersCompleted ProductionOrder[] @relation("ProdOrderCompletedBy")
   productionOrdersCancelled ProductionOrder[] @relation("ProdOrderCancelledBy")
   productionComments        ProductionComment[] @relation("ProdCommentAuthor")
+
+  moduleAccess        UserModuleAccess[] @relation
+  moduleAccessGranted UserModuleAccess[] @relation("ModuleAccessGrantedBy")
 
   @@index([roleId])
   @@index([departmentId])
@@ -1046,6 +1050,73 @@ model ContractActivity {
 
   @@index([contractId, createdAt(sort: Asc)])
   @@map("contract_activities")
+}
+
+// ---------------------------------------------------------------------------
+// Department-Scoped Module Access
+// Unit 15 — added 2026-07-04
+//
+// UserModuleAccess: one row per (user, module) controlling the department scope.
+// UserModuleDepartmentGrant: explicit grant rows used when scope = SELECTED_DEPARTMENTS.
+//
+// Absent record → OWN_DEPARTMENT (fail-closed default).
+// ALL_DEPARTMENTS is also granted implicitly to users with access_scope.manage_all_departments
+// so SUPER_ADMIN/ADMIN work without explicit rows.
+//
+// onDelete: Cascade on UserModuleDepartmentGrant.userModuleAccessId so removing
+// the access row removes all its grants.
+// ---------------------------------------------------------------------------
+
+enum DepartmentAccessScope {
+  OWN_DEPARTMENT
+  SELECTED_DEPARTMENTS
+  ALL_DEPARTMENTS
+
+  @@map("department_access_scope")
+}
+
+enum ModuleIdentifier {
+  FACTORY_TASKS
+  INCIDENT_REPORT
+  MAINTENANCE_REQUESTS
+  SAFETY_COMPLIANCE
+  CONTRACTS_MANAGEMENT
+  PRODUCTION_DASHBOARD
+  ADMINISTRATION
+
+  @@map("module_identifier")
+}
+
+model UserModuleAccess {
+  id        String                @id @default(uuid()) @db.Uuid
+  userId    String                @map("user_id") @db.Uuid
+  module    ModuleIdentifier
+  scope     DepartmentAccessScope @default(OWN_DEPARTMENT)
+  grantedBy String?               @map("granted_by") @db.Uuid
+  createdAt DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user    User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grantor User?                       @relation("ModuleAccessGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+  grants  UserModuleDepartmentGrant[]
+
+  @@unique([userId, module])
+  @@index([userId])
+  @@map("user_module_access")
+}
+
+model UserModuleDepartmentGrant {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userModuleAccessId String   @map("user_module_access_id") @db.Uuid
+  departmentId       String   @map("department_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  userModuleAccess UserModuleAccess @relation(fields: [userModuleAccessId], references: [id], onDelete: Cascade)
+  department       Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userModuleAccessId, departmentId])
+  @@index([userModuleAccessId])
+  @@map("user_module_department_grants")
 }
 
 // ---------------------------------------------------------------------------

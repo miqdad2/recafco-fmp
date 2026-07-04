@@ -34,7 +34,7 @@ export default async function AddEntryPage({ params }: PageProps): Promise<React
     <div className="min-h-full p-8">
       <div className="max-w-2xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Production', href: '/production' },
+          { label: 'Production Dashboard', href: '/production' },
           { label: order.referenceNumber, href: `/production/${id}` },
           { label: 'Add Entry' },
         ]} />

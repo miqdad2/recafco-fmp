@@ -16,6 +16,7 @@ const ACTOR_ADMIN: AuthUser = {
   isActive: true,
   mustChangePassword: false,
   sessionId: 'session-001',
+  departmentId: null,
 };
 
 const ACTOR_VIEWER: AuthUser = {

@@ -4,8 +4,9 @@
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InspectionStatus, FindingSeverity, FindingStatus } from '@recafco/database';
+import { InspectionStatus, FindingSeverity, FindingStatus, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { SafetyRefService } from './safety-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateInspectionDto } from './dto/create-inspection.dto';
@@ -102,6 +103,7 @@ export class SafetyService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: SafetyRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -109,6 +111,8 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async create(dto: CreateInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.SAFETY_COMPLIANCE, dto.departmentId ?? null);
+
     if (dto.inspectorUserId) {
       await this.requireActiveUser(dto.inspectorUserId, 'inspectorUserId');
     }
@@ -167,7 +171,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async updateDraft(id: string, dto: UpdateInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -220,7 +224,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async schedule(id: string, dto: ScheduleInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -286,7 +290,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async start(id: string, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.SCHEDULED) {
       throw new UnprocessableEntityException({
@@ -334,7 +338,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async complete(id: string, dto: CompleteInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.IN_PROGRESS) {
       throw new UnprocessableEntityException({
@@ -404,7 +408,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async close(id: string, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.COMPLETED) {
       throw new UnprocessableEntityException({
@@ -459,7 +463,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async cancel(id: string, dto: CancelInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     const cancellableStatuses: InspectionStatus[] = [
       InspectionStatus.DRAFT,
@@ -544,7 +548,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async reopen(id: string, dto: ReopenInspectionDto, actor: AuthUser): Promise<InspectionRecord> {
-    const inspection = await this.findOneOrThrow(id);
+    const inspection = await this.findOneOrThrow(id, actor);
 
     if (inspection.status !== InspectionStatus.CLOSED) {
       throw new UnprocessableEntityException({
@@ -613,7 +617,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async createFinding(inspectionId: string, dto: CreateFindingDto, actor: AuthUser): Promise<FindingRecord> {
-    const inspection = await this.findOneOrThrow(inspectionId);
+    const inspection = await this.findOneOrThrow(inspectionId, actor);
 
     const allowedStatuses: InspectionStatus[] = [
       InspectionStatus.IN_PROGRESS,
@@ -675,8 +679,8 @@ export class SafetyService {
   // Findings â€” List
   // ---------------------------------------------------------------------------
 
-  async listFindings(inspectionId: string): Promise<FindingRecord[]> {
-    await this.findOneOrThrow(inspectionId);
+  async listFindings(inspectionId: string, actor: AuthUser): Promise<FindingRecord[]> {
+    await this.findOneOrThrow(inspectionId, actor);
     return this.db.getClient().safetyFinding.findMany({
       where: { inspectionId },
       orderBy: [{ createdAt: 'asc' }],
@@ -694,7 +698,7 @@ export class SafetyService {
     dto: AssignFindingDto,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     const assignableStatuses: FindingStatus[] = [FindingStatus.OPEN, FindingStatus.ACTION_REQUIRED];
@@ -758,7 +762,7 @@ export class SafetyService {
     dto: RequireActionDto,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     if (finding.status !== FindingStatus.OPEN) {
@@ -814,7 +818,7 @@ export class SafetyService {
     dto: ResolveFindingDto,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     const resolvableStatuses: FindingStatus[] = [FindingStatus.OPEN, FindingStatus.ACTION_REQUIRED];
@@ -889,7 +893,7 @@ export class SafetyService {
     findingId: string,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     if (finding.status !== FindingStatus.RESOLVED) {
@@ -963,7 +967,7 @@ export class SafetyService {
     findingId: string,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     if (finding.status !== FindingStatus.VERIFIED) {
@@ -1017,7 +1021,7 @@ export class SafetyService {
     dto: ReopenFindingDto,
     actor: AuthUser,
   ): Promise<FindingRecord> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
     const finding = await this.findFindingOrThrow(inspectionId, findingId);
 
     const reopenableStatuses: FindingStatus[] = [
@@ -1096,7 +1100,7 @@ export class SafetyService {
   // ---------------------------------------------------------------------------
 
   async addComment(inspectionId: string, dto: AddInspectionCommentDto, actor: AuthUser): Promise<unknown> {
-    await this.findOneOrThrow(inspectionId);
+    await this.findOneOrThrow(inspectionId, actor);
 
     const body = dto.body.trim();
     if (!body) {
@@ -1131,8 +1135,8 @@ export class SafetyService {
     });
   }
 
-  async listComments(inspectionId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(inspectionId);
+  async listComments(inspectionId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(inspectionId, actor);
     return this.db.getClient().safetyInspectionComment.findMany({
       where: { inspectionId },
       orderBy: [{ createdAt: 'asc' }],
@@ -1150,8 +1154,8 @@ export class SafetyService {
   // Activities
   // ---------------------------------------------------------------------------
 
-  async listActivities(inspectionId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(inspectionId);
+  async listActivities(inspectionId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(inspectionId, actor);
     return this.db.getClient().safetyInspectionActivity.findMany({
       where: { inspectionId },
       orderBy: [{ createdAt: 'asc' }],
@@ -1164,12 +1168,17 @@ export class SafetyService {
 
   async findAll(
     query: InspectionListQueryDto,
+    actor: AuthUser,
   ): Promise<PaginatedResult<InspectionRecord>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
 
-    const where = buildListWhere(query);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.SAFETY_COMPLIANCE);
+    const where: Record<string, unknown> = { ...buildListWhere(query) };
+    if (deptFilter !== null) {
+      where['departmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().safetyInspection.findMany({
@@ -1195,11 +1204,11 @@ export class SafetyService {
     };
   }
 
-  async findOne(id: string): Promise<InspectionRecord> {
-    return this.findOneOrThrow(id);
+  async findOne(id: string, actor: AuthUser): Promise<InspectionRecord> {
+    return this.findOneOrThrow(id, actor);
   }
 
-  async getSummary(): Promise<{
+  async getSummary(actor: AuthUser): Promise<{
     scheduledInspections: number;
     openFindings: number;
     criticalFindings: number;
@@ -1215,6 +1224,14 @@ export class SafetyService {
       FindingStatus.VERIFIED,
     ];
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.SAFETY_COMPLIANCE);
+    const inspectionDeptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
+    // Findings are nested under inspections; scope via inspection relation
+    const findingDeptWhere = deptFilter !== null
+      ? { inspection: { departmentId: deptFilter } }
+      : {};
+
     const [
       scheduledInspections,
       openFindings,
@@ -1223,25 +1240,27 @@ export class SafetyService {
       inProgressInspections,
     ] = await Promise.all([
       this.db.getClient().safetyInspection.count({
-        where: { status: InspectionStatus.SCHEDULED },
+        where: { ...inspectionDeptWhere, status: InspectionStatus.SCHEDULED },
       }),
       this.db.getClient().safetyFinding.count({
-        where: { status: { in: openFindingStatuses } },
+        where: { ...findingDeptWhere, status: { in: openFindingStatuses } },
       }),
       this.db.getClient().safetyFinding.count({
         where: {
+          ...findingDeptWhere,
           severity: FindingSeverity.CRITICAL,
           status: { not: FindingStatus.CLOSED },
         },
       }),
       this.db.getClient().safetyFinding.count({
         where: {
+          ...findingDeptWhere,
           dueAt: { lt: now },
           status: { in: [FindingStatus.OPEN, FindingStatus.ACTION_REQUIRED] },
         },
       }),
       this.db.getClient().safetyInspection.count({
-        where: { status: InspectionStatus.IN_PROGRESS },
+        where: { ...inspectionDeptWhere, status: InspectionStatus.IN_PROGRESS },
       }),
     ]);
 
@@ -1274,7 +1293,7 @@ export class SafetyService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async findOneOrThrow(id: string): Promise<InspectionRecord> {
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<InspectionRecord> {
     const inspection = await this.db.getClient().safetyInspection.findUnique({
       where: { id },
       select: INSPECTION_SELECT,
@@ -1284,6 +1303,9 @@ export class SafetyService {
         code: 'SAFETY_NOT_FOUND',
         message: 'Safety inspection not found',
       });
+    }
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.SAFETY_COMPLIANCE, inspection.departmentId as string | null);
     }
     return inspection as InspectionRecord;
   }

@@ -9,4 +9,5 @@ export interface AuthUser {
   mustChangePassword: boolean;
   isActive: boolean;
   sessionId: string;
+  departmentId: string | null;
 }

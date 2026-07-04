@@ -177,6 +177,78 @@ Living document. Update after every reusable component or established visual pat
 - Used by: `administration/users/[id]/edit/page.tsx`
 - Notes: `'use client'`; wraps a 3-arg `resetPasswordAction.bind(null, id)` inside `useActionState` so it satisfies the 1-arg `<form action>` contract.
 
+### ScopeBadge
+- Path: `apps/web/src/app/(protected)/administration/users/_components/scope-badge.tsx`
+- Purpose: Pill badge for `DepartmentAccessScope` values with correct colour semantics.
+- Variants: `OWN_DEPARTMENT` → neutral blue; `SELECTED_DEPARTMENTS` → amber; `ALL_DEPARTMENTS` → red/error; `NO_ACCESS` → muted grey.
+- Key tokens/classes: `rounded-full px-2 py-0.5 text-xs font-medium border`; token-mapped per scope.
+- Accessibility behavior: Purely presentational; no role attribute needed.
+- Used by: `ModuleAccessSummary`, `module-access-panel.tsx`, list pages.
+- Notes: Accepts `scope: DepartmentAccessScope | 'NO_ACCESS'`. Exports `ScopeOrNoAccess` type. Pure RSC (no hooks).
+
+### UserSecurityStatus
+- Path: `apps/web/src/app/(protected)/administration/users/_components/user-security-status.tsx`
+- Purpose: Compact multi-badge display of a user's account status (active/inactive + locked + must-change-password).
+- Variants: Active (green pill), Inactive (muted grey), Locked (amber), Must Change Password (amber).
+- Key tokens/classes: `rounded-full px-2.5 py-0.5 text-xs font-medium`; tokens: `bg-success-light text-success`, `bg-warning-light text-warning`, `bg-surface-secondary text-text-muted`.
+- Accessibility behavior: Active/Inactive badge uses `aria-label`.
+- Used by: `administration/users/page.tsx`, `EditUserTabs`
+- Notes: Props: `isActive`, `isLocked`, `mustChangePassword`. Pure RSC.
+
+### ModuleAccessSummary
+- Path: `apps/web/src/app/(protected)/administration/users/_components/module-access-summary.tsx`
+- Purpose: Compact inline badge strip showing elevated (non-default) module scopes; up to N visible then "+N more" overflow badge.
+- Variants: All-defaults → "All defaults" text; ≤N elevated → inline badges; >N → last badge is count overflow.
+- Key tokens/classes: `ScopeBadge` for each scope; overflow uses `bg-surface-secondary text-text-muted border-border`.
+- Accessibility behavior: Purely presentational.
+- Used by: User list pages, future user drawer/dialog.
+- Notes: Props: `moduleAccess: UserModuleAccessConfig[]`, `maxVisible?: number` (default 3). Pure RSC.
+
+### RolePermissionSummary
+- Path: `apps/web/src/app/(protected)/administration/users/_components/role-permission-summary.tsx`
+- Purpose: Collapsible panel listing all permissions for a role, grouped by module with dot-bullet items.
+- Variants: Collapsed (shows count summary, "▼ View permissions") and expanded (shows grouped list per module).
+- Key tokens/classes: `rounded-md border border-border bg-surface`; expand button uses `hover:bg-surface-secondary`.
+- Accessibility behavior: `aria-expanded` on toggle button; grouped by module heading.
+- Used by: `NewUserForm` (Section 3), `EditUserTabs` (Role tab)
+- Notes: `'use client'`; Props: `permissions: PermissionSummary[]`. Groups by `p.module` field.
+
+### ModuleAccessEditor
+- Path: `apps/web/src/app/(protected)/administration/users/_components/module-access-editor.tsx`
+- Purpose: Inline per-module scope editor for use inside a creation form; renders all 7 modules with scope selectors as native form inputs (name=`module_scope_{MODULE}`) for FormData submission.
+- Variants: Per-module scope selector; `SELECTED_DEPARTMENTS` shows checkbox list; `ALL_DEPARTMENTS` shows warning banner; `canManageAll: false` hides ALL_DEPARTMENTS option.
+- Key tokens/classes: Same scope/department list pattern as `ModuleAccessPanel`.
+- Accessibility behavior: Each scope selector has `<label>`; department checkboxes labelled inline.
+- Used by: `NewUserForm` (Section 4)
+- Notes: `'use client'`; exports `getAvailableScopeOptions(canManageAll)` (also in `scope-utils.ts`) and `ALL_MODULES` constant. Props: `allDepartments`, `canManageAll`, `defaultValues?`.
+
+### NewUserForm
+- Path: `apps/web/src/app/(protected)/administration/users/_components/new-user-form.tsx`
+- Purpose: 4-section user creation form — (1) Account Information, (2) Organization Assignment with missing-dept warning, (3) Role & Permissions with collapsible permission preview, (4) Module Access with per-module scope editor.
+- Variants: Form state (in progress), success screen (shows temp password with Copy button, Go to User, Create Another, Back to Users actions), partial-success screen (module access failures listed with warning).
+- Key tokens/classes: Section cards use `rounded-lg border border-border bg-surface p-6`; section numbers are accent circles.
+- Accessibility behavior: Each section labelled; field errors have `role="alert"`; required fields marked; Copy button uses `navigator.clipboard`.
+- Used by: `administration/users/new/page.tsx`
+- Notes: `'use client'`; `useActionState(createUserWithAccessAction, null)`. Props include `canManageAll` for ALL_DEPARTMENTS option. `RoleWithPerms` interface extends `RoleSummary` with permissions.
+
+### EditUserTabs
+- Path: `apps/web/src/app/(protected)/administration/users/_components/edit-user-tabs.tsx`
+- Purpose: Tabbed edit UI for user administration — Profile, Organization, Role & Permissions, Module Access, Security.
+- Variants: 5 tabs; active tab has `border-accent text-accent` underline; each tab renders its own form component. Module Access tab reuses `ModuleAccessPanel`. Security tab shows `UserSecurityStatus` + reset password + activate/deactivate + unlock.
+- Key tokens/classes: Tab bar: `border-b border-border -mx-8 px-8`; active: `border-b-2 border-accent text-accent`; inactive: `border-transparent text-text-secondary`.
+- Accessibility behavior: `role="tablist"` + `role="tab"` + `aria-selected` on each tab; `role="tabpanel"` on content area.
+- Used by: `administration/users/[id]/edit/page.tsx`
+- Notes: `'use client'`; all bound server actions passed as props from the server page. Profile/Org/Role save via `useActionState` with inline success/error messages (no redirect).
+
+### ModuleAccessPanel
+- Path: `apps/web/src/app/(protected)/administration/users/_components/module-access-panel.tsx`
+- Purpose: Inline per-module scope editor on the user edit page; shows current scope badge for each of the 7 modules; allows admin to change scope with a dropdown; shows department checkboxes when `SELECTED_DEPARTMENTS` is chosen.
+- Variants: Read-only mode (`canManage: false` hides "Change" buttons); edit mode inline per row (one form open at a time); `ALL_DEPARTMENTS` option only shown when `canManageAll: true`.
+- Key tokens/classes: Scope badge colors: `OWN_DEPARTMENT` → `bg-surface-secondary text-text-secondary`; `SELECTED_DEPARTMENTS` → `bg-warning-light text-warning`; `ALL_DEPARTMENTS` → `bg-success-light text-success`. Department list scrollable at `max-h-36`.
+- Accessibility behavior: Each module row has labelled form fields; submit button shows "Saving…" during pending state; cancel returns to read view.
+- Used by: `administration/users/[id]/edit/page.tsx`
+- Notes: `'use client'`; each module row has its own isolated `useActionState` with a closure binding `(userId, module)`; `action` prop is the `setModuleAccessAction` server action passed from the server page. Props: `userId`, `moduleAccess: UserModuleAccessConfig[]`, `allDepartments`, `action`, `canManage`, `canManageAll`.
+
 ---
 
 ## API Patterns (Unit 06)
@@ -193,8 +265,8 @@ Living document. Update after every reusable component or established visual pat
 ### AuthUser Type — Authenticated Request Context
 - Path: `apps/api/src/common/types/auth-user.ts`
 - Purpose: Shape of `req.user` after `JwtAuthGuard` processes a request.
-- Fields: `id`, `username`, `displayName`, `roleId`, `roleCode`, `roleName`, `permissions: string[]`, `mustChangePassword`, `isActive`, `sessionId`
-- Notes: `permissions` is an array of dot-notation codes (e.g. `'users.read'`). DB is authoritative — never trust JWT for role/permissions.
+- Fields: `id`, `username`, `displayName`, `roleId`, `roleCode`, `roleName`, `permissions: string[]`, `mustChangePassword`, `isActive`, `sessionId`, `departmentId: string | null`
+- Notes: `permissions` is an array of dot-notation codes (e.g. `'users.read'`). DB is authoritative — never trust JWT for role/permissions. `departmentId` populated from DB by `JwtAuthGuard` (Unit 15); used by `DepartmentAccessService.buildDeptFilter` for `OWN_DEPARTMENT` scope.
 
 ### RoleId-based User Mutations
 - Pattern: Role assignment uses `PATCH /administration/users/:id/role` with `{ roleId: string }` body; `UpdateUserDto` has no role field.

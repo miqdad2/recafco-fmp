@@ -51,6 +51,28 @@ export interface UpdateUserPayload {
   locationId?: string;
 }
 
+export type DepartmentAccessScope = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export type ModuleIdentifier =
+  | 'FACTORY_TASKS'
+  | 'INCIDENT_REPORT'
+  | 'MAINTENANCE_REQUESTS'
+  | 'SAFETY_COMPLIANCE'
+  | 'CONTRACTS_MANAGEMENT'
+  | 'PRODUCTION_DASHBOARD'
+  | 'ADMINISTRATION';
+
+export interface UserModuleAccessConfig {
+  module: ModuleIdentifier;
+  scope: DepartmentAccessScope;
+  grantedDepartments: { id: string; code: string; name: string }[];
+}
+
+export interface SetModuleAccessPayload {
+  scope: DepartmentAccessScope;
+  departmentIds?: string[];
+}
+
 type ApiOk<T> = { data: T; meta: { requestId?: string }; error: null };
 type ApiErr = { data: null; meta: { requestId?: string }; error: { code: string; message: string } };
 
@@ -126,4 +148,13 @@ export const usersApi = {
 
   unlock: (accessToken: string, id: string) =>
     apiFetch<UserSummary>(`/administration/users/${id}/unlock`, accessToken, { method: 'POST' }),
+
+  getModuleAccess: (accessToken: string, id: string) =>
+    apiFetch<UserModuleAccessConfig[]>(`/administration/users/${id}/module-access`, accessToken),
+
+  setModuleAccess: (accessToken: string, id: string, module: ModuleIdentifier, payload: SetModuleAccessPayload) =>
+    apiFetch<null>(`/administration/users/${id}/module-access/${module}`, accessToken, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 };

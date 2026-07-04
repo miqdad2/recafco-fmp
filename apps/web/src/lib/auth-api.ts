@@ -16,6 +16,7 @@ export interface UserProfile {
   roleId: string;
   roleCode: string;
   roleName: string;
+  permissions: string[];
   isActive: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;

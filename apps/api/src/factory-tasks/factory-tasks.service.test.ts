@@ -5,6 +5,7 @@ import { FactoryTasksService } from './factory-tasks.service';
 import type { DatabaseService } from '../database/database.service';
 import type { TasksRefService } from './tasks-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 
 // ---------------------------------------------------------------------------
 // Mock infrastructure
@@ -58,6 +59,16 @@ const mockRef = {
   nextRef: vi.fn().mockResolvedValue('TASK-2026-000001'),
 } as unknown as TasksRefService;
 
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: vi.fn(),
+  canAccessDepartment: vi.fn().mockResolvedValue(true),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+  canGrantScope: vi.fn().mockReturnValue(true),
+  getUserModuleAccessConfig: vi.fn(),
+  setUserModuleAccess: vi.fn(),
+} as unknown as DepartmentAccessService;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -72,6 +83,7 @@ const ACTOR_NO_MANAGE: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-1',
+  departmentId: null,
   permissions: ['tasks.create', 'tasks.read', 'tasks.start', 'tasks.block', 'tasks.complete', 'tasks.update_progress', 'tasks.comment'],
 };
 
@@ -86,6 +98,7 @@ const ACTOR_MANAGE: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-2',
+  departmentId: null,
   permissions: ['tasks.manage', 'tasks.create', 'tasks.read', 'tasks.assign', 'tasks.start', 'tasks.block', 'tasks.complete', 'tasks.close', 'tasks.update_progress', 'tasks.comment'],
 };
 
@@ -100,6 +113,7 @@ const ACTOR_WITH_INCIDENTS: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-3',
+  departmentId: null,
   permissions: ['tasks.create', 'tasks.read', 'tasks.manage', 'tasks.assign', 'incidents.read'],
 };
 
@@ -153,7 +167,7 @@ describe('FactoryTasksService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTransaction.mockImplementation(async (cb) => cb(mockTx));
-    service = new FactoryTasksService(mockDb, mockRef);
+    service = new FactoryTasksService(mockDb, mockRef, mockDeptAccess);
   });
 
   // ── create ──────────────────────────────────────────────────────────────────

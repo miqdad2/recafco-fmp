@@ -44,6 +44,8 @@ export type {
   ProductionEntry,
   ProductionComment,
   ProductionActivity,
+  UserModuleAccess,
+  UserModuleDepartmentGrant,
 } from './generated/prisma/client';
 export {
   Prisma,
@@ -60,4 +62,6 @@ export {
   ContractStatus,
   ProductionOrderStatus,
   ProductionEntryType,
+  DepartmentAccessScope,
+  ModuleIdentifier,
 } from './generated/prisma/client';

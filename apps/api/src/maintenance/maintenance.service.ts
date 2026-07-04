@@ -4,8 +4,9 @@ import {
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { MaintenanceStatus, MaintenancePriority } from '@recafco/database';
+import { MaintenanceStatus, MaintenancePriority, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { MaintenanceRefService } from './maintenance-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateMrDto } from './dto/create-mr.dto';
@@ -86,6 +87,7 @@ export class MaintenanceService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: MaintenanceRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -108,6 +110,8 @@ export class MaintenanceService {
       dto.plantId,
       dto.locationId,
     );
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.MAINTENANCE_REQUESTS, dto.affectedDepartmentId ?? null);
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -161,7 +165,7 @@ export class MaintenanceService {
   // ---------------------------------------------------------------------------
 
   async updateDraft(id: string, dto: UpdateMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -219,7 +223,7 @@ export class MaintenanceService {
   // ---------------------------------------------------------------------------
 
   async submit(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -238,7 +242,7 @@ export class MaintenanceService {
   }
 
   async review(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.SUBMITTED) {
       throw new UnprocessableEntityException({
@@ -251,7 +255,7 @@ export class MaintenanceService {
   }
 
   async approve(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.UNDER_REVIEW) {
       throw new UnprocessableEntityException({
@@ -264,7 +268,7 @@ export class MaintenanceService {
   }
 
   async reject(id: string, dto: RejectMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     const rejectableStatuses: MaintenanceStatus[] = [
       MaintenanceStatus.SUBMITTED,
@@ -331,7 +335,7 @@ export class MaintenanceService {
   }
 
   async assign(id: string, dto: AssignMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     const assignableStatuses: MaintenanceStatus[] = [
       MaintenanceStatus.APPROVED,
@@ -396,7 +400,7 @@ export class MaintenanceService {
   }
 
   async unassign(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.ASSIGNED) {
       throw new UnprocessableEntityException({
@@ -435,7 +439,7 @@ export class MaintenanceService {
   }
 
   async start(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.ASSIGNED) {
       throw new UnprocessableEntityException({
@@ -451,7 +455,7 @@ export class MaintenanceService {
   }
 
   async waitingForParts(id: string, dto: WaitingForPartsMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.IN_PROGRESS) {
       throw new UnprocessableEntityException({
@@ -506,7 +510,7 @@ export class MaintenanceService {
   }
 
   async resume(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.WAITING_FOR_PARTS) {
       throw new UnprocessableEntityException({
@@ -551,7 +555,7 @@ export class MaintenanceService {
   }
 
   async complete(id: string, dto: CompleteMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     const completableStatuses: MaintenanceStatus[] = [
       MaintenanceStatus.IN_PROGRESS,
@@ -620,7 +624,7 @@ export class MaintenanceService {
   }
 
   async close(id: string, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (mr.status !== MaintenanceStatus.COMPLETED) {
       throw new UnprocessableEntityException({
@@ -669,7 +673,7 @@ export class MaintenanceService {
   }
 
   async cancel(id: string, dto: CancelMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     if (TERMINAL_STATUSES.includes(mr.status as MaintenanceStatus)) {
       throw new UnprocessableEntityException({
@@ -744,7 +748,7 @@ export class MaintenanceService {
   }
 
   async reopen(id: string, dto: ReopenMrDto, actor: AuthUser): Promise<MrRecord> {
-    const mr = await this.findOneOrThrow(id);
+    const mr = await this.findOneOrThrow(id, actor);
 
     const reopenableStatuses: MaintenanceStatus[] = [
       MaintenanceStatus.COMPLETED,
@@ -826,7 +830,7 @@ export class MaintenanceService {
   // ---------------------------------------------------------------------------
 
   async addComment(requestId: string, dto: AddMrCommentDto, actor: AuthUser): Promise<unknown> {
-    await this.findOneOrThrow(requestId);
+    await this.findOneOrThrow(requestId, actor);
 
     const body = dto.body.trim();
     if (!body) {
@@ -861,8 +865,8 @@ export class MaintenanceService {
     });
   }
 
-  async listComments(requestId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(requestId);
+  async listComments(requestId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(requestId, actor);
     return this.db.getClient().maintenanceRequestComment.findMany({
       where: { requestId },
       orderBy: [{ createdAt: 'asc' }],
@@ -880,8 +884,8 @@ export class MaintenanceService {
   // Activities
   // ---------------------------------------------------------------------------
 
-  async listActivities(requestId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(requestId);
+  async listActivities(requestId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(requestId, actor);
     return this.db.getClient().maintenanceRequestActivity.findMany({
       where: { requestId },
       orderBy: [{ createdAt: 'asc' }],
@@ -897,7 +901,11 @@ export class MaintenanceService {
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
 
-    const where = buildListWhere(query, actor);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.MAINTENANCE_REQUESTS);
+    const where: Record<string, unknown> = { ...buildListWhere(query, actor) };
+    if (deptFilter !== null) {
+      where['affectedDepartmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().maintenanceRequest.findMany({
@@ -916,8 +924,8 @@ export class MaintenanceService {
     };
   }
 
-  async findOne(id: string): Promise<MrRecord> {
-    return this.findOneOrThrow(id);
+  async findOne(id: string, actor: AuthUser): Promise<MrRecord> {
+    return this.findOneOrThrow(id, actor);
   }
 
   async findMy(query: MrListQueryDto, actor: AuthUser): Promise<PaginatedResult<MrRecord>> {
@@ -962,23 +970,28 @@ export class MaintenanceService {
       MaintenanceStatus.APPROVED,
     ];
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.MAINTENANCE_REQUESTS);
+    const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
+
     const [openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth] =
       await Promise.all([
-        this.db.getClient().maintenanceRequest.count({ where: { status: { in: openStatuses } } }),
+        this.db.getClient().maintenanceRequest.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
         this.db.getClient().maintenanceRequest.count({
           where: { assignedToUserId: actor.id, status: { in: ACTIVE_STATUSES } },
         }),
         this.db.getClient().maintenanceRequest.count({
           where: {
+            ...deptWhere,
             status: { in: ACTIVE_STATUSES },
             requestedCompletionAt: { lt: now },
           },
         }),
         this.db.getClient().maintenanceRequest.count({
-          where: { status: MaintenanceStatus.WAITING_FOR_PARTS },
+          where: { ...deptWhere, status: MaintenanceStatus.WAITING_FOR_PARTS },
         }),
         this.db.getClient().maintenanceRequest.count({
           where: {
+            ...deptWhere,
             status: { in: [MaintenanceStatus.COMPLETED, MaintenanceStatus.CLOSED] },
             completedAt: { gte: monthStart, lt: monthEnd },
           },
@@ -1012,13 +1025,16 @@ export class MaintenanceService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async findOneOrThrow(id: string): Promise<MrRecord> {
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<MrRecord> {
     const mr = await this.db.getClient().maintenanceRequest.findUnique({
       where: { id },
       select: MR_SELECT,
     });
     if (!mr) {
       throw new NotFoundException({ code: 'MR_NOT_FOUND', message: 'Maintenance request not found' });
+    }
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.MAINTENANCE_REQUESTS, mr.affectedDepartmentId as string | null);
     }
     return mr as MrRecord;
   }

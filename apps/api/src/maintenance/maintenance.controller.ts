@@ -85,8 +85,9 @@ export class MaintenanceController {
   @Permissions('maintenance.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const mr = await this.maintenanceService.findOne(id);
+    const mr = await this.maintenanceService.findOne(id, actor);
     return { data: mr, meta: meta(), error: null };
   }
 
@@ -252,8 +253,9 @@ export class MaintenanceController {
   @Permissions('maintenance.read')
   async listComments(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const comments = await this.maintenanceService.listComments(id);
+    const comments = await this.maintenanceService.listComments(id, actor);
     return { data: comments, meta: meta(), error: null };
   }
 
@@ -273,8 +275,9 @@ export class MaintenanceController {
   @Permissions('maintenance.read')
   async listActivities(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const activities = await this.maintenanceService.listActivities(id);
+    const activities = await this.maintenanceService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
   }
 }

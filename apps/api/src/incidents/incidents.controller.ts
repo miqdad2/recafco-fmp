@@ -47,13 +47,15 @@ export class IncidentsController {
   // summary must be declared BEFORE /:id to avoid route conflict
   @Get('summary')
   @Permissions('incidents.read')
-  async summary(): Promise<ApiSuccessResponse<{
+  async summary(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<{
     totalOpen: number;
     criticalOpen: number;
     underInvestigation: number;
     resolvedThisMonth: number;
   }>> {
-    const data = await this.incidentsService.getSummary();
+    const data = await this.incidentsService.getSummary(actor);
     return { data, meta: meta(), error: null };
   }
 
@@ -71,8 +73,9 @@ export class IncidentsController {
   @Permissions('incidents.read')
   async list(
     @Query() query: IncidentListQueryDto,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const result = await this.incidentsService.findAll(query);
+    const result = await this.incidentsService.findAll(query, actor);
     return { data: result, meta: meta(), error: null };
   }
 
@@ -80,8 +83,9 @@ export class IncidentsController {
   @Permissions('incidents.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const incident = await this.incidentsService.findOne(id);
+    const incident = await this.incidentsService.findOne(id, actor);
     return { data: incident, meta: meta(), error: null };
   }
 
@@ -234,8 +238,9 @@ export class IncidentsController {
   @Permissions('incidents.read')
   async listComments(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const comments = await this.incidentsService.listComments(id);
+    const comments = await this.incidentsService.listComments(id, actor);
     return { data: comments, meta: meta(), error: null };
   }
 
@@ -255,8 +260,9 @@ export class IncidentsController {
   @Permissions('incidents.read')
   async listActivities(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const activities = await this.incidentsService.listActivities(id);
+    const activities = await this.incidentsService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
   }
 
@@ -264,8 +270,9 @@ export class IncidentsController {
   @Permissions('incidents.read')
   async listActions(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const actions = await this.incidentsService.listActions(id);
+    const actions = await this.incidentsService.listActions(id, actor);
     return { data: actions, meta: meta(), error: null };
   }
 

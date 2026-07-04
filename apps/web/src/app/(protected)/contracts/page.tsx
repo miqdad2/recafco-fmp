@@ -8,7 +8,7 @@ import { contractsApi } from '../../../lib/contracts-api';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Contracts — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Contracts Management — RECAFCO FMP' };
 
 async function getUserPermissions(): Promise<string[]> {
   try {
@@ -91,11 +91,11 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Contracts' }]} />
+        <Breadcrumbs items={[{ label: 'Contracts Management' }]} />
 
         <div className="mb-6">
           <PageHeader
-            title="Contracts"
+            title="Contracts Management"
             description="Vendor and service contracts. Ref format: CONTRACT-YYYY-NNNNNN"
             action={
               canCreate ? (

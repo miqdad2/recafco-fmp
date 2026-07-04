@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness (2026-07-02)
+- **Last completed:** Permission Handling Safety Fix (2026-07-04)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -32,6 +32,55 @@
 - **Unit 12 — Contracts Management Foundation** ✓
 - **Unit 13 — Production Management Foundation** ✓
 - **Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness** ✓
+- **Unit 15 — Department-Scoped Module Access** ✓
+- **User Administration UI Redesign** ✓
+- **Permission Handling Safety Fix** ✓
+
+## Permission Handling Safety Fix (Completed 2026-07-04)
+
+### Summary
+
+Eliminated runtime crash in User Administration pages caused by unsafe optional-chaining on `permissions.includes()`. Added a pure `resolvePermissions()` utility and tests. Fixed a locale-dependent date rendering that caused SSR hydration mismatches.
+
+### What Was Fixed
+
+- **`new/page.tsx:36`** — `currentUser?.permissions.includes(...)` crashed when `meData` fetch failed and `currentUser` was null (`?.` short-circuits to `undefined`; `.includes()` on `undefined` throws). Fixed to `resolvePermissions(currentUser?.permissions).includes(...)`.
+- **`[id]/edit/page.tsx:62-63`** — Same unsafe pattern for both `canManageAccess` and `canManageAll`. Fixed with same normalization.
+- **`edit-user-tabs.tsx:315`** — `new Date(user.lastLoginAt).toLocaleString()` produced different output on server (UTC locale) vs. client (browser locale), causing React hydration mismatch warnings. Changed to `toISOString().slice(0, 19).replace('T', ' ') + ' UTC'` — deterministic and locale-independent.
+
+### Audit — All Permission Patterns Reviewed
+
+| File | Pattern | Safe? |
+|---|---|---|
+| `users/new/page.tsx` | `currentUser?.permissions.includes(...)` | ❌ → fixed |
+| `users/[id]/edit/page.tsx` | `currentUser?.permissions.includes(...)` | ❌ → fixed |
+| `sidebar.tsx` | `user.permissions.includes(...)` | ✓ `ShellUser.permissions: string[]` is non-optional |
+| `factory-tasks/[id]/edit/page.tsx` | `info.permissions.includes(...)` | ✓ `getUserInfo()` always returns `{ permissions: [] }` fallback |
+| All `getUserPermissions()` helpers | `Array.isArray(payload.permissions)` guard | ✓ |
+| All detail pages (`maintenance/[id]`, etc.) | `Array.isArray(payload.permissions)` guard | ✓ |
+
+### Hydration Warning Audit
+
+Browser showed `__processed_*` and `bis_register*` attributes — these are injected by browser extensions (Browsec-type VPN/proxy extensions), not by application code. The only application-generated instability found was `toLocaleString()` in `edit-user-tabs.tsx`, now fixed. No `suppressHydrationWarning` attributes were added. Recommend testing in Incognito with extensions disabled to confirm extension attribution.
+
+### New Files
+
+- `apps/web/src/app/(protected)/administration/users/_components/permissions-utils.ts` — `resolvePermissions(permissions: unknown): string[]`
+- `apps/web/src/app/(protected)/administration/users/__tests__/permissions-utils.test.ts` — 8 tests
+
+### Verification Results (2026-07-04)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm typecheck` (api) | ✓ 0 errors |
+| `pnpm test` (web) | ✓ 17/17 tests (3 test files) |
+| `pnpm test` (api) | ✓ 557/557 tests (21 test files, cached) |
+| `pnpm build` (web) | ✓ Build exit 0, 47 routes emitted |
+
+No backend changes. No database changes.
+
+---
 
 ## Unit 14 — Final Platform Hardening, Release Audit, and Deployment Readiness (Completed 2026-07-02)
 
@@ -145,6 +194,95 @@ Full platform audit through Unit 13 and hardening to deployment-readiness for th
 | `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
 | `pnpm test` | ✓ 499/499 tests (20 test files) |
 | ESLint (api + web) | ✓ 0 errors |
+
+## Unit 15 — Department-Scoped Module Access (Completed 2026-07-04, corrected 2026-07-04)
+
+### Summary
+
+Per-user, per-module department access scope. All six operational modules enforce scope on every operation: list, summary, detail, create, update, all lifecycle transitions, comments, activities, entries, and findings. Scope is DB-only — no permission fast-path. ADMIN cannot receive ALL_DEPARTMENTS without an explicit DB row. SUPER_ADMIN bootstrapped with ALL_DEPARTMENTS rows for all 7 modules.
+
+### What Was Built
+
+#### Database
+
+**Migration `20260704000000_add_department_scoped_access`** (applied):
+- `DepartmentAccessScope` enum: `OWN_DEPARTMENT` (default), `SELECTED_DEPARTMENTS`, `ALL_DEPARTMENTS`
+- `ModuleIdentifier` enum: 7 modules
+- `user_module_access` table: one row per (user, module); `scope`; `granted_by` FK to users
+- `user_module_department_grants` table: grant rows for `SELECTED_DEPARTMENTS` scope
+- Initial (wrong) permission codes `scope.read/manage/manage_all` — corrected by migration below
+
+**Migration `20260704000001_fix_access_scope_permissions`** (applied — corrective):
+- Relaxed `permissions_code_format_check` constraint to allow underscores in first segment (`^[a-z][a-z0-9_]*...`)
+- Inserted approved permission codes: `access_scope.read`, `access_scope.manage`, `access_scope.manage_all_departments`
+- Removed wrong `scope.*` role-permission links (orphan rows left in `permissions` table, unused)
+- Final role assignments: SUPER_ADMIN → all 3; ADMIN → `access_scope.read` + `access_scope.manage` only; VIEWER → none
+- Bootstrapped all active SUPER_ADMIN users with `ALL_DEPARTMENTS` `UserModuleAccess` rows for all 7 modules (idempotent — `ON CONFLICT DO NOTHING`)
+
+#### Backend
+
+- `DepartmentAccessService` — `getScope`, `buildDeptFilter`, `canAccessDepartment`, `assertCanAccessDepartment`, `canGrantScope`, `getUserModuleAccessConfig`, `setUserModuleAccess`
+- **No fast-path**: operational ALL_DEPARTMENTS scope MUST come from a `UserModuleAccess` DB row; `access_scope.manage_all_departments` permission only controls who may ASSIGN that scope to others
+- Fail-closed: no `UserModuleAccess` record → `OWN_DEPARTMENT` (applies to ADMIN too); `OWN_DEPARTMENT` with no primary dept → `{in: []}` → zero results
+- Privilege escalation blocked: `canGrantScope` requires `access_scope.manage_all_departments` for `ALL_DEPARTMENTS`; ADMIN (which only has `access_scope.manage`) cannot grant ALL_DEPARTMENTS
+- `setUserModuleAccess` validates active dept IDs; records `scope_changed` / `scope_all_departments_changed` audit events in same transaction
+- `GET /administration/users/:id/module-access` — requires `access_scope.read`
+- `PUT /administration/users/:id/module-access/:module` — requires `access_scope.manage`
+- `AuthUser` interface: `departmentId: string | null`; `JwtAuthGuard` populates it from DB
+
+#### Scope enforcement — all 6 operational modules + ADMINISTRATION
+
+Every service enforces department scope on:
+- **findAll / getSummary**: Prisma WHERE filter via `buildDeptFilter`
+- **findOne / detail**: `assertCanAccessDepartment` after loading record
+- **create**: `assertCanAccessDepartment` on target dept before transaction
+- **update**: `assertCanAccessDepartment` on existing record (and new dept if changed)
+- **all lifecycle transitions**: enforced via shared `findOneOrThrow(id, actor)` pattern
+- **comments / activities / entries / findings**: enforced via parent record's `findOneOrThrow`
+
+**Department field mapping:**
+| Module | Field |
+|---|---|
+| FACTORY_TASKS | `responsibleDepartmentId` |
+| INCIDENT_REPORT | `affectedDepartmentId` |
+| MAINTENANCE_REQUESTS | `affectedDepartmentId` |
+| SAFETY_COMPLIANCE | `departmentId` (inspections); findings via `{ inspection: { departmentId } }` |
+| CONTRACTS_MANAGEMENT | `departmentId` |
+| PRODUCTION_DASHBOARD | `departmentId` |
+| ADMINISTRATION | `departmentId` of the user being managed |
+
+#### Frontend
+- `usersApi.getModuleAccess()` and `setModuleAccess()` — in `apps/web/src/lib/users-api.ts`
+- `setModuleAccessAction` server action — in `apps/web/src/app/(protected)/administration/users/actions.ts`
+- `ModuleAccessPanel` — per-module inline edit with scope dropdown and department checkboxes for `SELECTED_DEPARTMENTS`
+- Scope labels: "My Department", "Selected Departments", "All Departments"
+- `ALL_DEPARTMENTS` option shown only to SUPER_ADMIN (`canManageAll = roleCode === 'SUPER_ADMIN'`); ADMIN sees only OWN / SELECTED
+- Warning shown when ALL_DEPARTMENTS selected: "This gives company-wide access to this module."
+
+### Permission Assignments
+
+| Permission | SUPER_ADMIN | ADMIN | VIEWER |
+|---|---|---|---|
+| `access_scope.read` | ✓ | ✓ | — |
+| `access_scope.manage` | ✓ | ✓ | — |
+| `access_scope.manage_all_departments` | ✓ | — | — |
+
+### Key Notes
+- `access_scope.manage_all_departments` is a grant-right, NOT operational visibility — it only controls who may assign ALL_DEPARTMENTS scope to others
+- Operational ALL_DEPARTMENTS visibility requires an explicit `UserModuleAccess` DB row — no permission bypasses this
+- Shadow DB workaround still required; both migrations applied via `prisma db execute --stdin` then `migrate resolve --applied`
+- `setUserModuleAccess` with `SELECTED_DEPARTMENTS` + empty dept array throws `BadRequestException`
+- Default = OWN_DEPARTMENT for any user with no record, including ADMIN
+
+### Verification Results (2026-07-04, final)
+
+| Command | Result |
+|---|---|
+| `pnpm db:validate` | ✓ Schema valid |
+| `pnpm db:migrate:status` | ✓ 13 migrations applied, schema up to date |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm test` | ✓ 557/557 tests (21 test files) |
+| `pnpm build` | ✓ 8/8 tasks successful |
 
 ## Unit 13 — Production Management Foundation (Completed 2026-07-02)
 

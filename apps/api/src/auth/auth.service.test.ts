@@ -324,6 +324,7 @@ describe('AuthService', () => {
       isActive: true,
       mustChangePassword: false,
       sessionId: 'session-id-001',
+      departmentId: null,
     };
 
     it('revokes all sessions, updates hash, and sets mustChangePassword to false', async () => {

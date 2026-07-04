@@ -16,6 +16,7 @@ vi.mock('@node-rs/argon2', () => ({
 import { UsersService } from './users.service';
 import type { DatabaseService } from '../database/database.service';
 import type { AuthService } from '../auth/auth.service';
+import type { DepartmentAccessService } from '../department-access/department-access.service';
 
 const mockUserCreate = vi.fn();
 const mockUserFindMany = vi.fn();
@@ -47,6 +48,10 @@ const mockAuthService = {
   hashPassword: vi.fn().mockResolvedValue('$argon2id$temp_hash'),
   auditEvent: vi.fn(),
 } as unknown as AuthService;
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+} as unknown as DepartmentAccessService;
 
 const ADMIN_ACTOR = {
   id: 'actor-uuid-0001',
@@ -59,6 +64,7 @@ const ADMIN_ACTOR = {
   isActive: true,
   mustChangePassword: false,
   sessionId: 'session-001',
+  departmentId: null,
 };
 
 const BASE_USER = {
@@ -93,7 +99,7 @@ describe('UsersService', () => {
     );
     // Default: resolve VIEWER role when creating users without an explicit roleId
     mockRoleFindUnique.mockResolvedValue(VIEWER_ROLE);
-    service = new UsersService(mockDb, mockAuthService);
+    service = new UsersService(mockDb, mockAuthService, mockDeptAccess);
   });
 
   // ---------------------------------------------------------------------------

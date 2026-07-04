@@ -5,6 +5,7 @@ import { MaintenanceService } from './maintenance.service';
 import type { DatabaseService } from '../database/database.service';
 import type { MaintenanceRefService } from './maintenance-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 
 // ---------------------------------------------------------------------------
 // Mock infrastructure
@@ -53,6 +54,16 @@ const mockRef = {
   nextRef: vi.fn().mockResolvedValue('MR-2026-000001'),
 } as unknown as MaintenanceRefService;
 
+const mockDeptAccess = {
+  buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: vi.fn(),
+  canAccessDepartment: vi.fn().mockResolvedValue(true),
+  assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
+  canGrantScope: vi.fn().mockReturnValue(true),
+  getUserModuleAccessConfig: vi.fn(),
+  setUserModuleAccess: vi.fn(),
+} as unknown as DepartmentAccessService;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -67,6 +78,7 @@ const ACTOR_BASE: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-1',
+  departmentId: null,
   permissions: [
     'maintenance.read', 'maintenance.create', 'maintenance.start',
     'maintenance.complete', 'maintenance.comment',
@@ -83,6 +95,7 @@ const ACTOR_MANAGE: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-2',
+  departmentId: null,
   permissions: [
     'maintenance.read', 'maintenance.create', 'maintenance.review',
     'maintenance.approve', 'maintenance.reject', 'maintenance.assign',
@@ -101,6 +114,7 @@ const ACTOR_ASSIGNEE: AuthUser = {
   mustChangePassword: false,
   isActive: true,
   sessionId: 'session-3',
+  departmentId: null,
   permissions: ['maintenance.read', 'maintenance.start', 'maintenance.complete', 'maintenance.comment'],
 };
 
@@ -156,7 +170,7 @@ describe('MaintenanceService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTransaction.mockImplementation(async (cb) => cb(mockTx));
-    service = new MaintenanceService(mockDb, mockRef);
+    service = new MaintenanceService(mockDb, mockRef, mockDeptAccess);
   });
 
   // ── create ──────────────────────────────────────────────────────────────────
@@ -716,12 +730,12 @@ describe('MaintenanceService', () => {
   describe('findOne', () => {
     it('throws MR_NOT_FOUND when request does not exist', async () => {
       mockMrFindUnique.mockResolvedValue(null);
-      await expect(service.findOne('bad-id')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('bad-id', ACTOR_BASE)).rejects.toThrow(NotFoundException);
     });
 
     it('returns the request when found', async () => {
       mockMrFindUnique.mockResolvedValue(makeMr());
-      const result = await service.findOne('mr-id-1');
+      const result = await service.findOne('mr-id-1', ACTOR_BASE);
       expect((result as Record<string, unknown>)['id']).toBe('mr-id-1');
     });
   });

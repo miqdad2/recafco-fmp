@@ -4,8 +4,9 @@ import {
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { TaskStatus, TaskPriority } from '@recafco/database';
+import { TaskStatus, TaskPriority, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { TasksRefService } from './tasks-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateTaskDto } from './dto/create-task.dto';
@@ -86,6 +87,7 @@ export class FactoryTasksService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: TasksRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -123,6 +125,8 @@ export class FactoryTasksService {
       }
       await this.requireIncidentExists(dto.incidentId);
     }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.FACTORY_TASKS, dto.responsibleDepartmentId ?? null);
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -177,7 +181,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async updateDraft(id: string, dto: UpdateTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -246,7 +250,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async updatePriority(id: string, priority: TaskPriority, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (TERMINAL_STATUSES.includes(task.status as TaskStatus)) {
       throw new UnprocessableEntityException({
@@ -302,7 +306,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async updateDueDate(id: string, dueAt: string | null | undefined, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (TERMINAL_STATUSES.includes(task.status as TaskStatus)) {
       throw new UnprocessableEntityException({
@@ -341,7 +345,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async open(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -366,7 +370,7 @@ export class FactoryTasksService {
   }
 
   async assign(id: string, dto: AssignTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     const assignableStatuses: TaskStatus[] = [
       TaskStatus.OPEN,
@@ -431,7 +435,7 @@ export class FactoryTasksService {
   }
 
   async unassign(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.ASSIGNED) {
       throw new UnprocessableEntityException({
@@ -470,7 +474,7 @@ export class FactoryTasksService {
   }
 
   async start(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.ASSIGNED) {
       throw new UnprocessableEntityException({
@@ -486,7 +490,7 @@ export class FactoryTasksService {
   }
 
   async block(id: string, dto: BlockTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.IN_PROGRESS) {
       throw new UnprocessableEntityException({
@@ -543,7 +547,7 @@ export class FactoryTasksService {
   }
 
   async unblock(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.BLOCKED) {
       throw new UnprocessableEntityException({
@@ -589,7 +593,7 @@ export class FactoryTasksService {
   }
 
   async complete(id: string, dto: CompleteTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.IN_PROGRESS) {
       throw new UnprocessableEntityException({
@@ -655,7 +659,7 @@ export class FactoryTasksService {
   }
 
   async close(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (task.status !== TaskStatus.COMPLETED) {
       throw new UnprocessableEntityException({
@@ -704,7 +708,7 @@ export class FactoryTasksService {
   }
 
   async reopen(id: string, dto: ReopenTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     const reopenableStatuses: TaskStatus[] = [TaskStatus.COMPLETED, TaskStatus.CLOSED];
     if (!reopenableStatuses.includes(task.status as TaskStatus)) {
@@ -771,7 +775,7 @@ export class FactoryTasksService {
   }
 
   async cancel(id: string, dto: CancelTaskDto, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     if (TERMINAL_STATUSES.includes(task.status as TaskStatus)) {
       throw new UnprocessableEntityException({
@@ -850,7 +854,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async addProgress(id: string, dto: AddProgressDto, actor: AuthUser): Promise<unknown> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
 
     const progressAllowedStatuses: TaskStatus[] = [TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED];
     if (!progressAllowedStatuses.includes(task.status as TaskStatus)) {
@@ -905,8 +909,8 @@ export class FactoryTasksService {
     });
   }
 
-  async listProgress(taskId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(taskId);
+  async listProgress(taskId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(taskId, actor);
     return this.db.getClient().factoryTaskProgress.findMany({
       where: { taskId },
       orderBy: [{ createdAt: 'asc' }],
@@ -927,7 +931,7 @@ export class FactoryTasksService {
   // ---------------------------------------------------------------------------
 
   async addComment(taskId: string, dto: AddCommentDto, actor: AuthUser): Promise<unknown> {
-    await this.findOneOrThrow(taskId);
+    await this.findOneOrThrow(taskId, actor);
 
     const body = dto.body.trim();
     if (!body) {
@@ -962,8 +966,8 @@ export class FactoryTasksService {
     });
   }
 
-  async listComments(taskId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(taskId);
+  async listComments(taskId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(taskId, actor);
     return this.db.getClient().factoryTaskComment.findMany({
       where: { taskId },
       orderBy: [{ createdAt: 'asc' }],
@@ -981,8 +985,8 @@ export class FactoryTasksService {
   // Activities
   // ---------------------------------------------------------------------------
 
-  async listActivities(taskId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(taskId);
+  async listActivities(taskId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(taskId, actor);
     return this.db.getClient().factoryTaskActivity.findMany({
       where: { taskId },
       orderBy: [{ createdAt: 'asc' }],
@@ -998,7 +1002,11 @@ export class FactoryTasksService {
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
 
-    const where = buildListWhere(query, actor);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS);
+    const where: Record<string, unknown> = { ...buildListWhere(query, actor) };
+    if (deptFilter !== null) {
+      where['responsibleDepartmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().factoryTask.findMany({
@@ -1018,7 +1026,7 @@ export class FactoryTasksService {
   }
 
   async findOne(id: string, actor: AuthUser): Promise<TaskRecord> {
-    const task = await this.findOneOrThrow(id);
+    const task = await this.findOneOrThrow(id, actor);
     return this.filterTaskIncident(task, actor);
   }
 
@@ -1058,20 +1066,25 @@ export class FactoryTasksService {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS);
+    const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
+
     const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth] = await Promise.all([
-      this.db.getClient().factoryTask.count({ where: { status: { in: ACTIVE_STATUSES } } }),
+      this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: { in: ACTIVE_STATUSES } } }),
       this.db.getClient().factoryTask.count({
         where: { assignedToUserId: actor.id, status: { in: ACTIVE_STATUSES } },
       }),
       this.db.getClient().factoryTask.count({
         where: {
+          ...deptWhere,
           status: { in: OVERDUE_STATUSES },
           dueAt: { lt: now },
         },
       }),
-      this.db.getClient().factoryTask.count({ where: { status: TaskStatus.BLOCKED } }),
+      this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: TaskStatus.BLOCKED } }),
       this.db.getClient().factoryTask.count({
         where: {
+          ...deptWhere,
           status: { in: [TaskStatus.COMPLETED, TaskStatus.CLOSED] },
           completedAt: { gte: monthStart, lt: monthEnd },
         },
@@ -1105,13 +1118,16 @@ export class FactoryTasksService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async findOneOrThrow(id: string): Promise<TaskRecord> {
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<TaskRecord> {
     const task = await this.db.getClient().factoryTask.findUnique({
       where: { id },
       select: TASK_SELECT,
     });
     if (!task) {
       throw new NotFoundException({ code: 'TASK_NOT_FOUND', message: 'Task not found' });
+    }
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.FACTORY_TASKS, task.responsibleDepartmentId as string | null);
     }
     return task as TaskRecord;
   }

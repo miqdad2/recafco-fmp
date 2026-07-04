@@ -64,18 +64,18 @@ const PROGRESS_STEPS = [
   { label: 'Authentication', detail: 'Session tokens, refresh, change-password flow', done: true },
   { label: 'RBAC', detail: 'Roles, permissions, permission-aware guards', done: true },
   { label: 'Application Shell', detail: 'Navigation, dashboard, module landing pages', done: true },
-  { label: 'Factory Tasks', detail: 'Full lifecycle: Draft → Open → Assigned → In Progress → Completed → Closed', done: true },
-  { label: 'Incidents', detail: 'Incident reporting, investigation workflow, corrective actions', done: true },
+  { label: 'Factory Tasks Management', detail: 'Full lifecycle: Draft → Open → Assigned → In Progress → Completed → Closed', done: true },
+  { label: 'Incident Report', detail: 'Incident reporting, investigation workflow, corrective actions', done: true },
   { label: 'Maintenance Requests', detail: 'Full 11-status lifecycle: Draft → Submitted → Approved → Assigned → In Progress → Completed → Closed', done: true },
   { label: 'Safety & Compliance', detail: 'Safety inspections with findings, verification, and compliance lifecycle', done: true },
-  { label: 'Contracts', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
-  { label: 'Production', detail: 'Production orders, production lines, entries (Output/Downtime/Adjustment), KPI metrics', done: true },
+  { label: 'Contracts Management', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
+  { label: 'Production Dashboard', detail: 'Production orders, production lines, entries (Output/Downtime/Adjustment), KPI metrics', done: true },
   { label: 'Platform Hardening', detail: 'Security regression tests, PM2 deployment config, release documentation', done: true },
 ];
 
 const MODULE_CARDS = [
   {
-    title: 'Factory Tasks',
+    title: 'Factory Tasks Management',
     description: 'Assign, track, and complete recurring operational tasks across the factory floor.',
     href: '/factory-tasks',
     icon: ClipboardList,
@@ -83,7 +83,7 @@ const MODULE_CARDS = [
     status: 'available' as const,
   },
   {
-    title: 'Incidents',
+    title: 'Incident Report',
     description: 'Report and manage incidents, near-misses, and corrective actions.',
     href: '/incidents',
     icon: AlertTriangle,
@@ -91,7 +91,7 @@ const MODULE_CARDS = [
     status: 'available' as const,
   },
   {
-    title: 'Maintenance',
+    title: 'Maintenance Requests',
     description: 'Submit and track maintenance requests through the full review and repair lifecycle.',
     href: '/maintenance',
     icon: Wrench,
@@ -107,7 +107,7 @@ const MODULE_CARDS = [
     status: 'available' as const,
   },
   {
-    title: 'Contracts',
+    title: 'Contracts Management',
     description: 'Vendor contract register with lifecycle tracking and approval workflow.',
     href: '/contracts',
     icon: FileText,
@@ -115,7 +115,7 @@ const MODULE_CARDS = [
     status: 'available' as const,
   },
   {
-    title: 'Production',
+    title: 'Production Dashboard',
     description: 'Production orders and lines: Output, Downtime, and Adjustment entries with live KPI metrics.',
     href: '/production',
     icon: Factory,

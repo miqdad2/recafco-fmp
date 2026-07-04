@@ -65,7 +65,7 @@ export default async function ProductionLinesPage({ searchParams }: PageProps): 
   return (
     <div className="min-h-full p-8">
       <div className="max-w-5xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Production', href: '/production' }, { label: 'Lines' }]} />
+        <Breadcrumbs items={[{ label: 'Production Dashboard', href: '/production' }, { label: 'Lines' }]} />
 
         <div className="mb-6">
           <PageHeader

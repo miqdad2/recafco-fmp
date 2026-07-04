@@ -98,7 +98,7 @@ export default async function ContractDetailPage({ params }: PageProps): Promise
     <div className="min-h-full p-8">
       <div className="max-w-5xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Contracts', href: '/contracts' },
+          { label: 'Contracts Management', href: '/contracts' },
           { label: contract.referenceNumber },
         ]} />
 

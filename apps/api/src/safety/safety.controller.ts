@@ -48,8 +48,10 @@ export class SafetyController {
 
   @Get('summary')
   @Permissions('safety.read')
-  async summary(): Promise<ApiSuccessResponse<unknown>> {
-    const data = await this.safetyService.getSummary();
+  async summary(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.safetyService.getSummary(actor);
     return { data, meta: meta(), error: null };
   }
 
@@ -66,8 +68,9 @@ export class SafetyController {
   @Permissions('safety.read')
   async list(
     @Query() query: InspectionListQueryDto,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const result = await this.safetyService.findAll(query);
+    const result = await this.safetyService.findAll(query, actor);
     return { data: result, meta: meta(), error: null };
   }
 
@@ -75,8 +78,9 @@ export class SafetyController {
   @Permissions('safety.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const inspection = await this.safetyService.findOne(id);
+    const inspection = await this.safetyService.findOne(id, actor);
     return { data: inspection, meta: meta(), error: null };
   }
 
@@ -174,8 +178,9 @@ export class SafetyController {
   @Permissions('safety.read')
   async listFindings(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const findings = await this.safetyService.listFindings(id);
+    const findings = await this.safetyService.listFindings(id, actor);
     return { data: findings, meta: meta(), error: null };
   }
 
@@ -269,8 +274,9 @@ export class SafetyController {
   @Permissions('safety.read')
   async listComments(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const comments = await this.safetyService.listComments(id);
+    const comments = await this.safetyService.listComments(id, actor);
     return { data: comments, meta: meta(), error: null };
   }
 
@@ -294,8 +300,9 @@ export class SafetyController {
   @Permissions('safety.read')
   async listActivities(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown[]>> {
-    const activities = await this.safetyService.listActivities(id);
+    const activities = await this.safetyService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
   }
 }

@@ -5,8 +5,9 @@ import {
   UnprocessableEntityException,
   BadRequestException,
 } from '@nestjs/common';
-import { IncidentStatus, IncidentActionStatus, IncidentSeverity } from '@recafco/database';
+import { IncidentStatus, IncidentActionStatus, IncidentSeverity, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { IncidentsRefService } from './incidents-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateIncidentDto } from './dto/create-incident.dto';
@@ -115,6 +116,7 @@ export class IncidentsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: IncidentsRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -131,6 +133,8 @@ export class IncidentsService {
     if (dto.affectedPlantId && dto.affectedLocationId) {
       await this.validateLocationBelongsToPlant(dto.affectedLocationId, dto.affectedPlantId);
     }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.INCIDENT_REPORT, dto.affectedDepartmentId ?? null);
 
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -175,7 +179,7 @@ export class IncidentsService {
   // ---------------------------------------------------------------------------
 
   async updateDraft(id: string, dto: UpdateIncidentDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     if (incident.status !== IncidentStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -226,7 +230,7 @@ export class IncidentsService {
   // ---------------------------------------------------------------------------
 
   async updateSeverity(id: string, severity: IncidentSeverity, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
     const isTerminal = incident.status === IncidentStatus.RESOLVED
       || incident.status === IncidentStatus.CLOSED
       || incident.status === IncidentStatus.CANCELLED;
@@ -278,7 +282,7 @@ export class IncidentsService {
   // ---------------------------------------------------------------------------
 
   async updateInvestigation(id: string, dto: UpdateInvestigationDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     const allowed: IncidentStatus[] = [
       IncidentStatus.INVESTIGATION,
@@ -325,7 +329,7 @@ export class IncidentsService {
   // Find / List
   // ---------------------------------------------------------------------------
 
-  async findAll(query: IncidentListQueryDto): Promise<PaginatedResult<IncidentRecord>> {
+  async findAll(query: IncidentListQueryDto, actor: AuthUser): Promise<PaginatedResult<IncidentRecord>> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
@@ -338,7 +342,11 @@ export class IncidentsService {
       });
     }
 
-    const where = buildListWhere(query);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.INCIDENT_REPORT);
+    const where: Record<string, unknown> = { ...buildListWhere(query) };
+    if (deptFilter !== null) {
+      where['affectedDepartmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().incident.findMany({
@@ -357,11 +365,11 @@ export class IncidentsService {
     };
   }
 
-  async findOne(id: string): Promise<IncidentRecord> {
-    return this.findOneOrThrow(id);
+  async findOne(id: string, actor: AuthUser): Promise<IncidentRecord> {
+    return this.findOneOrThrow(id, actor);
   }
 
-  async getSummary(): Promise<{
+  async getSummary(actor: AuthUser): Promise<{
     totalOpen: number;
     criticalOpen: number;
     underInvestigation: number;
@@ -378,14 +386,18 @@ export class IncidentsService {
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.INCIDENT_REPORT);
+    const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
+
     const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth] = await Promise.all([
-      this.db.getClient().incident.count({ where: { status: { in: openStatuses } } }),
+      this.db.getClient().incident.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
       this.db.getClient().incident.count({
-        where: { status: { in: openStatuses }, severity: IncidentSeverity.CRITICAL },
+        where: { ...deptWhere, status: { in: openStatuses }, severity: IncidentSeverity.CRITICAL },
       }),
-      this.db.getClient().incident.count({ where: { status: IncidentStatus.INVESTIGATION } }),
+      this.db.getClient().incident.count({ where: { ...deptWhere, status: IncidentStatus.INVESTIGATION } }),
       this.db.getClient().incident.count({
         where: {
+          ...deptWhere,
           status: IncidentStatus.RESOLVED,
           resolvedAt: { gte: monthStart, lt: monthEnd },
         },
@@ -400,7 +412,7 @@ export class IncidentsService {
   // ---------------------------------------------------------------------------
 
   async submit(id: string, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     if (incident.status !== IncidentStatus.DRAFT) {
       throw new UnprocessableEntityException({ code: 'INCIDENT_INVALID_TRANSITION', message: 'Only DRAFT incidents can be submitted' });
@@ -413,7 +425,7 @@ export class IncidentsService {
   }
 
   async startReview(id: string, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
     this.assertValidTransition(incident, IncidentStatus.UNDER_REVIEW);
     return this.transitionStatus(incident, IncidentStatus.UNDER_REVIEW, actor, {
       reviewedByUserId: actor.id,
@@ -421,7 +433,7 @@ export class IncidentsService {
   }
 
   async assign(id: string, dto: AssignIncidentDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     const assignableStatuses: IncidentStatus[] = [
       IncidentStatus.SUBMITTED,
@@ -482,19 +494,19 @@ export class IncidentsService {
   }
 
   async beginInvestigation(id: string, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
     this.assertValidTransition(incident, IncidentStatus.INVESTIGATION);
     return this.transitionStatus(incident, IncidentStatus.INVESTIGATION, actor, {});
   }
 
   async requestActions(id: string, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
     this.assertValidTransition(incident, IncidentStatus.ACTION_REQUIRED);
     return this.transitionStatus(incident, IncidentStatus.ACTION_REQUIRED, actor, {});
   }
 
   async resolve(id: string, dto: ResolveIncidentDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     const resolvableStatuses: IncidentStatus[] = [
       IncidentStatus.UNDER_REVIEW,
@@ -541,7 +553,7 @@ export class IncidentsService {
   }
 
   async close(id: string, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
     this.assertValidTransition(incident, IncidentStatus.CLOSED);
     return this.transitionStatus(incident, IncidentStatus.CLOSED, actor, {
       closedByUserId: actor.id,
@@ -550,7 +562,7 @@ export class IncidentsService {
   }
 
   async cancel(id: string, dto: CancelIncidentDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     // Reporter can cancel own DRAFT or SUBMITTED (approved correction B)
     const isOwnEarlyState =
@@ -626,7 +638,7 @@ export class IncidentsService {
   }
 
   async reopen(id: string, dto: ReopenIncidentDto, actor: AuthUser): Promise<IncidentRecord> {
-    const incident = await this.findOneOrThrow(id);
+    const incident = await this.findOneOrThrow(id, actor);
 
     const reopenableStatuses: IncidentStatus[] = [IncidentStatus.RESOLVED, IncidentStatus.CLOSED];
     if (!reopenableStatuses.includes(incident.status as IncidentStatus)) {
@@ -702,8 +714,8 @@ export class IncidentsService {
   // Comments
   // ---------------------------------------------------------------------------
 
-  async listComments(incidentId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(incidentId);
+  async listComments(incidentId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(incidentId, actor);
     return this.db.getClient().incidentComment.findMany({
       where: { incidentId },
       orderBy: [{ createdAt: 'asc' }],
@@ -718,7 +730,7 @@ export class IncidentsService {
   }
 
   async addComment(incidentId: string, dto: AddCommentDto, actor: AuthUser): Promise<unknown> {
-    await this.findOneOrThrow(incidentId);
+    await this.findOneOrThrow(incidentId, actor);
 
     const body = dto.body.trim();
     if (!body) {
@@ -754,8 +766,8 @@ export class IncidentsService {
   // Activities
   // ---------------------------------------------------------------------------
 
-  async listActivities(incidentId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(incidentId);
+  async listActivities(incidentId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(incidentId, actor);
     return this.db.getClient().incidentActivity.findMany({
       where: { incidentId },
       orderBy: [{ createdAt: 'asc' }],
@@ -766,8 +778,8 @@ export class IncidentsService {
   // Corrective actions
   // ---------------------------------------------------------------------------
 
-  async listActions(incidentId: string): Promise<unknown[]> {
-    await this.findOneOrThrow(incidentId);
+  async listActions(incidentId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(incidentId, actor);
     return this.db.getClient().incidentAction.findMany({
       where: { incidentId },
       orderBy: [{ createdAt: 'asc' }],
@@ -789,7 +801,7 @@ export class IncidentsService {
   }
 
   async addAction(incidentId: string, dto: AddActionDto, actor: AuthUser): Promise<unknown> {
-    const incident = await this.findOneOrThrow(incidentId);
+    const incident = await this.findOneOrThrow(incidentId, actor);
 
     if (!ACTION_ALLOWED_STATUSES.has(incident.status as IncidentStatus)) {
       throw new UnprocessableEntityException({
@@ -842,7 +854,7 @@ export class IncidentsService {
   }
 
   async updateAction(incidentId: string, actionId: string, dto: UpdateActionDto, actor: AuthUser): Promise<unknown> {
-    await this.findOneOrThrow(incidentId);
+    await this.findOneOrThrow(incidentId, actor);
 
     const action = await this.db.getClient().incidentAction.findFirst({
       where: { id: actionId, incidentId },
@@ -955,13 +967,16 @@ export class IncidentsService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async findOneOrThrow(id: string): Promise<IncidentRecord> {
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<IncidentRecord> {
     const incident = await this.db.getClient().incident.findUnique({
       where: { id },
       select: INCIDENT_SELECT,
     });
     if (!incident) {
       throw new NotFoundException({ code: 'INCIDENT_NOT_FOUND', message: 'Incident not found' });
+    }
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.INCIDENT_REPORT, incident.affectedDepartmentId as string | null);
     }
     return incident as IncidentRecord;
   }

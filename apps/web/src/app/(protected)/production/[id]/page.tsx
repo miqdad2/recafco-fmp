@@ -137,7 +137,7 @@ export default async function ProductionOrderDetailPage({ params }: PageProps): 
     <div className="min-h-full p-8">
       <div className="max-w-5xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Production', href: '/production' },
+          { label: 'Production Dashboard', href: '/production' },
           { label: order.referenceNumber },
         ]} />
 

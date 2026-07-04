@@ -48,6 +48,7 @@ export interface UserProfile {
   roleId: string;
   roleCode: string;
   roleName: string;
+  permissions: string[];
   isActive: boolean;
   mustChangePassword: boolean;
   lastLoginAt: Date | null;
@@ -249,6 +250,7 @@ export class AuthService implements OnModuleInit {
       roleId: dbUser.roleId,
       roleCode: dbUser.role.code,
       roleName: dbUser.role.name,
+      permissions: user.permissions,
       isActive: dbUser.isActive,
       mustChangePassword: dbUser.mustChangePassword,
       lastLoginAt: dbUser.lastLoginAt,

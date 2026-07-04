@@ -46,12 +46,12 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { label: 'Factory Tasks', href: '/factory-tasks', icon: ClipboardList },
-      { label: 'Incidents', href: '/incidents', icon: AlertTriangle },
-      { label: 'Maintenance', href: '/maintenance', icon: Wrench },
+      { label: 'Factory Tasks Management', href: '/factory-tasks', icon: ClipboardList },
+      { label: 'Incident Report', href: '/incidents', icon: AlertTriangle },
+      { label: 'Maintenance Requests', href: '/maintenance', icon: Wrench },
       { label: 'Safety & Compliance', href: '/safety-compliance', icon: ShieldCheck },
-      { label: 'Contracts', href: '/contracts', icon: FileText },
-      { label: 'Production', href: '/production', icon: Factory },
+      { label: 'Contracts Management', href: '/contracts', icon: FileText },
+      { label: 'Production Dashboard', href: '/production', icon: Factory },
     ],
   },
   {

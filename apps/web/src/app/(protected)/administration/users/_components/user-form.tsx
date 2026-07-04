@@ -8,7 +8,9 @@ import type { RoleSummary } from '@/lib/roles-api';
 export interface UserFormState {
   error?: string;
   fieldErrors?: Record<string, string[]>;
+  success?: boolean;
   created?: {
+    id: string;
     username: string;
     displayName: string;
     tempPassword: string;

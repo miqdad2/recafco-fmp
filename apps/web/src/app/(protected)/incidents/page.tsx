@@ -10,7 +10,7 @@ import { cookies } from 'next/headers';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Incidents — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Incident Report — RECAFCO FMP' };
 
 const OPEN_STATUSES: IncidentStatus[] = ['SUBMITTED', 'UNDER_REVIEW', 'INVESTIGATION', 'ACTION_REQUIRED'];
 
@@ -72,11 +72,11 @@ export default async function IncidentsPage({ searchParams }: PageProps): Promis
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Incidents' }]} />
+        <Breadcrumbs items={[{ label: 'Incident Report' }]} />
 
         <div className="mb-6">
           <PageHeader
-            title="Incidents"
+            title="Incident Report"
             description="Report and track incidents, near-misses, and safety events across all facilities."
             action={
               canCreate ? (

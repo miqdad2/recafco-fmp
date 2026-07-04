@@ -34,7 +34,7 @@ export default async function EditProductionLinePage({ params }: PageProps): Pro
     <div className="min-h-full p-8">
       <div className="max-w-2xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Production', href: '/production' },
+          { label: 'Production Dashboard', href: '/production' },
           { label: 'Lines', href: '/production/lines' },
           { label: line.code },
           { label: 'Edit' },

@@ -36,7 +36,7 @@ export default async function EditProductionOrderPage({ params }: PageProps): Pr
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Production', href: '/production' },
+          { label: 'Production Dashboard', href: '/production' },
           { label: order.referenceNumber, href: `/production/${id}` },
           { label: 'Edit' },
         ]} />

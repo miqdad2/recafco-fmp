@@ -5,8 +5,9 @@ import {
   UnprocessableEntityException,
   ConflictException,
 } from '@nestjs/common';
-import { ContractStatus } from '@recafco/database';
+import { ContractStatus, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsRefService } from './contracts-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractDto } from './dto/create-contract.dto';
@@ -118,6 +119,7 @@ export class ContractsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly ref: ContractsRefService,
+    private readonly deptAccess: DepartmentAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -128,6 +130,8 @@ export class ContractsService {
     if (!actor.permissions.includes('contracts.create')) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.create' });
     }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, dto.departmentId ?? null);
 
     if (dto.ownerUserId && dto.ownerUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
       throw new ForbiddenException({
@@ -193,7 +197,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.update' });
     }
 
-    const contract = await this.findOneOrThrow(id);
+    const contract = await this.findOneOrThrow(id, actor);
 
     if ((contract.status as string) !== ContractStatus.DRAFT) {
       throw new UnprocessableEntityException({
@@ -207,6 +211,11 @@ export class ContractsService {
         code: 'CONTRACTS_PERMISSION_DENIED',
         message: 'Only contracts.manage can change the owner',
       });
+    }
+
+    // If the department is being changed, assert actor can access the new department
+    if (dto.departmentId !== undefined && dto.departmentId !== (contract.departmentId as string | null)) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, dto.departmentId ?? null);
     }
 
     const data: Record<string, unknown> = {};
@@ -376,7 +385,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.close' });
     }
 
-    const contract = await this.findOneOrThrow(id);
+    const contract = await this.findOneOrThrow(id, actor);
     const currentStatus = contract.status as ContractStatus;
 
     if (currentStatus !== ContractStatus.ACTIVE && currentStatus !== ContractStatus.TERMINATED) {
@@ -434,7 +443,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 
-    const contract = await this.findOneOrThrow(id);
+    const contract = await this.findOneOrThrow(id, actor);
     return withLifecycle(contract);
   }
 
@@ -454,7 +463,11 @@ export class ContractsService {
     const pageSize = query.pageSize ?? 25;
     const skip = (page - 1) * pageSize;
 
-    const where = buildListWhere(query);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
+    const where: Record<string, unknown> = { ...buildListWhere(query) };
+    if (deptFilter !== null) {
+      where['departmentId'] = deptFilter;
+    }
 
     const [items, total] = await Promise.all([
       this.db.getClient().contract.findMany({
@@ -494,6 +507,9 @@ export class ContractsService {
 
     const today = utcToday();
 
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
+    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
     const [
       totalDraft,
       totalActive,
@@ -502,10 +518,11 @@ export class ContractsService {
       totalTerminated,
       totalClosed,
     ] = await Promise.all([
-      this.db.getClient().contract.count({ where: { status: ContractStatus.DRAFT } }),
-      this.db.getClient().contract.count({ where: { status: ContractStatus.ACTIVE } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.DRAFT } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.ACTIVE } }),
       this.db.getClient().contract.count({
         where: {
+          ...deptWhere,
           status: ContractStatus.ACTIVE,
           renewalNoticeDate: { lte: today },
           OR: [{ endDate: null }, { endDate: { gte: today } }],
@@ -513,12 +530,13 @@ export class ContractsService {
       }),
       this.db.getClient().contract.count({
         where: {
+          ...deptWhere,
           status: ContractStatus.ACTIVE,
           endDate: { lt: today },
         },
       }),
-      this.db.getClient().contract.count({ where: { status: ContractStatus.TERMINATED } }),
-      this.db.getClient().contract.count({ where: { status: ContractStatus.CLOSED } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.TERMINATED } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.CLOSED } }),
     ]);
 
     return { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed };
@@ -533,10 +551,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.comment' });
     }
 
-    const contract = await this.db.getClient().contract.findUnique({ where: { id }, select: { id: true } });
-    if (!contract) {
-      throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
-    }
+    await this.findOneOrThrow(id, actor);
 
     return this.db.getClient().$transaction(async (tx) => {
       const comment = await tx.contractComment.create({
@@ -568,7 +583,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 
-    await this.requireContractExists(id);
+    await this.findOneOrThrow(id, actor);
 
     return this.db.getClient().contractComment.findMany({
       where: { contractId: id },
@@ -592,7 +607,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 
-    await this.requireContractExists(id);
+    await this.findOneOrThrow(id, actor);
 
     return this.db.getClient().contractActivity.findMany({
       where: { contractId: id },
@@ -660,13 +675,16 @@ export class ContractsService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private async findOneOrThrow(id: string): Promise<ContractRecord> {
+  private async findOneOrThrow(id: string, actor?: AuthUser): Promise<ContractRecord> {
     const contract = await this.db.getClient().contract.findUnique({
       where: { id },
       select: CONTRACT_SELECT,
     });
     if (!contract) {
       throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
+    }
+    if (actor) {
+      await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, contract.departmentId as string | null);
     }
     return contract as ContractRecord;
   }

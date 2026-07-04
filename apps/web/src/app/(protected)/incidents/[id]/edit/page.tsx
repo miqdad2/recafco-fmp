@@ -69,7 +69,7 @@ export default async function EditIncidentPage({ params }: PageProps): Promise<R
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Incidents', href: '/incidents' },
+          { label: 'Incident Report', href: '/incidents' },
           { label: incidentRes.referenceNumber, href: `/incidents/${id}` },
           { label: 'Edit draft' },
         ]} />

@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Body,
   Param,
   Query,
@@ -11,20 +12,34 @@ import {
   ParseUUIDPipe,
   Header,
 } from '@nestjs/common';
-import { IsOptional, IsBoolean, IsString, IsInt, Min, Max, MaxLength } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsOptional, IsBoolean, IsString, IsInt, IsArray, IsEnum, Min, Max, MaxLength, IsUUID } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { DepartmentAccessService } from '../department-access/department-access.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
+import { DepartmentAccessScope, ModuleIdentifier } from '@recafco/database';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { AuthUser } from '../common/types/auth-user';
 import type { UserSummary, UserListResult, UserCreatedResult } from './users.service';
+import type { UserModuleAccessConfig } from '../department-access/department-access.service';
+
+class SetModuleAccessDto {
+  @IsEnum(DepartmentAccessScope)
+  scope!: DepartmentAccessScope;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @Type(() => String)
+  departmentIds?: string[];
+}
 
 class UserListQueryDto {
   @IsOptional()
@@ -64,14 +79,18 @@ function meta(): { requestId?: string } {
 @Controller('administration/users')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly departmentAccess: DepartmentAccessService,
+  ) {}
 
   @Get()
   @Permissions('users.read')
   async list(
     @Query() query: UserListQueryDto,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<UserListResult>> {
-    const result = await this.usersService.findAll(query);
+    const result = await this.usersService.findAll(query, actor);
     return { data: result, meta: meta(), error: null };
   }
 
@@ -79,8 +98,9 @@ export class UsersController {
   @Permissions('users.read')
   async findOne(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<UserSummary>> {
-    const user = await this.usersService.findOne(id);
+    const user = await this.usersService.findOne(id, actor);
     return { data: user, meta: meta(), error: null };
   }
 
@@ -157,5 +177,35 @@ export class UsersController {
   ): Promise<ApiSuccessResponse<UserSummary>> {
     const user = await this.usersService.unlock(id, actor);
     return { data: user, meta: meta(), error: null };
+  }
+
+  @Get(':id/module-access')
+  @Permissions('access_scope.read')
+  async getModuleAccess(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiSuccessResponse<UserModuleAccessConfig[]>> {
+    await this.usersService.findOne(id);
+    const config = await this.departmentAccess.getUserModuleAccessConfig(id);
+    return { data: config, meta: meta(), error: null };
+  }
+
+  @Put(':id/module-access/:module')
+  @Permissions('access_scope.manage')
+  async setModuleAccess(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('module') module: string,
+    @Body() dto: SetModuleAccessDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.usersService.findOne(id);
+    const moduleId = module as ModuleIdentifier;
+    await this.departmentAccess.setUserModuleAccess(
+      id,
+      moduleId,
+      dto.scope,
+      dto.departmentIds ?? [],
+      actor,
+    );
+    return { data: null, meta: meta(), error: null };
   }
 }

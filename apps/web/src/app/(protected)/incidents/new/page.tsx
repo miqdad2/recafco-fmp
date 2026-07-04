@@ -24,7 +24,7 @@ export default async function NewIncidentPage(): Promise<React.JSX.Element> {
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Incidents', href: '/incidents' },
+          { label: 'Incident Report', href: '/incidents' },
           { label: 'Report incident' },
         ]} />
 
