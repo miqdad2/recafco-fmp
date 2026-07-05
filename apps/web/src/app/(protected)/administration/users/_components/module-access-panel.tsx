@@ -30,14 +30,30 @@ interface ModuleRowProps {
   config: UserModuleAccessConfig;
   userId: string;
   allDepartments: { id: string; code: string; name: string }[];
+  deptApiError: boolean;
   action: (userId: string, module: ModuleIdentifier, prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
   canManage: boolean;
   canManageAll: boolean;
 }
 
-function ModuleRow({ config, userId, allDepartments, action, canManage, canManageAll }: ModuleRowProps) {
+function ModuleRow({ config, userId, allDepartments, deptApiError, action, canManage, canManageAll }: ModuleRowProps) {
   const [editing, setEditing] = useState(false);
   const [selectedScope, setSelectedScope] = useState<DepartmentAccessScope>(config.scope);
+  const [checkedDeptIds, setCheckedDeptIds] = useState<Set<string>>(
+    () => new Set(config.grantedDepartments.map((d) => d.id)),
+  );
+
+  function openEditing() {
+    setSelectedScope(config.scope);
+    setCheckedDeptIds(new Set(config.grantedDepartments.map((d) => d.id)));
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setSelectedScope(config.scope);
+    setCheckedDeptIds(new Set(config.grantedDepartments.map((d) => d.id)));
+    setEditing(false);
+  }
 
   const boundAction = async (prev: ModuleAccessActionState, fd: FormData): Promise<ModuleAccessActionState> => {
     const result = await action(userId, config.module, prev, fd);
@@ -46,6 +62,8 @@ function ModuleRow({ config, userId, allDepartments, action, canManage, canManag
   };
 
   const [state, formAction, pending] = useActionState(boundAction, null);
+
+  const noDeptSelected = selectedScope === 'SELECTED_DEPARTMENTS' && checkedDeptIds.size === 0 && !deptApiError;
 
   return (
     <div className="py-3 border-b border-border last:border-0">
@@ -68,7 +86,7 @@ function ModuleRow({ config, userId, allDepartments, action, canManage, canManag
         {canManage && !editing && (
           <button
             type="button"
-            onClick={() => { setSelectedScope(config.scope); setEditing(true); }}
+            onClick={openEditing}
             className="flex-shrink-0 text-xs text-accent hover:underline"
           >
             Change
@@ -101,24 +119,40 @@ function ModuleRow({ config, userId, allDepartments, action, canManage, canManag
           {selectedScope === 'SELECTED_DEPARTMENTS' && (
             <div>
               <label className="block text-xs font-medium text-text-secondary mb-1">Departments</label>
-              <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface p-2 space-y-1">
-                {allDepartments.map((dept) => (
-                  <label key={dept.id} className="flex items-center gap-2 cursor-pointer hover:bg-surface-secondary rounded px-1 py-0.5">
-                    <input
-                      type="checkbox"
-                      name="departmentIds"
-                      value={dept.id}
-                      defaultChecked={config.grantedDepartments.some((g) => g.id === dept.id)}
-                      className="rounded border-border text-accent focus:ring-accent"
-                    />
-                    <span className="text-sm text-text-primary">{dept.name}</span>
-                    <span className="text-xs text-text-muted font-mono">{dept.code}</span>
-                  </label>
-                ))}
-                {allDepartments.length === 0 && (
-                  <p className="text-xs text-text-muted py-1 px-1">No departments available</p>
-                )}
-              </div>
+              {deptApiError ? (
+                <p className="text-xs text-error py-1">
+                  Unable to load departments — contact your administrator.
+                </p>
+              ) : (
+                <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface p-2 space-y-1">
+                  {allDepartments.map((dept) => (
+                    <label key={dept.id} className="flex items-center gap-2 cursor-pointer hover:bg-surface-secondary rounded px-1 py-0.5">
+                      <input
+                        type="checkbox"
+                        name="departmentIds"
+                        value={dept.id}
+                        checked={checkedDeptIds.has(dept.id)}
+                        onChange={(e) => {
+                          setCheckedDeptIds((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(dept.id); else next.delete(dept.id);
+                            return next;
+                          });
+                        }}
+                        className="rounded border-border text-accent focus:ring-accent"
+                      />
+                      <span className="text-sm text-text-primary">{dept.name}</span>
+                      <span className="text-xs text-text-muted font-mono">{dept.code}</span>
+                    </label>
+                  ))}
+                  {allDepartments.length === 0 && (
+                    <p className="text-xs text-text-muted py-1 px-1">No active departments found.</p>
+                  )}
+                </div>
+              )}
+              {noDeptSelected && (
+                <p className="text-xs text-error mt-1">Select at least one department.</p>
+              )}
             </div>
           )}
 
@@ -129,14 +163,14 @@ function ModuleRow({ config, userId, allDepartments, action, canManage, canManag
           <div className="flex gap-2">
             <button
               type="submit"
-              disabled={pending}
-              className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50"
+              disabled={pending || noDeptSelected}
+              className="px-3 py-1.5 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {pending ? 'Saving…' : 'Save'}
             </button>
             <button
               type="button"
-              onClick={() => setEditing(false)}
+              onClick={cancelEditing}
               className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-secondary text-xs hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
             >
               Cancel
@@ -152,12 +186,13 @@ interface Props {
   userId: string;
   moduleAccess: UserModuleAccessConfig[];
   allDepartments: { id: string; code: string; name: string }[];
+  deptApiError?: boolean;
   action: (userId: string, module: ModuleIdentifier, prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
   canManage: boolean;
   canManageAll: boolean;
 }
 
-export function ModuleAccessPanel({ userId, moduleAccess, allDepartments, action, canManage, canManageAll }: Props) {
+export function ModuleAccessPanel({ userId, moduleAccess, allDepartments, deptApiError = false, action, canManage, canManageAll }: Props) {
   return (
     <div className="mt-8 pt-6 border-t border-border">
       <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-4">
@@ -170,6 +205,7 @@ export function ModuleAccessPanel({ userId, moduleAccess, allDepartments, action
             config={config}
             userId={userId}
             allDepartments={allDepartments}
+            deptApiError={deptApiError}
             action={action}
             canManage={canManage}
             canManageAll={canManageAll}

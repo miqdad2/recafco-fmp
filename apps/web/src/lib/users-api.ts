@@ -46,9 +46,9 @@ export interface UpdateUserPayload {
   displayName?: string;
   email?: string;
   employeeNumber?: string;
-  departmentId?: string;
-  plantId?: string;
-  locationId?: string;
+  departmentId?: string | null;
+  plantId?: string | null;
+  locationId?: string | null;
 }
 
 export type DepartmentAccessScope = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';

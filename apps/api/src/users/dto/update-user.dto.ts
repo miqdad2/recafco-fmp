@@ -5,6 +5,7 @@ import {
   IsEmail,
   IsOptional,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateUserDto {
@@ -25,15 +26,19 @@ export class UpdateUserDto {
   @MaxLength(50)
   employeeNumber?: string;
 
+  // Allow null to explicitly clear the field; undefined means "no change"
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsUUID(4)
-  departmentId?: string;
+  departmentId?: string | null;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsUUID(4)
-  plantId?: string;
+  plantId?: string | null;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsUUID(4)
-  locationId?: string;
+  locationId?: string | null;
 }

@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** Department-Specific Dashboards (2026-07-05)
+- **Last completed:** UAT Live Execution — Full Acceptance Test (2026-07-05)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -36,6 +36,139 @@
 - **User Administration UI Redesign** ✓
 - **Permission Handling Safety Fix** ✓
 - **Department-Specific Dashboards** ✓
+- **User Access Acceptance Test** ✓
+- **UAT Live Execution — Full Acceptance Test** ✓
+
+## UAT Live Execution — Full Acceptance Test (Completed 2026-07-05)
+
+### Summary
+
+End-to-end live acceptance test using four dedicated test users seeded into the development database by an idempotent `uat-seed.ts` script (aborts in production). Twelve UAT records were created (two per operational module, one per department). All 30 live API tests passed. Two new automated test files added (+31 tests). Final test count: **705 total** (638 API + 67 web).
+
+### Test Data Created by uat-seed.ts
+
+| Entity | Code / Username | Notes |
+|---|---|---|
+| Department | ENG-01 | Engineering; created by seed (never removes CM-01) |
+| Plant | TEST-PLANT-01 | UAT-only; safe to delete after cleanup |
+| Location | TEST-LOC-01 | Linked to TEST-PLANT-01 |
+| Production Line | UAT-LINE-01 | ENG-01; UAT-only |
+| User | test.operator | VIEWER, CM-01, OWN_DEPARTMENT all modules |
+| User | test.selected | VIEWER, CM-01; SELECTED_DEPARTMENTS [CM-01+ENG-01] for FACTORY_TASKS + INCIDENT_REPORT; OWN_DEPARTMENT all others |
+| User | test.manager | ADMIN, CM-01; ALL_DEPARTMENTS for INCIDENT_REPORT + CONTRACTS_MANAGEMENT; OWN_DEPARTMENT all others |
+| User | test.nodept | VIEWER, no department; fail-closed everywhere |
+| Module records (×12) | titles: `[UAT] ...` | TASK/INC/MR/SAFE/CONTRACT/PROD ×2 (999001=CM-01, 999002=ENG-01) |
+
+All passwords: `UATpass2026!` (Argon2id). Reference numbers use 999xxx range to avoid sequence collision.
+
+### Live Acceptance Test Results
+
+**Section 1 — Login (4/4 PASS)**
+
+All four test users authenticate successfully.
+
+**Section A — SELECTED_DEPARTMENTS isolation (6/6 PASS)**
+
+| Test | Result |
+|---|---|
+| A1: test.selected FACTORY_TASKS — sees CM-01 task | PASS |
+| A2: test.selected FACTORY_TASKS — sees ENG-01 task | PASS |
+| A3: test.selected INCIDENT_REPORT — sees CM-01 incident | PASS |
+| A4: test.selected INCIDENT_REPORT — sees ENG-01 incident | PASS |
+| A5: test.selected MAINTENANCE_REQUESTS — sees CM-01 maintenance (OWN_DEPARTMENT fallback) | PASS |
+| A6: test.selected MAINTENANCE_REQUESTS — CANNOT see ENG-01 maintenance | PASS |
+
+**Section B — Mixed ALL_DEPARTMENTS isolation (8/8 PASS)**
+
+| Test | Result |
+|---|---|
+| B1: test.manager incidents — sees CM-01 [ALL_DEPARTMENTS] | PASS |
+| B2: test.manager incidents — sees ENG-01 [ALL_DEPARTMENTS] | PASS |
+| B3: test.manager contracts — sees CM-01 [ALL_DEPARTMENTS] | PASS |
+| B4: test.manager contracts — sees ENG-01 [ALL_DEPARTMENTS] | PASS |
+| B5: test.manager maintenance — sees CM-01 [OWN_DEPARTMENT] | PASS |
+| B6: test.manager maintenance — CANNOT see ENG-01 [OWN_DEPARTMENT isolation] | PASS |
+| B7: test.manager tasks — sees CM-01 [OWN_DEPARTMENT] | PASS |
+| B8: test.manager tasks — CANNOT see ENG-01 [OWN_DEPARTMENT isolation] | PASS |
+
+**Section C — Plant/Location selector API (3/3 PASS)**
+
+| Test | Result |
+|---|---|
+| C1: TEST-PLANT-01 appears in plants list | PASS |
+| C2: TEST-LOC-01 appears when filtered by TEST-PLANT-01 | PASS |
+| C3: TEST-LOC-01 appears in unfiltered location list | PASS |
+
+**Section D — Direct URL access control (5/5 PASS)**
+
+| Test | Result |
+|---|---|
+| D1: test.operator → ENG-01 incident detail → 403 | PASS |
+| D2: test.manager → ENG-01 incident detail → 200 [ALL_DEPARTMENTS] | PASS |
+| D3: test.nodept → ENG-01 incident detail → 403 [fail-closed] | PASS |
+| D4: test.nodept → CM-01 maintenance detail → 403 [fail-closed] | PASS |
+| D5: test.operator → CM-01 maintenance detail → 200 [own dept] | PASS |
+
+**Section E — Dashboard/list scope consistency (4/4 PASS + 1 NOTE)**
+
+| Test | Result |
+|---|---|
+| E1: test.operator dashboard recent — does NOT include ENG-01 incident | PASS |
+| E2: test.operator list — does NOT include ENG-01 incident | PASS |
+| E3: test.operator list — DOES include CM-01 incident | PASS |
+| E4: test.operator incident dashboard scope badge = OWN_DEPARTMENT | PASS |
+| E5: test.manager incident dashboard scope badge = ALL_DEPARTMENTS | PASS |
+
+**Section F — Scope update validation (3/3 PASS)**
+
+| Test | Result |
+|---|---|
+| F1: ADMIN (test.manager) PUT SELECTED_DEPARTMENTS + 0 depts → 400 | PASS |
+| F2: ADMIN (test.manager) PUT ALL_DEPARTMENTS without manage_all_departments → 403 | PASS |
+| F3: VIEWER (test.operator) PUT module-access → 403 (no access_scope.manage) | PASS |
+
+### New Automated Tests Added
+
+**`apps/api/src/acceptance/uat-scope-isolation.test.ts`** — 15 tests (B1–B15)
+- B1–B4: SELECTED_DEPARTMENTS profile — buildDeptFilter, canAccessDepartment
+- B5–B8: mixed ALL_DEPARTMENTS profile — filter is null vs {in:[deptId]}
+- B9–B11: scope badge consistency — getScope() sentinel matches buildDeptFilter() sentinel
+- B12–B15: direct URL access control — assertCanAccessDepartment per profile
+
+**`apps/web/src/app/(protected)/administration/users/__tests__/uat-org-selectors.test.ts`** — 16 tests (T34–T49)
+- T34–T37: location filter includes locations without a plant (`!l.plantId`)
+- T38–T41: "Select a plant before assigning a location" prompt
+- T42–T44: plant onChange drives filteredLocations via selectedPlantId state
+- T45–T47: server pages request `isActive: true` for plants and locations
+- T48–T49: "No active plants found" empty state in both form components
+
+### Scripts Added
+
+| Script | Purpose |
+|---|---|
+| `pnpm --filter @recafco/api uat:seed` | Idempotent seed; aborts if NODE_ENV=production |
+| `pnpm --filter @recafco/api uat:cleanup` | Idempotent cleanup of `[UAT]`-prefixed records + test users; never removes CM-01; aborts in production |
+
+### Key Technical Notes
+
+- Reference numbers use the 999xxx range (`TASK-2026-999001`) to satisfy DB CHECK constraints (`^MODULE-[0-9]{4}-[0-9]{6}$`) while avoiding real sequence collision
+- Cleanup uses `title: { startsWith: '[UAT]' }` (not referenceNumber prefix) since reference numbers follow the enforced format
+- `vi.resetAllMocks()` required in `beforeEach` (not `vi.clearAllMocks()`) — clear does not drain `mockResolvedValueOnce` queues; stale values corrupt subsequent tests
+- test.manager's ALL_DEPARTMENTS for INCIDENT_REPORT and CONTRACTS_MANAGEMENT is an explicit `UserModuleAccess` row; it does NOT come from the ADMIN role
+- `PUT /administration/users/:id/module-access/:module` lives under `/administration/users/` prefix (not `/users/`)
+- `/auth/me` is the profile endpoint (not `/me`)
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api test --run` | ✓ **638/638** (26 test files) |
+| `pnpm --filter @recafco/web test --run` | ✓ **67/67** (6 test files) |
+| **Total** | ✓ **705 tests** |
+
+No production data modified. No migrations. No automatic deployment.
+
+---
 
 ## Department-Specific Dashboards (Completed 2026-07-05)
 
@@ -116,6 +249,225 @@ Acceptance audit found two gaps: (1) MODULE_CARDS on the root dashboard shown un
 | `pnpm typecheck` | ✓ 12/12 tasks |
 | `pnpm test` | ✓ 566/566 tests |
 | `pnpm build` | ✓ 8/8 tasks, 54 routes emitted |
+
+No database changes. No new migrations.
+
+---
+
+## User Access Acceptance Test (Completed 2026-07-05)
+
+### Summary
+
+Formal acceptance-test plan covering permissions, department scope, cross-module isolation, direct-URL protection, and role-change safety. Produces a full acceptance matrix with blocked-test identification, 5 user profiles, and automated tests for all provable security paths.
+
+### Five User Profiles
+
+| Profile | Role | Dept | Scope | Purpose |
+|---|---|---|---|---|
+| A — OWN-DEPT OPERATOR | Viewer | CM-01 | OWN_DEPARTMENT | Sees only CM-01 records |
+| B — SELECTED-DEPTS USER | Viewer | CM-01 | SELECTED_DEPARTMENTS + CM-01 grant | Sees own + selected depts |
+| C — COMPANY-WIDE MANAGER | Administrator | CM-01 | ALL_DEPARTMENTS (explicit, per module) | Company-wide in configured modules only |
+| D — READ-ONLY USER | Viewer | CM-01 | OWN_DEPARTMENT | Read perms only; write actions blocked |
+| E — NO-DEPT USER | Viewer | NULL | OWN_DEPARTMENT | Zero records everywhere (fail-closed) |
+
+Test users A/D/E map to `dataentry` (currently no dept). Profiles B and C require `superadmin` or a second user to be created and configured.
+
+### Automated Tests Added (+40 API tests)
+
+**New file: `apps/api/src/acceptance/user-access-acceptance.test.ts`** (27 tests)
+| Test | Coverage |
+|---|---|
+| A1–A5 | Cross-module scope isolation: ALL_DEPARTMENTS for module A ≠ module B |
+| A6–A8 | Role names never used: PermissionGuard checks permissions[], not roleName/roleCode |
+| A9–A11 | Permission absent + scope row = blocked (guard runs before scope check) |
+| A12–A15 | Dept change: OWN changes, SELECTED_DEPARTMENTS grants unchanged |
+| A16 (×7) | No-dept fail-closed for all 7 modules (OWN_DEPARTMENT → {in: []}) |
+| A17–A19 | ALL_DEPARTMENTS requires explicit DB row; permission never fast-paths it |
+| A20–A22 | canGrantScope privilege escalation prevention |
+| A23–A27 | assertCanAccessDepartment direct URL protection per module |
+
+**Extended: `apps/api/src/incidents/incidents.service.test.ts`** (+13 tests)
+| Test | Coverage |
+|---|---|
+| getDashboard × 2 | ALL_DEPARTMENTS and OWN_DEPARTMENT scope application |
+| findOne × 3 | Direct URL protection: 403 on cross-dept, 404 on missing, pass on own dept |
+| findAll × 3 | Dept filter applied: {in:[dept-a]}, {in:[]}, null each produce correct query shape |
+
+### Test Data Coverage Gaps (Blocked — B/C/D)
+
+Tests that CANNOT run until additional data is created:
+
+| Blocked Test | Blocker |
+|---|---|
+| Profile B: SELECTED_DEPARTMENTS cross-dept isolation | Requires ≥ 2 active departments |
+| Profile C: ALL_DEPARTMENTS in module X ≠ scope in module Y | Requires a second user configured with mixed scopes |
+| Plant/Location selector UI tests | 0 plants, 0 locations |
+| Cross-department direct-URL rejection (live API test) | Requires a second active department and a record in that department |
+
+### Required Setup Before Full Manual Test
+
+In priority order (do not create automatically):
+
+1. **Create at least one more active department** (e.g., `ENG-01 — Engineering`) to enable cross-department tests
+2. **Seed at least one plant and location** so plant/location selectors can be tested
+3. **Create test users** (propose usernames/roles, do not auto-create):
+   - `test.operator` — Viewer role, CM-01 dept, OWN_DEPARTMENT (Profile A)
+   - `test.selected` — Viewer role, CM-01 dept, SELECTED_DEPARTMENTS with CM-01 + ENG-01 grants (Profile B — needs second dept)
+   - `test.manager` — Administrator role, CM-01 dept, ALL_DEPARTMENTS for Incidents + Maintenance only (Profile C)
+   - `test.nodept` — Viewer role, no dept, OWN_DEPARTMENT (Profile E)
+4. **Create at least one test record in each module** (one per department) to enable cross-dept visibility testing
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm --filter @recafco/api test --run` | ✓ **623/623** (25 files) |
+| `pnpm --filter @recafco/web test --run` | ✓ **51/51** (5 files) |
+| **Total** | ✓ **674 tests** |
+| `pnpm build` | ✓ **8/8 tasks** |
+
+No database changes. No new migrations. No production data modified.
+
+---
+
+## User Administration & Organization Assignment Security Audit (Completed 2026-07-05)
+
+### Summary
+
+11-phase security audit and correction of User Administration, Organization Assignment, and Module Access. Phases 1, 9 were read-only audits; Phases 2–8, 10, 11 applied concrete fixes.
+
+### Root Cause (Phase 1)
+
+Frontend called `departments.list({ pageSize: 200 })`. The backend `OrgListQueryDto` had `@Max(100)` on `pageSize`. The API returned HTTP 400. `Promise.allSettled` swallowed the rejection as an empty array. Dropdowns showed only "— None —".
+
+### Backend Fixes
+
+**`apps/api/src/organizations/dto/org-list-query.dto.ts`** — `@Max(100)` raised to `@Max(500)` to accommodate large installations.
+
+**`apps/api/src/users/dto/update-user.dto.ts`** — `departmentId`, `plantId`, `locationId` now accept `string | null` using `@ValidateIf((_, v) => v !== null)` to allow explicit clearing of org assignments.
+
+**`apps/api/src/users/users.service.ts`** — `update()` now emits a specific `user_org_assignment_changed` audit event (in addition to `user_updated`) when any org field changes, including before/after values in metadata.
+
+### Frontend Fixes
+
+**`apps/web/src/app/(protected)/administration/users/actions.ts`** — `updateOrgAction` now sends `departmentId: null` (not omits) when "— None —" is selected, enabling explicit field clearing.
+
+**`apps/web/src/app/(protected)/administration/users/new/page.tsx`** — Detects rejected API calls (`deptApiError`, `plantApiError`, `locApiError`) and passes them to `NewUserForm`.
+
+**`apps/web/src/app/(protected)/administration/users/[id]/edit/page.tsx`** — Same error propagation pattern.
+
+**`apps/web/src/app/(protected)/administration/users/_components/new-user-form.tsx`** — Shows visible "Unable to load organization data" error banner and per-field error text when API calls fail (instead of silent empty dropdown).
+
+**`apps/web/src/app/(protected)/administration/users/_components/edit-user-tabs.tsx`** — Added `deptApiError`/`plantApiError`/`locApiError` props; shows error banner in OrgTab; added "no primary department" warning; removed `overflow-x-auto` from tab navigation bar.
+
+**`apps/web/src/app/(protected)/administration/users/_components/module-access-panel.tsx`** — Distinguishes "API failed" (shows error text) from "no active departments" (shows empty state text) for SELECTED_DEPARTMENTS department list.
+
+**`apps/web/src/app/(protected)/administration/users/_components/module-access-editor.tsx`** — Same API error vs. no-records distinction.
+
+**`apps/web/src/lib/users-api.ts`** — `UpdateUserPayload` org fields typed as `string | null` to match backend.
+
+### Database Inspection Findings (Phase 9, Read-Only)
+
+- 1 active department (CM-01), 0 active plants, 0 active locations
+- Both active users (`superadmin`, `dataentry`) have `department_id = NULL` — fail-closed behavior already in place (`OWN_DEPARTMENT` with no deptId returns `{ in: [] }`)
+- VIEWER role has 33 permissions; several write permissions (`maintenance.approve`, `tasks.create`, `safety.create`, etc.) present — intentionality unconfirmed; no changes made without business confirmation
+
+### New Tests (Phase 10 — 20 new tests)
+
+| File | Tests |
+|---|---|
+| `apps/api/src/organizations/dto/org-list-query.test.ts` | T1–T6: pageSize 200/500/501/0/1/default |
+| `apps/api/src/users/dto/update-user.test.ts` | T7–T13: nullable org fields, valid UUID, reject non-UUID |
+| `apps/api/src/users/users.service.test.ts` | 4 new: org audit event emitted/not emitted, null clear accepted |
+| `apps/web/src/app/(protected)/administration/users/__tests__/user-admin-security.test.ts` | T14–T20: @Max fix, error state detection, updateOrgAction clearing |
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm test` | ✓ 583 API + 36 web = 619 total (baseline 566+29=595; net +24). "583" in earlier report was API-only, not a regression. |
+| `pnpm build` | ✓ 8/8 tasks |
+
+**Important correction:** `@Max(100)` on `OrgListQueryDto.pageSize` was mistakenly raised to `@Max(500)` in this audit. It was then restored back to `@Max(100)` and frontend corrected to use `pageSize: 100`.
+
+No database changes. No new migrations.
+
+---
+
+## User Administration Security Audit — Release Blocker Remediation (Completed 2026-07-05)
+
+### Summary
+
+Resolved 7 release blockers identified post-audit: restored `@Max(100)` API limit, explained test count (no regression), added write-permission UI warning, strengthened org empty-state messaging, added SELECTED_DEPARTMENTS Save-disable validation, performed read-only DB inspection, and ran full verification.
+
+### Item 1 — @Max(100) Restored
+
+`apps/api/src/organizations/dto/org-list-query.dto.ts` — `@Max(500)` was wrong; restored to `@Max(100)`. Both `new/page.tsx` and `[id]/edit/page.tsx` corrected to `pageSize: 100`. Tests T1–T6 verify DTO limit; T14b/T14c verify neither page requests > 100.
+
+### Item 2 — Test Count Clarified
+
+Previous "595" = 566 API + 29 web. Current "619" = 583 API + 36 web. The "583" reported in the first audit session was the API-only count; no tests were lost.
+
+### Item 3 — Write-Permission UI Warning
+
+`apps/web/src/app/(protected)/administration/users/_components/role-permission-summary.tsx` — Added `getWritePermissions()` helper (excludes `.read`, `.comment`, `update_own_draft`, `update_progress`) and a yellow `role="alert"` banner listing write permission codes when `showWriteWarning` prop is true. Wired in both `new-user-form.tsx` and `edit-user-tabs.tsx` with `showWriteWarning`.
+
+No changes to VIEWER role assignments. VIEWER has 33 permissions including `maintenance.approve`, `maintenance.assign`, `maintenance.complete`, `tasks.create`, `tasks.start`, `safety.create` — flagged for business review but intentional by design per migration comments.
+
+### Item 4 — Organization Empty-State Messaging
+
+Strengthened in both `new-user-form.tsx` and the OrgTab in `edit-user-tabs.tsx`:
+- Plant with 0 results: "No active plants found." (not a silent empty select)
+- Location before plant selected: "Select a plant before assigning a location."
+- Location after plant selected, 0 results: "No active locations found for this plant."
+- No-dept warning strengthened to: "This user has no primary department. Department-scoped operational access currently fails closed — they will see zero records in modules that filter by department."
+
+### Item 5 — Module Access Validation UX
+
+`module-access-panel.tsx` `ModuleRow`:
+- Checkboxes changed from `defaultChecked` to controlled `checked={checkedDeptIds.has(dept.id)}` with `checkedDeptIds: Set<string>` state.
+- `noDeptSelected` computed: `selectedScope === 'SELECTED_DEPARTMENTS' && checkedDeptIds.size === 0 && !deptApiError`
+- Save button: `disabled={pending || noDeptSelected}` + `cursor-not-allowed`
+- Inline "Select at least one department." validation message shown when `noDeptSelected`
+- `cancelEditing()` resets both `selectedScope` and `checkedDeptIds` to persisted config values (full Cancel-restore behavior).
+
+### Item 6 — Read-Only Database Inspection
+
+| Entity | Count | Notes |
+|---|---|---|
+| Departments (active) | 1 | CM-01 — Contacts Management |
+| Plants (active) | 0 | None seeded yet |
+| Locations (active) | 0 | None seeded yet |
+| Users | 2 | `superadmin` (Super Administrator), `dataentry` (Viewer role); both have `department_id = NULL` |
+| Module access records | 7 | All belong to `superadmin`, all scoped `ALL_DEPARTMENTS` |
+| VIEWER permissions | 33 | Includes write permissions — see Item 3 |
+
+Both users have `department_id = NULL`. Since both `superadmin` and `dataentry` have either `ALL_DEPARTMENTS` module access or OWN_DEPARTMENT scope, the fail-closed behavior (`OWN_DEPARTMENT` + no dept → `{ in: [] }`) does not affect them yet. This should be corrected once org data is seeded.
+
+No data was modified.
+
+### New Tests (Items 1, 3–5 — 13 new web tests)
+
+| Test | Description |
+|---|---|
+| T21–T23 | `role-permission-summary.tsx` write-warning logic and prop wiring |
+| T24–T29 | Org empty-state messages in new-user-form and edit-user-tabs |
+| T30–T33 | Module access panel: Save-disable, inline error, cancelEditing, controlled checkboxes |
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm --filter @recafco/api test --run` | ✓ 583/583 tests (24 files) |
+| `pnpm --filter @recafco/web test --run` | ✓ 51/51 tests (5 files) |
+| Total | ✓ 634 tests |
+| `pnpm build` | ✓ 8/8 tasks |
 
 No database changes. No new migrations.
 

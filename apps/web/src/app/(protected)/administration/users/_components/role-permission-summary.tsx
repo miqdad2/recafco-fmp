@@ -12,11 +12,23 @@ function groupByModule(perms: PermissionSummary[]): Record<string, PermissionSum
   return groups;
 }
 
-interface Props {
-  permissions: PermissionSummary[];
+// Permissions that are NOT purely read-only. update_own_draft is low-risk (own unsaved records only).
+const READ_ONLY_SUFFIXES = ['.read', '.comment'];
+const LOW_RISK_CODES = new Set(['incidents.update_own_draft', 'tasks.update_own_draft', 'tasks.update_progress']);
+
+function getWritePermissions(permissions: PermissionSummary[]): PermissionSummary[] {
+  return permissions.filter((p) => {
+    if (LOW_RISK_CODES.has(p.code)) return false;
+    return !READ_ONLY_SUFFIXES.some((s) => p.code.endsWith(s));
+  });
 }
 
-export function RolePermissionSummary({ permissions }: Props): React.JSX.Element {
+interface Props {
+  permissions: PermissionSummary[];
+  showWriteWarning?: boolean;
+}
+
+export function RolePermissionSummary({ permissions, showWriteWarning = false }: Props): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const groups = groupByModule(permissions);
   const moduleCount = Object.keys(groups).length;
@@ -26,8 +38,24 @@ export function RolePermissionSummary({ permissions }: Props): React.JSX.Element
       ? 'No permissions assigned'
       : `${permissions.length} permission${permissions.length !== 1 ? 's' : ''} across ${moduleCount} module${moduleCount !== 1 ? 's' : ''}`;
 
+  const writePerms = showWriteWarning ? getWritePermissions(permissions) : [];
+
   return (
-    <div className="rounded-md border border-border bg-surface overflow-hidden">
+    <div className="space-y-2">
+      {showWriteWarning && writePerms.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-md border border-warning bg-warning/10 px-4 py-3 text-sm text-warning-foreground"
+        >
+          <p className="font-medium">This role includes write permissions.</p>
+          <p className="mt-1 text-xs text-text-secondary">
+            {writePerms.length} non-read-only permission{writePerms.length !== 1 ? 's' : ''} (
+            {writePerms.map((p) => p.code).join(', ')}). Review carefully before assigning to
+            users who should have read-only access.
+          </p>
+        </div>
+      )}
+      <div className="rounded-md border border-border bg-surface overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -73,6 +101,7 @@ export function RolePermissionSummary({ permissions }: Props): React.JSX.Element
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ export interface DeptOption {
 interface ModuleRowProps {
   module: ModuleIdentifier;
   allDepartments: DeptOption[];
+  deptApiError: boolean;
   canManageAll: boolean;
   defaultScope?: DepartmentAccessScope;
   defaultDeptIds?: string[];
@@ -33,6 +34,7 @@ interface ModuleRowProps {
 function ModuleRow({
   module,
   allDepartments,
+  deptApiError,
   canManageAll,
   defaultScope = 'OWN_DEPARTMENT',
   defaultDeptIds = [],
@@ -63,28 +65,34 @@ function ModuleRow({
         {scope === 'SELECTED_DEPARTMENTS' && (
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">Departments</label>
-            <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface p-2 space-y-1">
-              {allDepartments.length === 0 ? (
-                <p className="text-xs text-text-muted py-1 px-1">No departments available</p>
-              ) : (
-                allDepartments.map((dept) => (
-                  <label
-                    key={dept.id}
-                    className="flex items-center gap-2 cursor-pointer hover:bg-surface-secondary rounded px-1 py-0.5"
-                  >
-                    <input
-                      type="checkbox"
-                      name={`module_depts_${module}`}
-                      value={dept.id}
-                      defaultChecked={defaultDeptIds.includes(dept.id)}
-                      className="rounded border-border text-accent focus:ring-accent"
-                    />
-                    <span className="text-sm text-text-primary">{dept.name}</span>
-                    <span className="text-xs text-text-muted font-mono">{dept.code}</span>
-                  </label>
-                ))
-              )}
-            </div>
+            {deptApiError ? (
+              <p className="text-xs text-error py-1">
+                Unable to load departments — contact your administrator.
+              </p>
+            ) : (
+              <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface p-2 space-y-1">
+                {allDepartments.length === 0 ? (
+                  <p className="text-xs text-text-muted py-1 px-1">No active departments found.</p>
+                ) : (
+                  allDepartments.map((dept) => (
+                    <label
+                      key={dept.id}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-surface-secondary rounded px-1 py-0.5"
+                    >
+                      <input
+                        type="checkbox"
+                        name={`module_depts_${module}`}
+                        value={dept.id}
+                        defaultChecked={defaultDeptIds.includes(dept.id)}
+                        className="rounded border-border text-accent focus:ring-accent"
+                      />
+                      <span className="text-sm text-text-primary">{dept.name}</span>
+                      <span className="text-xs text-text-muted font-mono">{dept.code}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -94,12 +102,14 @@ function ModuleRow({
 
 interface Props {
   allDepartments: DeptOption[];
+  deptApiError?: boolean;
   canManageAll: boolean;
   defaultValues?: Partial<Record<ModuleIdentifier, { scope: DepartmentAccessScope; deptIds: string[] }>>;
 }
 
 export function ModuleAccessEditor({
   allDepartments,
+  deptApiError = false,
   canManageAll,
   defaultValues = {},
 }: Props): React.JSX.Element {
@@ -110,6 +120,7 @@ export function ModuleAccessEditor({
           key={mod}
           module={mod}
           allDepartments={allDepartments}
+          deptApiError={deptApiError}
           canManageAll={canManageAll}
           defaultScope={defaultValues[mod]?.scope ?? 'OWN_DEPARTMENT'}
           defaultDeptIds={defaultValues[mod]?.deptIds ?? []}

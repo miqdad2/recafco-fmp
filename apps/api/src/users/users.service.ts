@@ -132,7 +132,7 @@ export class UsersService {
 
     await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, dto.departmentId ?? null);
 
-    await this.validateOrgConsistency(dto.plantId, dto.locationId);
+    await this.validateOrgConsistency(dto.plantId ?? undefined, dto.locationId ?? undefined);
 
     // Resolve the role to assign — default to VIEWER.
     const roleId = await this.resolveNewUserRole(dto.roleId, actor);
@@ -233,7 +233,7 @@ export class UsersService {
       await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, dto.departmentId ?? null);
     }
 
-    await this.validateOrgConsistency(dto.plantId, dto.locationId);
+    await this.validateOrgConsistency(dto.plantId ?? undefined, dto.locationId ?? undefined);
 
     const data: Record<string, unknown> = {};
     if (dto.displayName !== undefined) data['displayName'] = dto.displayName.trim();
@@ -244,12 +244,35 @@ export class UsersService {
     if (dto.plantId !== undefined) data['plantId'] = dto.plantId ?? null;
     if (dto.locationId !== undefined) data['locationId'] = dto.locationId ?? null;
 
+    const hasOrgChange =
+      dto.departmentId !== undefined || dto.plantId !== undefined || dto.locationId !== undefined;
+
     try {
       const updated = await this.db.getClient().$transaction(async (tx) => {
         const u = await tx.user.update({ where: { id }, data, select: USER_SELECT });
         await tx.securityAuditEvent.create({
           data: { event: 'user_updated', userId: id, actorId: actor.id },
         });
+        if (hasOrgChange) {
+          await tx.securityAuditEvent.create({
+            data: {
+              event: 'user_org_assignment_changed',
+              userId: id,
+              actorId: actor.id,
+              metadata: {
+                ...(dto.departmentId !== undefined
+                  ? { departmentId: { from: existing.departmentId, to: dto.departmentId } }
+                  : {}),
+                ...(dto.plantId !== undefined
+                  ? { plantId: { from: existing.plantId, to: dto.plantId } }
+                  : {}),
+                ...(dto.locationId !== undefined
+                  ? { locationId: { from: existing.locationId, to: dto.locationId } }
+                  : {}),
+              },
+            },
+          });
+        }
         return u;
       });
       return toSummary(updated);

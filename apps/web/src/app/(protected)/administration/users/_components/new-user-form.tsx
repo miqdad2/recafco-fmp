@@ -18,6 +18,9 @@ interface Props {
   plants: OrgEntity[];
   locations: LocationEntity[];
   canManageAll: boolean;
+  deptApiError?: boolean;
+  plantApiError?: boolean;
+  locApiError?: boolean;
 }
 
 function FieldError({ errors }: { errors: string[] | undefined }): React.JSX.Element | null {
@@ -86,6 +89,9 @@ export function NewUserForm({
   plants,
   locations,
   canManageAll,
+  deptApiError = false,
+  plantApiError = false,
+  locApiError = false,
 }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
   const [selectedRoleId, setSelectedRoleId] = useState('');
@@ -251,10 +257,21 @@ export function NewUserForm({
           title="Organization Assignment"
           description="Assign the user to their primary organizational unit."
         />
-        {!hasDept && (
+        {(deptApiError || plantApiError || locApiError) && (
+          <div
+            role="alert"
+            className="mb-4 rounded-md bg-error-light border border-error px-4 py-3 text-xs text-error"
+          >
+            Unable to load organization data — contact your administrator.
+            {deptApiError && ' Departments unavailable.'}
+            {plantApiError && ' Plants unavailable.'}
+            {locApiError && ' Locations unavailable.'}
+          </div>
+        )}
+        {!hasDept && !deptApiError && (
           <div className="mb-4 rounded-md bg-warning-light border border-warning/30 px-4 py-3 text-xs text-warning">
-            Users without a primary department cannot access department-scoped operational records
-            unless explicit company-wide access is granted.
+            This user has no primary department. Department-scoped operational access currently
+            fails closed — they will see zero records in modules that filter by department.
           </div>
         )}
         <div className="space-y-4">
@@ -262,51 +279,69 @@ export function NewUserForm({
             <label htmlFor="departmentId" className="block text-sm font-medium text-text-primary mb-1">
               Primary Department
             </label>
-            <select
-              id="departmentId"
-              name="departmentId"
-              className={selectCls}
-              onChange={(e) => setHasDept(!!e.target.value)}
-            >
-              <option value="">— None —</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} — {d.name}
-                </option>
-              ))}
-            </select>
+            {deptApiError ? (
+              <p className="text-xs text-error">Unable to load departments.</p>
+            ) : (
+              <select
+                id="departmentId"
+                name="departmentId"
+                className={selectCls}
+                onChange={(e) => setHasDept(!!e.target.value)}
+              >
+                <option value="">— None —</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} — {d.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div>
             <label htmlFor="plantId" className="block text-sm font-medium text-text-primary mb-1">
               Plant
             </label>
-            <select
-              id="plantId"
-              name="plantId"
-              className={selectCls}
-              onChange={(e) => setSelectedPlantId(e.target.value)}
-            >
-              <option value="">— None —</option>
-              {plants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.code} — {p.name}
-                </option>
-              ))}
-            </select>
+            {plantApiError ? (
+              <p className="text-xs text-error">Unable to load plants.</p>
+            ) : plants.length === 0 ? (
+              <p className="text-xs text-text-muted">No active plants found.</p>
+            ) : (
+              <select
+                id="plantId"
+                name="plantId"
+                className={selectCls}
+                onChange={(e) => setSelectedPlantId(e.target.value)}
+              >
+                <option value="">— None —</option>
+                {plants.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} — {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <div>
             <label htmlFor="locationId" className="block text-sm font-medium text-text-primary mb-1">
               Location
             </label>
-            <select id="locationId" name="locationId" className={selectCls}>
-              <option value="">— None —</option>
-              {filteredLocations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.code} — {l.name}
-                  {l.plant ? ` (${l.plant.code})` : ''}
-                </option>
-              ))}
-            </select>
+            {locApiError ? (
+              <p className="text-xs text-error">Unable to load locations.</p>
+            ) : !selectedPlantId ? (
+              <p className="text-xs text-text-muted">Select a plant before assigning a location.</p>
+            ) : filteredLocations.length === 0 ? (
+              <p className="text-xs text-text-muted">No active locations found for this plant.</p>
+            ) : (
+              <select id="locationId" name="locationId" className={selectCls}>
+                <option value="">— None —</option>
+                {filteredLocations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code} — {l.name}
+                    {l.plant ? ` (${l.plant.code})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </div>
@@ -345,7 +380,7 @@ export function NewUserForm({
           {selectedRole ? (
             <div>
               <p className="text-xs text-text-muted mb-2">Permissions for this role:</p>
-              <RolePermissionSummary permissions={selectedRole.permissions} />
+              <RolePermissionSummary permissions={selectedRole.permissions} showWriteWarning />
             </div>
           ) : (
             <p className="text-xs text-text-muted">Select a role above to preview its permissions.</p>
@@ -366,6 +401,7 @@ export function NewUserForm({
         />
         <ModuleAccessEditor
           allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
+          deptApiError={deptApiError}
           canManageAll={canManageAll}
         />
       </div>

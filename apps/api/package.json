@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "bootstrap:admin": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/bootstrap-admin.ts",
-    "cleanup:sessions": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/cleanup-sessions.ts"
+    "cleanup:sessions": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/cleanup-sessions.ts",
+    "uat:seed": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/uat-seed.ts",
+    "uat:cleanup": "node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/scripts/uat-cleanup.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

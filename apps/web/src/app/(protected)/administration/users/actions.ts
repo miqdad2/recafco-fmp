@@ -202,10 +202,11 @@ export async function updateOrgAction(
   const plantIdRaw = formData.get('plantId')?.toString().trim();
   const locationIdRaw = formData.get('locationId')?.toString().trim();
 
+  // Empty string means the user selected "— None —" — send null to explicitly clear the field.
   const payload = {
-    ...(departmentIdRaw ? { departmentId: departmentIdRaw } : {}),
-    ...(plantIdRaw ? { plantId: plantIdRaw } : {}),
-    ...(locationIdRaw ? { locationId: locationIdRaw } : {}),
+    departmentId: departmentIdRaw || null,
+    plantId: plantIdRaw || null,
+    locationId: locationIdRaw || null,
   };
 
   const result = await usersApi.update(accessToken, id, payload);

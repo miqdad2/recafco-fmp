@@ -18,9 +18,9 @@ export default async function NewUserPage(): Promise<React.JSX.Element> {
 
   const [deptData, plantData, locData, rolesData, meData] =
     await Promise.allSettled([
-      departments.list({ isActive: true, pageSize: 200 }),
-      plants.list({ isActive: true, pageSize: 200 }),
-      locations.list({ isActive: true, pageSize: 200 }),
+      departments.list({ isActive: true, pageSize: 100 }),
+      plants.list({ isActive: true, pageSize: 100 }),
+      locations.list({ isActive: true, pageSize: 100 }),
       rolesApi.list(accessToken),
       authApi.me(accessToken),
     ]);
@@ -28,6 +28,9 @@ export default async function NewUserPage(): Promise<React.JSX.Element> {
   const deptItems = deptData.status === 'fulfilled' ? deptData.value.items : [];
   const plantItems = plantData.status === 'fulfilled' ? plantData.value.items : [];
   const locItems = locData.status === 'fulfilled' ? locData.value.items : [];
+  const deptApiError = deptData.status === 'rejected';
+  const plantApiError = plantData.status === 'rejected';
+  const locApiError = locData.status === 'rejected';
   const roleList =
     rolesData.status === 'fulfilled' && rolesData.value.ok ? rolesData.value.data : [];
 
@@ -70,6 +73,9 @@ export default async function NewUserPage(): Promise<React.JSX.Element> {
           plants={plantItems}
           locations={locItems}
           canManageAll={canManageAll}
+          deptApiError={deptApiError}
+          plantApiError={plantApiError}
+          locApiError={locApiError}
         />
       </div>
     </div>

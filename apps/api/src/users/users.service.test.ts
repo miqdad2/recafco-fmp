@@ -299,6 +299,60 @@ describe('UsersService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // update (org assignment)
+  // ---------------------------------------------------------------------------
+
+  describe('update org assignment', () => {
+    beforeEach(() => {
+      mockUserFindUnique.mockResolvedValue(BASE_USER);
+      mockUserUpdate.mockResolvedValue({ ...BASE_USER, departmentId: 'dept-new' });
+      mockLocationFindUnique.mockResolvedValue(null);
+    });
+
+    it('emits user_org_assignment_changed audit event when departmentId changes', async () => {
+      await service.update(BASE_USER.id, { departmentId: 'dept-new' }, ADMIN_ACTOR);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const auditCalls = mockAuditCreate.mock.calls.map((c: any[]) => (c[0] as { data: { event: string } }).data.event);
+      expect(auditCalls).toContain('user_org_assignment_changed');
+    });
+
+    it('includes before/after departmentId in org audit event metadata', async () => {
+      await service.update(BASE_USER.id, { departmentId: 'dept-new' }, ADMIN_ACTOR);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const orgAuditCall = mockAuditCreate.mock.calls.find((c: any[]) =>
+        (c[0] as { data: { event: string } }).data.event === 'user_org_assignment_changed',
+      );
+      expect(orgAuditCall).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((orgAuditCall as any[])[0].data.metadata).toMatchObject({
+        departmentId: { from: null, to: 'dept-new' },
+      });
+    });
+
+    it('does NOT emit user_org_assignment_changed when only displayName changes', async () => {
+      mockUserUpdate.mockResolvedValue({ ...BASE_USER, displayName: 'Bob' });
+
+      await service.update(BASE_USER.id, { displayName: 'Bob' }, ADMIN_ACTOR);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const auditCalls = mockAuditCreate.mock.calls.map((c: any[]) => (c[0] as { data: { event: string } }).data.event);
+      expect(auditCalls).not.toContain('user_org_assignment_changed');
+    });
+
+    it('accepts departmentId=null to clear the department', async () => {
+      mockUserUpdate.mockResolvedValue({ ...BASE_USER, departmentId: null });
+
+      await service.update(BASE_USER.id, { departmentId: null }, ADMIN_ACTOR);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ departmentId: null }) }),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // updateRole
   // ---------------------------------------------------------------------------
 

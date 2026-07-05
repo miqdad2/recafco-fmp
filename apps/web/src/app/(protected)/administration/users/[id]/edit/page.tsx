@@ -40,9 +40,9 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
 
   const [deptData, plantData, locData, rolesData, moduleAccessData, meData] =
     await Promise.allSettled([
-      departments.list({ isActive: true, pageSize: 200 }),
-      plants.list({ isActive: true, pageSize: 200 }),
-      locations.list({ isActive: true, pageSize: 200 }),
+      departments.list({ isActive: true, pageSize: 100 }),
+      plants.list({ isActive: true, pageSize: 100 }),
+      locations.list({ isActive: true, pageSize: 100 }),
       rolesApi.list(accessToken),
       usersApi.getModuleAccess(accessToken, id),
       authApi.me(accessToken),
@@ -51,6 +51,9 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
   const deptItems = deptData.status === 'fulfilled' ? deptData.value.items : [];
   const plantItems = plantData.status === 'fulfilled' ? plantData.value.items : [];
   const locItems = locData.status === 'fulfilled' ? locData.value.items : [];
+  const deptApiError = deptData.status === 'rejected';
+  const plantApiError = plantData.status === 'rejected';
+  const locApiError = locData.status === 'rejected';
   const roleList =
     rolesData.status === 'fulfilled' && rolesData.value.ok ? rolesData.value.data : [];
 
@@ -106,6 +109,9 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
           moduleAccess={moduleAccess}
           canManageAccess={canManageAccess}
           canManageAll={canManageAll}
+          deptApiError={deptApiError}
+          plantApiError={plantApiError}
+          locApiError={locApiError}
           updateProfileAction={updateProfileBound}
           updateOrgAction={updateOrgBound}
           assignRoleAction={assignRoleBound}

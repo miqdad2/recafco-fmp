@@ -34,6 +34,9 @@ interface Props {
   moduleAccess: UserModuleAccessConfig[] | null;
   canManageAccess: boolean;
   canManageAll: boolean;
+  deptApiError?: boolean;
+  plantApiError?: boolean;
+  locApiError?: boolean;
   updateProfileAction: (prev: UserFormState | null, fd: FormData) => Promise<UserFormState | null>;
   updateOrgAction: (prev: UserFormState | null, fd: FormData) => Promise<UserFormState | null>;
   assignRoleAction: (prev: UserFormState | null, fd: FormData) => Promise<UserFormState | null>;
@@ -143,12 +146,18 @@ function OrgTab({
   departments,
   plants,
   locations,
+  deptApiError = false,
+  plantApiError = false,
+  locApiError = false,
   action,
 }: {
   user: UserSummary;
   departments: OrgEntity[];
   plants: OrgEntity[];
   locations: LocationEntity[];
+  deptApiError?: boolean;
+  plantApiError?: boolean;
+  locApiError?: boolean;
   action: (prev: UserFormState | null, fd: FormData) => Promise<UserFormState | null>;
 }): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
@@ -157,56 +166,95 @@ function OrgTab({
     ? locations.filter((l) => !l.plantId || l.plantId === selectedPlantId)
     : locations;
 
+  const hasApiError = deptApiError || plantApiError || locApiError;
+
   return (
     <form action={formAction} className="space-y-5 max-w-lg">
       {state?.success && <SaveSuccess />}
       {state?.error && <FormError message={state.error} />}
 
+      {hasApiError && (
+        <div
+          role="alert"
+          className="rounded-md bg-error-light border border-error px-4 py-3 text-xs text-error"
+        >
+          Unable to load organization data — contact your administrator.
+          {deptApiError && ' Departments unavailable.'}
+          {plantApiError && ' Plants unavailable.'}
+          {locApiError && ' Locations unavailable.'}
+        </div>
+      )}
+
+      {!user.departmentId && !deptApiError && (
+        <div className="rounded-md bg-warning-light border border-warning/30 px-4 py-3 text-xs text-warning">
+          This user has no primary department. Department-scoped operational access currently
+          fails closed — they will see zero records in modules that filter by department.
+        </div>
+      )}
+
       <div>
         <label htmlFor="departmentId" className="block text-sm font-medium text-text-primary mb-1">
           Primary Department
         </label>
-        <select id="departmentId" name="departmentId" defaultValue={user.departmentId ?? ''} className={selectCls}>
-          <option value="">— None —</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.code} — {d.name}
-            </option>
-          ))}
-        </select>
+        {deptApiError ? (
+          <p className="text-xs text-error">Unable to load departments.</p>
+        ) : (
+          <select id="departmentId" name="departmentId" defaultValue={user.departmentId ?? ''} className={selectCls}>
+            <option value="">— None —</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code} — {d.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div>
         <label htmlFor="plantId" className="block text-sm font-medium text-text-primary mb-1">
           Plant
         </label>
-        <select
-          id="plantId"
-          name="plantId"
-          defaultValue={user.plantId ?? ''}
-          className={selectCls}
-          onChange={(e) => setSelectedPlantId(e.target.value)}
-        >
-          <option value="">— None —</option>
-          {plants.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.code} — {p.name}
-            </option>
-          ))}
-        </select>
+        {plantApiError ? (
+          <p className="text-xs text-error">Unable to load plants.</p>
+        ) : plants.length === 0 ? (
+          <p className="text-xs text-text-muted">No active plants found.</p>
+        ) : (
+          <select
+            id="plantId"
+            name="plantId"
+            defaultValue={user.plantId ?? ''}
+            className={selectCls}
+            onChange={(e) => setSelectedPlantId(e.target.value)}
+          >
+            <option value="">— None —</option>
+            {plants.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.code} — {p.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div>
         <label htmlFor="locationId" className="block text-sm font-medium text-text-primary mb-1">
           Location
         </label>
-        <select id="locationId" name="locationId" defaultValue={user.locationId ?? ''} className={selectCls}>
-          <option value="">— None —</option>
-          {filteredLocations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.code} — {l.name}
-              {l.plant ? ` (${l.plant.code})` : ''}
-            </option>
-          ))}
-        </select>
+        {locApiError ? (
+          <p className="text-xs text-error">Unable to load locations.</p>
+        ) : !selectedPlantId ? (
+          <p className="text-xs text-text-muted">Select a plant before assigning a location.</p>
+        ) : filteredLocations.length === 0 ? (
+          <p className="text-xs text-text-muted">No active locations found for this plant.</p>
+        ) : (
+          <select id="locationId" name="locationId" defaultValue={user.locationId ?? ''} className={selectCls}>
+            <option value="">— None —</option>
+            {filteredLocations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.code} — {l.name}
+                {l.plant ? ` (${l.plant.code})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div className="pt-1">
         <button
@@ -273,7 +321,7 @@ function RoleTab({
       {selectedRole && (
         <div>
           <p className="text-xs font-medium text-text-secondary mb-2">Permissions for this role:</p>
-          <RolePermissionSummary permissions={selectedRole.permissions} />
+          <RolePermissionSummary permissions={selectedRole.permissions} showWriteWarning />
         </div>
       )}
 
@@ -368,6 +416,9 @@ export function EditUserTabs({
   moduleAccess,
   canManageAccess,
   canManageAll,
+  deptApiError = false,
+  plantApiError = false,
+  locApiError = false,
   updateProfileAction,
   updateOrgAction,
   assignRoleAction,
@@ -384,7 +435,7 @@ export function EditUserTabs({
   return (
     <div>
       <div
-        className="flex border-b border-border mb-6 -mx-8 px-8 overflow-x-auto"
+        className="flex border-b border-border mb-6 -mx-8 px-8"
         role="tablist"
         aria-label="User edit sections"
       >
@@ -417,6 +468,9 @@ export function EditUserTabs({
             departments={departments}
             plants={plants}
             locations={locations}
+            deptApiError={deptApiError}
+            plantApiError={plantApiError}
+            locApiError={locApiError}
             action={updateOrgAction}
           />
         )}
@@ -430,6 +484,7 @@ export function EditUserTabs({
                 userId={user.id}
                 moduleAccess={moduleAccess}
                 allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
+                deptApiError={deptApiError}
                 action={setModuleAccessAction}
                 canManage={canManageAccess}
                 canManageAll={canManageAll}
