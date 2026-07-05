@@ -17,6 +17,8 @@ export interface UserSummary {
   departmentId: string | null;
   plantId: string | null;
   locationId: string | null;
+  archivedAt: string | null;
+  archivedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +73,12 @@ export interface UserModuleAccessConfig {
 export interface SetModuleAccessPayload {
   scope: DepartmentAccessScope;
   departmentIds?: string[];
+}
+
+export interface UserHistoryCheck {
+  hasHistory: boolean;
+  counts: Record<string, number>;
+  isTestUser: boolean;
 }
 
 export interface AdminDashboardData {
@@ -159,6 +167,18 @@ export const usersApi = {
 
   unlock: (accessToken: string, id: string) =>
     apiFetch<UserSummary>(`/administration/users/${id}/unlock`, accessToken, { method: 'POST' }),
+
+  archive: (accessToken: string, id: string) =>
+    apiFetch<UserSummary>(`/administration/users/${id}/archive`, accessToken, { method: 'POST' }),
+
+  getHistory: (accessToken: string, id: string) =>
+    apiFetch<UserHistoryCheck>(`/administration/users/${id}/history`, accessToken),
+
+  deleteTestUser: (accessToken: string, id: string, confirmationText: string) =>
+    apiFetch<void>(`/administration/users/${id}`, accessToken, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmationText }),
+    }),
 
   getModuleAccess: (accessToken: string, id: string) =>
     apiFetch<UserModuleAccessConfig[]>(`/administration/users/${id}/module-access`, accessToken),

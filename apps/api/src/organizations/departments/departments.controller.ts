@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -17,10 +18,13 @@ import { OrgListQueryDto } from '../dto/org-list-query.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { Department } from '@recafco/database';
 import type { PaginatedResult } from '../dto/org-list-query.dto';
+import type { DependencyCheck } from './departments.service';
+import type { AuthUser } from '../../common/types/auth-user';
 
 function meta(): { requestId?: string } {
   const requestId = getRequestId();
@@ -50,6 +54,15 @@ export class DepartmentsController {
     return { data: dept, meta: meta(), error: null };
   }
 
+  @Get(':id/dependencies')
+  @Permissions('org.departments.read')
+  async checkDependencies(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiSuccessResponse<DependencyCheck>> {
+    const result = await this.departmentsService.checkDependencies(id);
+    return { data: result, meta: meta(), error: null };
+  }
+
   @Post()
   @HttpCode(201)
   @Permissions('org.departments.write')
@@ -72,17 +85,39 @@ export class DepartmentsController {
   @Permissions('org.departments.write')
   async activate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<Department>> {
-    const dept = await this.departmentsService.activate(id);
+    const dept = await this.departmentsService.activate(id, actor.id);
     return { data: dept, meta: meta(), error: null };
   }
 
   @Post(':id/deactivate')
-  @Permissions('org.departments.write')
+  @Permissions('org.departments.deactivate')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<Department>> {
-    const dept = await this.departmentsService.deactivate(id);
+    const dept = await this.departmentsService.deactivate(id, actor.id);
     return { data: dept, meta: meta(), error: null };
+  }
+
+  @Post(':id/archive')
+  @Permissions('org.departments.archive')
+  async archive(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<Department>> {
+    const dept = await this.departmentsService.archive(id, actor.id);
+    return { data: dept, meta: meta(), error: null };
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Permissions('org.departments.delete')
+  async delete(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<void> {
+    await this.departmentsService.delete(id, actor.id);
   }
 }

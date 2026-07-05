@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -18,9 +19,12 @@ import { OrgListQueryDto } from '../dto/org-list-query.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { PaginatedResult } from '../dto/org-list-query.dto';
+import type { DependencyCheck } from './locations.service';
+import type { AuthUser } from '../../common/types/auth-user';
 
 class LocationListQueryDto extends OrgListQueryDto {
   @IsOptional()
@@ -54,6 +58,15 @@ export class LocationsController {
     return { data: location, meta: meta(), error: null };
   }
 
+  @Get(':id/dependencies')
+  @Permissions('org.locations.read')
+  async checkDependencies(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiSuccessResponse<DependencyCheck>> {
+    const result = await this.locationsService.checkDependencies(id);
+    return { data: result, meta: meta(), error: null };
+  }
+
   @Post()
   @HttpCode(201)
   @Permissions('org.locations.write')
@@ -76,17 +89,39 @@ export class LocationsController {
   @Permissions('org.locations.write')
   async activate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const location = await this.locationsService.activate(id);
+    const location = await this.locationsService.activate(id, actor.id);
     return { data: location, meta: meta(), error: null };
   }
 
   @Post(':id/deactivate')
-  @Permissions('org.locations.write')
+  @Permissions('org.locations.deactivate')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const location = await this.locationsService.deactivate(id);
+    const location = await this.locationsService.deactivate(id, actor.id);
     return { data: location, meta: meta(), error: null };
+  }
+
+  @Post(':id/archive')
+  @Permissions('org.locations.archive')
+  async archive(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const location = await this.locationsService.archive(id, actor.id);
+    return { data: location, meta: meta(), error: null };
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Permissions('org.locations.delete')
+  async delete(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<void> {
+    await this.locationsService.delete(id, actor.id);
   }
 }

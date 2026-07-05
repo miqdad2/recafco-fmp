@@ -4,6 +4,7 @@ import {
   Post,
   Patch,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -27,8 +28,14 @@ import { getRequestId } from '@recafco/observability';
 import { DepartmentAccessScope, ModuleIdentifier } from '@recafco/database';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { AuthUser } from '../common/types/auth-user';
-import type { UserSummary, UserListResult, UserCreatedResult } from './users.service';
+import type { UserSummary, UserListResult, UserCreatedResult, UserHistoryCheck } from './users.service';
 import type { UserModuleAccessConfig } from '../department-access/department-access.service';
+
+class DeleteTestUserDto {
+  @IsString()
+  @MaxLength(100)
+  confirmationText!: string;
+}
 
 class SetModuleAccessDto {
   @IsEnum(DepartmentAccessScope)
@@ -158,7 +165,7 @@ export class UsersController {
   }
 
   @Post(':id/deactivate')
-  @Permissions('users.activate')
+  @Permissions('users.deactivate')
   async deactivate(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @CurrentUser() actor: AuthUser,
@@ -186,6 +193,37 @@ export class UsersController {
   ): Promise<ApiSuccessResponse<UserSummary>> {
     const user = await this.usersService.unlock(id, actor);
     return { data: user, meta: meta(), error: null };
+  }
+
+  @Post(':id/archive')
+  @Permissions('users.archive')
+  async archive(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<UserSummary>> {
+    const user = await this.usersService.archive(id, actor);
+    return { data: user, meta: meta(), error: null };
+  }
+
+  @Get(':id/history')
+  @Permissions('users.read')
+  async getHistory(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiSuccessResponse<UserHistoryCheck>> {
+    const result = await this.usersService.checkUserHistory(id);
+    return { data: result, meta: meta(), error: null };
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Header('Cache-Control', 'no-store')
+  @Permissions('users.delete_test')
+  async deleteTestUser(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: DeleteTestUserDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<void> {
+    await this.usersService.deleteTestUser(id, dto.confirmationText, actor);
   }
 
   @Get(':id/module-access')

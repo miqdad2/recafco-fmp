@@ -8,6 +8,8 @@ export interface OrgEntity {
   name: string;
   description: string | null;
   isActive: boolean;
+  archivedAt: string | null;
+  archivedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,6 +54,11 @@ export interface ListQuery {
   pageSize?: number;
   search?: string;
   isActive?: boolean;
+}
+
+export interface DependencyCheck {
+  canDelete: boolean;
+  dependencies: Record<string, number>;
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -100,6 +107,12 @@ export const departments = {
     apiFetch<OrgEntity>(`/organizations/departments/${id}/activate`, { method: 'POST' }),
   deactivate: (id: string) =>
     apiFetch<OrgEntity>(`/organizations/departments/${id}/deactivate`, { method: 'POST' }),
+  archive: (id: string) =>
+    apiFetch<OrgEntity>(`/organizations/departments/${id}/archive`, { method: 'POST' }),
+  checkDependencies: (id: string) =>
+    apiFetch<DependencyCheck>(`/organizations/departments/${id}/dependencies`),
+  delete: (id: string) =>
+    apiFetch<void>(`/organizations/departments/${id}`, { method: 'DELETE' }),
 };
 
 // Plants
@@ -115,6 +128,12 @@ export const plants = {
     apiFetch<OrgEntity>(`/organizations/plants/${id}/activate`, { method: 'POST' }),
   deactivate: (id: string) =>
     apiFetch<OrgEntity>(`/organizations/plants/${id}/deactivate`, { method: 'POST' }),
+  archive: (id: string) =>
+    apiFetch<OrgEntity>(`/organizations/plants/${id}/archive`, { method: 'POST' }),
+  checkDependencies: (id: string) =>
+    apiFetch<DependencyCheck>(`/organizations/plants/${id}/dependencies`),
+  delete: (id: string) =>
+    apiFetch<void>(`/organizations/plants/${id}`, { method: 'DELETE' }),
 };
 
 // Locations
@@ -130,4 +149,10 @@ export const locations = {
     apiFetch<LocationEntity>(`/organizations/locations/${id}/activate`, { method: 'POST' }),
   deactivate: (id: string) =>
     apiFetch<LocationEntity>(`/organizations/locations/${id}/deactivate`, { method: 'POST' }),
+  archive: (id: string) =>
+    apiFetch<LocationEntity>(`/organizations/locations/${id}/archive`, { method: 'POST' }),
+  checkDependencies: (id: string) =>
+    apiFetch<DependencyCheck>(`/organizations/locations/${id}/dependencies`),
+  delete: (id: string) =>
+    apiFetch<void>(`/organizations/locations/${id}`, { method: 'DELETE' }),
 };

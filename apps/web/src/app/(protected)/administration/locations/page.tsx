@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import type { Metadata } from 'next';
 import { locations } from '@/lib/organizations-api';
 import { Breadcrumbs } from '../../_components/breadcrumbs';
@@ -6,6 +5,14 @@ import { PageHeader } from '../_components/page-header';
 import { StatusBadge } from '../_components/status-badge';
 import { EmptyState } from '../_components/empty-state';
 import { ErrorState } from '../_components/error-state';
+import { OrgLifecycleActions } from '../_components/lifecycle-actions';
+import {
+  activateLocationAction,
+  deactivateLocationAction,
+  archiveLocationAction,
+  getLocationDependenciesAction,
+  deleteLocationAction,
+} from './actions';
 
 export const metadata: Metadata = { title: 'Locations — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -34,12 +41,12 @@ export default async function LocationsPage(): Promise<React.JSX.Element> {
           title="Locations"
           description="Physical locations within plants or independent areas."
           action={
-            <Link
+            <a
               href="/administration/locations/new"
               className="inline-flex items-center h-10 px-4 rounded-md bg-accent text-accent-foreground text-sm font-medium hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus"
             >
               New Location
-            </Link>
+            </a>
           }
         />
 
@@ -70,15 +77,22 @@ export default async function LocationsPage(): Promise<React.JSX.Element> {
                         : <span className="text-text-muted">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge isActive={loc.isActive} />
+                      <StatusBadge isActive={loc.isActive} isArchived={loc.archivedAt !== null} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/administration/locations/${loc.id}/edit`}
-                        className="text-xs font-medium text-accent hover:text-accent-hover"
-                      >
-                        Edit
-                      </Link>
+                      <OrgLifecycleActions
+                        id={loc.id}
+                        code={loc.code}
+                        name={loc.name}
+                        isActive={loc.isActive}
+                        isArchived={loc.archivedAt !== null}
+                        editHref={`/administration/locations/${loc.id}/edit`}
+                        activateAction={activateLocationAction}
+                        deactivateAction={deactivateLocationAction}
+                        archiveAction={archiveLocationAction}
+                        getDependenciesAction={getLocationDependenciesAction}
+                        deleteAction={deleteLocationAction}
+                      />
                     </td>
                   </tr>
                 ))}

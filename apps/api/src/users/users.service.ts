@@ -36,6 +36,8 @@ const USER_SELECT = {
   departmentId: true,
   plantId: true,
   locationId: true,
+  archivedAt: true,
+  archivedByUserId: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -56,6 +58,8 @@ type UserRecord = {
   departmentId: string | null;
   plantId: string | null;
   locationId: string | null;
+  archivedAt: Date | null;
+  archivedByUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -72,6 +76,12 @@ export interface UserCreatedResult {
 export interface UserListResult {
   items: UserSummary[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export interface UserHistoryCheck {
+  hasHistory: boolean;
+  counts: Record<string, number>;
+  isTestUser: boolean;
 }
 
 function toSummary(u: UserRecord): UserSummary {
@@ -465,6 +475,154 @@ export class UsersService {
         updatedAt: u.updatedAt.toISOString(),
       })),
     };
+  }
+
+  async archive(id: string, actor: AuthUser): Promise<UserSummary> {
+    if (id === actor.id) {
+      throw new UnprocessableEntityException({
+        code: 'CANNOT_ARCHIVE_SELF',
+        message: 'You cannot archive your own account',
+      });
+    }
+
+    const target = await this.findOne(id);
+
+    if (target.role.code === SUPER_ADMIN_CODE) {
+      await this.assertNotLastActiveSuperAdmin(id, 'archive');
+    }
+
+    const now = new Date();
+    const updated = await this.db.getClient().$transaction(async (tx) => {
+      const u = await tx.user.update({
+        where: { id },
+        data: { isActive: false, archivedAt: now, archivedByUserId: actor.id },
+        select: USER_SELECT,
+      });
+      await tx.userSession.deleteMany({ where: { userId: id } });
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'user_archived',
+          userId: id,
+          actorId: actor.id,
+          metadata: { archivedAt: now.toISOString() },
+        },
+      });
+      return u;
+    });
+    return toSummary(updated);
+  }
+
+  async checkUserHistory(id: string): Promise<UserHistoryCheck> {
+    const user = await this.findOneOrThrow(id);
+    const db = this.db.getClient();
+
+    const [
+      incidentsReported,
+      incidentsAssigned,
+      tasksCreated,
+      tasksAssigned,
+      maintenanceCreated,
+      maintenanceAssigned,
+      safetyInspections,
+      safetyFindings,
+      contractsOwned,
+      contractsCreated,
+      productionOrders,
+      comments,
+      auditEvents,
+    ] = await Promise.all([
+      db.incident.count({ where: { reportedByUserId: id } }),
+      db.incident.count({ where: { assignedToUserId: id } }),
+      db.factoryTask.count({ where: { createdByUserId: id } }),
+      db.factoryTask.count({ where: { assignedToUserId: id } }),
+      db.maintenanceRequest.count({ where: { createdByUserId: id } }),
+      db.maintenanceRequest.count({ where: { assignedToUserId: id } }),
+      db.safetyInspection.count({ where: { createdByUserId: id } }),
+      db.safetyFinding.count({ where: { assignedToUserId: id } }),
+      db.contract.count({ where: { ownerUserId: id } }),
+      db.contract.count({ where: { createdByUserId: id } }),
+      db.productionOrder.count({ where: { createdByUserId: id } }),
+      db.incidentComment.count({ where: { authorUserId: id } }),
+      db.securityAuditEvent.count({ where: { OR: [{ userId: id }, { actorId: id }] } }),
+    ]);
+
+    const counts: Record<string, number> = {};
+    if (incidentsReported > 0) counts['incidentsReported'] = incidentsReported;
+    if (incidentsAssigned > 0) counts['incidentsAssigned'] = incidentsAssigned;
+    if (tasksCreated > 0) counts['tasksCreated'] = tasksCreated;
+    if (tasksAssigned > 0) counts['tasksAssigned'] = tasksAssigned;
+    if (maintenanceCreated > 0) counts['maintenanceCreated'] = maintenanceCreated;
+    if (maintenanceAssigned > 0) counts['maintenanceAssigned'] = maintenanceAssigned;
+    if (safetyInspections > 0) counts['safetyInspections'] = safetyInspections;
+    if (safetyFindings > 0) counts['safetyFindings'] = safetyFindings;
+    if (contractsOwned > 0) counts['contractsOwned'] = contractsOwned;
+    if (contractsCreated > 0) counts['contractsCreated'] = contractsCreated;
+    if (productionOrders > 0) counts['productionOrders'] = productionOrders;
+    if (comments > 0) counts['comments'] = comments;
+    if (auditEvents > 0) counts['auditEvents'] = auditEvents;
+
+    return {
+      hasHistory: Object.keys(counts).length > 0,
+      counts,
+      isTestUser: user.username.startsWith('test.'),
+    };
+  }
+
+  async deleteTestUser(id: string, confirmationText: string, actor: AuthUser): Promise<void> {
+    if (id === actor.id) {
+      throw new UnprocessableEntityException({
+        code: 'CANNOT_DELETE_SELF',
+        message: 'You cannot delete your own account',
+      });
+    }
+
+    const target = await this.findOneOrThrow(id);
+
+    if (!target.username.startsWith('test.')) {
+      throw new UnprocessableEntityException({
+        code: 'NOT_A_TEST_USER',
+        message: `Permanent deletion is only permitted for users whose username starts with 'test.'`,
+      });
+    }
+
+    if (confirmationText !== target.username) {
+      throw new BadRequestException({
+        code: 'CONFIRMATION_MISMATCH',
+        message: 'Confirmation text does not match the username. Type the exact username to confirm.',
+      });
+    }
+
+    const history = await this.checkUserHistory(id);
+    if (history.hasHistory) {
+      await this.db.getClient().securityAuditEvent.create({
+        data: {
+          event: 'test_user_delete_blocked',
+          actorId: actor.id,
+          metadata: { targetUserId: id, username: target.username, counts: history.counts },
+        },
+      });
+      const summary = Object.entries(history.counts)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      throw new UnprocessableEntityException({
+        code: 'USER_HAS_HISTORY',
+        message: `Cannot permanently delete: user has business history (${summary}). Deactivate or archive instead.`,
+        counts: history.counts,
+      });
+    }
+
+    await this.db.getClient().$transaction(async (tx) => {
+      await tx.userSession.deleteMany({ where: { userId: id } });
+      await tx.userModuleAccess.deleteMany({ where: { userId: id } });
+      await tx.user.delete({ where: { id } });
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'test_user_permanently_deleted',
+          actorId: actor.id,
+          metadata: { deletedUserId: id, username: target.username, displayName: target.displayName },
+        },
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------

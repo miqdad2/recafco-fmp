@@ -1,4 +1,3 @@
-﻿import Link from 'next/link';
 import type { Metadata } from 'next';
 import { departments } from '@/lib/organizations-api';
 import { Breadcrumbs } from '../../_components/breadcrumbs';
@@ -6,8 +5,16 @@ import { PageHeader } from '../_components/page-header';
 import { StatusBadge } from '../_components/status-badge';
 import { EmptyState } from '../_components/empty-state';
 import { ErrorState } from '../_components/error-state';
+import { OrgLifecycleActions } from '../_components/lifecycle-actions';
+import {
+  activateDepartmentAction,
+  deactivateDepartmentAction,
+  archiveDepartmentAction,
+  getDepartmentDependenciesAction,
+  deleteDepartmentAction,
+} from './actions';
 
-export const metadata: Metadata = { title: 'Departments â€” RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Departments – RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 export default async function DepartmentsPage(): Promise<React.JSX.Element> {
@@ -34,12 +41,12 @@ export default async function DepartmentsPage(): Promise<React.JSX.Element> {
           title="Departments"
           description="Company-wide departments with no plant assignment."
           action={
-            <Link
+            <a
               href="/administration/departments/new"
               className="inline-flex items-center h-10 px-4 rounded-md bg-accent text-accent-foreground text-sm font-medium hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus"
             >
               New Department
-            </Link>
+            </a>
           }
         />
 
@@ -67,15 +74,22 @@ export default async function DepartmentsPage(): Promise<React.JSX.Element> {
                     <td className="px-4 py-3 font-mono text-xs text-text-secondary">{dept.code}</td>
                     <td className="px-4 py-3 text-text-primary">{dept.name}</td>
                     <td className="px-4 py-3">
-                      <StatusBadge isActive={dept.isActive} />
+                      <StatusBadge isActive={dept.isActive} isArchived={dept.archivedAt !== null} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/administration/departments/${dept.id}/edit`}
-                        className="text-xs font-medium text-accent hover:text-accent-hover focus:outline-none focus:underline"
-                      >
-                        Edit
-                      </Link>
+                      <OrgLifecycleActions
+                        id={dept.id}
+                        code={dept.code}
+                        name={dept.name}
+                        isActive={dept.isActive}
+                        isArchived={dept.archivedAt !== null}
+                        editHref={`/administration/departments/${dept.id}/edit`}
+                        activateAction={activateDepartmentAction}
+                        deactivateAction={deactivateDepartmentAction}
+                        archiveAction={archiveDepartmentAction}
+                        getDependenciesAction={getDepartmentDependenciesAction}
+                        deleteAction={deleteDepartmentAction}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -90,4 +104,3 @@ export default async function DepartmentsPage(): Promise<React.JSX.Element> {
     </div>
   );
 }
-

@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** UAT Live Execution — Full Acceptance Test (2026-07-05)
+- **Last completed:** Safe Lifecycle Management — Users, Departments, Plants, Locations (2026-07-05)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -38,6 +38,7 @@
 - **Department-Specific Dashboards** ✓
 - **User Access Acceptance Test** ✓
 - **UAT Live Execution — Full Acceptance Test** ✓
+- **Safe Lifecycle Management (Departments, Plants, Locations, Users)** ✓
 
 ## UAT Live Execution — Full Acceptance Test (Completed 2026-07-05)
 
@@ -167,6 +168,74 @@ All four test users authenticate successfully.
 | **Total** | ✓ **705 tests** |
 
 No production data modified. No migrations. No automatic deployment.
+
+## Safe Lifecycle Management — Departments, Plants, Locations, Users (Completed 2026-07-05)
+
+### Summary
+
+Added soft-archive and guarded hard-delete lifecycle management for all four organizational and user entities. All state changes create `securityAuditEvent` rows. No CASCADE deletes. No breaking of foreign keys, history, or audit trails.
+
+### Lifecycle States
+
+| State | isActive | archivedAt |
+|---|---|---|
+| Active | true | null |
+| Deactivated | false | null |
+| Archived | false | non-null |
+
+### API Endpoints Added
+
+| Entity | Endpoint | Permission |
+|---|---|---|
+| Departments | `GET :id/dependencies` | `org.departments.read` |
+| Departments | `POST :id/archive` | `org.departments.archive` |
+| Departments | `DELETE :id` | `org.departments.delete` |
+| Plants | `GET :id/dependencies` | `org.plants.read` |
+| Plants | `POST :id/archive` | `org.plants.archive` |
+| Plants | `DELETE :id` | `org.plants.delete` |
+| Locations | `GET :id/dependencies` | `org.locations.read` |
+| Locations | `POST :id/archive` | `org.locations.archive` |
+| Locations | `DELETE :id` | `org.locations.delete` |
+| Users | `GET :id/history` | `users.read` |
+| Users | `POST :id/archive` | `users.archive` |
+| Users | `DELETE :id` | `users.delete_test` (test users only) |
+
+### Hard Delete Rules
+
+- **Departments/Plants/Locations**: blocked if any FK dependency exists; dependency check returns `{ canDelete, dependencies }`. DELETE returns HTTP 204.
+- **Users**: only permitted when username starts with `test.`, user has zero history across all 12 business tables, and actor supplies matching `confirmationText` in request body.
+- **Self-protection**: actors cannot deactivate, archive, or delete themselves.
+- **Last SUPER_ADMIN guard**: archive blocked when no other active SUPER_ADMIN exists.
+
+### Frontend Components Added
+
+- `_components/lifecycle-actions.tsx` — `OrgLifecycleActions` client component (archive + dependency-check + delete dialogs)
+- `_components/status-badge.tsx` — rewritten to handle Active/Inactive/Archived states
+- `users/_components/user-lifecycle-actions.tsx` — `UserLifecycleActions` client component
+- All 4 list pages updated to use the new action menus
+
+### Migration Applied
+
+Migration `20260705_lifecycle_management`: adds `archived_at` and `archived_by_user_id` columns to `departments`, `plants`, `locations`, `users`. Adds 12 lifecycle permission codes.
+
+### Key Technical Notes
+
+- `archivedByUserId` stored as plain string (no FK) to preserve history if actor is later deactivated
+- `checkUserHistory` queries 12 tables: incident (reportedBy + assignedTo), factoryTask (createdBy + assignedTo), maintenanceRequest (createdBy + assignedTo), safetyInspection (createdBy), safetyFinding (assignedTo), contract (ownerUser + createdBy), productionOrder (createdBy), incidentComment (authorUser), securityAuditEvent (userId + actorId)
+- `moduleAccess` indirect count removed from department `checkDependencies` — `userModuleDepartmentGrant` (direct FK) is the real dependency
+- All lifecycle server actions return `{ error?: string }` (not void) to allow inline error display without redirect
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api exec tsc --noEmit` | ✓ 0 errors |
+| `pnpm --filter @recafco/web exec tsc --noEmit` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ **670/670** (27 test files) |
+| `pnpm --filter @recafco/web test --run` | ✓ **67/67** (6 test files) |
+| `pnpm build` | ✓ 8/8 tasks |
+| **Total** | ✓ **737 tests** |
 
 ---
 

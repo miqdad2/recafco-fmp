@@ -2,11 +2,22 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import type { OrgEntityFormState } from '../_components/org-entity-form';
+import type { DependencyCheck } from '@/lib/organizations-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
 type ApiError = { error: { code: string; message: string; details?: { fields?: Record<string, string[]> } } };
+
+export type LifecycleActionResult = { error?: string };
+
+async function getToken(): Promise<string> {
+  const store = await cookies();
+  const token = store.get('recafco_access')?.value;
+  if (!token) redirect('/login');
+  return token;
+}
 
 async function postJson(url: string, body: unknown, method = 'POST'): Promise<Response> {
   const store = await cookies();
@@ -54,4 +65,82 @@ export async function updatePlantAction(
     return { fieldErrors: body.error.details?.fields ?? {} };
   }
   return { error: body.error.message };
+}
+
+export async function activatePlantAction(id: string): Promise<LifecycleActionResult> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE}/organizations/plants/${id}/activate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const b = (await res.json()) as ApiError;
+    return { error: b.error?.message ?? 'Failed to activate' };
+  }
+  revalidatePath('/administration/plants');
+  return {};
+}
+
+export async function deactivatePlantAction(id: string): Promise<LifecycleActionResult> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE}/organizations/plants/${id}/deactivate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const b = (await res.json()) as ApiError;
+    return { error: b.error?.message ?? 'Failed to deactivate' };
+  }
+  revalidatePath('/administration/plants');
+  return {};
+}
+
+export async function archivePlantAction(id: string): Promise<LifecycleActionResult> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE}/organizations/plants/${id}/archive`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const b = (await res.json()) as ApiError;
+    return { error: b.error?.message ?? 'Failed to archive' };
+  }
+  revalidatePath('/administration/plants');
+  return {};
+}
+
+export async function getPlantDependenciesAction(id: string): Promise<DependencyCheck | { error: string }> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE}/organizations/plants/${id}/dependencies`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const b = (await res.json()) as ApiError;
+    return { error: b.error?.message ?? 'Failed to check dependencies' };
+  }
+  const json = (await res.json()) as { data: DependencyCheck };
+  return json.data;
+}
+
+export async function deletePlantAction(id: string): Promise<LifecycleActionResult> {
+  const token = await getToken();
+  const res = await fetch(`${API_BASE}/organizations/plants/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (res.status === 204) {
+    revalidatePath('/administration/plants');
+    return {};
+  }
+  if (!res.ok) {
+    const b = (await res.json()) as ApiError;
+    return { error: b.error?.message ?? 'Cannot delete this plant' };
+  }
+  revalidatePath('/administration/plants');
+  return {};
 }

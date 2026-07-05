@@ -8,6 +8,8 @@ import { PageHeader } from '../_components/page-header';
 import { EmptyState } from '../_components/empty-state';
 import { ErrorState } from '../_components/error-state';
 import { UserSecurityStatus } from './_components/user-security-status';
+import { UserLifecycleActions } from './_components/user-lifecycle-actions';
+import { activateUserAction, deactivateUserAction, archiveUserAction, deleteTestUserAction } from './actions';
 
 export const metadata: Metadata = { title: 'Users — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -181,12 +183,17 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
                         : <span className="text-text-muted italic">Never</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/administration/users/${user.id}/edit`}
-                        className="text-xs font-medium text-accent hover:text-accent-hover focus:outline-none focus:underline"
-                      >
-                        Edit
-                      </Link>
+                      <UserLifecycleActions
+                        id={user.id}
+                        username={user.username}
+                        isActive={user.isActive}
+                        isArchived={user.archivedAt !== null}
+                        isTestUser={user.username.startsWith('test.')}
+                        activateAction={activateUserAction}
+                        deactivateAction={deactivateUserAction}
+                        archiveAction={archiveUserAction}
+                        deleteTestUserAction={deleteTestUserAction}
+                      />
                     </td>
                   </tr>
                 ))}

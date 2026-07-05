@@ -29,6 +29,8 @@ model Department {
   name                String               @db.VarChar(200)
   description         String?              @db.VarChar(500)
   isActive            Boolean              @default(true) @map("is_active")
+  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId    String?              @map("archived_by_user_id") @db.Uuid
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   users               User[]
@@ -50,6 +52,8 @@ model Plant {
   name                String               @db.VarChar(200)
   description         String?              @db.VarChar(500)
   isActive            Boolean              @default(true) @map("is_active")
+  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId    String?              @map("archived_by_user_id") @db.Uuid
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   locations           Location[]
@@ -72,6 +76,8 @@ model Location {
   description         String?              @db.VarChar(500)
   plantId             String?              @map("plant_id") @db.Uuid
   isActive            Boolean              @default(true) @map("is_active")
+  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId    String?              @map("archived_by_user_id") @db.Uuid
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   plant               Plant?               @relation(fields: [plantId], references: [id], onDelete: Restrict)
@@ -162,6 +168,8 @@ model User {
   departmentId        String?   @map("department_id") @db.Uuid
   plantId             String?   @map("plant_id") @db.Uuid
   locationId          String?   @map("location_id") @db.Uuid
+  archivedAt          DateTime? @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId    String?   @map("archived_by_user_id") @db.Uuid
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 

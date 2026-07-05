@@ -318,6 +318,27 @@ export async function unlockUserAction(id: string): Promise<void> {
   redirect(`/administration/users/${id}/edit`);
 }
 
+export type UserLifecycleActionResult = { error?: string };
+
+export async function archiveUserAction(id: string): Promise<UserLifecycleActionResult> {
+  const accessToken = await getToken();
+  const result = await usersApi.archive(accessToken, id);
+  if (!result.ok) return { error: result.message };
+  revalidatePath('/administration/users');
+  return {};
+}
+
+export async function deleteTestUserAction(
+  id: string,
+  confirmationText: string,
+): Promise<UserLifecycleActionResult> {
+  const accessToken = await getToken();
+  const result = await usersApi.deleteTestUser(accessToken, id, confirmationText);
+  if (!result.ok) return { error: result.message };
+  revalidatePath('/administration/users');
+  return {};
+}
+
 // ---------------------------------------------------------------------------
 // Module access
 // ---------------------------------------------------------------------------

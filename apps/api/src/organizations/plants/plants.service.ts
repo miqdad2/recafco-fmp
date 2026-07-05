@@ -1,10 +1,20 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { Plant } from '@recafco/database';
 import { DatabaseService } from '../../database/database.service';
 import type { CreatePlantDto } from './dto/create-plant.dto';
 import type { UpdatePlantDto } from './dto/update-plant.dto';
 import type { OrgListQueryDto, PaginatedResult } from '../dto/org-list-query.dto';
 import { isPrismaError } from '../prisma-error';
+
+export interface DependencyCheck {
+  canDelete: boolean;
+  dependencies: Record<string, number>;
+}
 
 @Injectable()
 export class PlantsService {
@@ -77,14 +87,119 @@ export class PlantsService {
     }
   }
 
-  async activate(id: string): Promise<Plant> {
+  async activate(id: string, actorId?: string): Promise<Plant> {
     await this.findOne(id);
-    return this.db.getClient().plant.update({ where: { id }, data: { isActive: true } });
+    return this.db.getClient().$transaction(async (tx) => {
+      const plant = await tx.plant.update({ where: { id }, data: { isActive: true } });
+      await tx.securityAuditEvent.create({
+        data: { event: 'plant_activated', metadata: { plantId: id }, actorId: actorId ?? null },
+      });
+      return plant;
+    });
   }
 
-  async deactivate(id: string): Promise<Plant> {
+  async deactivate(id: string, actorId?: string): Promise<Plant> {
     await this.findOne(id);
-    return this.db.getClient().plant.update({ where: { id }, data: { isActive: false } });
+    return this.db.getClient().$transaction(async (tx) => {
+      const plant = await tx.plant.update({ where: { id }, data: { isActive: false } });
+      await tx.securityAuditEvent.create({
+        data: { event: 'plant_deactivated', metadata: { plantId: id }, actorId: actorId ?? null },
+      });
+      return plant;
+    });
+  }
+
+  async archive(id: string, actorId: string): Promise<Plant> {
+    await this.findOne(id);
+    const now = new Date();
+    return this.db.getClient().$transaction(async (tx) => {
+      const plant = await tx.plant.update({
+        where: { id },
+        data: { isActive: false, archivedAt: now, archivedByUserId: actorId },
+      });
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'plant_archived',
+          actorId,
+          metadata: { plantId: id, archivedAt: now.toISOString() },
+        },
+      });
+      return plant;
+    });
+  }
+
+  async checkDependencies(id: string): Promise<DependencyCheck> {
+    await this.findOne(id);
+    const db = this.db.getClient();
+
+    const [
+      locations,
+      users,
+      incidents,
+      tasks,
+      maintenanceRequests,
+      safetyInspections,
+      contracts,
+      productionLines,
+      productionOrders,
+    ] = await Promise.all([
+      db.location.count({ where: { plantId: id } }),
+      db.user.count({ where: { plantId: id } }),
+      db.incident.count({ where: { affectedPlantId: id } }),
+      db.factoryTask.count({ where: { plantId: id } }),
+      db.maintenanceRequest.count({ where: { plantId: id } }),
+      db.safetyInspection.count({ where: { plantId: id } }),
+      db.contract.count({ where: { plantId: id } }),
+      db.productionLine.count({ where: { plantId: id } }),
+      db.productionOrder.count({ where: { plantId: id } }),
+    ]);
+
+    const dependencies: Record<string, number> = {};
+    if (locations > 0) dependencies['locations'] = locations;
+    if (users > 0) dependencies['users'] = users;
+    if (incidents > 0) dependencies['incidents'] = incidents;
+    if (tasks > 0) dependencies['tasks'] = tasks;
+    if (maintenanceRequests > 0) dependencies['maintenanceRequests'] = maintenanceRequests;
+    if (safetyInspections > 0) dependencies['safetyInspections'] = safetyInspections;
+    if (contracts > 0) dependencies['contracts'] = contracts;
+    if (productionLines > 0) dependencies['productionLines'] = productionLines;
+    if (productionOrders > 0) dependencies['productionOrders'] = productionOrders;
+
+    return { canDelete: Object.keys(dependencies).length === 0, dependencies };
+  }
+
+  async delete(id: string, actorId: string): Promise<void> {
+    const plant = await this.findOne(id);
+    const check = await this.checkDependencies(id);
+
+    if (!check.canDelete) {
+      await this.db.getClient().securityAuditEvent.create({
+        data: {
+          event: 'plant_delete_blocked',
+          actorId,
+          metadata: { plantId: id, code: plant.code, dependencies: check.dependencies },
+        },
+      });
+      const summary = Object.entries(check.dependencies)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      throw new UnprocessableEntityException({
+        code: 'PLANT_HAS_DEPENDENCIES',
+        message: `This plant cannot be permanently deleted because it is referenced by ${summary}. Deactivate or archive it instead.`,
+        dependencies: check.dependencies,
+      });
+    }
+
+    await this.db.getClient().$transaction(async (tx) => {
+      await tx.plant.delete({ where: { id } });
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'plant_permanently_deleted',
+          actorId,
+          metadata: { plantId: id, code: plant.code, name: plant.name },
+        },
+      });
+    });
   }
 }
 
