@@ -249,6 +249,24 @@ Living document. Update after every reusable component or established visual pat
 - Used by: `administration/users/[id]/edit/page.tsx`
 - Notes: `'use client'`; each module row has its own isolated `useActionState` with a closure binding `(userId, module)`; `action` prop is the `setModuleAccessAction` server action passed from the server page. Props: `userId`, `moduleAccess: UserModuleAccessConfig[]`, `allDepartments`, `action`, `canManage`, `canManageAll`.
 
+### DashboardScopeBadge
+- Path: `apps/web/src/app/(protected)/_components/dashboard-scope-badge.tsx`
+- Purpose: Displays the department scope for any module dashboard — All Departments, My Department, or N Departments.
+- Variants: `ALL_DEPARTMENTS` → grey Globe icon; `OWN_DEPARTMENT` → blue/info Building2 icon with dept name; `SELECTED_DEPARTMENTS` → secondary LayoutList icon with count.
+- Key tokens/classes: `inline-flex items-center gap-1 text-sm`; variant-specific icon colors.
+- Accessibility behavior: Purely informational; no interactive state.
+- Used by: All 7 module dashboard pages.
+- Notes: Props: `scope: { type: DashboardScopeType; departmentNames: string[] } | undefined`. Returns `null` when scope is undefined. `DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS'`.
+
+### DashboardRecentTable
+- Path: `apps/web/src/app/(protected)/_components/dashboard-recent-table.tsx`
+- Purpose: Renders a compact table of the 8 most-recently-updated records for any module's dashboard, with clickable row links.
+- Variants: Optional `hrefSuffix` (e.g., `/edit` for admin user links); optional `emptyMessage` override.
+- Key tokens/classes: `divide-y divide-border`; row links use `hover:bg-surface-secondary`; status shown as `font-mono text-xs uppercase`.
+- Accessibility behavior: `<table>` with `<thead>`/`<tbody>`; each row is a `<Link>` spanning via block layout.
+- Used by: All 7 module dashboard pages.
+- Notes: Props: `items: DashboardRecentItem[]`, `baseHref: string`, `hrefSuffix?: string`, `emptyMessage?: string`. `DashboardRecentItem = { id, referenceNumber, title, status, updatedAt }`. Link format: `${baseHref}/${item.id}${hrefSuffix}`.
+
 ---
 
 ## API Patterns (Unit 06)

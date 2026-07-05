@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** Permission Handling Safety Fix (2026-07-04)
+- **Last completed:** Department-Specific Dashboards (2026-07-05)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -35,6 +35,139 @@
 - **Unit 15 — Department-Scoped Module Access** ✓
 - **User Administration UI Redesign** ✓
 - **Permission Handling Safety Fix** ✓
+- **Department-Specific Dashboards** ✓
+
+## Department-Specific Dashboards (Completed 2026-07-05)
+
+### Summary
+
+Added per-module dashboard pages for all 7 modules (Factory Tasks, Incidents, Maintenance, Safety & Compliance, Contracts, Production, Administration). Each dashboard shows department scope badge, metric cards, and recent items table. Backend adds `getDashboard(actor)` to all 7 services + `GET /module/dashboard` endpoints with `@Permissions('module.read')`. Department scoping is enforced via `DepartmentAccessService`. Root dashboard `/` module cards and sidebar navigation updated to point to dashboard routes.
+
+### Routes Added
+
+- `/factory-tasks/dashboard` — 5 metrics: Open Tasks, Assigned to Me, Overdue, Blocked, Completed This Month
+- `/incidents/dashboard` — 4 metrics: Open, Critical Open, Under Investigation, Resolved This Month
+- `/maintenance/dashboard` — 5 metrics: Open, Assigned to Me, Overdue, Waiting for Parts, Completed This Month
+- `/safety-compliance/dashboard` — 5 metrics: Scheduled, In Progress, Open Findings, Critical Findings, Overdue Findings
+- `/contracts/dashboard` — 6 metrics: Active, Expiring Soon, Expired, Draft, Terminated, Closed
+- `/production/dashboard` — 4 metrics: Scheduled Orders, In Progress, Paused, Completed This Month
+- `/administration/dashboard` — 4 metrics: Active Users, Inactive Users, Locked Accounts, Must Change Password
+
+### Key Architecture Notes
+
+- `DashboardScopeBadge` shared component displays scope type with appropriate icon/color
+- `DashboardRecentTable` shared component shows 8 most-recently-updated items with clickable row links
+- `hrefSuffix` prop on `DashboardRecentTable` supports admin users linking to `/edit`
+- Admin dashboard reads cookie directly (pattern differs from other modules using `apiFetch`)
+- Sidebar `isActive()` updated to highlight module nav when anywhere in `/module/**` including `/module/dashboard`
+- `@Get('dashboard')` declared before `@Get(':id')` in all controllers to avoid NestJS route conflicts
+- Safety findings scoped via `{ inspection: { departmentId: deptFilter } }` (no direct `departmentId` on `SafetyFinding`)
+
+### New Files
+
+- `apps/web/src/app/(protected)/_components/dashboard-scope-badge.tsx`
+- `apps/web/src/app/(protected)/_components/dashboard-recent-table.tsx`
+- `apps/web/src/app/(protected)/factory-tasks/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/incidents/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/maintenance/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/safety-compliance/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/production/dashboard/page.tsx`
+- `apps/web/src/app/(protected)/administration/dashboard/page.tsx`
+- `apps/api/src/incidents/incidents.service.test.ts`
+
+### Verification Results (2026-07-05 — initial)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm test` | ✓ 566/566 tests (22 test files) |
+| `pnpm build` | ✓ 8/8 tasks, 54 routes emitted |
+
+No database changes. No new migrations.
+
+## Dashboard Permission Hardening (Completed 2026-07-05)
+
+### Summary
+
+Acceptance audit found two gaps: (1) MODULE_CARDS on the root dashboard shown unconditionally regardless of permissions, (2) quick-action create buttons on all 7 module dashboards shown unconditionally. Both fixed.
+
+### Changes
+
+**Root page (`apps/web/src/app/(protected)/page.tsx`):**
+- Added `readPermission` field to each of the 6 `MODULE_CARDS` entries
+- Filters MODULE_CARDS by `permissions.includes(card.readPermission)` before rendering
+- Shows "You do not have access to any operational modules" empty state when no cards are visible
+
+**All 7 module dashboard pages** — added `Promise.allSettled([api.dashboard(), authApi.me(accessToken)])` to run dashboard fetch and permission fetch in parallel; gates create buttons by permission:
+- `factory-tasks/dashboard`: "New Task" gated by `tasks.create`
+- `incidents/dashboard`: "Report Incident" gated by `incidents.create`
+- `maintenance/dashboard`: "New Request" gated by `maintenance.create`
+- `safety-compliance/dashboard`: "New Inspection" gated by `safety.create`
+- `contracts/dashboard`: "New Contract" gated by `contracts.create`
+- `production/dashboard`: "New Production Order" gated by `production.create`; "Production Lines" gated by `production.lines.read`
+- `administration/dashboard`: "New User" gated by `users.create`; "Roles" gated by `roles.read`
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm test` | ✓ 566/566 tests |
+| `pnpm build` | ✓ 8/8 tasks, 54 routes emitted |
+
+No database changes. No new migrations.
+
+---
+
+## Root Dashboard Security Fix (Completed 2026-07-05)
+
+### Summary
+
+The root dashboard (`/`) previously called `summary()` API endpoints for 5 operational modules and was missing the production module entirely. Although all `getSummary()` backend methods DO use `buildDeptFilter(actor, module)` (they are actor-scoped), the switch to `getDashboard()` was warranted because: (1) `getDashboard()` is the canonical endpoint returning scope metadata + recent items; (2) the frontend `TaskSummaryShape` had a pre-existing bug — it declared `myOpenTasks` but the backend returns `assignedToMe`; (3) module metric sections were rendered unconditionally rather than being hidden when the user lacks `read` permission.
+
+### Changes
+
+**`apps/web/src/app/(protected)/page.tsx`:**
+- Removed sequential `rolesApi.get()` call — permissions now read directly from `authApi.me().data.permissions`
+- Added `canReadProduction = permissions.includes('production.read')`
+- Replaced 5 `summary()` calls with 6 `dashboard()` calls (`incidentsApi.dashboard()`, `tasksApi.dashboard()`, `maintenanceApi.dashboard()`, `safetyApi.dashboard()`, `contractsApi.dashboard()`, `productionApi.dashboard()`)
+- Each module fetch conditional on read permission: `canReadX ? xApi.dashboard() : Promise.resolve(null)`
+- All 6 module metric sections wrapped in `{canReadX && ...}` — sections are absent (not restricted) when user lacks permission
+- Fixed `tasks.myOpenTasks` bug → `tasks.assignedToMe` (correct key from `TaskDashboardData`)
+- Added Production metrics section (was completely absent before): Scheduled Orders, In Progress, Paused, Completed This Month
+- Added `Play`, `PauseCircle` icon imports for production cards
+
+**New files:**
+- `apps/web/src/app/(protected)/_lib/root-dashboard-helpers.ts` — pure helpers: `getAccessibleModulePermissions`, `moduleDashStatus`, `MODULE_READ_PERMISSIONS`
+- `apps/web/src/app/(protected)/_lib/root-dashboard-helpers.test.ts` — 12 tests covering 11 required scenarios
+
+### Legacy getSummary() Endpoint Audit
+
+| Endpoint | Backend dept-scope | Frontend status |
+|---|---|---|
+| `GET /incidents/summary` | ✓ `buildDeptFilter(actor, INCIDENT_REPORT)` | Replaced by `dashboard()` |
+| `GET /factory-tasks/summary` | ✓ `buildDeptFilter(actor, FACTORY_TASKS)` | Replaced by `dashboard()` |
+| `GET /maintenance/summary` | ✓ `buildDeptFilter(actor, MAINTENANCE)` | Replaced by `dashboard()` |
+| `GET /safety-compliance/summary` | ✓ `buildDeptFilter(actor, SAFETY_COMPLIANCE)` | Replaced by `dashboard()` |
+| `GET /contracts/summary` | ✓ `buildDeptFilter(actor, CONTRACTS)` | Replaced by `dashboard()` |
+| `GET /production/summary` | ✓ `buildDeptFilter(actor, PRODUCTION)` | Never used (production was missing from root) |
+
+All 6 summary endpoints are safely dept-scoped at the backend level. The switch to `dashboard()` endpoints provides richer data (scope metadata, recent items) and eliminates the frontend type bug.
+
+### Verification Results (2026-07-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 12/12 tasks |
+| `pnpm test` | ✓ 566/566 API + 29/29 web (595 total, 12 new web tests) |
+| `pnpm build` | ✓ 8/8 tasks |
+
+No database changes. No new migrations.
+
+---
 
 ## Permission Handling Safety Fix (Completed 2026-07-04)
 

@@ -73,6 +73,17 @@ export interface SetModuleAccessPayload {
   departmentIds?: string[];
 }
 
+export interface AdminDashboardData {
+  scope: { type: DepartmentAccessScope; departmentNames: string[] };
+  metrics: {
+    totalActiveUsers: number;
+    totalInactiveUsers: number;
+    totalLockedUsers: number;
+    mustChangePassword: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 type ApiOk<T> = { data: T; meta: { requestId?: string }; error: null };
 type ApiErr = { data: null; meta: { requestId?: string }; error: { code: string; message: string } };
 
@@ -157,4 +168,7 @@ export const usersApi = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+
+  dashboard: (accessToken: string) =>
+    apiFetch<AdminDashboardData>('/administration/users/dashboard', accessToken),
 };

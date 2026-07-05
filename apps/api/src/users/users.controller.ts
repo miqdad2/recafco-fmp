@@ -94,6 +94,15 @@ export class UsersController {
     return { data: result, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('users.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.usersService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   @Get(':id')
   @Permissions('users.read')
   async findOne(

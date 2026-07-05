@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { TaskStatus, TaskPriority } from '@recafco/database';
+import { TaskStatus, TaskPriority, DepartmentAccessScope } from '@recafco/database';
 import { FactoryTasksService } from './factory-tasks.service';
 import type { DatabaseService } from '../database/database.service';
 import type { TasksRefService } from './tasks-ref.service';
@@ -39,6 +39,8 @@ const mockFactoryTaskCount = vi.fn();
 const mockUserFindUnique = vi.fn();
 const mockIncidentFindUnique = vi.fn();
 const mockLocationFindUnique = vi.fn();
+const mockDepartmentFindMany = vi.fn();
+const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
 const mockClient = {
@@ -50,6 +52,7 @@ const mockClient = {
   user: { findUnique: mockUserFindUnique },
   incident: { findUnique: mockIncidentFindUnique },
   location: { findUnique: mockLocationFindUnique },
+  department: { findMany: mockDepartmentFindMany },
   $transaction: mockTransaction,
 };
 
@@ -61,7 +64,7 @@ const mockRef = {
 
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
-  getScope: vi.fn(),
+  getScope: mockGetScope,
   canAccessDepartment: vi.fn().mockResolvedValue(true),
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
   canGrantScope: vi.fn().mockReturnValue(true),
@@ -773,6 +776,37 @@ describe('FactoryTasksService', () => {
       expect(incident).not.toBeNull();
       expect(incident['referenceNumber']).toBe('INC-2026-000001');
       expect(incident['title']).toBe('Safety Issue');
+    });
+  });
+
+  // ── getDashboard ──────────────────────────────────────────────────────────────
+
+  describe('getDashboard', () => {
+    it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+      mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+      // buildDeptFilter returns null by default — no department lookup
+      mockFactoryTaskCount
+        .mockResolvedValueOnce(12) // openTasks
+        .mockResolvedValueOnce(4)  // assignedToMe
+        .mockResolvedValueOnce(2)  // overdueTasks
+        .mockResolvedValueOnce(1)  // blockedTasks
+        .mockResolvedValueOnce(7); // completedThisMonth
+      mockFactoryTaskFindMany.mockResolvedValueOnce([
+        { id: 'task-r1', referenceNumber: 'TASK-001', title: 'Inspect Belt', status: 'OPEN', updatedAt: new Date('2026-07-01T10:00:00Z') },
+      ]);
+
+      const result = await service.getDashboard(ACTOR_NO_MANAGE);
+
+      expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+      expect(result.scope.departmentNames).toEqual([]);
+      expect(result.metrics.openTasks).toBe(12);
+      expect(result.metrics.assignedToMe).toBe(4);
+      expect(result.metrics.overdueTasks).toBe(2);
+      expect(result.metrics.blockedTasks).toBe(1);
+      expect(result.metrics.completedThisMonth).toBe(7);
+      expect(result.recent).toHaveLength(1);
+      expect(result.recent[0]?.referenceNumber).toBe('TASK-001');
+      expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

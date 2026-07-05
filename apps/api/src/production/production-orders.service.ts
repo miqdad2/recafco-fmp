@@ -5,7 +5,7 @@ import {
   ConflictException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { ProductionOrderStatus, ProductionEntryType, ModuleIdentifier } from '@recafco/database';
+import { ProductionOrderStatus, ProductionEntryType, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ProductionRefService } from './production-ref.service';
@@ -660,6 +660,80 @@ export class ProductionOrdersService {
     ]);
 
     return { totalDraft: draft, totalScheduled: scheduled, totalInProgress: inProgress, totalPaused: paused, totalCompleted: completed, totalCancelled: cancelled };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      scheduledOrders: number;
+      inProgressOrders: number;
+      pausedOrders: number;
+      completedThisMonth: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    if (!actor.permissions.includes('production.read')) {
+      throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.read' });
+    }
+
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.PRODUCTION_DASHBOARD),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.PRODUCTION_DASHBOARD),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
+    const [scheduledOrders, inProgressOrders, pausedOrders, completedThisMonth, recentRaw] =
+      await Promise.all([
+        this.db.getClient().productionOrder.count({
+          where: { ...deptWhere, status: ProductionOrderStatus.SCHEDULED },
+        }),
+        this.db.getClient().productionOrder.count({
+          where: { ...deptWhere, status: ProductionOrderStatus.IN_PROGRESS },
+        }),
+        this.db.getClient().productionOrder.count({
+          where: { ...deptWhere, status: ProductionOrderStatus.PAUSED },
+        }),
+        this.db.getClient().productionOrder.count({
+          where: {
+            ...deptWhere,
+            status: ProductionOrderStatus.COMPLETED,
+            completedAt: { gte: monthStart, lt: monthEnd },
+          },
+        }),
+        this.db.getClient().productionOrder.findMany({
+          where: { ...deptWhere },
+          take: 8,
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+        }),
+      ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { scheduledOrders, inProgressOrders, pausedOrders, completedThisMonth },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---- Org selectors ----

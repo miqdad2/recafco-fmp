@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { TaskStatus, TaskPriority, ModuleIdentifier } from '@recafco/database';
+import { TaskStatus, TaskPriority, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { TasksRefService } from './tasks-ref.service';
@@ -1092,6 +1092,76 @@ export class FactoryTasksService {
     ]);
 
     return { openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      openTasks: number;
+      assignedToMe: number;
+      overdueTasks: number;
+      blockedTasks: number;
+      completedThisMonth: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.FACTORY_TASKS),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
+
+    const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, recentRaw] =
+      await Promise.all([
+        this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: { in: ACTIVE_STATUSES } } }),
+        this.db.getClient().factoryTask.count({
+          where: { assignedToUserId: actor.id, status: { in: ACTIVE_STATUSES } },
+        }),
+        this.db.getClient().factoryTask.count({
+          where: { ...deptWhere, status: { in: OVERDUE_STATUSES }, dueAt: { lt: now } },
+        }),
+        this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: TaskStatus.BLOCKED } }),
+        this.db.getClient().factoryTask.count({
+          where: {
+            ...deptWhere,
+            status: { in: [TaskStatus.COMPLETED, TaskStatus.CLOSED] },
+            completedAt: { gte: monthStart, lt: monthEnd },
+          },
+        }),
+        this.db.getClient().factoryTask.findMany({
+          where: { ...deptWhere },
+          take: 8,
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+        }),
+      ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------

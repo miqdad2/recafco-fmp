@@ -105,6 +105,19 @@ export interface IncidentSummary {
   resolvedThisMonth: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface IncidentDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    totalOpen: number;
+    criticalOpen: number;
+    underInvestigation: number;
+    resolvedThisMonth: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -239,6 +252,9 @@ export const incidentsApi = {
 
   summary: () =>
     apiFetch<IncidentSummary>('/incidents/summary'),
+
+  dashboard: () =>
+    apiFetch<IncidentDashboardData>('/incidents/dashboard'),
 
   listComments: (id: string) =>
     apiFetch<IncidentComment[]>(`/incidents/${id}/comments`),

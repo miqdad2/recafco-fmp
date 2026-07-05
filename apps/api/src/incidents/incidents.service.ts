@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
   BadRequestException,
 } from '@nestjs/common';
-import { IncidentStatus, IncidentActionStatus, IncidentSeverity, ModuleIdentifier } from '@recafco/database';
+import { IncidentStatus, IncidentActionStatus, IncidentSeverity, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { IncidentsRefService } from './incidents-ref.service';
@@ -405,6 +405,79 @@ export class IncidentsService {
     ]);
 
     return { totalOpen, criticalOpen, underInvestigation, resolvedThisMonth };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      totalOpen: number;
+      criticalOpen: number;
+      underInvestigation: number;
+      resolvedThisMonth: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.INCIDENT_REPORT),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.INCIDENT_REPORT),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const openStatuses = [
+      IncidentStatus.SUBMITTED,
+      IncidentStatus.UNDER_REVIEW,
+      IncidentStatus.INVESTIGATION,
+      IncidentStatus.ACTION_REQUIRED,
+    ];
+
+    const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
+
+    const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, recentRaw] =
+      await Promise.all([
+        this.db.getClient().incident.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
+        this.db.getClient().incident.count({
+          where: { ...deptWhere, status: { in: openStatuses }, severity: IncidentSeverity.CRITICAL },
+        }),
+        this.db.getClient().incident.count({ where: { ...deptWhere, status: IncidentStatus.INVESTIGATION } }),
+        this.db.getClient().incident.count({
+          where: {
+            ...deptWhere,
+            status: IncidentStatus.RESOLVED,
+            resolvedAt: { gte: monthStart, lt: monthEnd },
+          },
+        }),
+        this.db.getClient().incident.findMany({
+          where: { ...deptWhere },
+          take: 8,
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+        }),
+      ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { totalOpen, criticalOpen, underInvestigation, resolvedThisMonth },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------

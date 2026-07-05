@@ -52,6 +52,15 @@ export class MaintenanceController {
     return { data, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('maintenance.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.maintenanceService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   @Get('my')
   @Permissions('maintenance.read')
   async my(

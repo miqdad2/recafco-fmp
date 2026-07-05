@@ -55,6 +55,15 @@ export class SafetyController {
     return { data, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('safety.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.safetyService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   @Get('people')
   @Permissions('safety.read')
   async people(

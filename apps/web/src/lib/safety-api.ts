@@ -126,6 +126,20 @@ export interface InspectionSummary {
   inProgressInspections: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface SafetyDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    scheduledInspections: number;
+    inProgressInspections: number;
+    openFindings: number;
+    criticalFindings: number;
+    overdueFindings: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface ListResponse<T> {
   items: T[];
   total: number;
@@ -254,6 +268,9 @@ export const safetyApi = {
 
   summary: () =>
     apiFetch<InspectionSummary>('/safety-compliance/summary'),
+
+  dashboard: () =>
+    apiFetch<SafetyDashboardData>('/safety-compliance/dashboard'),
 
   listFindings: (id: string) =>
     apiFetch<SafetyFinding[]>(`/safety-compliance/${id}/findings`),

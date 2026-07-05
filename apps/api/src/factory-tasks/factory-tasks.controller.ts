@@ -46,6 +46,15 @@ export class FactoryTasksController {
     return { data, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('tasks.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.tasksService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   @Get('my')
   @Permissions('tasks.read')
   async my(

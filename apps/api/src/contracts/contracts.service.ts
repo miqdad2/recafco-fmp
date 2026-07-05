@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
   ConflictException,
 } from '@nestjs/common';
-import { ContractStatus, ModuleIdentifier } from '@recafco/database';
+import { ContractStatus, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsRefService } from './contracts-ref.service';
@@ -540,6 +540,85 @@ export class ContractsService {
     ]);
 
     return { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      totalDraft: number;
+      totalActive: number;
+      totalExpiring: number;
+      totalExpired: number;
+      totalTerminated: number;
+      totalClosed: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    if (!actor.permissions.includes('contracts.read')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
+    }
+
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const today = utcToday();
+    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
+    const [
+      totalDraft,
+      totalActive,
+      totalExpiring,
+      totalExpired,
+      totalTerminated,
+      totalClosed,
+      recentRaw,
+    ] = await Promise.all([
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.DRAFT } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.ACTIVE } }),
+      this.db.getClient().contract.count({
+        where: {
+          ...deptWhere,
+          status: ContractStatus.ACTIVE,
+          renewalNoticeDate: { lte: today },
+          OR: [{ endDate: null }, { endDate: { gte: today } }],
+        },
+      }),
+      this.db.getClient().contract.count({
+        where: { ...deptWhere, status: ContractStatus.ACTIVE, endDate: { lt: today } },
+      }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.TERMINATED } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.CLOSED } }),
+      this.db.getClient().contract.findMany({
+        where: { ...deptWhere },
+        take: 8,
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+      }),
+    ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------

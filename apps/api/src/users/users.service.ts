@@ -7,7 +7,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { ModuleIdentifier } from '@recafco/database';
+import { ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { AuthService } from '../auth/auth.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
@@ -387,6 +387,61 @@ export class UsersService {
       return u;
     });
     return toSummary(updated);
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      totalActiveUsers: number;
+      totalInactiveUsers: number;
+      totalLockedUsers: number;
+      mustChangePassword: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.ADMINISTRATION),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.ADMINISTRATION),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+
+    const [totalActiveUsers, totalInactiveUsers, totalLockedUsers, mustChangePassword, recentRaw] =
+      await Promise.all([
+        this.db.getClient().user.count({ where: { ...deptWhere, isActive: true } }),
+        this.db.getClient().user.count({ where: { ...deptWhere, isActive: false } }),
+        this.db.getClient().user.count({ where: { ...deptWhere, lockedUntil: { gt: now } } }),
+        this.db.getClient().user.count({ where: { ...deptWhere, mustChangePassword: true, isActive: true } }),
+        this.db.getClient().user.findMany({
+          where: { ...deptWhere },
+          take: 8,
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, username: true, displayName: true, isActive: true, updatedAt: true },
+        }),
+      ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { totalActiveUsers, totalInactiveUsers, totalLockedUsers, mustChangePassword },
+      recent: recentRaw.map((u) => ({
+        id: u.id,
+        referenceNumber: u.username,
+        title: u.displayName,
+        status: u.isActive ? 'active' : 'inactive',
+        updatedAt: u.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------

@@ -108,6 +108,20 @@ export interface TaskSummary {
   blockedTasks: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface TaskDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    openTasks: number;
+    assignedToMe: number;
+    overdueTasks: number;
+    blockedTasks: number;
+    completedThisMonth: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -250,6 +264,9 @@ export const tasksApi = {
 
   summary: () =>
     apiFetch<TaskSummary>('/factory-tasks/summary'),
+
+  dashboard: () =>
+    apiFetch<TaskDashboardData>('/factory-tasks/dashboard'),
 
   my: (q: TaskListQuery = {}) =>
     apiFetch<ListResponse<FactoryTask>>(`/factory-tasks/my${buildQuery(q)}`),

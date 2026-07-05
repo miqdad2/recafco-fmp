@@ -70,6 +70,21 @@ export interface ContractSummary {
   totalClosed: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface ContractDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    totalDraft: number;
+    totalActive: number;
+    totalExpiring: number;
+    totalExpired: number;
+    totalTerminated: number;
+    totalClosed: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface ListResponse<T> {
   items: T[];
   total: number;
@@ -178,6 +193,9 @@ export const contractsApi = {
 
   summary: () =>
     apiFetch<ContractSummary>('/contracts/summary'),
+
+  dashboard: () =>
+    apiFetch<ContractDashboardData>('/contracts/dashboard'),
 
   listComments: (id: string) =>
     apiFetch<ContractComment[]>(`/contracts/${id}/comments`),

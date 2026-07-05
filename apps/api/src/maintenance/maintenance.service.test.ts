@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { MaintenanceStatus, MaintenancePriority } from '@recafco/database';
+import { MaintenanceStatus, MaintenancePriority, DepartmentAccessScope } from '@recafco/database';
 import { MaintenanceService } from './maintenance.service';
 import type { DatabaseService } from '../database/database.service';
 import type { MaintenanceRefService } from './maintenance-ref.service';
@@ -34,6 +34,8 @@ const mockMrFindMany = vi.fn();
 const mockMrCount = vi.fn();
 const mockUserFindUnique = vi.fn();
 const mockLocationFindUnique = vi.fn();
+const mockDepartmentFindMany = vi.fn();
+const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
 const mockClient = {
@@ -45,6 +47,7 @@ const mockClient = {
   },
   user: { findUnique: mockUserFindUnique },
   location: { findUnique: mockLocationFindUnique },
+  department: { findMany: mockDepartmentFindMany },
   $transaction: mockTransaction,
 };
 
@@ -56,7 +59,7 @@ const mockRef = {
 
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
-  getScope: vi.fn(),
+  getScope: mockGetScope,
   canAccessDepartment: vi.fn().mockResolvedValue(true),
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
   canGrantScope: vi.fn().mockReturnValue(true),
@@ -809,6 +812,36 @@ describe('MaintenanceService', () => {
       await expect(
         service.complete('mr-id-1', { completionSummary: 'Done' }, ACTOR_ASSIGNEE),
       ).rejects.toThrow(UnprocessableEntityException);
+    });
+  });
+
+  // ── getDashboard ──────────────────────────────────────────────────────────────
+
+  describe('getDashboard', () => {
+    it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+      mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+      mockMrCount
+        .mockResolvedValueOnce(8)  // openRequests
+        .mockResolvedValueOnce(3)  // assignedToMe
+        .mockResolvedValueOnce(2)  // overdueRequests
+        .mockResolvedValueOnce(1)  // waitingForParts
+        .mockResolvedValueOnce(5); // completedThisMonth
+      mockMrFindMany.mockResolvedValueOnce([
+        { id: 'mr-r1', referenceNumber: 'MR-001', title: 'Fix Pump', status: 'SUBMITTED', updatedAt: new Date('2026-07-01T08:00:00Z') },
+      ]);
+
+      const result = await service.getDashboard(ACTOR_BASE);
+
+      expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+      expect(result.scope.departmentNames).toEqual([]);
+      expect(result.metrics.openRequests).toBe(8);
+      expect(result.metrics.assignedToMe).toBe(3);
+      expect(result.metrics.overdueRequests).toBe(2);
+      expect(result.metrics.waitingForParts).toBe(1);
+      expect(result.metrics.completedThisMonth).toBe(5);
+      expect(result.recent).toHaveLength(1);
+      expect(result.recent[0]?.referenceNumber).toBe('MR-001');
+      expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

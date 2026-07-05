@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { MaintenanceStatus, MaintenancePriority, ModuleIdentifier } from '@recafco/database';
+import { MaintenanceStatus, MaintenancePriority, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { MaintenanceRefService } from './maintenance-ref.service';
@@ -999,6 +999,84 @@ export class MaintenanceService {
       ]);
 
     return { openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      openRequests: number;
+      assignedToMe: number;
+      overdueRequests: number;
+      waitingForParts: number;
+      completedThisMonth: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.MAINTENANCE_REQUESTS),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.MAINTENANCE_REQUESTS),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const openStatuses: MaintenanceStatus[] = [
+      MaintenanceStatus.SUBMITTED,
+      MaintenanceStatus.UNDER_REVIEW,
+      MaintenanceStatus.APPROVED,
+    ];
+
+    const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
+
+    const [openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth, recentRaw] =
+      await Promise.all([
+        this.db.getClient().maintenanceRequest.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
+        this.db.getClient().maintenanceRequest.count({
+          where: { assignedToUserId: actor.id, status: { in: ACTIVE_STATUSES } },
+        }),
+        this.db.getClient().maintenanceRequest.count({
+          where: { ...deptWhere, status: { in: ACTIVE_STATUSES }, requestedCompletionAt: { lt: now } },
+        }),
+        this.db.getClient().maintenanceRequest.count({
+          where: { ...deptWhere, status: MaintenanceStatus.WAITING_FOR_PARTS },
+        }),
+        this.db.getClient().maintenanceRequest.count({
+          where: {
+            ...deptWhere,
+            status: { in: [MaintenanceStatus.COMPLETED, MaintenanceStatus.CLOSED] },
+            completedAt: { gte: monthStart, lt: monthEnd },
+          },
+        }),
+        this.db.getClient().maintenanceRequest.findMany({
+          where: { ...deptWhere },
+          take: 8,
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+        }),
+      ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------------------

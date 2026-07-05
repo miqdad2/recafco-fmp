@@ -14,6 +14,7 @@ vi.mock('@node-rs/argon2', () => ({
 }));
 
 import { UsersService } from './users.service';
+import { DepartmentAccessScope } from '@recafco/database';
 import type { DatabaseService } from '../database/database.service';
 import type { AuthService } from '../auth/auth.service';
 import type { DepartmentAccessService } from '../department-access/department-access.service';
@@ -27,6 +28,8 @@ const mockSessionDeleteMany = vi.fn();
 const mockLocationFindUnique = vi.fn();
 const mockRoleFindUnique = vi.fn();
 const mockAuditCreate = vi.fn();
+const mockDepartmentFindMany = vi.fn();
+const mockGetScope = vi.fn();
 
 const mockClient = {
   user: {
@@ -40,6 +43,7 @@ const mockClient = {
   location: { findUnique: mockLocationFindUnique },
   role: { findUnique: mockRoleFindUnique },
   securityAuditEvent: { create: mockAuditCreate },
+  department: { findMany: mockDepartmentFindMany },
   $transaction: vi.fn((fn: (tx: typeof mockClient) => Promise<unknown>) => fn(mockClient)),
 };
 
@@ -50,6 +54,7 @@ const mockAuthService = {
 } as unknown as AuthService;
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
+  getScope: mockGetScope,
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
 } as unknown as DepartmentAccessService;
 
@@ -395,6 +400,36 @@ describe('UsersService', () => {
       expect(typeof result.tempPassword).toBe('string');
       expect(result.tempPassword.length).toBeGreaterThan(0);
       expect(mockSessionDeleteMany).toHaveBeenCalledWith({ where: { userId: BASE_USER.id } });
+    });
+  });
+
+  describe('getDashboard', () => {
+    it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+      mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+      mockUserCount
+        .mockResolvedValueOnce(20) // totalActiveUsers
+        .mockResolvedValueOnce(5)  // totalInactiveUsers
+        .mockResolvedValueOnce(2)  // totalLockedUsers
+        .mockResolvedValueOnce(3); // mustChangePassword
+      mockUserFindMany.mockResolvedValueOnce([
+        { id: 'u-1', username: 'alice', displayName: 'Alice', isActive: true, updatedAt: new Date('2026-07-01T12:00:00Z') },
+        { id: 'u-2', username: 'bob', displayName: 'Bob', isActive: false, updatedAt: new Date('2026-07-01T11:00:00Z') },
+      ]);
+
+      const result = await service.getDashboard(ADMIN_ACTOR);
+
+      expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+      expect(result.scope.departmentNames).toEqual([]);
+      expect(result.metrics.totalActiveUsers).toBe(20);
+      expect(result.metrics.totalInactiveUsers).toBe(5);
+      expect(result.metrics.totalLockedUsers).toBe(2);
+      expect(result.metrics.mustChangePassword).toBe(3);
+      expect(result.recent).toHaveLength(2);
+      expect(result.recent[0]?.referenceNumber).toBe('alice');
+      expect(result.recent[0]?.title).toBe('Alice');
+      expect(result.recent[0]?.status).toBe('active');
+      expect(result.recent[1]?.status).toBe('inactive');
+      expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

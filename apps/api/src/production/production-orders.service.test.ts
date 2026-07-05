@@ -10,6 +10,7 @@ import type { DatabaseService } from '../database/database.service';
 import type { ProductionRefService } from './production-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import { DepartmentAccessService } from '../department-access/department-access.service';
+import { DepartmentAccessScope } from '@recafco/database';
 
 // ---------------------------------------------------------------------------
 // Transaction mocks
@@ -40,6 +41,7 @@ const mockTx = {
 const mockOrderFindUnique = vi.fn();
 const mockOrderFindMany = vi.fn();
 const mockOrderCount = vi.fn();
+const mockGetScope = vi.fn();
 const mockEntryFindMany = vi.fn();
 const mockEntryCreate = vi.fn();
 const mockCommentFindMany = vi.fn();
@@ -84,7 +86,7 @@ const mockRef = {
 
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
-  getScope: vi.fn(),
+  getScope: mockGetScope,
   canAccessDepartment: vi.fn().mockResolvedValue(true),
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
   canGrantScope: vi.fn().mockReturnValue(true),
@@ -875,6 +877,36 @@ describe('ProductionOrdersService', () => {
       const result = await service.listLocations(ACTOR_VIEWER);
       expect(result).toHaveLength(1);
       expect(mockLocationFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { isActive: true } }));
+    });
+  });
+
+  describe('getDashboard', () => {
+    it('throws ForbiddenException without production.read', async () => {
+      await expect(service.getDashboard(ACTOR_NONE)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+      mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+      mockOrderCount
+        .mockResolvedValueOnce(6)  // scheduledOrders
+        .mockResolvedValueOnce(3)  // inProgressOrders
+        .mockResolvedValueOnce(1)  // pausedOrders
+        .mockResolvedValueOnce(8); // completedThisMonth
+      mockOrderFindMany.mockResolvedValueOnce([
+        { id: 'ord-r1', referenceNumber: 'PROD-001', title: 'Batch Alpha', status: 'SCHEDULED', updatedAt: new Date('2026-07-01T06:00:00Z') },
+      ]);
+
+      const result = await service.getDashboard(ACTOR_VIEWER);
+
+      expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+      expect(result.scope.departmentNames).toEqual([]);
+      expect(result.metrics.scheduledOrders).toBe(6);
+      expect(result.metrics.inProgressOrders).toBe(3);
+      expect(result.metrics.pausedOrders).toBe(1);
+      expect(result.metrics.completedThisMonth).toBe(8);
+      expect(result.recent).toHaveLength(1);
+      expect(result.recent[0]?.referenceNumber).toBe('PROD-001');
+      expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { InspectionStatus, FindingSeverity, FindingStatus } from '@recafco/database';
+import { InspectionStatus, FindingSeverity, FindingStatus, DepartmentAccessScope } from '@recafco/database';
 import { SafetyService } from './safety.service';
 import type { DatabaseService } from '../database/database.service';
 import type { SafetyRefService } from './safety-ref.service';
@@ -51,6 +51,8 @@ const mockCommentFindMany = vi.fn();
 const mockActivityFindMany = vi.fn();
 const mockUserFindUnique = vi.fn();
 const mockLocationFindUnique = vi.fn();
+const mockDepartmentFindMany = vi.fn();
+const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
 const mockClient = {
@@ -69,6 +71,7 @@ const mockClient = {
   safetyInspectionActivity: { findMany: mockActivityFindMany },
   user: { findUnique: mockUserFindUnique, findMany: vi.fn() },
   location: { findUnique: mockLocationFindUnique },
+  department: { findMany: mockDepartmentFindMany },
   $transaction: mockTransaction,
 };
 
@@ -77,7 +80,7 @@ const mockRef = { nextRef: vi.fn().mockResolvedValue('SAFE-2026-000001') } as un
 
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
-  getScope: vi.fn(),
+  getScope: mockGetScope,
   canAccessDepartment: vi.fn().mockResolvedValue(true),
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
   canGrantScope: vi.fn().mockReturnValue(true),
@@ -1060,5 +1063,37 @@ describe('SafetyService.findAll', () => {
         where: expect.objectContaining({ status: 'SCHEDULED' }),
       }),
     );
+  });
+});
+
+// ── getDashboard ──────────────────────────────────────────────────────────────
+
+describe('SafetyService.getDashboard', () => {
+  it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+    // buildDeptFilter returns null by default — no department lookup
+    mockInspectionCount
+      .mockResolvedValueOnce(4)  // scheduledInspections
+      .mockResolvedValueOnce(2); // inProgressInspections
+    mockFindingCount
+      .mockResolvedValueOnce(9)  // openFindings
+      .mockResolvedValueOnce(3)  // criticalFindings
+      .mockResolvedValueOnce(1); // overdueFindings
+    mockInspectionFindMany.mockResolvedValueOnce([
+      { id: 'insp-r1', referenceNumber: 'SAFE-001', title: 'Fire Check', status: 'SCHEDULED', updatedAt: new Date('2026-07-01T09:00:00Z') },
+    ]);
+
+    const result = await service.getDashboard(ACTOR_VIEWER);
+
+    expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+    expect(result.scope.departmentNames).toEqual([]);
+    expect(result.metrics.scheduledInspections).toBe(4);
+    expect(result.metrics.inProgressInspections).toBe(2);
+    expect(result.metrics.openFindings).toBe(9);
+    expect(result.metrics.criticalFindings).toBe(3);
+    expect(result.metrics.overdueFindings).toBe(1);
+    expect(result.recent).toHaveLength(1);
+    expect(result.recent[0]?.referenceNumber).toBe('SAFE-001');
+    expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });

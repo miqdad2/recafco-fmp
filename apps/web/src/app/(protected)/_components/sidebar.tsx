@@ -46,12 +46,12 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { label: 'Factory Tasks Management', href: '/factory-tasks', icon: ClipboardList },
-      { label: 'Incident Report', href: '/incidents', icon: AlertTriangle },
-      { label: 'Maintenance Requests', href: '/maintenance', icon: Wrench },
-      { label: 'Safety & Compliance', href: '/safety-compliance', icon: ShieldCheck },
-      { label: 'Contracts Management', href: '/contracts', icon: FileText },
-      { label: 'Production Dashboard', href: '/production', icon: Factory },
+      { label: 'Factory Tasks Management', href: '/factory-tasks/dashboard', icon: ClipboardList },
+      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle },
+      { label: 'Maintenance Requests', href: '/maintenance/dashboard', icon: Wrench },
+      { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck },
+      { label: 'Contracts Management', href: '/contracts/dashboard', icon: FileText },
+      { label: 'Production Dashboard', href: '/production/dashboard', icon: Factory },
     ],
   },
   {
@@ -63,7 +63,7 @@ const MAIN_GROUPS: NavGroup[] = [
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
-  { label: 'Overview', href: '/administration', icon: Settings },
+  { label: 'Overview', href: '/administration/dashboard', icon: Settings },
   { label: 'Users', href: '/administration/users', icon: Users, permission: 'users.read' },
   { label: 'Roles', href: '/administration/roles', icon: Shield, permission: 'roles.read' },
   { label: 'Departments', href: '/administration/departments', icon: Building2, permission: 'org.departments.read' },
@@ -80,6 +80,10 @@ interface SidebarProps {
 
 function isActive(href: string, pathname: string): boolean {
   if (href === '/') return pathname === '/';
+  if (href.endsWith('/dashboard')) {
+    const base = href.slice(0, -'/dashboard'.length);
+    return pathname === href || pathname === base || pathname.startsWith(base + '/');
+  }
   return pathname === href || pathname.startsWith(href + '/');
 }
 
@@ -206,8 +210,8 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
               <div id="admin-nav-items" className="ml-3 border-l border-nav-hover">
                 {visibleAdminItems.map((item) => {
                   if (!item.href) return null;
-                  const active = item.href === '/administration'
-                    ? pathname === '/administration'
+                  const active = item.href === '/administration/dashboard'
+                    ? (pathname === '/administration/dashboard' || pathname === '/administration')
                     : isActive(item.href, pathname);
                   return (
                     <Link

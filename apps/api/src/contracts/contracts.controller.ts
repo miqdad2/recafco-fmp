@@ -47,6 +47,15 @@ export class ContractsController {
     return { data, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('contracts.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractsService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   @Get('people')
   @Permissions('contracts.read')
   async people(

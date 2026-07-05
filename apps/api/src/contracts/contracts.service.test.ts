@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
-import { ContractStatus } from '@recafco/database';
+import { ContractStatus, DepartmentAccessScope } from '@recafco/database';
 import { ContractsService, getDerivedLifecycleStatus, buildListWhere } from './contracts.service';
 import type { DatabaseService } from '../database/database.service';
 import type { ContractsRefService } from './contracts-ref.service';
@@ -42,6 +42,7 @@ const mockUserFindMany = vi.fn();
 const mockDepartmentFindMany = vi.fn();
 const mockPlantFindMany = vi.fn();
 const mockLocationFindMany = vi.fn();
+const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
 const mockClient = {
@@ -64,7 +65,7 @@ const mockRef = { nextRef: vi.fn().mockResolvedValue('CONTRACT-2026-000001') } a
 
 const mockDeptAccess = {
   buildDeptFilter: vi.fn().mockResolvedValue(null),
-  getScope: vi.fn(),
+  getScope: mockGetScope,
   canAccessDepartment: vi.fn().mockResolvedValue(true),
   assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined),
   canGrantScope: vi.fn().mockReturnValue(true),
@@ -899,5 +900,44 @@ describe('ContractsService.listLocations', () => {
     expect(mockLocationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { isActive: true, plantId: 'plant-123' } }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ContractsService.getDashboard
+// ---------------------------------------------------------------------------
+
+describe('ContractsService.getDashboard', () => {
+  it('throws ForbiddenException without contracts.read', async () => {
+    const noRead: AuthUser = { ...ACTOR_VIEWER, permissions: [] };
+    await expect(service.getDashboard(noRead)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('returns ALL_DEPARTMENTS scope and correct metrics when no dept filter', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+    mockContractCount
+      .mockResolvedValueOnce(3)  // totalDraft
+      .mockResolvedValueOnce(10) // totalActive
+      .mockResolvedValueOnce(2)  // totalExpiring
+      .mockResolvedValueOnce(1)  // totalExpired
+      .mockResolvedValueOnce(4)  // totalTerminated
+      .mockResolvedValueOnce(5); // totalClosed
+    mockContractFindMany.mockResolvedValueOnce([
+      { id: 'c-r1', referenceNumber: 'CONTRACT-001', title: 'Vendor A', status: 'ACTIVE', updatedAt: new Date('2026-07-01T07:00:00Z') },
+    ]);
+
+    const result = await service.getDashboard(ACTOR_VIEWER);
+
+    expect(result.scope.type).toBe(DepartmentAccessScope.ALL_DEPARTMENTS);
+    expect(result.scope.departmentNames).toEqual([]);
+    expect(result.metrics.totalDraft).toBe(3);
+    expect(result.metrics.totalActive).toBe(10);
+    expect(result.metrics.totalExpiring).toBe(2);
+    expect(result.metrics.totalExpired).toBe(1);
+    expect(result.metrics.totalTerminated).toBe(4);
+    expect(result.metrics.totalClosed).toBe(5);
+    expect(result.recent).toHaveLength(1);
+    expect(result.recent[0]?.referenceNumber).toBe('CONTRACT-001');
+    expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });

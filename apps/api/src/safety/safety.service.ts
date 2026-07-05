@@ -4,7 +4,7 @@
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InspectionStatus, FindingSeverity, FindingStatus, ModuleIdentifier } from '@recafco/database';
+import { InspectionStatus, FindingSeverity, FindingStatus, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { SafetyRefService } from './safety-ref.service';
@@ -1270,6 +1270,91 @@ export class SafetyService {
       criticalFindings,
       overdueFindings,
       inProgressInspections,
+    };
+  }
+
+  async getDashboard(actor: AuthUser): Promise<{
+    scope: { type: DepartmentAccessScope; departmentNames: string[] };
+    metrics: {
+      scheduledInspections: number;
+      inProgressInspections: number;
+      openFindings: number;
+      criticalFindings: number;
+      overdueFindings: number;
+    };
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  }> {
+    const [scopeType, deptFilter] = await Promise.all([
+      this.deptAccess.getScope(actor, ModuleIdentifier.SAFETY_COMPLIANCE),
+      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.SAFETY_COMPLIANCE),
+    ]);
+
+    let departmentNames: string[] = [];
+    if (deptFilter !== null && deptFilter.in.length > 0) {
+      const depts = await this.db.getClient().department.findMany({
+        where: { id: { in: deptFilter.in } },
+        select: { name: true },
+        orderBy: { name: 'asc' },
+      });
+      departmentNames = depts.map((d) => d.name);
+    }
+
+    const now = new Date();
+
+    const inspectionDeptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+    const findingDeptWhere = deptFilter !== null ? { inspection: { departmentId: deptFilter } } : {};
+
+    const openFindingStatuses = [FindingStatus.OPEN, FindingStatus.ACTION_REQUIRED];
+
+    const [
+      scheduledInspections,
+      inProgressInspections,
+      openFindings,
+      criticalFindings,
+      overdueFindings,
+      recentRaw,
+    ] = await Promise.all([
+      this.db.getClient().safetyInspection.count({
+        where: { ...inspectionDeptWhere, status: InspectionStatus.SCHEDULED },
+      }),
+      this.db.getClient().safetyInspection.count({
+        where: { ...inspectionDeptWhere, status: InspectionStatus.IN_PROGRESS },
+      }),
+      this.db.getClient().safetyFinding.count({
+        where: { ...findingDeptWhere, status: { in: openFindingStatuses } },
+      }),
+      this.db.getClient().safetyFinding.count({
+        where: {
+          ...findingDeptWhere,
+          severity: FindingSeverity.CRITICAL,
+          status: { not: FindingStatus.CLOSED },
+        },
+      }),
+      this.db.getClient().safetyFinding.count({
+        where: {
+          ...findingDeptWhere,
+          dueAt: { lt: now },
+          status: { in: openFindingStatuses },
+        },
+      }),
+      this.db.getClient().safetyInspection.findMany({
+        where: { ...inspectionDeptWhere },
+        take: 8,
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+      }),
+    ]);
+
+    return {
+      scope: { type: scopeType, departmentNames },
+      metrics: { scheduledInspections, inProgressInspections, openFindings, criticalFindings, overdueFindings },
+      recent: recentRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        status: r.status as string,
+        updatedAt: r.updatedAt.toISOString(),
+      })),
     };
   }
 

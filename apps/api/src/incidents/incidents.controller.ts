@@ -44,7 +44,7 @@ function meta(): { requestId?: string } {
 export class IncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
-  // summary must be declared BEFORE /:id to avoid route conflict
+  // summary and dashboard must be declared BEFORE /:id to avoid route conflict
   @Get('summary')
   @Permissions('incidents.read')
   async summary(
@@ -56,6 +56,15 @@ export class IncidentsController {
     resolvedThisMonth: number;
   }>> {
     const data = await this.incidentsService.getSummary(actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get('dashboard')
+  @Permissions('incidents.read')
+  async dashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.incidentsService.getDashboard(actor);
     return { data, meta: meta(), error: null };
   }
 

@@ -120,6 +120,19 @@ export interface ProductionSummary {
   totalCancelled: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface ProductionDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    scheduledOrders: number;
+    inProgressOrders: number;
+    pausedOrders: number;
+    completedThisMonth: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface ListResponse<T> {
   items: T[];
   total: number;
@@ -240,6 +253,9 @@ export const productionApi = {
 
   summary: () =>
     apiFetch<ProductionSummary>('/production/summary'),
+
+  dashboard: () =>
+    apiFetch<ProductionDashboardData>('/production/dashboard'),
 
   listEntries: (id: string) =>
     apiFetch<ProductionEntry[]>(`/production/${id}/entries`),

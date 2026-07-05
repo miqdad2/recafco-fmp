@@ -99,6 +99,20 @@ export interface MrSummary {
   completedThisMonth: number;
 }
 
+export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface MrDashboardData {
+  scope: { type: DashboardScopeType; departmentNames: string[] };
+  metrics: {
+    openRequests: number;
+    assignedToMe: number;
+    overdueRequests: number;
+    waitingForParts: number;
+    completedThisMonth: number;
+  };
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -237,6 +251,9 @@ export const maintenanceApi = {
 
   summary: () =>
     apiFetch<MrSummary>('/maintenance/summary'),
+
+  dashboard: () =>
+    apiFetch<MrDashboardData>('/maintenance/dashboard'),
 
   my: (q: MrListQuery = {}) =>
     apiFetch<ListResponse<MaintenanceRequest>>(`/maintenance/my${buildQuery(q)}`),

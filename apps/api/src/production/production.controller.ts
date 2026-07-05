@@ -60,6 +60,13 @@ export class ProductionController {
     return { data, meta: meta(), error: null };
   }
 
+  @Get('dashboard')
+  @Permissions('production.read')
+  async dashboard(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.ordersService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   // ---- Org selectors ----
 
   @Get('departments')
