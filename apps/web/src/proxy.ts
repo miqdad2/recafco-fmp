@@ -45,7 +45,15 @@ async function tryRefresh(
 }
 
 const IS_PROD = process.env['NODE_ENV'] === 'production';
-const COOKIE_BASE = { httpOnly: true, secure: IS_PROD, sameSite: 'strict' as const, path: '/' };
+const COOKIE_SECURE =
+  IS_PROD && process.env['AUTH_COOKIE_SECURE'] !== 'false';
+
+const COOKIE_BASE = {
+  httpOnly: true,
+  secure: COOKIE_SECURE,
+  sameSite: 'lax' as const,
+  path: '/',
+};
 
 function setTokenCookies(
   res: NextResponse,
