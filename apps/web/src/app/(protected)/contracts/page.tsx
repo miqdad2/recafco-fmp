@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { Breadcrumbs } from '../_components/breadcrumbs';
 import { PageHeader } from '../administration/_components/page-header';
 import { ContractLifecycleBadge } from './_components/contract-lifecycle-badge';
+import { ContractDepartmentBadge } from './_components/contract-department-badge';
 import { contractsApi } from '../../../lib/contracts-api';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
@@ -245,8 +246,8 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
                       <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
                         {contract.ownerUser.displayName}
                       </td>
-                      <td className="px-4 py-3 text-sm text-text-secondary hidden xl:table-cell">
-                        {contract.department ? contract.department.name : <span className="text-text-muted">—</span>}
+                      <td className="px-4 py-3 hidden xl:table-cell">
+                        <ContractDepartmentBadge department={contract.department} />
                       </td>
                     </tr>
                   ))}

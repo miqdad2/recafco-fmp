@@ -17,6 +17,7 @@ const mockTxContractFindUniqueOrThrow = vi.fn();
 const mockTxContractFindUnique = vi.fn();
 const mockTxActivityCreate = vi.fn();
 const mockTxCommentCreate = vi.fn();
+const mockTxSecurityAuditEventCreate = vi.fn();
 
 const mockTx = {
   contract: {
@@ -27,6 +28,7 @@ const mockTx = {
   },
   contractActivity: { create: mockTxActivityCreate },
   contractComment: { create: mockTxCommentCreate },
+  securityAuditEvent: { create: mockTxSecurityAuditEventCreate },
 };
 
 // ---------------------------------------------------------------------------
@@ -333,6 +335,35 @@ describe('ContractsService.create', () => {
 
     expect(mockRef.nextRef).toHaveBeenCalledWith(mockTx, expect.any(Number));
   });
+
+  it('writes a CONTRACT_CREATED security audit event', async () => {
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V', departmentId: 'dept-1' }, ACTOR_VIEWER);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_CREATED');
+    expect(auditCall.data['userId']).toBe(ACTOR_VIEWER.id);
+    expect(auditCall.data['actorId']).toBe(ACTOR_VIEWER.id);
+    expect(auditCall.data['metadata']).toMatchObject({ contractId: contract['id'], departmentId: 'dept-1' });
+  });
+
+  it('enforces department access scope on create', async () => {
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V', departmentId: 'dept-9' }, ACTOR_VIEWER);
+
+    expect(mockDeptAccess.assertCanAccessDepartment).toHaveBeenCalledWith(
+      ACTOR_VIEWER,
+      'CONTRACTS_MANAGEMENT',
+      'dept-9',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -443,6 +474,56 @@ describe('ContractsService.update', () => {
     mockContractFindUnique.mockResolvedValue(null);
     await expect(service.update('missing-id', { version: 1, title: 'New' }, ACTOR_ADMIN)).rejects.toThrow(NotFoundException);
   });
+
+  it('writes a CONTRACT_UPDATED security audit event with changed-field diff', async () => {
+    const draftContract = makeContract({ title: 'Old Title', departmentId: 'dept-1' });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ title: 'New Title', version: 2 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, title: 'New Title' }, ACTOR_ADMIN);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_UPDATED');
+    const metadata = auditCall.data['metadata'] as Record<string, unknown>;
+    expect(metadata['changedFields']).toContain('title');
+    expect((metadata['previousValues'] as Record<string, unknown>)['title']).toBe('Old Title');
+    expect((metadata['newValues'] as Record<string, unknown>)['title']).toBe('New Title');
+  });
+
+  it('flags free-text field changes without duplicating their content in audit metadata', async () => {
+    const draftContract = makeContract({ description: 'Old secret-ish notes' });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ description: 'New description text', version: 2 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, description: 'New description text' }, ACTOR_ADMIN);
+
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    const metadata = auditCall.data['metadata'] as Record<string, unknown>;
+    expect(metadata['changedFields']).toContain('description');
+    expect(JSON.stringify(metadata)).not.toContain('Old secret-ish notes');
+    expect(JSON.stringify(metadata)).not.toContain('New description text');
+  });
+
+  it('enforces department access scope when departmentId changes on update', async () => {
+    const draftContract = makeContract({ departmentId: 'dept-1' });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ departmentId: 'dept-2', version: 2 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, departmentId: 'dept-2' }, ACTOR_ADMIN);
+
+    expect(mockDeptAccess.assertCanAccessDepartment).toHaveBeenCalledWith(
+      ACTOR_ADMIN,
+      'CONTRACTS_MANAGEMENT',
+      'dept-2',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -490,6 +571,25 @@ describe('ContractsService.activate', () => {
     const activityCall = mockTxActivityCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
     expect(activityCall.data['previousStatus']).toBe(ContractStatus.DRAFT);
     expect(activityCall.data['newStatus']).toBe(ContractStatus.ACTIVE);
+  });
+
+  it('writes a CONTRACT_ACTIVATED security audit event alongside the activity record', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(activeContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.activate('id-1', { version: 1 }, ACTOR_ADMIN);
+
+    expect(mockTxActivityCreate).toHaveBeenCalledTimes(1);
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_ACTIVATED');
+    expect(auditCall.data['actorId']).toBe(ACTOR_ADMIN.id);
+    expect(auditCall.data['metadata']).toMatchObject({
+      previousStatus: ContractStatus.DRAFT,
+      newStatus: ContractStatus.ACTIVE,
+    });
   });
 });
 
@@ -542,6 +642,24 @@ describe('ContractsService.terminate', () => {
     const activityCall = mockTxActivityCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
     expect(activityCall.data['previousStatus']).toBe(ContractStatus.ACTIVE);
     expect(activityCall.data['newStatus']).toBe(ContractStatus.TERMINATED);
+  });
+
+  it('writes a CONTRACT_TERMINATED security audit event including the reason', async () => {
+    const terminatedContract = makeContract({ status: ContractStatus.TERMINATED });
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(terminatedContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.terminate('id-1', { reason: 'Budget cut', version: 1 }, ACTOR_ADMIN);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_TERMINATED');
+    expect(auditCall.data['metadata']).toMatchObject({
+      previousStatus: ContractStatus.ACTIVE,
+      newStatus: ContractStatus.TERMINATED,
+      reason: 'Budget cut',
+    });
   });
 });
 
@@ -611,6 +729,25 @@ describe('ContractsService.close', () => {
   it('throws NotFoundException when contract does not exist', async () => {
     mockContractFindUnique.mockResolvedValue(null);
     await expect(service.close('missing', { version: 1 }, ACTOR_ADMIN)).rejects.toThrow(NotFoundException);
+  });
+
+  it('writes a CONTRACT_CLOSED security audit event', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    const closedContract = makeContract({ status: ContractStatus.CLOSED });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(closedContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.close('id-1', { version: 1 }, ACTOR_ADMIN);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_CLOSED');
+    expect(auditCall.data['metadata']).toMatchObject({
+      previousStatus: ContractStatus.ACTIVE,
+      newStatus: ContractStatus.CLOSED,
+    });
   });
 });
 
@@ -745,6 +882,42 @@ describe('ContractsService.addComment', () => {
     expect(mockTxActivityCreate).toHaveBeenCalledTimes(1);
     const activityCall = mockTxActivityCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
     expect(activityCall.data['event']).toBe('comment_added');
+  });
+
+  it('writes a CONTRACT_COMMENT_ADDED security audit event without duplicating the comment body', async () => {
+    const contract = makeContract();
+    const comment = { id: 'comment-1', contractId: 'id-1', body: 'a private note', createdAt: new Date(), authorUser: { id: 'user-1', displayName: 'Alice' } };
+    mockContractFindUnique.mockResolvedValue(contract);
+    mockTxCommentCreate.mockResolvedValue(comment);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.addComment('id-1', { body: 'a private note' }, ACTOR_VIEWER);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_COMMENT_ADDED');
+    expect(JSON.stringify(auditCall.data['metadata'])).not.toContain('a private note');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security audit metadata safety
+// ---------------------------------------------------------------------------
+
+describe('ContractsService security audit metadata safety', () => {
+  it('never includes password, token, or secret keys in any audit metadata payload', async () => {
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V' }, ACTOR_VIEWER);
+
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    const serialized = JSON.stringify(auditCall.data).toLowerCase();
+    expect(serialized).not.toContain('password');
+    expect(serialized).not.toContain('token');
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('stack');
   });
 });
 

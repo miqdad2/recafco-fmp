@@ -2,14 +2,12 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { Breadcrumbs } from '../../_components/breadcrumbs';
+import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { ContractLifecycleBadge } from '../_components/contract-lifecycle-badge';
+import { ContractDepartmentBadge } from '../_components/contract-department-badge';
+import { ContractTransitions } from '../_components/contract-transitions';
 import { contractsApi } from '../../../../lib/contracts-api';
-import {
-  activateContractAction,
-  terminateContractAction,
-  closeContractAction,
-  addContractCommentAction,
-} from '../actions';
+import { addContractCommentAction } from '../actions';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -44,11 +42,12 @@ function formatDateTime(iso: string): string {
 export default async function ContractDetailPage({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
-  const [jwtRes, contractRes, commentsRes, activitiesRes] = await Promise.allSettled([
+  const [jwtRes, contractRes, commentsRes, activitiesRes, dashboardRes] = await Promise.allSettled([
     getJwtPayload(),
     contractsApi.get(id),
     contractsApi.listComments(id),
     contractsApi.listActivities(id),
+    contractsApi.dashboard(),
   ]);
 
   if (contractRes.status === 'rejected') notFound();
@@ -56,43 +55,21 @@ export default async function ContractDetailPage({ params }: PageProps): Promise
   const contract = (contractRes as PromiseFulfilledResult<Awaited<ReturnType<typeof contractsApi.get>>>).value;
   const comments = commentsRes.status === 'fulfilled' ? commentsRes.value : [];
   const activities = activitiesRes.status === 'fulfilled' ? activitiesRes.value : [];
+  const viewerScope = dashboardRes.status === 'fulfilled' ? dashboardRes.value.scope : undefined;
 
   const payload = jwtRes.status === 'fulfilled' ? jwtRes.value : {};
   const permissions = Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [];
 
   const canUpdate = permissions.includes('contracts.update');
-  const canActivate = permissions.includes('contracts.activate');
-  const canTerminate = permissions.includes('contracts.terminate');
-  const canClose = permissions.includes('contracts.close');
   const canComment = permissions.includes('contracts.comment');
 
   const isDraft = contract.status === 'DRAFT';
-  const isActive = contract.status === 'ACTIVE';
-  const isTerminated = contract.status === 'TERMINATED';
-
   const canEdit = isDraft && canUpdate;
-  const canDoActivate = isDraft && canActivate;
-  const canDoTerminate = isActive && canTerminate;
-  const canDoClose = (isActive || isTerminated) && canClose;
 
-  async function handleActivate(): Promise<void> {
-    'use server';
-    await activateContractAction(id, contract.version);
-  }
-  async function handleClose(): Promise<void> {
-    'use server';
-    await closeContractAction(id, contract.version);
-  }
-  async function handleTerminate(formData: FormData): Promise<void> {
-    'use server';
-    await terminateContractAction(id, contract.version, { error: null }, formData);
-  }
   async function handleComment(formData: FormData): Promise<void> {
     'use server';
     await addContractCommentAction(id, { error: null }, formData);
   }
-
-  const hasTransitions = canDoActivate || canDoTerminate || canDoClose;
 
   return (
     <div className="min-h-full p-8">
@@ -107,6 +84,8 @@ export default async function ContractDetailPage({ params }: PageProps): Promise
             <div className="flex flex-wrap items-center gap-2 mb-1">
               <h1 className="text-2xl font-semibold text-text-primary">{contract.title}</h1>
               <ContractLifecycleBadge status={contract.lifecycleStatus} />
+              <ContractDepartmentBadge department={contract.department} />
+              <DashboardScopeBadge scope={viewerScope} />
             </div>
             <p className="text-sm text-text-muted font-mono">{contract.referenceNumber}</p>
           </div>
@@ -221,59 +200,12 @@ export default async function ContractDetailPage({ params }: PageProps): Promise
             )}
 
             {/* Transitions */}
-            {hasTransitions && (
-              <section className="rounded-lg border border-border bg-surface p-5">
-                <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-4">Actions</h2>
-                <div className="space-y-4">
-                  {canDoActivate && (
-                    <form action={handleActivate}>
-                      <button
-                        type="submit"
-                        className="rounded-md bg-success px-4 py-2 text-sm font-medium text-white hover:bg-success/90 focus:outline-none focus:ring-2 focus:ring-focus"
-                      >
-                        Activate Contract
-                      </button>
-                    </form>
-                  )}
-
-                  {canDoClose && (
-                    <form action={handleClose}>
-                      <button
-                        type="submit"
-                        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
-                      >
-                        Close Contract
-                      </button>
-                    </form>
-                  )}
-
-                  {canDoTerminate && (
-                    <form action={handleTerminate} className="space-y-2">
-                      <div>
-                        <label htmlFor="reason" className="block text-xs font-medium text-text-secondary mb-1">
-                          Termination reason <span className="text-danger">*</span>
-                        </label>
-                        <textarea
-                          id="reason"
-                          name="reason"
-                          rows={2}
-                          required
-                          maxLength={2000}
-                          placeholder="State the reason for termination…"
-                          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        className="rounded-md bg-danger px-4 py-2 text-sm font-medium text-white hover:bg-danger/90 focus:outline-none focus:ring-2 focus:ring-focus"
-                      >
-                        Terminate Contract
-                      </button>
-                    </form>
-                  )}
-                </div>
-              </section>
-            )}
+            <ContractTransitions
+              contractId={contract.id}
+              status={contract.status}
+              version={contract.version}
+              permissions={permissions}
+            />
 
             {/* Comments */}
             <section className="rounded-lg border border-border bg-surface p-5">

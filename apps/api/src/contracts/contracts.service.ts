@@ -114,6 +114,85 @@ function withLifecycle(contract: ContractRecord): ContractWithLifecycle {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Security audit metadata helpers
+//
+// ContractActivity (above) is the user-facing contract timeline. These
+// helpers build metadata for securityAuditEvent, the separate platform
+// audit/security/compliance trail (see incidents/maintenance/safety for the
+// same pattern). Free-text fields (description/notes/counterpartyContact)
+// are flagged as changed but never duplicated into audit metadata.
+// ---------------------------------------------------------------------------
+
+const AUDITABLE_UPDATE_FIELDS = [
+  'title',
+  'counterpartyName',
+  'contractValue',
+  'currency',
+  'startDate',
+  'endDate',
+  'renewalNoticeDate',
+  'departmentId',
+  'plantId',
+  'locationId',
+  'ownerUserId',
+] as const;
+
+const DATE_UPDATE_FIELDS = new Set(['startDate', 'endDate', 'renewalNoticeDate']);
+
+type AuditScalar = string | number | boolean | null;
+
+function auditSerialize(value: unknown): AuditScalar {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (
+    typeof value === 'object' &&
+    typeof (value as { toNumber?: unknown }).toNumber === 'function'
+  ) {
+    return (value as { toNumber(): number }).toNumber();
+  }
+  return value as AuditScalar;
+}
+
+function buildUpdateAuditMetadata(
+  existing: ContractRecord,
+  dto: UpdateContractDto,
+): { changedFields: string[]; previousValues: Record<string, AuditScalar>; newValues: Record<string, AuditScalar> } {
+  const changedFields: string[] = [];
+  const previousValues: Record<string, AuditScalar> = {};
+  const newValues: Record<string, AuditScalar> = {};
+
+  const dtoData = dto as unknown as Record<string, unknown>;
+  const existingData = existing as unknown as Record<string, unknown>;
+
+  for (const field of AUDITABLE_UPDATE_FIELDS) {
+    const dtoValue = dtoData[field];
+    if (dtoValue === undefined) continue;
+
+    const nextValue = DATE_UPDATE_FIELDS.has(field) ? new Date(dtoValue as string) : dtoValue;
+    const prevSerialized = auditSerialize(existingData[field]);
+    const nextSerialized = auditSerialize(nextValue);
+
+    if (JSON.stringify(prevSerialized) !== JSON.stringify(nextSerialized)) {
+      changedFields.push(field);
+      previousValues[field] = prevSerialized;
+      newValues[field] = nextSerialized;
+    }
+  }
+
+  if (dto.description !== undefined && dto.description !== (existing.description as string | null)) {
+    changedFields.push('description');
+  }
+  if (dto.counterpartyContact !== undefined && dto.counterpartyContact !== (existing.counterpartyContact as string | null)) {
+    changedFields.push('counterpartyContact');
+  }
+  if (dto.notes !== undefined && dto.notes !== (existing.notes as string | null)) {
+    changedFields.push('notes');
+  }
+
+  return { changedFields, previousValues, newValues };
+}
+
 @Injectable()
 export class ContractsService {
   constructor(
@@ -182,6 +261,19 @@ export class ContractsService {
         },
       });
 
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_CREATED',
+          userId: ownerUserId,
+          actorId: actor.id,
+          metadata: {
+            contractId: created.id,
+            referenceNumber,
+            departmentId: dto.departmentId ?? null,
+          },
+        },
+      });
+
       return created;
     });
 
@@ -234,6 +326,8 @@ export class ContractsService {
     if (dto.locationId !== undefined) data['locationId'] = dto.locationId;
     if (dto.notes !== undefined) data['notes'] = dto.notes;
 
+    const auditMetadata = buildUpdateAuditMetadata(contract, dto);
+
     const updated = await this.db.getClient().$transaction(async (tx) => {
       // Condition on client-submitted version — real optimistic concurrency
       const result = await tx.contract.updateMany({
@@ -260,6 +354,22 @@ export class ContractsService {
           actorUserId: actor.id,
           actorName: actor.displayName,
           event: 'updated',
+        },
+      });
+
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_UPDATED',
+          userId: (dto.ownerUserId ?? contract.ownerUserId) as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: contract.referenceNumber,
+            departmentId: (dto.departmentId ?? contract.departmentId) as string | null,
+            changedFields: auditMetadata.changedFields,
+            previousValues: auditMetadata.previousValues,
+            newValues: auditMetadata.newValues,
+          },
         },
       });
 
@@ -316,6 +426,21 @@ export class ContractsService {
         },
       });
 
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_ACTIVATED',
+          userId: refreshed.ownerUserId as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: refreshed.referenceNumber,
+            previousStatus: ContractStatus.DRAFT,
+            newStatus: ContractStatus.ACTIVE,
+            departmentId: refreshed.departmentId as string | null,
+          },
+        },
+      });
+
       return refreshed;
     });
 
@@ -367,6 +492,22 @@ export class ContractsService {
           previousStatus: ContractStatus.ACTIVE,
           newStatus: ContractStatus.TERMINATED,
           metadata: { reason: dto.reason },
+        },
+      });
+
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_TERMINATED',
+          userId: refreshed.ownerUserId as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: refreshed.referenceNumber,
+            previousStatus: ContractStatus.ACTIVE,
+            newStatus: ContractStatus.TERMINATED,
+            departmentId: refreshed.departmentId as string | null,
+            reason: dto.reason,
+          },
         },
       });
 
@@ -425,6 +566,21 @@ export class ContractsService {
           event: 'closed',
           previousStatus: currentStatus,
           newStatus: ContractStatus.CLOSED,
+        },
+      });
+
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_CLOSED',
+          userId: refreshed.ownerUserId as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: refreshed.referenceNumber,
+            previousStatus: currentStatus,
+            newStatus: ContractStatus.CLOSED,
+            departmentId: refreshed.departmentId as string | null,
+          },
         },
       });
 
@@ -630,7 +786,7 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.comment' });
     }
 
-    await this.findOneOrThrow(id, actor);
+    const contract = await this.findOneOrThrow(id, actor);
 
     return this.db.getClient().$transaction(async (tx) => {
       const comment = await tx.contractComment.create({
@@ -650,6 +806,19 @@ export class ContractsService {
           actorUserId: actor.id,
           actorName: actor.displayName,
           event: 'comment_added',
+        },
+      });
+
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_COMMENT_ADDED',
+          userId: contract.ownerUserId as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: contract.referenceNumber,
+            departmentId: contract.departmentId as string | null,
+          },
         },
       });
 
