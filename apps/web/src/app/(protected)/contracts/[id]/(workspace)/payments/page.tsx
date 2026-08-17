@@ -1,7 +1,13 @@
+import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { Plus } from 'lucide-react';
+import { contractsApi } from '../../../../../../lib/contracts-api';
 
 export const metadata: Metadata = { title: 'Payments — Contract Management — RECAFCO FMP' };
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
 
 const PAYMENT_STATUS_ROWS = ['Total Submitted', 'Total Paid', 'Outstanding', 'Overdue', 'Next Due Payment'];
 
@@ -9,7 +15,16 @@ const PAYMENT_TRACKER_COLUMNS = [
   'Payment No.', 'Amount', 'Submitted Date', 'Received Date', 'Paid Amount', 'Remaining Amount', 'Status', 'Action',
 ];
 
-export default function ContractPaymentsTab(): React.JSX.Element {
+export default async function ContractPaymentsTab({ params }: PageProps): Promise<React.JSX.Element> {
+  const { id } = await params;
+
+  const contract = await contractsApi.get(id).catch(() => null);
+  if (!contract) notFound();
+
+  const currentContractValue = contract.contractValue
+    ? (contract.currency ? `${contract.contractValue} ${contract.currency}` : contract.contractValue)
+    : 'Not started';
+
   return (
     <div className="space-y-4">
       <div>
@@ -21,10 +36,14 @@ export default function ContractPaymentsTab(): React.JSX.Element {
       <section className="rounded-lg border border-border bg-surface p-4">
         <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Payment Status</h2>
         <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
+          <div>
+            <dt className="text-xs text-text-muted">Current Contract Value</dt>
+            <dd className="font-medium text-text-primary mt-0.5">{currentContractValue}</dd>
+          </div>
           {PAYMENT_STATUS_ROWS.map((label) => (
             <div key={label}>
               <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
             </div>
           ))}
         </dl>

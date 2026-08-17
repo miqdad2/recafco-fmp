@@ -47,7 +47,7 @@ export default function ContractWorkflowTab(): React.JSX.Element {
           {WORKFLOW_STATUS_ROWS.map((label) => (
             <div key={label}>
               <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
             </div>
           ))}
         </dl>
@@ -71,7 +71,7 @@ export default function ContractWorkflowTab(): React.JSX.Element {
                       <span className="text-xs font-medium text-text-primary truncate">{step}</span>
                     </div>
                     <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-text-muted border border-border">
-                      Not tracked yet
+                      Not started
                     </span>
                   </div>
                 ))}

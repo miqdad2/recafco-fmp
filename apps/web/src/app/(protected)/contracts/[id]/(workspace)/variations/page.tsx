@@ -19,7 +19,7 @@ export default async function ContractVariationsTab({ params }: PageProps): Prom
 
   const currentContractValue = contract.contractValue
     ? (contract.currency ? `${contract.contractValue} ${contract.currency}` : contract.contractValue)
-    : 'Not tracked yet';
+    : 'Not started';
 
   return (
     <div className="space-y-4">
@@ -34,19 +34,19 @@ export default async function ContractVariationsTab({ params }: PageProps): Prom
         <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
           <div>
             <dt className="text-xs text-text-muted">Total Variations</dt>
-            <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+            <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Approved Variations</dt>
-            <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+            <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Pending Variations</dt>
-            <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+            <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Rejected / Cancelled</dt>
-            <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+            <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Current Contract Value</dt>

@@ -984,6 +984,12 @@ model Contract {
   version             Int            @default(1)
   counterpartyName    String         @map("counterparty_name") @db.VarChar(300)
   counterpartyContact String?        @map("counterparty_contact") @db.VarChar(500)
+  jobOrder            String?        @map("job_order") @db.VarChar(100)
+  contractDate        DateTime?      @map("contract_date") @db.Date
+  quotationNumber     String?        @map("quotation_number") @db.VarChar(100)
+  projectNumber       String?        @map("project_number") @db.VarChar(100)
+  scopeOfWork         Json?          @map("scope_of_work") @db.JsonB
+  paymentTerms        Json?          @map("payment_terms") @db.JsonB
   contractValue       Decimal?       @map("contract_value") @db.Decimal(18, 2)
   currency            String?        @db.VarChar(3)
   startDate           DateTime?      @map("start_date") @db.Date

@@ -135,6 +135,12 @@ function makeContract(overrides: Record<string, unknown> = {}): Record<string, u
     version: 1,
     counterpartyName: 'Vendor Corp',
     counterpartyContact: null,
+    jobOrder: null,
+    contractDate: null,
+    quotationNumber: null,
+    projectNumber: null,
+    scopeOfWork: null,
+    paymentTerms: null,
     contractValue: null,
     currency: null,
     startDate: null,
@@ -429,6 +435,48 @@ describe('ContractsService.create', () => {
     expect(createCall.data['departmentId']).toBe('dept-explicit');
     expect(mockGetScope).not.toHaveBeenCalled();
   });
+
+  it('persists jobOrder, contractDate, quotationNumber, projectNumber, scopeOfWork, paymentTerms when provided', async () => {
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        jobOrder: 'JO-100',
+        contractDate: '2026-08-17',
+        quotationNumber: 'Q-200',
+        projectNumber: 'P-300',
+        scopeOfWork: { shopDrawing: true, delivery: false },
+        paymentTerms: { advance: true },
+      },
+      ACTOR_VIEWER,
+    );
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['jobOrder']).toBe('JO-100');
+    expect(createCall.data['contractDate']).toEqual(new Date('2026-08-17'));
+    expect(createCall.data['quotationNumber']).toBe('Q-200');
+    expect(createCall.data['projectNumber']).toBe('P-300');
+    expect(createCall.data['scopeOfWork']).toEqual({ shopDrawing: true, delivery: false });
+    expect(createCall.data['paymentTerms']).toEqual({ advance: true });
+  });
+
+  it('omits register fields from create data when not provided', async () => {
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V' }, ACTOR_VIEWER);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['jobOrder']).toBeUndefined();
+    expect(createCall.data['contractDate']).toBeUndefined();
+    expect(createCall.data['scopeOfWork']).toBeUndefined();
+    expect(createCall.data['paymentTerms']).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -538,6 +586,36 @@ describe('ContractsService.update', () => {
   it('throws NotFoundException when contract does not exist', async () => {
     mockContractFindUnique.mockResolvedValue(null);
     await expect(service.update('missing-id', { version: 1, title: 'New' }, ACTOR_ADMIN)).rejects.toThrow(NotFoundException);
+  });
+
+  it('persists jobOrder, contractDate, quotationNumber, projectNumber, scopeOfWork, paymentTerms when provided', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(draftContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      {
+        version: 1,
+        jobOrder: 'JO-100',
+        contractDate: '2026-08-17',
+        quotationNumber: 'Q-200',
+        projectNumber: 'P-300',
+        scopeOfWork: { production: true },
+        paymentTerms: { retention: true },
+      },
+      ACTOR_ADMIN,
+    );
+
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['jobOrder']).toBe('JO-100');
+    expect(updateCall.data['contractDate']).toEqual(new Date('2026-08-17'));
+    expect(updateCall.data['quotationNumber']).toBe('Q-200');
+    expect(updateCall.data['projectNumber']).toBe('P-300');
+    expect(updateCall.data['scopeOfWork']).toEqual({ production: true });
+    expect(updateCall.data['paymentTerms']).toEqual({ retention: true });
   });
 
   it('writes a CONTRACT_UPDATED security audit event with changed-field diff', async () => {

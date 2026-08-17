@@ -19,6 +19,12 @@ export interface Contract {
   version: number;
   counterpartyName: string;
   counterpartyContact?: string;
+  jobOrder?: string;
+  contractDate?: string;
+  quotationNumber?: string;
+  projectNumber?: string;
+  scopeOfWork?: Record<string, boolean>;
+  paymentTerms?: Record<string, boolean>;
   contractValue?: string;
   currency?: string;
   startDate?: string;

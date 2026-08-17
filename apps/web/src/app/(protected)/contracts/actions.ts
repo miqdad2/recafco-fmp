@@ -74,6 +74,20 @@ async function actionFetch(
 // Create contract
 // ---------------------------------------------------------------------------
 
+const SCOPE_OF_WORK_KEYS = ['shopDrawing', 'designProduction', 'production', 'delivery', 'erection', 'exFactory'];
+const PAYMENT_TERM_KEYS = ['advance', 'retention', 'performanceBond', 'insurance', 'interimPayment', 'taxClearance'];
+
+function readCheckboxGroup(formData: FormData, prefix: string, keys: string[]): Record<string, boolean> | undefined {
+  const group: Record<string, boolean> = {};
+  let anyChecked = false;
+  for (const key of keys) {
+    const checked = formData.get(`${prefix}_${key}`) === 'on';
+    group[key] = checked;
+    if (checked) anyChecked = true;
+  }
+  return anyChecked ? group : undefined;
+}
+
 export async function createContractAction(
   _prev: ActionResult,
   formData: FormData,
@@ -86,6 +100,12 @@ export async function createContractAction(
 
   const description = (formData.get('description') as string | null)?.trim() || undefined;
   const counterpartyContact = (formData.get('counterpartyContact') as string | null)?.trim() || undefined;
+  const jobOrder = (formData.get('jobOrder') as string | null)?.trim() || undefined;
+  const contractDate = (formData.get('contractDate') as string | null) || undefined;
+  const quotationNumber = (formData.get('quotationNumber') as string | null)?.trim() || undefined;
+  const projectNumber = (formData.get('projectNumber') as string | null)?.trim() || undefined;
+  const scopeOfWork = readCheckboxGroup(formData, 'scope', SCOPE_OF_WORK_KEYS);
+  const paymentTerms = readCheckboxGroup(formData, 'paymentTerm', PAYMENT_TERM_KEYS);
   const contractValueRaw = (formData.get('contractValue') as string | null)?.trim();
   const contractValue = contractValueRaw ? parseFloat(contractValueRaw) : undefined;
   const currency = (formData.get('currency') as string | null)?.trim() || undefined;
@@ -103,6 +123,12 @@ export async function createContractAction(
     counterpartyName,
     ...(description !== undefined ? { description } : {}),
     ...(counterpartyContact !== undefined ? { counterpartyContact } : {}),
+    ...(jobOrder !== undefined ? { jobOrder } : {}),
+    ...(contractDate !== undefined ? { contractDate } : {}),
+    ...(quotationNumber !== undefined ? { quotationNumber } : {}),
+    ...(projectNumber !== undefined ? { projectNumber } : {}),
+    ...(scopeOfWork !== undefined ? { scopeOfWork } : {}),
+    ...(paymentTerms !== undefined ? { paymentTerms } : {}),
     ...(contractValue !== undefined && !isNaN(contractValue) ? { contractValue } : {}),
     ...(currency !== undefined ? { currency } : {}),
     ...(startDate !== undefined ? { startDate } : {}),

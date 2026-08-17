@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import { ContractTransitions } from '../../_components/contract-transitions';
 import { ContractInfoCard } from '../../_components/contract-info-card';
+import { ContractRegisterDetailsCard } from '../../_components/contract-register-details-card';
+import { ContractBadgeGroupCard } from '../../_components/contract-badge-group-card';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
 import { getVisibleContractTransitions, hasAnyVisibleTransition } from '../../_lib/contract-ui-helpers';
@@ -12,6 +14,24 @@ interface PageProps {
 const KEY_STATUS_AREAS = [
   'Payments', 'Production Status', 'Variations', 'Claims Registry', 'Risk Assessment',
   'Documents & Obligations', 'Workflow & Team Tasks', 'Issue Log', 'Attachments', 'Closeout',
+];
+
+const SCOPE_OF_WORK_OPTIONS = [
+  { key: 'shopDrawing', label: 'Shop Drawing' },
+  { key: 'designProduction', label: 'Design Production' },
+  { key: 'production', label: 'Production' },
+  { key: 'delivery', label: 'Delivery' },
+  { key: 'erection', label: 'Erection' },
+  { key: 'exFactory', label: 'Ex-Factory' },
+];
+
+const PAYMENT_TERM_OPTIONS = [
+  { key: 'advance', label: 'Advance' },
+  { key: 'retention', label: 'Retention' },
+  { key: 'performanceBond', label: 'Performance Bond' },
+  { key: 'insurance', label: 'Insurance' },
+  { key: 'interimPayment', label: 'Interim Payment' },
+  { key: 'taxClearance', label: 'Tax Clearance' },
 ];
 
 function formatDateTime(iso: string): string {
@@ -44,6 +64,11 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
   return (
     <div className="space-y-6">
       <ContractInfoCard contract={contract} />
+      <ContractRegisterDetailsCard contract={contract} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ContractBadgeGroupCard title="Scope of Work" options={SCOPE_OF_WORK_OPTIONS} selected={contract.scopeOfWork} />
+        <ContractBadgeGroupCard title="Payment Terms" options={PAYMENT_TERM_OPTIONS} selected={contract.paymentTerms} />
+      </div>
 
       {hasActions && (
         <section>
@@ -66,7 +91,7 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
               className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm"
             >
               <span className="text-text-primary font-medium">{area}</span>
-              <span className="text-xs text-text-muted italic">Not tracked yet</span>
+              <span className="text-xs text-text-muted italic">Not started</span>
             </div>
           ))}
         </div>

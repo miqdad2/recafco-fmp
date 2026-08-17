@@ -37,7 +37,7 @@ export default function ContractCloseoutTab(): React.JSX.Element {
           {CLOSEOUT_STATUS_ROWS.map((label) => (
             <div key={label}>
               <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
             </div>
           ))}
         </dl>
@@ -65,7 +65,7 @@ export default function ContractCloseoutTab(): React.JSX.Element {
               {CHECKLIST_ITEMS.map((item) => (
                 <tr key={item}>
                   <td className="px-3 py-2 text-text-primary">{item}</td>
-                  <td className="px-3 py-2 text-text-muted">Not tracked yet</td>
+                  <td className="px-3 py-2 text-text-muted">Not started</td>
                   <td className="px-3 py-2 text-text-muted">—</td>
                   <td className="px-3 py-2 text-text-muted">—</td>
                   <td className="px-3 py-2 text-text-muted">—</td>
@@ -83,7 +83,7 @@ export default function ContractCloseoutTab(): React.JSX.Element {
           {APPROVAL_ROWS.map((label) => (
             <div key={label}>
               <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
             </div>
           ))}
         </dl>

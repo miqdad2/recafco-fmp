@@ -69,30 +69,35 @@ function InfoBox({ children }: { children: React.ReactNode }): React.JSX.Element
 
 const inputCls =
   'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
-const plannedInputCls =
-  'w-full rounded-md border border-border bg-surface-secondary px-2.5 py-1.5 text-xs text-text-muted cursor-not-allowed';
+const boqInputCls =
+  'w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
 const labelCls = 'block text-sm font-medium text-text-primary mb-1';
-const plannedLabelCls = 'block text-sm font-medium text-text-secondary mb-1';
 const gridCls3 = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
 
-function PlannedTag(): React.JSX.Element {
-  return (
-    <span className="ml-1.5 inline-flex items-center rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-medium text-text-muted align-middle">
-      Planned
-    </span>
-  );
+interface BoqRow {
+  id: string;
+  description: string;
+  unit: string;
+  qty: string;
+  unitPrice: string;
+  invoiceQty: string;
+  pr: string;
+  amountRemaining: string;
 }
 
-function PlannedField({ label }: { label: string }): React.JSX.Element {
-  return (
-    <div>
-      <label className={plannedLabelCls}>
-        {label}
-        <PlannedTag />
-      </label>
-      <input type="text" disabled placeholder="Not yet supported" className={plannedInputCls} />
-    </div>
-  );
+function makeBoqId(): string {
+  return `boq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emptyBoqRow(): BoqRow {
+  return { id: makeBoqId(), description: '', unit: '', qty: '', unitPrice: '', invoiceQty: '', pr: '', amountRemaining: '' };
+}
+
+function boqLineTotal(row: BoqRow): number {
+  const qty = parseFloat(row.qty);
+  const unitPrice = parseFloat(row.unitPrice);
+  if (isNaN(qty) || isNaN(unitPrice)) return 0;
+  return qty * unitPrice;
 }
 
 const SCOPE_OPTIONS = [
@@ -121,6 +126,21 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
   );
   const [exFactory, setExFactory] = useState(false);
   const [scope, setScope] = useState<Record<string, boolean>>({});
+  const [boqRows, setBoqRows] = useState<BoqRow[]>(() => [emptyBoqRow()]);
+
+  function updateBoqRow(id: string, field: keyof Omit<BoqRow, 'id'>, value: string): void {
+    setBoqRows((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  }
+
+  function addBoqRow(): void {
+    setBoqRows((rows) => [...rows, emptyBoqRow()]);
+  }
+
+  function removeBoqRow(id: string): void {
+    setBoqRows((rows) => rows.filter((r) => r.id !== id));
+  }
+
+  const totalAmount = boqRows.reduce((sum, row) => sum + boqLineTotal(row), 0);
 
   const errorBanner = state.error && (
     <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
@@ -181,9 +201,40 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
       {/* Section 1 — Basic Contract Details */}
       <SectionCard badge="1" title="Basic Contract Details">
         <div className={gridCls3}>
-          <PlannedField label="Job Order" />
-          <PlannedField label="Date" />
-          <PlannedField label="Quotation #" />
+          <div>
+            <label htmlFor="jobOrder" className={labelCls}>Job Order</label>
+            <input
+              id="jobOrder"
+              name="jobOrder"
+              type="text"
+              maxLength={100}
+              placeholder="Enter job order number"
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="contractDate" className={labelCls}>Date</label>
+            <input
+              id="contractDate"
+              name="contractDate"
+              type="date"
+              placeholder="Select contract date"
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="quotationNumber" className={labelCls}>Quotation #</label>
+            <input
+              id="quotationNumber"
+              name="quotationNumber"
+              type="text"
+              maxLength={100}
+              placeholder="Enter quotation number"
+              className={inputCls}
+            />
+          </div>
 
           <div>
             <label htmlFor="counterpartyName" className={labelCls}>
@@ -215,7 +266,17 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
             />
           </div>
 
-          <PlannedField label="Project Number" />
+          <div>
+            <label htmlFor="projectNumber" className={labelCls}>Project Number</label>
+            <input
+              id="projectNumber"
+              name="projectNumber"
+              type="text"
+              maxLength={100}
+              placeholder="Enter project number"
+              className={inputCls}
+            />
+          </div>
         </div>
       </SectionCard>
 
@@ -291,24 +352,84 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
               </tr>
             </thead>
             <tbody className="divide-y divide-border bg-surface">
-              {[1, 2, 3, 4, 5].map((row) => (
-                <tr key={row}>
-                  <td className="px-3 py-2 text-text-muted">{row}</td>
-                  <td className="px-3 py-1.5"><input type="text" disabled placeholder="Item description" className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-1.5 w-28"><input type="text" disabled className={plannedInputCls} /></td>
-                  <td className="px-3 py-2 text-center">
-                    <button type="button" disabled className="text-text-muted cursor-not-allowed" title="Planned for a future unit">
-                      <Trash2 className="size-3.5" aria-hidden="true" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {boqRows.map((row, index) => {
+                const lineTotal = boqLineTotal(row);
+                return (
+                  <tr key={row.id}>
+                    <td className="px-3 py-2 text-text-muted">{index + 1}</td>
+                    <td className="px-3 py-1.5">
+                      <input
+                        type="text"
+                        value={row.description}
+                        onChange={(e) => updateBoqRow(row.id, 'description', e.target.value)}
+                        placeholder="Item description"
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-20">
+                      <input
+                        type="text"
+                        value={row.unit}
+                        onChange={(e) => updateBoqRow(row.id, 'unit', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-20">
+                      <input
+                        type="number"
+                        value={row.qty}
+                        onChange={(e) => updateBoqRow(row.id, 'qty', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-24">
+                      <input
+                        type="number"
+                        value={row.unitPrice}
+                        onChange={(e) => updateBoqRow(row.id, 'unitPrice', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-24 text-text-secondary font-medium">
+                      {lineTotal > 0 ? lineTotal.toFixed(2) : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 w-24">
+                      <input
+                        type="number"
+                        value={row.invoiceQty}
+                        onChange={(e) => updateBoqRow(row.id, 'invoiceQty', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-20">
+                      <input
+                        type="text"
+                        value={row.pr}
+                        onChange={(e) => updateBoqRow(row.id, 'pr', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-1.5 w-28">
+                      <input
+                        type="text"
+                        value={row.amountRemaining}
+                        onChange={(e) => updateBoqRow(row.id, 'amountRemaining', e.target.value)}
+                        className={boqInputCls}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => removeBoqRow(row.id)}
+                        className="text-text-muted hover:text-danger focus:outline-none focus:ring-2 focus:ring-focus rounded"
+                        title="Remove row"
+                      >
+                        <Trash2 className="size-3.5" aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -316,18 +437,27 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
-            disabled
-            title="BOQ items are planned for a future backend unit"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-secondary px-3 py-1.5 text-xs font-medium text-text-muted cursor-not-allowed"
+            onClick={addBoqRow}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <Plus className="size-3.5" aria-hidden="true" />
             Add Item
           </button>
           <div className="text-right">
             <p className="text-xs text-text-muted">Total Amount (KWD)</p>
-            <p className="text-sm font-semibold text-text-secondary">— <span className="font-normal text-xs">(not calculated yet)</span></p>
+            <p className="text-sm font-semibold text-text-primary">{totalAmount.toFixed(2)}</p>
           </div>
         </div>
+
+        <div className="mt-4">
+          <InfoBox>
+            Basic details, scope, payment terms and total amount will be saved. BOQ line items will be saved in
+            a later update.
+          </InfoBox>
+        </div>
+
+        <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(2) : ''} />
+        <input type="hidden" name="currency" value={totalAmount > 0 ? 'KWD' : ''} />
       </SectionCard>
 
       {/* Section 5 — Actions */}

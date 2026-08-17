@@ -67,6 +67,12 @@ const CONTRACT_SELECT = {
   version: true,
   counterpartyName: true,
   counterpartyContact: true,
+  jobOrder: true,
+  contractDate: true,
+  quotationNumber: true,
+  projectNumber: true,
+  scopeOfWork: true,
+  paymentTerms: true,
   contractValue: true,
   currency: true,
   startDate: true,
@@ -127,6 +133,10 @@ function withLifecycle(contract: ContractRecord): ContractWithLifecycle {
 const AUDITABLE_UPDATE_FIELDS = [
   'title',
   'counterpartyName',
+  'jobOrder',
+  'contractDate',
+  'quotationNumber',
+  'projectNumber',
   'contractValue',
   'currency',
   'startDate',
@@ -138,7 +148,7 @@ const AUDITABLE_UPDATE_FIELDS = [
   'ownerUserId',
 ] as const;
 
-const DATE_UPDATE_FIELDS = new Set(['startDate', 'endDate', 'renewalNoticeDate']);
+const DATE_UPDATE_FIELDS = new Set(['startDate', 'endDate', 'renewalNoticeDate', 'contractDate']);
 
 type AuditScalar = string | number | boolean | null;
 
@@ -188,6 +198,12 @@ function buildUpdateAuditMetadata(
   }
   if (dto.notes !== undefined && dto.notes !== (existing.notes as string | null)) {
     changedFields.push('notes');
+  }
+  if (dto.scopeOfWork !== undefined) {
+    changedFields.push('scopeOfWork');
+  }
+  if (dto.paymentTerms !== undefined) {
+    changedFields.push('paymentTerms');
   }
 
   return { changedFields, previousValues, newValues };
@@ -255,6 +271,12 @@ export class ContractsService {
           createdByUserId: actor.id,
           ...(dto.description !== undefined ? { description: dto.description } : {}),
           ...(dto.counterpartyContact !== undefined ? { counterpartyContact: dto.counterpartyContact } : {}),
+          ...(dto.jobOrder !== undefined ? { jobOrder: dto.jobOrder } : {}),
+          ...(dto.contractDate !== undefined ? { contractDate: new Date(dto.contractDate) } : {}),
+          ...(dto.quotationNumber !== undefined ? { quotationNumber: dto.quotationNumber } : {}),
+          ...(dto.projectNumber !== undefined ? { projectNumber: dto.projectNumber } : {}),
+          ...(dto.scopeOfWork !== undefined ? { scopeOfWork: dto.scopeOfWork } : {}),
+          ...(dto.paymentTerms !== undefined ? { paymentTerms: dto.paymentTerms } : {}),
           ...(dto.contractValue !== undefined ? { contractValue: dto.contractValue } : {}),
           ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
           ...(dto.startDate !== undefined ? { startDate: new Date(dto.startDate) } : {}),
@@ -333,6 +355,12 @@ export class ContractsService {
     if (dto.description !== undefined) data['description'] = dto.description;
     if (dto.counterpartyName !== undefined) data['counterpartyName'] = dto.counterpartyName;
     if (dto.counterpartyContact !== undefined) data['counterpartyContact'] = dto.counterpartyContact;
+    if (dto.jobOrder !== undefined) data['jobOrder'] = dto.jobOrder;
+    if (dto.contractDate !== undefined) data['contractDate'] = new Date(dto.contractDate);
+    if (dto.quotationNumber !== undefined) data['quotationNumber'] = dto.quotationNumber;
+    if (dto.projectNumber !== undefined) data['projectNumber'] = dto.projectNumber;
+    if (dto.scopeOfWork !== undefined) data['scopeOfWork'] = dto.scopeOfWork;
+    if (dto.paymentTerms !== undefined) data['paymentTerms'] = dto.paymentTerms;
     if (dto.contractValue !== undefined) data['contractValue'] = dto.contractValue;
     if (dto.currency !== undefined) data['currency'] = dto.currency;
     if (dto.startDate !== undefined) data['startDate'] = new Date(dto.startDate);

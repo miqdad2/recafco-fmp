@@ -22,7 +22,7 @@ export default function ContractDocumentsTab(): React.JSX.Element {
           {DOCUMENT_STATUS_ROWS.map((label) => (
             <div key={label}>
               <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not tracked yet</dd>
+              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
             </div>
           ))}
         </dl>

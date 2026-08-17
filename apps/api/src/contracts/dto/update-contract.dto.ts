@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsPositive,
   IsNumber,
+  IsObject,
   IsInt,
   Min,
   Length,
@@ -40,6 +41,34 @@ export class UpdateContractDto {
   @IsString()
   @MaxLength(500)
   counterpartyContact?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  jobOrder?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'contractDate must be in YYYY-MM-DD format' })
+  contractDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  quotationNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  projectNumber?: string;
+
+  @IsOptional()
+  @IsObject()
+  scopeOfWork?: Record<string, boolean>;
+
+  @IsOptional()
+  @IsObject()
+  paymentTerms?: Record<string, boolean>;
 
   @IsOptional()
   @IsNumber()
