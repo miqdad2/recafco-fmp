@@ -1,33 +1,18 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
+import { Download, LayoutDashboard } from 'lucide-react';
 import { Breadcrumbs } from '../_components/breadcrumbs';
-import { PageHeader } from '../administration/_components/page-header';
-import { ContractLifecycleBadge } from './_components/contract-lifecycle-badge';
-import { ContractDepartmentBadge } from './_components/contract-department-badge';
+import { DashboardScopeBadge } from '../_components/dashboard-scope-badge';
+import { ContractSummaryCards } from './_components/contract-summary-cards';
+import { ContractFilterBar } from './_components/contract-filter-bar';
+import { ContractListTable } from './_components/contract-list-table';
+import { NewContractRegisterModal } from './_components/new-contract-register-modal';
 import { contractsApi } from '../../../lib/contracts-api';
+import { getUserPermissions } from './_lib/get-user-permissions';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Contracts Management — RECAFCO FMP' };
-
-async function getUserPermissions(): Promise<string[]> {
-  try {
-    const store = await cookies();
-    const token = store.get('recafco_access')?.value;
-    if (!token) return [];
-    const payload = JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString());
-    return Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
-}
+export const metadata: Metadata = { title: 'Contract List — RECAFCO FMP' };
 
 interface PageProps {
   searchParams: Promise<PageSearchParams>;
@@ -37,21 +22,31 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const params = await searchParams;
   const permissions = await getUserPermissions();
   const canCreate = permissions.includes('contracts.create');
+  const canUpdate = permissions.includes('contracts.update');
 
-  const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
   const lifecycleFilter = typeof params['lifecycleStatus'] === 'string' ? params['lifecycleStatus'] : undefined;
+  const departmentFilter = typeof params['departmentId'] === 'string' ? params['departmentId'] : undefined;
+  const ownerFilter = typeof params['ownerUserId'] === 'string' ? params['ownerUserId'] : undefined;
   const search = typeof params['search'] === 'string' ? params['search'] : undefined;
   const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
 
-  const [listRes, summaryRes] = await Promise.allSettled([
+  const hasActiveFilters = Boolean(lifecycleFilter ?? departmentFilter ?? ownerFilter ?? search);
+
+  const [listRes, summaryRes, dashboardRes, deptsRes, peopleRes, plantsRes, locationsRes] = await Promise.allSettled([
     contractsApi.list({
       page,
       pageSize: 25,
-      ...(statusFilter ? { status: statusFilter } : {}),
       ...(lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
+      ...(departmentFilter ? { departmentId: departmentFilter } : {}),
+      ...(ownerFilter ? { ownerUserId: ownerFilter } : {}),
       ...(search ? { search } : {}),
     }),
     contractsApi.summary(),
+    contractsApi.dashboard(),
+    contractsApi.departments(),
+    contractsApi.people(),
+    contractsApi.plants(),
+    contractsApi.locations(),
   ]);
 
   let error: string | null = null;
@@ -61,23 +56,21 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   }
 
   const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : null;
+  const scope = dashboardRes.status === 'fulfilled' ? dashboardRes.value.scope : undefined;
+  const departments = deptsRes.status === 'fulfilled' ? deptsRes.value : [];
+  const people = peopleRes.status === 'fulfilled' ? peopleRes.value : [];
+  const plants = plantsRes.status === 'fulfilled' ? plantsRes.value : [];
+  const locations = locationsRes.status === 'fulfilled' ? locationsRes.value : [];
   const contracts = result?.items ?? [];
   const total = result?.total ?? 0;
   const totalPages = result?.totalPages ?? 1;
 
-  const quickFilters: { label: string; lifecycle?: string; status?: string }[] = [
-    { label: 'All' },
-    { label: 'Draft', status: 'DRAFT' },
-    { label: 'Active', status: 'ACTIVE' },
-    { label: 'Expiring', lifecycle: 'EXPIRING' },
-    { label: 'Expired', lifecycle: 'EXPIRED' },
-  ];
-
   function buildHref(overrides: Record<string, string | undefined>): string {
     const q = new URLSearchParams();
     const merged = {
-      status: statusFilter,
       lifecycleStatus: lifecycleFilter,
+      departmentId: departmentFilter,
+      ownerUserId: ownerFilter,
       search,
       page: page > 1 ? String(page) : undefined,
       ...overrides,
@@ -90,198 +83,99 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   }
 
   return (
-    <div className="min-h-full p-8">
-      <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Contracts Management' }]} />
+    <div className="px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-6">
+      <Breadcrumbs items={[{ label: 'Contract Management', href: '/contracts/dashboard' }, { label: 'Contract List' }]} />
 
-        <div className="mb-6">
-          <PageHeader
-            title="Contracts Management"
-            description="Vendor and service contracts. Ref format: CONTRACT-YYYY-NNNNNN"
-            action={
-              canCreate ? (
-                <Link
-                  href="/contracts/new"
-                  className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
-                >
-                  New Contract
-                </Link>
-              ) : undefined
-            }
-          />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract List</h1>
+          <p className="mt-1.5 text-sm text-text-secondary">View and manage all contracts in one place.</p>
         </div>
-
-        {/* Summary stat cards */}
-        {summary && (
-          <div className="flex flex-wrap gap-3 mb-6">
-            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
-              <p className="text-xs text-text-muted mb-0.5">Active</p>
-              <p className="text-xl font-semibold text-success">{summary.totalActive}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
-              <p className="text-xs text-text-muted mb-0.5">Expiring</p>
-              <p className="text-xl font-semibold text-warning">{summary.totalExpiring}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
-              <p className="text-xs text-text-muted mb-0.5">Expired</p>
-              <p className="text-xl font-semibold text-danger">{summary.totalExpired}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-surface px-4 py-3 min-w-[110px]">
-              <p className="text-xs text-text-muted mb-0.5">Draft</p>
-              <p className="text-xl font-semibold text-text-primary">{summary.totalDraft}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Quick filters */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          {quickFilters.map((f) => {
-            const active =
-              f.lifecycle !== undefined
-                ? lifecycleFilter === f.lifecycle
-                : f.status !== undefined
-                  ? statusFilter === f.status && !lifecycleFilter
-                  : !statusFilter && !lifecycleFilter;
-            return (
-              <Link
-                key={f.label}
-                href={buildHref({
-                  status: f.status,
-                  lifecycleStatus: f.lifecycle,
-                  page: undefined,
-                })}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-accent text-white' : 'bg-surface border border-border text-text-secondary hover:border-border-strong'}`}
-              >
-                {f.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* Search */}
-        <form method="GET" action="/contracts" className="mb-6 flex gap-2">
-          {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
-          {lifecycleFilter && <input type="hidden" name="lifecycleStatus" value={lifecycleFilter} />}
-          <input
-            name="search"
-            type="search"
-            defaultValue={search}
-            placeholder="Search by reference, title or counterparty…"
-            className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+        <div className="flex items-center gap-3">
+          <DashboardScopeBadge scope={scope} />
+          {canCreate && (
+            <NewContractRegisterModal depts={departments} plantsData={plants} locations={locations} people={people} scope={scope} />
+          )}
+          <Link
+            href="/contracts/dashboard"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
           >
-            Search
+            <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
+            Open Dashboard
+          </Link>
+          <button
+            type="button"
+            disabled
+            title="Export to Excel is planned for a future unit"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface-secondary text-text-muted text-sm cursor-not-allowed"
+          >
+            <Download className="size-3.5 shrink-0" aria-hidden="true" />
+            Export Excel
           </button>
-        </form>
-
-        {error && (
-          <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-            {error}
-          </div>
-        )}
-
-        {/* Table */}
-        {contracts.length === 0 && !error ? (
-          <div className="rounded-lg border border-border bg-surface p-12 text-center">
-            <p className="text-sm text-text-secondary">
-              {search ?? statusFilter ?? lifecycleFilter
-                ? 'No contracts match the current filters.'
-                : 'No contracts yet.'}
-            </p>
-            {canCreate && !(search ?? statusFilter ?? lifecycleFilter) && (
-              <Link
-                href="/contracts/new"
-                className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-              >
-                Create first contract
-              </Link>
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="overflow-hidden rounded-lg border border-border bg-surface">
-              <table className="min-w-full divide-y divide-border">
-                <thead>
-                  <tr className="bg-surface-secondary">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Reference</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Title</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">End Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden md:table-cell">Counterparty</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Owner</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Department</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {contracts.map((contract) => (
-                    <tr key={contract.id} className="hover:bg-surface-secondary/50 transition-colors">
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/contracts/${contract.id}`}
-                          className="font-mono text-xs font-medium text-accent hover:underline"
-                        >
-                          {contract.referenceNumber}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/contracts/${contract.id}`}
-                          className="text-sm font-medium text-text-primary hover:text-accent"
-                        >
-                          {contract.title}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3">
-                        <ContractLifecycleBadge status={contract.lifecycleStatus} />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-text-secondary hidden sm:table-cell">
-                        {contract.endDate ? formatDate(contract.endDate) : <span className="text-text-muted">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-text-secondary hidden md:table-cell">
-                        {contract.counterpartyName}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
-                        {contract.ownerUser.displayName}
-                      </td>
-                      <td className="px-4 py-3 hidden xl:table-cell">
-                        <ContractDepartmentBadge department={contract.department} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="mt-4 flex items-center justify-between text-sm text-text-secondary">
-                <span>Showing {contracts.length} of {total}</span>
-                <div className="flex gap-2">
-                  {page > 1 && (
-                    <Link
-                      href={buildHref({ page: String(page - 1) })}
-                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
-                    >
-                      Previous
-                    </Link>
-                  )}
-                  {page < totalPages && (
-                    <Link
-                      href={buildHref({ page: String(page + 1) })}
-                      className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
-                    >
-                      Next
-                    </Link>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        </div>
       </div>
+
+      <ContractSummaryCards summary={summary} buildHref={buildHref} />
+
+      <ContractFilterBar
+        search={search}
+        lifecycleStatus={lifecycleFilter}
+        departmentId={departmentFilter}
+        ownerUserId={ownerFilter}
+        departments={departments}
+        people={people}
+        hasActiveFilters={hasActiveFilters}
+      />
+
+      {error && (
+        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      {contracts.length === 0 && !error ? (
+        <div className="rounded-lg border border-border bg-surface p-12 text-center">
+          <p className="text-sm text-text-secondary">
+            {hasActiveFilters ? 'No contracts match the current filters.' : 'No contracts yet.'}
+          </p>
+          {canCreate && !hasActiveFilters && (
+            <Link
+              href="/contracts/new"
+              className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+            >
+              Create first contract
+            </Link>
+          )}
+        </div>
+      ) : (
+        <>
+          <ContractListTable contracts={contracts} canUpdate={canUpdate} />
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm text-text-secondary">
+              <span>Showing {contracts.length} of {total}</span>
+              <div className="flex gap-2">
+                {page > 1 && (
+                  <Link
+                    href={buildHref({ page: String(page - 1) })}
+                    className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                  >
+                    Previous
+                  </Link>
+                )}
+                {page < totalPages && (
+                  <Link
+                    href={buildHref({ page: String(page + 1) })}
+                    className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong"
+                  >
+                    Next
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

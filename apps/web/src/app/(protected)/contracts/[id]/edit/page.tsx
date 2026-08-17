@@ -45,7 +45,8 @@ export default async function EditContractPage({ params }: PageProps): Promise<R
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Contracts Management', href: '/contracts' },
+          { label: 'Contract Management', href: '/contracts/dashboard' },
+          { label: 'Contract List', href: '/contracts' },
           { label: contract.referenceNumber, href: `/contracts/${id}` },
           { label: 'Edit' },
         ]} />

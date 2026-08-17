@@ -93,13 +93,20 @@ export interface AdminDashboardData {
 }
 
 type ApiOk<T> = { data: T; meta: { requestId?: string }; error: null };
-type ApiErr = { data: null; meta: { requestId?: string }; error: { code: string; message: string } };
+type ApiErr = {
+  data: null;
+  meta: { requestId?: string };
+  error: { code: string; message: string; details?: { fields?: Record<string, string[]> } };
+};
 
 async function apiFetch<T>(
   path: string,
   accessToken: string,
   init?: RequestInit,
-): Promise<{ ok: true; data: T } | { ok: false; code: string; message: string }> {
+): Promise<
+  | { ok: true; data: T }
+  | { ok: false; code: string; message: string; fieldErrors?: Record<string, string[]> }
+> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -113,7 +120,12 @@ async function apiFetch<T>(
   const json = (await res.json()) as ApiOk<T> | ApiErr;
   if (!res.ok || json.error !== null) {
     const err = (json as ApiErr).error;
-    return { ok: false, code: err?.code ?? 'UNKNOWN', message: err?.message ?? `HTTP ${res.status}` };
+    return {
+      ok: false,
+      code: err?.code ?? 'UNKNOWN',
+      message: err?.message ?? `HTTP ${res.status}`,
+      ...(err?.details?.fields ? { fieldErrors: err.details.fields } : {}),
+    };
   }
   return { ok: true, data: (json as ApiOk<T>).data };
 }

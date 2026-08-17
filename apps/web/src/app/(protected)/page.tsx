@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import {
   Activity,
@@ -40,6 +41,7 @@ import type { ProductionDashboardData } from '@/lib/production-api';
 import { MetricCard } from './_components/metric-card';
 import type { MetricStatus } from './_components/metric-card';
 import { ModuleCard } from './_components/module-card';
+import { isContractManagementOnlyAccess } from './_lib/module-visibility';
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -77,7 +79,7 @@ const PROGRESS_STEPS = [
   { label: 'Incident Report', detail: 'Incident reporting, investigation workflow, corrective actions', done: true },
   { label: 'Maintenance Requests', detail: 'Full 11-status lifecycle: Draft → Submitted → Approved → Assigned → In Progress → Completed → Closed', done: true },
   { label: 'Safety & Compliance', detail: 'Safety inspections with findings, verification, and compliance lifecycle', done: true },
-  { label: 'Contracts Management', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
+  { label: 'Contract Management', detail: 'Contract lifecycle: Draft → Active → Terminated/Closed with derived EXPIRING/EXPIRED states', done: true },
   { label: 'Production Dashboard', detail: 'Production orders and lines: Output, Downtime, and Adjustment entries with live KPI metrics', done: true },
   { label: 'Platform Hardening', detail: 'Security regression tests, PM2 deployment config, release documentation', done: true },
 ];
@@ -120,7 +122,7 @@ const MODULE_CARDS = [
     readPermission: 'safety.read',
   },
   {
-    title: 'Contracts Management',
+    title: 'Contract Management',
     description: 'Vendor contract register with lifecycle tracking and approval workflow.',
     href: '/contracts/dashboard',
     icon: FileText,
@@ -151,6 +153,13 @@ export default async function DashboardPage(): Promise<React.JSX.Element> {
   if (meResult.ok) {
     displayName = meResult.data.displayName;
     permissions = meResult.data.permissions;
+  }
+
+  // A user who can only see Contract Management should land directly on its dashboard,
+  // not this platform-wide overview — even though every metric below is already
+  // permission-gated and never leaks real cross-module data to them.
+  if (isContractManagementOnlyAccess(permissions)) {
+    redirect('/contracts/dashboard');
   }
 
   const canReadUsers = permissions.includes('users.read');

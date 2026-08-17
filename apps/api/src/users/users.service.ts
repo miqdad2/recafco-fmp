@@ -6,7 +6,6 @@ import {
   UnprocessableEntityException,
   ForbiddenException,
 } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import { ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { AuthService } from '../auth/auth.service';
@@ -14,6 +13,17 @@ import { DepartmentAccessService } from '../department-access/department-access.
 import type { CreateUserDto } from './dto/create-user.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
 import type { AuthUser } from '../common/types/auth-user';
+
+/**
+ * Fixed internal onboarding password — business decision for this internal-only platform:
+ * admins hand this to the correct staff member directly, and mustChangePassword is always
+ * set true alongside it, so the account can never be used past first login without a real
+ * password being set. Still hashed before storage like any other password (never stored as
+ * plain text) — only the *value* handed out is fixed, not the security model around it.
+ */
+function generateTempPassword(): string {
+  return '123';
+}
 
 const USER_SELECT = {
   id: true,
@@ -95,8 +105,12 @@ function handleUniqueError(err: unknown, dto: { username?: string; email?: strin
     'code' in err &&
     (err as { code: string }).code === 'P2002'
   ) {
-    const meta = (err as { meta?: { target?: string[] } }).meta;
-    const fields = meta?.target ?? [];
+    // Prisma reports `meta.target` as a string[] of column names on some engines/DBs,
+    // but as a single constraint-name string (e.g. "users_username_key") on others —
+    // normalize to an array so `.some(...)` below never crashes with a raw TypeError.
+    const meta = (err as { meta?: { target?: string[] | string } }).meta;
+    const rawTarget = meta?.target;
+    const fields = Array.isArray(rawTarget) ? rawTarget : typeof rawTarget === 'string' ? [rawTarget] : [];
     if (fields.some((f) => f.includes('username'))) {
       throw new ConflictException({
         code: 'DUPLICATE_USERNAME',
@@ -147,7 +161,7 @@ export class UsersService {
     // Resolve the role to assign — default to VIEWER.
     const roleId = await this.resolveNewUserRole(dto.roleId, actor);
 
-    const tempPassword = randomBytes(16).toString('base64url');
+    const tempPassword = generateTempPassword();
     const passwordHash = await this.authService.hashPassword(tempPassword);
 
     let created: UserRecord;
@@ -334,7 +348,7 @@ export class UsersService {
   async resetPassword(id: string, actor: AuthUser): Promise<{ tempPassword: string }> {
     await this.findOne(id);
 
-    const tempPassword = randomBytes(16).toString('base64url');
+    const tempPassword = generateTempPassword();
     const passwordHash = await this.authService.hashPassword(tempPassword);
 
     await this.db.getClient().$transaction(async (tx) => {

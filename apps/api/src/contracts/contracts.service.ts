@@ -210,7 +210,25 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.create' });
     }
 
-    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, dto.departmentId ?? null);
+    // No departmentId was submitted: for OWN_DEPARTMENT-scoped actors, default to their own
+    // department so the contract they just created remains visible to them in the Contract
+    // List (which is filtered to that same department). Privileged scopes (SELECTED/ALL
+    // departments) are left untouched — their existing null-department behavior is unaffected.
+    let departmentId = dto.departmentId;
+    if (departmentId === undefined) {
+      const scope = await this.deptAccess.getScope(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
+      if (scope === DepartmentAccessScope.OWN_DEPARTMENT) {
+        if (!actor.departmentId) {
+          throw new UnprocessableEntityException({
+            code: 'CONTRACT_DEPARTMENT_REQUIRED',
+            message: 'Your user is not assigned to a department. Please contact administrator.',
+          });
+        }
+        departmentId = actor.departmentId;
+      }
+    }
+
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, departmentId ?? null);
 
     if (dto.ownerUserId && dto.ownerUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
       throw new ForbiddenException({
@@ -242,7 +260,7 @@ export class ContractsService {
           ...(dto.startDate !== undefined ? { startDate: new Date(dto.startDate) } : {}),
           ...(dto.endDate !== undefined ? { endDate: new Date(dto.endDate) } : {}),
           ...(dto.renewalNoticeDate !== undefined ? { renewalNoticeDate: new Date(dto.renewalNoticeDate) } : {}),
-          ...(dto.departmentId !== undefined ? { departmentId: dto.departmentId } : {}),
+          ...(departmentId !== undefined ? { departmentId } : {}),
           ...(dto.plantId !== undefined ? { plantId: dto.plantId } : {}),
           ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
           ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
@@ -269,7 +287,7 @@ export class ContractsService {
           metadata: {
             contractId: created.id,
             referenceNumber,
-            departmentId: dto.departmentId ?? null,
+            departmentId: departmentId ?? null,
           },
         },
       });

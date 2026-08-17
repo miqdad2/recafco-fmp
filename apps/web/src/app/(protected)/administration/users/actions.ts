@@ -7,8 +7,6 @@ import { usersApi } from '@/lib/users-api';
 import type { ModuleIdentifier, DepartmentAccessScope } from '@/lib/users-api';
 import type { UserFormState } from './_components/user-form';
 
-type ApiError = { error: { code: string; message: string; details?: { fields?: Record<string, string[]> } } };
-
 async function getToken(): Promise<string> {
   const store = await cookies();
   const token = store.get('recafco_access')?.value;
@@ -48,9 +46,8 @@ export async function createUserAction(
 
   const result = await usersApi.create(accessToken, payload);
   if (!result.ok) {
-    const body = result as unknown as ApiError;
-    if (result.code === 'VALIDATION_ERROR') {
-      return { fieldErrors: (body as unknown as { fieldErrors?: Record<string, string[]> }).fieldErrors ?? {} };
+    if (result.code === 'VALIDATION_ERROR' && result.fieldErrors) {
+      return { fieldErrors: result.fieldErrors };
     }
     return { error: result.message };
   }
@@ -119,8 +116,8 @@ export async function createUserWithAccessAction(
 
   const result = await usersApi.create(accessToken, payload);
   if (!result.ok) {
-    if (result.code === 'VALIDATION_ERROR') {
-      return { fieldErrors: {} };
+    if (result.code === 'VALIDATION_ERROR' && result.fieldErrors) {
+      return { fieldErrors: result.fieldErrors };
     }
     return { error: result.message };
   }

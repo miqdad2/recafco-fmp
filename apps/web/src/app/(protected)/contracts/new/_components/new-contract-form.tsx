@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import Link from 'next/link';
+import { Info, Plus, Trash2 } from 'lucide-react';
 import type { ActionResult } from '../../actions';
 import { createContractAction } from '../../actions';
 
@@ -16,240 +17,349 @@ interface PersonItem {
   displayName: string;
 }
 
+interface LocationItem {
+  id: string;
+  name: string;
+  code: string;
+}
+
 interface Props {
   depts: OrgItem[];
   plantsData: OrgItem[];
+  locations?: LocationItem[];
   people: PersonItem[];
+  /** Current user's Contract Management department-access scope, used to explain department assignment on create. */
+  scope?: { type: 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS'; departmentNames: string[] } | undefined;
+  /** When provided, Cancel calls this instead of navigating (used inside the modal). */
+  onCancel?: () => void;
+  /** 'modal' fills its container height with an internally scrolling body and a pinned footer. Defaults to 'page' (natural document flow, used by /contracts/new). */
+  layout?: 'page' | 'modal';
 }
 
-export function NewContractForm({ depts, plantsData, people }: Props): React.JSX.Element {
+function SectionCard({
+  badge,
+  title,
+  children,
+}: {
+  badge: string;
+  title: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-6">
+      <div className="flex items-center gap-3 mb-5">
+        <span className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-accent text-white text-xs font-semibold">
+          {badge}
+        </span>
+        <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function InfoBox({ children }: { children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info-light px-3 py-2.5 text-xs text-info">
+      <Info className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+      <p>{children}</p>
+    </div>
+  );
+}
+
+const inputCls =
+  'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
+const plannedInputCls =
+  'w-full rounded-md border border-border bg-surface-secondary px-2.5 py-1.5 text-xs text-text-muted cursor-not-allowed';
+const labelCls = 'block text-sm font-medium text-text-primary mb-1';
+const plannedLabelCls = 'block text-sm font-medium text-text-secondary mb-1';
+const gridCls3 = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
+
+function PlannedTag(): React.JSX.Element {
+  return (
+    <span className="ml-1.5 inline-flex items-center rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-medium text-text-muted align-middle">
+      Planned
+    </span>
+  );
+}
+
+function PlannedField({ label }: { label: string }): React.JSX.Element {
+  return (
+    <div>
+      <label className={plannedLabelCls}>
+        {label}
+        <PlannedTag />
+      </label>
+      <input type="text" disabled placeholder="Not yet supported" className={plannedInputCls} />
+    </div>
+  );
+}
+
+const SCOPE_OPTIONS = [
+  { key: 'shopDrawing', label: 'Shop Drawing' },
+  { key: 'designProduction', label: 'Design Production' },
+  { key: 'production', label: 'Production' },
+  { key: 'delivery', label: 'Delivery' },
+  { key: 'erection', label: 'Erection' },
+];
+
+const PAYMENT_TERM_OPTIONS = [
+  { key: 'advance', label: 'Advance' },
+  { key: 'retention', label: 'Retention' },
+  { key: 'performanceBond', label: 'Performance Bond' },
+  { key: 'insurance', label: 'Insurance' },
+  { key: 'interimPayment', label: 'Interim Payment' },
+  { key: 'taxClearance', label: 'Tax Clearance' },
+];
+
+const BOQ_COLUMNS = ['S/N', 'Item Description', 'Unit', 'Qty', 'U/P', 'T/P', 'Invoice Qty', 'P/R', 'Amount Remaining', 'Action'];
+
+export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(
     createContractAction,
     { error: null },
   );
+  const [exFactory, setExFactory] = useState(false);
+  const [scope, setScope] = useState<Record<string, boolean>>({});
+
+  const errorBanner = state.error && (
+    <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+      {state.error}
+    </div>
+  );
+
+  const ownDepartmentName = deptScope?.departmentNames[0];
+  const departmentBanner =
+    deptScope?.type === 'OWN_DEPARTMENT' ? (
+      ownDepartmentName ? (
+        <InfoBox>This contract will be created under your department.</InfoBox>
+      ) : (
+        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+          Your user is not assigned to a department. Please contact administrator.
+        </div>
+      )
+    ) : null;
+
+  const actions = (
+    <div className="flex items-center justify-end gap-3">
+      {onCancel ? (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+        >
+          Cancel
+        </button>
+      ) : (
+        <Link
+          href="/contracts"
+          className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+        >
+          Cancel
+        </Link>
+      )}
+      <button
+        type="button"
+        disabled
+        title="Register Contract already saves this as a Draft — a separate save-draft step isn't needed yet"
+        className="rounded-md border border-border bg-surface-secondary px-4 py-2 text-sm font-medium text-text-muted cursor-not-allowed"
+      >
+        Save Draft
+      </button>
+      <button
+        type="submit"
+        disabled={isPending}
+        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+      >
+        {isPending ? 'Registering…' : 'Register Contract'}
+      </button>
+    </div>
+  );
+
+  const sections = (
+    <>
+      {/* Section 1 — Basic Contract Details */}
+      <SectionCard badge="1" title="Basic Contract Details">
+        <div className={gridCls3}>
+          <PlannedField label="Job Order" />
+          <PlannedField label="Date" />
+          <PlannedField label="Quotation #" />
+
+          <div>
+            <label htmlFor="counterpartyName" className={labelCls}>
+              Company Name <span className="text-danger">*</span>
+            </label>
+            <input
+              id="counterpartyName"
+              name="counterpartyName"
+              type="text"
+              required
+              maxLength={300}
+              placeholder="Client, employer, vendor…"
+              className={inputCls}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="title" className={labelCls}>
+              Project Name <span className="text-danger">*</span>
+            </label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              required
+              maxLength={300}
+              placeholder="Project or contract name"
+              className={inputCls}
+            />
+          </div>
+
+          <PlannedField label="Project Number" />
+        </div>
+      </SectionCard>
+
+      {/* Section 2 — Scope of Work */}
+      <SectionCard badge="2" title="Scope of Work">
+        <div className="space-y-4">
+          <div className={gridCls3}>
+            {SCOPE_OPTIONS.map((opt) => {
+              const disabled = exFactory && (opt.key === 'delivery' || opt.key === 'erection');
+              return (
+                <label
+                  key={opt.key}
+                  className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm ${disabled ? 'opacity-50 cursor-not-allowed bg-surface-secondary' : 'text-text-primary'}`}
+                >
+                  <input
+                    type="checkbox"
+                    name={`scope_${opt.key}`}
+                    disabled={disabled}
+                    checked={disabled ? false : (scope[opt.key] ?? false)}
+                    onChange={(e) => setScope((s) => ({ ...s, [opt.key]: e.target.checked }))}
+                    className="rounded border-border text-accent focus:ring-accent"
+                  />
+                  {opt.label}
+                </label>
+              );
+            })}
+            <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-text-primary bg-surface-secondary">
+              <input
+                type="checkbox"
+                name="scope_exFactory"
+                checked={exFactory}
+                onChange={(e) => setExFactory(e.target.checked)}
+                className="rounded border-border text-accent focus:ring-accent"
+              />
+              Ex-Factory
+            </label>
+          </div>
+
+          <InfoBox>If &ldquo;Ex-Factory&rdquo; is selected, Delivery and Erection will be disabled.</InfoBox>
+        </div>
+      </SectionCard>
+
+      {/* Section 3 — Payment Terms */}
+      <SectionCard badge="3" title="Payment Terms">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {PAYMENT_TERM_OPTIONS.map((opt) => (
+            <label
+              key={opt.key}
+              className="flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm font-medium text-text-primary text-center cursor-pointer transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent/5 hover:border-border-strong"
+            >
+              <input
+                type="checkbox"
+                name={`paymentTerm_${opt.key}`}
+                className="rounded border-border text-accent focus:ring-accent"
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </SectionCard>
+
+      {/* Section 4 — Contract BOQ / Items */}
+      <SectionCard badge="4" title="Contract BOQ / Items">
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="min-w-full divide-y divide-border text-xs">
+            <thead>
+              <tr className="bg-surface-secondary">
+                {BOQ_COLUMNS.map((col) => (
+                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border bg-surface">
+              {[1, 2, 3, 4, 5].map((row) => (
+                <tr key={row}>
+                  <td className="px-3 py-2 text-text-muted">{row}</td>
+                  <td className="px-3 py-1.5"><input type="text" disabled placeholder="Item description" className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-24"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-20"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-1.5 w-28"><input type="text" disabled className={plannedInputCls} /></td>
+                  <td className="px-3 py-2 text-center">
+                    <button type="button" disabled className="text-text-muted cursor-not-allowed" title="Planned for a future unit">
+                      <Trash2 className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            disabled
+            title="BOQ items are planned for a future backend unit"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-secondary px-3 py-1.5 text-xs font-medium text-text-muted cursor-not-allowed"
+          >
+            <Plus className="size-3.5" aria-hidden="true" />
+            Add Item
+          </button>
+          <div className="text-right">
+            <p className="text-xs text-text-muted">Total Amount (KWD)</p>
+            <p className="text-sm font-semibold text-text-secondary">— <span className="font-normal text-xs">(not calculated yet)</span></p>
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Section 5 — Actions */}
+      <SectionCard badge="5" title="Actions">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+          <InfoBox>
+            Click &ldquo;Register Contract&rdquo; to save the contract and it will appear in the Contract List.
+          </InfoBox>
+          <div className="shrink-0">{actions}</div>
+        </div>
+      </SectionCard>
+    </>
+  );
+
+  if (layout === 'modal') {
+    return (
+      <form action={formAction} className="flex flex-1 min-h-0 flex-col">
+        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8 space-y-6">
+          {errorBanner}
+          {departmentBanner}
+          {sections}
+        </div>
+      </form>
+    );
+  }
 
   return (
     <>
-      {state.error && (
-        <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-          {state.error}
-        </div>
-      )}
-
-      <form action={formAction} className="space-y-6 rounded-lg border border-border bg-surface p-6">
-        {/* Title */}
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-text-primary mb-1">
-            Title <span className="text-danger">*</span>
-          </label>
-          <input
-            id="title"
-            name="title"
-            type="text"
-            required
-            maxLength={300}
-            placeholder="Brief description of the contract"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        {/* Counterparty name */}
-        <div>
-          <label htmlFor="counterpartyName" className="block text-sm font-medium text-text-primary mb-1">
-            Counterparty Name <span className="text-danger">*</span>
-          </label>
-          <input
-            id="counterpartyName"
-            name="counterpartyName"
-            type="text"
-            required
-            maxLength={300}
-            placeholder="Vendor or service provider name"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        {/* Description */}
-        <div>
-          <label htmlFor="description" className="block text-sm font-medium text-text-primary mb-1">
-            Description
-          </label>
-          <textarea
-            id="description"
-            name="description"
-            rows={4}
-            maxLength={10000}
-            placeholder="Describe the scope and key terms of this contract…"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-          />
-        </div>
-
-        {/* Counterparty contact */}
-        <div>
-          <label htmlFor="counterpartyContact" className="block text-sm font-medium text-text-primary mb-1">
-            Counterparty Contact
-          </label>
-          <input
-            id="counterpartyContact"
-            name="counterpartyContact"
-            type="text"
-            maxLength={300}
-            placeholder="Contact name or email at the counterparty"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </div>
-
-        {/* Value + Currency */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="contractValue" className="block text-sm font-medium text-text-primary mb-1">
-              Contract Value
-            </label>
-            <input
-              id="contractValue"
-              name="contractValue"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="0.00"
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-          <div>
-            <label htmlFor="currency" className="block text-sm font-medium text-text-primary mb-1">
-              Currency
-            </label>
-            <input
-              id="currency"
-              name="currency"
-              type="text"
-              maxLength={10}
-              placeholder="e.g. SAR, USD"
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-        </div>
-
-        {/* Start + End date */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="startDate" className="block text-sm font-medium text-text-primary mb-1">
-              Start Date
-            </label>
-            <input
-              id="startDate"
-              name="startDate"
-              type="date"
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-          <div>
-            <label htmlFor="endDate" className="block text-sm font-medium text-text-primary mb-1">
-              End Date
-            </label>
-            <input
-              id="endDate"
-              name="endDate"
-              type="date"
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-          </div>
-        </div>
-
-        {/* Renewal notice date */}
-        <div>
-          <label htmlFor="renewalNoticeDate" className="block text-sm font-medium text-text-primary mb-1">
-            Renewal Notice Date
-          </label>
-          <input
-            id="renewalNoticeDate"
-            name="renewalNoticeDate"
-            type="date"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-          <p className="mt-1 text-xs text-text-muted">Date by which a renewal decision must be made.</p>
-        </div>
-
-        {/* Owner */}
-        <div>
-          <label htmlFor="ownerUserId" className="block text-sm font-medium text-text-primary mb-1">
-            Contract Owner
-          </label>
-          <select
-            id="ownerUserId"
-            name="ownerUserId"
-            defaultValue=""
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            <option value="">— Select owner —</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>{p.displayName}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Department + Plant */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="departmentId" className="block text-sm font-medium text-text-primary mb-1">Department</label>
-            <select
-              id="departmentId"
-              name="departmentId"
-              defaultValue=""
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            >
-              <option value="">— None —</option>
-              {depts.map((d) => (
-                <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="plantId" className="block text-sm font-medium text-text-primary mb-1">Plant</label>
-            <select
-              id="plantId"
-              name="plantId"
-              defaultValue=""
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            >
-              <option value="">— None —</option>
-              {plantsData.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label htmlFor="notes" className="block text-sm font-medium text-text-primary mb-1">
-            Notes
-          </label>
-          <textarea
-            id="notes"
-            name="notes"
-            rows={3}
-            maxLength={10000}
-            placeholder="Internal notes about this contract…"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-y"
-          />
-        </div>
-
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <Link
-            href="/contracts"
-            className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
-          >
-            Cancel
-          </Link>
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
-          >
-            {isPending ? 'Creating…' : 'Create contract'}
-          </button>
-        </div>
+      {errorBanner && <div className="mb-6">{errorBanner}</div>}
+      {departmentBanner && <div className="mb-6">{departmentBanner}</div>}
+      <form action={formAction} className="space-y-6">
+        {sections}
       </form>
     </>
   );

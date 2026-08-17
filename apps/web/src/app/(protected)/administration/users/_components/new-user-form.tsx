@@ -82,6 +82,13 @@ const inputCls = (hasError?: boolean): string =>
 const selectCls =
   'w-full h-10 px-3 rounded-md border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus';
 
+type AccessPreset = 'FULL' | 'CONTRACTS_ONLY' | 'CUSTOM';
+
+/** A role that grants access to Contract Management and nothing else. */
+function isContractsOnlyRole(role: RoleWithPerms): boolean {
+  return role.permissions.length > 0 && role.permissions.every((p) => p.module === 'contracts');
+}
+
 export function NewUserForm({
   action,
   roles,
@@ -97,6 +104,16 @@ export function NewUserForm({
   const [selectedRoleId, setSelectedRoleId] = useState('');
   const [selectedPlantId, setSelectedPlantId] = useState('');
   const [hasDept, setHasDept] = useState(true);
+  const [preset, setPreset] = useState<AccessPreset>('FULL');
+
+  const contractsOnlyRoles = roles.filter((r) => r.isActive && isContractsOnlyRole(r));
+
+  function handlePresetChange(next: AccessPreset): void {
+    setPreset(next);
+    if (next === 'CONTRACTS_ONLY' && contractsOnlyRoles.length === 1 && contractsOnlyRoles[0]) {
+      setSelectedRoleId(contractsOnlyRoles[0].id);
+    }
+  }
 
   if (state?.created) {
     const failures = state.created.accessFailures;
@@ -346,6 +363,59 @@ export function NewUserForm({
         </div>
       </div>
 
+      {/* Access Preset — helper for Role + Module Access below */}
+      <div className="rounded-lg border border-border bg-surface p-6">
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Access Preset</h3>
+        <p className="text-xs text-text-muted mb-4">
+          Role controls which modules the user can see. Module Access controls department record scope.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {(
+            [
+              { value: 'FULL', label: 'Full Platform Access' },
+              { value: 'CONTRACTS_ONLY', label: 'Contract Management Only' },
+              { value: 'CUSTOM', label: 'Custom Access' },
+            ] as const
+          ).map((opt) => (
+            <label
+              key={opt.value}
+              className={[
+                'flex items-center gap-2 rounded-md border px-3 py-2.5 text-sm cursor-pointer transition-colors',
+                preset === opt.value
+                  ? 'border-accent bg-accent/5 text-text-primary font-medium'
+                  : 'border-border text-text-secondary hover:border-border-strong',
+              ].join(' ')}
+            >
+              <input
+                type="radio"
+                name="accessPreset"
+                value={opt.value}
+                checked={preset === opt.value}
+                onChange={() => handlePresetChange(opt.value)}
+                className="text-accent focus:ring-accent"
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+
+        {preset === 'CONTRACTS_ONLY' && (
+          <div className="mt-4">
+            {contractsOnlyRoles.length === 0 ? (
+              <p className="text-xs text-warning bg-warning-light border border-warning/30 rounded-md px-3 py-2">
+                No Contract Management-only role is available yet. Create or seed a Contract Management role
+                before using this preset.
+              </p>
+            ) : (
+              <p className="text-xs text-info bg-info-light border border-info/20 rounded-md px-3 py-2">
+                Select a Contract Management-only role below. This user will only see Contract Management if
+                the selected role has only Contract Management permissions.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Section 3: Role and Permissions */}
       <div className="rounded-lg border border-border bg-surface p-6">
         <SectionHeader
@@ -371,6 +441,7 @@ export function NewUserForm({
                 .map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
+                    {preset === 'CONTRACTS_ONLY' && isContractsOnlyRole(r) ? ' (Contract Management only)' : ''}
                   </option>
                 ))}
             </select>
@@ -397,12 +468,19 @@ export function NewUserForm({
         <SectionHeader
           number={4}
           title="Module Access"
-          description="Set the department scope for each module. Leave as My Department (default) if unsure."
+          description="Module Access controls which department records are visible. It does not grant or remove module permissions."
         />
+        {preset === 'CONTRACTS_ONLY' && (
+          <p className="mb-4 text-xs text-text-muted">
+            Contract Management is highlighted below for reference — the other rows are not relevant for this
+            preset.
+          </p>
+        )}
         <ModuleAccessEditor
           allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
           deptApiError={deptApiError}
           canManageAll={canManageAll}
+          emphasizeModule={preset === 'CONTRACTS_ONLY' ? 'CONTRACTS_MANAGEMENT' : undefined}
         />
       </div>
 

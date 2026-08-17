@@ -29,6 +29,7 @@ interface ModuleRowProps {
   canManageAll: boolean;
   defaultScope?: DepartmentAccessScope;
   defaultDeptIds?: string[];
+  emphasis?: 'highlighted' | 'dimmed' | undefined;
 }
 
 function ModuleRow({
@@ -38,12 +39,26 @@ function ModuleRow({
   canManageAll,
   defaultScope = 'OWN_DEPARTMENT',
   defaultDeptIds = [],
+  emphasis,
 }: ModuleRowProps): React.JSX.Element {
   const [scope, setScope] = useState<DepartmentAccessScope>(defaultScope);
 
   return (
-    <div className="py-3 border-b border-border last:border-0">
-      <p className="text-sm font-medium text-text-primary mb-2">{MODULE_LABELS[module]}</p>
+    <div
+      className={[
+        'py-3 border-b border-border last:border-0 -mx-4 px-4',
+        emphasis === 'highlighted' ? 'bg-accent/5' : '',
+        emphasis === 'dimmed' ? 'opacity-50' : '',
+      ].join(' ')}
+    >
+      <p className="text-sm font-medium text-text-primary mb-2 flex items-center gap-2">
+        {MODULE_LABELS[module]}
+        {emphasis === 'highlighted' && (
+          <span className="text-[10px] font-semibold uppercase tracking-wide bg-accent text-accent-foreground rounded-full px-1.5 py-0.5">
+            Selected
+          </span>
+        )}
+      </p>
       <div className="space-y-2">
         <select
           name={`module_scope_${module}`}
@@ -105,6 +120,8 @@ interface Props {
   deptApiError?: boolean;
   canManageAll: boolean;
   defaultValues?: Partial<Record<ModuleIdentifier, { scope: DepartmentAccessScope; deptIds: string[] }>>;
+  /** When set, visually highlights this module and dims the rest. Purely cosmetic — every module row still submits a real scope value, since "no access" is not yet a supported scope. */
+  emphasizeModule?: ModuleIdentifier | undefined;
 }
 
 export function ModuleAccessEditor({
@@ -112,6 +129,7 @@ export function ModuleAccessEditor({
   deptApiError = false,
   canManageAll,
   defaultValues = {},
+  emphasizeModule,
 }: Props): React.JSX.Element {
   return (
     <div className="rounded-lg border border-border bg-surface px-4">
@@ -124,6 +142,7 @@ export function ModuleAccessEditor({
           canManageAll={canManageAll}
           defaultScope={defaultValues[mod]?.scope ?? 'OWN_DEPARTMENT'}
           defaultDeptIds={defaultValues[mod]?.deptIds ?? []}
+          emphasis={emphasizeModule ? (mod === emphasizeModule ? 'highlighted' : 'dimmed') : undefined}
         />
       ))}
     </div>

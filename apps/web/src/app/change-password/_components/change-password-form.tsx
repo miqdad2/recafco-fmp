@@ -51,10 +51,12 @@ export function ChangePasswordForm({ action }: Props): React.JSX.Element {
             state?.fieldErrors?.['newPassword'] ? 'border-error' : 'border-border',
           ].join(' ')}
         />
-        {state?.fieldErrors?.['newPassword'] && (
+        {state?.fieldErrors?.['newPassword'] ? (
           <p role="alert" className="mt-1 text-xs text-error">
             {state.fieldErrors['newPassword']?.join('. ')}
           </p>
+        ) : (
+          <p className="mt-1 text-xs text-text-muted">Password must be at least 3 characters.</p>
         )}
       </div>
 

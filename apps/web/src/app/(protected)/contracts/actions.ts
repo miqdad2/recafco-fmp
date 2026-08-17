@@ -115,7 +115,7 @@ export async function createContractAction(
     ...(notes !== undefined ? { notes } : {}),
   });
 
-  if (!result.ok) return { error: result.message ?? 'Failed to create contract' };
+  if (!result.ok) return { error: result.message ?? 'Contract could not be created.' };
 
   revalidatePath('/contracts');
   if (result.id) {

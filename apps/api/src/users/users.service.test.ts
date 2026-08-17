@@ -121,8 +121,8 @@ describe('UsersService', () => {
       );
 
       expect(result.user.username).toBe('alice');
-      expect(typeof result.tempPassword).toBe('string');
-      expect(result.tempPassword.length).toBeGreaterThan(0);
+      // Fixed internal onboarding password (business decision) — always "123", never random.
+      expect(result.tempPassword).toBe('123');
     });
 
     it('normalizes username to lowercase', async () => {
@@ -187,8 +187,22 @@ describe('UsersService', () => {
       );
     });
 
-    it('throws ConflictException on duplicate username (P2002)', async () => {
+    it('throws ConflictException on duplicate username (P2002, target as array)', async () => {
       mockUserCreate.mockRejectedValue({ code: 'P2002', meta: { target: ['username'] } });
+
+      await expect(
+        service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    // Regression test: on some Prisma engine/DB combinations (observed with this project's
+    // PostgreSQL setup), P2002's meta.target is a single constraint-name string
+    // (e.g. "users_username_key") rather than a string[] of column names. Calling
+    // `.some(...)` directly on a string used to throw a raw TypeError, which the global
+    // exception filter surfaced to users as "An unexpected error occurred" instead of
+    // the intended DUPLICATE_USERNAME conflict.
+    it('throws ConflictException on duplicate username (P2002, target as string)', async () => {
+      mockUserCreate.mockRejectedValue({ code: 'P2002', meta: { target: 'users_username_key' } });
 
       await expect(
         service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR),
@@ -444,15 +458,14 @@ describe('UsersService', () => {
   // ---------------------------------------------------------------------------
 
   describe('resetPassword', () => {
-    it('returns a non-empty tempPassword and revokes all sessions', async () => {
+    it('returns the fixed "123" tempPassword and revokes all sessions', async () => {
       mockUserFindUnique.mockResolvedValue(BASE_USER);
       mockSessionDeleteMany.mockResolvedValue({ count: 1 });
       mockUserUpdate.mockResolvedValue(BASE_USER);
 
       const result = await service.resetPassword(BASE_USER.id, ADMIN_ACTOR);
 
-      expect(typeof result.tempPassword).toBe('string');
-      expect(result.tempPassword.length).toBeGreaterThan(0);
+      expect(result.tempPassword).toBe('123');
       expect(mockSessionDeleteMany).toHaveBeenCalledWith({ where: { userId: BASE_USER.id } });
     });
   });

@@ -111,6 +111,20 @@ const ACTOR_ADMIN: AuthUser = {
   ],
 };
 
+const ACTOR_OWN_DEPT: AuthUser = {
+  id: 'user-cm-1',
+  username: 'cmuser',
+  displayName: 'Contract Management User',
+  roleId: 'role-cm',
+  roleCode: 'CONTRACT_MANAGEMENT_USER',
+  roleName: 'Contract Management User',
+  mustChangePassword: false,
+  isActive: true,
+  sessionId: 'session-3',
+  departmentId: 'dept-own-1',
+  permissions: ['contracts.read', 'contracts.create', 'contracts.update', 'contracts.comment'],
+};
+
 function makeContract(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'contract-1',
@@ -363,6 +377,57 @@ describe('ContractsService.create', () => {
       'CONTRACTS_MANAGEMENT',
       'dept-9',
     );
+  });
+
+  it('auto-assigns actor.departmentId when scope is OWN_DEPARTMENT and no departmentId given', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.OWN_DEPARTMENT);
+    const contract = makeContract({ departmentId: ACTOR_OWN_DEPT.departmentId });
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V' }, ACTOR_OWN_DEPT);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['departmentId']).toBe('dept-own-1');
+    expect(mockDeptAccess.assertCanAccessDepartment).toHaveBeenCalledWith(
+      ACTOR_OWN_DEPT,
+      'CONTRACTS_MANAGEMENT',
+      'dept-own-1',
+    );
+  });
+
+  it('throws UnprocessableEntityException when OWN_DEPARTMENT actor has no department', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.OWN_DEPARTMENT);
+    const noDeptActor: AuthUser = { ...ACTOR_OWN_DEPT, departmentId: null };
+
+    await expect(service.create({ title: 'T', counterpartyName: 'V' }, noDeptActor)).rejects.toThrow(
+      UnprocessableEntityException,
+    );
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-assign department when scope is ALL_DEPARTMENTS', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+    const contract = makeContract();
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V' }, ACTOR_ADMIN);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['departmentId']).toBeUndefined();
+  });
+
+  it('explicit departmentId in dto takes precedence over auto-default (getScope not consulted)', async () => {
+    const contract = makeContract({ departmentId: 'dept-explicit' });
+    mockTxContractCreate.mockResolvedValue(contract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V', departmentId: 'dept-explicit' }, ACTOR_OWN_DEPT);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['departmentId']).toBe('dept-explicit');
+    expect(mockGetScope).not.toHaveBeenCalled();
   });
 });
 

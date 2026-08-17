@@ -9,6 +9,15 @@ export interface ChangePasswordState {
   fieldErrors?: Record<string, string[]>;
 }
 
+const MIN_PASSWORD_LENGTH = 3;
+
+/** Maps known backend error codes to clear, user-friendly text. Falls back to the backend's own message for anything else — never invents a state the backend didn't report. */
+function friendlyChangePasswordError(result: { code: string; message: string }): string {
+  if (result.code === 'INVALID_CREDENTIALS') return 'Current password is incorrect.';
+  if (result.code === 'VALIDATION_ERROR') return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  return result.message;
+}
+
 export async function changePasswordAction(
   _prev: ChangePasswordState | null,
   formData: FormData,
@@ -25,13 +34,19 @@ export async function changePasswordAction(
     return { error: 'All fields are required.' };
   }
 
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    return {
+      fieldErrors: { newPassword: [`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`] },
+    };
+  }
+
   if (newPassword !== confirmNewPassword) {
-    return { fieldErrors: { confirmNewPassword: ['Passwords do not match.'] } };
+    return { fieldErrors: { confirmNewPassword: ['New password and confirm password do not match.'] } };
   }
 
   const result = await authApi.changePassword(accessToken, currentPassword, newPassword);
   if (!result.ok) {
-    return { error: result.message };
+    return { error: friendlyChangePasswordError(result) };
   }
 
   // Per correction #10: revoke all sessions → clear cookies → redirect to login.

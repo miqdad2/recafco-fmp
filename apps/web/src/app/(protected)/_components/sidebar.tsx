@@ -22,13 +22,28 @@ import {
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
+import { canSeeModule } from '../_lib/module-visibility';
+import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
   label: string;
   href: string | null;
   icon: LucideIcon;
   comingSoon?: boolean;
+  /** Gates visibility via the shared canSeeModule() source of truth. Used for Operations/Contract items and whole-module checks. */
+  module?: ModuleCode;
+  /** Gates visibility by an exact permission code — used where a module has several screens, each needing its own specific permission (e.g. Administration's individual items). */
   permission?: string;
+  /** Gated behind the same visibility as the Administration section (no dedicated permission exists yet). */
+  adminGated?: boolean;
+}
+
+/** Single visibility rule for every sidebar item — the one place "can this user see this link" is decided. */
+function isNavItemVisible(item: NavItem, permissions: string[], hasAnyAdminPermission: boolean): boolean {
+  if (item.module && !canSeeModule(permissions, item.module)) return false;
+  if (item.permission && !permissions.includes(item.permission)) return false;
+  if (item.adminGated && !hasAnyAdminPermission) return false;
+  return true;
 }
 
 interface NavGroup {
@@ -46,20 +61,24 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { label: 'Factory Tasks Management', href: '/factory-tasks/dashboard', icon: ClipboardList },
-      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle },
-      { label: 'Maintenance Requests', href: '/maintenance/dashboard', icon: Wrench },
-      { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck },
-      { label: 'Contracts Management', href: '/contracts/dashboard', icon: FileText },
-      { label: 'Production Dashboard', href: '/production/dashboard', icon: Factory },
+      { label: 'Factory Tasks Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
+      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
+      { label: 'Maintenance Requests', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
+      { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
+      { label: 'Production Dashboard', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
     ],
   },
   {
     label: 'Governance',
     items: [
-      { label: 'Audit Log', href: null, icon: FileSearch, comingSoon: true },
+      { label: 'Audit Log', href: null, icon: FileSearch, comingSoon: true, adminGated: true },
     ],
   },
+];
+
+const CONTRACT_ITEMS: NavItem[] = [
+  { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Contract List', href: '/contracts', icon: FileText, module: 'CONTRACTS_MANAGEMENT' },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
@@ -70,6 +89,14 @@ const ADMIN_ITEMS: NavItem[] = [
   { label: 'Plants', href: '/administration/plants', icon: Factory, permission: 'org.plants.read' },
   { label: 'Locations', href: '/administration/locations', icon: MapPin, permission: 'org.locations.read' },
 ];
+
+/** Contract List is active for /contracts and any of its sub-routes except the Dashboard itself. */
+function isContractItemActive(href: string, pathname: string): boolean {
+  if (href === '/contracts/dashboard') {
+    return pathname === '/contracts/dashboard';
+  }
+  return pathname === '/contracts' || (pathname.startsWith('/contracts/') && !pathname.startsWith('/contracts/dashboard'));
+}
 
 interface SidebarProps {
   user: ShellUser;
@@ -91,17 +118,29 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   const isInAdmin = pathname.startsWith('/administration');
   const [adminExpanded, setAdminExpanded] = useState(isInAdmin);
 
-  // Re-expand when navigating into admin
+  const isInContracts = pathname.startsWith('/contracts');
+  const [contractsExpanded, setContractsExpanded] = useState(isInContracts);
+
+  // Re-expand when navigating into admin or contracts
   useEffect(() => {
     if (isInAdmin) setAdminExpanded(true);
   }, [isInAdmin]);
+  useEffect(() => {
+    if (isInContracts) setContractsExpanded(true);
+  }, [isInContracts]);
 
-  const hasAnyAdminPermission = ADMIN_ITEMS.some(
-    (item) => !item.permission || user.permissions.includes(item.permission),
-  );
+  // The Administration section as a whole requires at least one real admin permission —
+  // individual items below still each require their own specific permission via isNavItemVisible.
+  const hasAnyAdminPermission = canSeeModule(user.permissions, 'ADMINISTRATION');
 
   const visibleAdminItems = ADMIN_ITEMS.filter(
-    (item) => !item.permission || user.permissions.includes(item.permission),
+    (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
+  );
+
+  const hasAnyContractPermission = canSeeModule(user.permissions, 'CONTRACTS_MANAGEMENT');
+
+  const visibleContractItems = CONTRACT_ITEMS.filter(
+    (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
   );
 
   const sidebarContent = (
@@ -132,52 +171,112 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-0.5" aria-label="Primary navigation">
-        {MAIN_GROUPS.map((group) => (
-          <div key={group.label ?? 'main'} className="mb-1">
-            {group.label && (
-              <p className="px-4 mb-1 mt-3 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
-                {group.label}
-              </p>
-            )}
-            {group.items.map((item) => {
-              if (item.comingSoon || !item.href) {
+        {MAIN_GROUPS.map((group) => {
+          const visibleItems = group.items.filter(
+            (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
+          );
+          const showContractsHere = group.label === 'Operations' && hasAnyContractPermission;
+          if (visibleItems.length === 0 && !showContractsHere) return null;
+
+          return (
+            <div key={group.label ?? 'main'} className="mb-1">
+              {group.label && (
+                <p className="px-4 mb-1 mt-3 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
+                  {group.label}
+                </p>
+              )}
+
+              {showContractsHere && (
+                <div className="mb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setContractsExpanded((v) => !v)}
+                    aria-expanded={contractsExpanded}
+                    aria-controls="contracts-nav-items"
+                    className={[
+                      'w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
+                      isInContracts
+                        ? 'text-text-inverse font-medium'
+                        : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                    ].join(' ')}
+                  >
+                    <FileText className="size-4 shrink-0" aria-hidden="true" />
+                    <span className="flex-1 text-left">Contract Management</span>
+                    {contractsExpanded ? (
+                      <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+
+                  {contractsExpanded && (
+                    <div id="contracts-nav-items" className="ml-3 border-l border-nav-hover">
+                      {visibleContractItems.map((item) => {
+                        if (!item.href) return null;
+                        const active = isContractItemActive(item.href, pathname);
+                        return (
+                          <Link
+                            key={item.label}
+                            href={item.href}
+                            onClick={onClose}
+                            aria-current={active ? 'page' : undefined}
+                            className={[
+                              'flex items-center gap-2.5 pl-5 pr-4 py-1.5 text-sm transition-colors',
+                              active
+                                ? 'bg-nav-active text-text-inverse font-medium'
+                                : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                            ].join(' ')}
+                          >
+                            <item.icon className="size-3.5 shrink-0" aria-hidden="true" />
+                            {item.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {visibleItems.map((item) => {
+                if (item.comingSoon || !item.href) {
+                  return (
+                    <span
+                      key={item.label}
+                      className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-inverse/40 cursor-not-allowed select-none"
+                      aria-disabled="true"
+                      title="Coming soon"
+                    >
+                      <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                      <span className="flex-1">{item.label}</span>
+                      <span className="text-[10px] bg-nav-hover px-1.5 py-0.5 rounded text-text-inverse/50">
+                        Soon
+                      </span>
+                    </span>
+                  );
+                }
+
+                const active = isActive(item.href, pathname);
                 return (
-                  <span
+                  <Link
                     key={item.label}
-                    className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-inverse/40 cursor-not-allowed select-none"
-                    aria-disabled="true"
-                    title="Coming soon"
+                    href={item.href}
+                    onClick={onClose}
+                    aria-current={active ? 'page' : undefined}
+                    className={[
+                      'flex items-center gap-2.5 px-4 py-2 text-sm rounded-none transition-colors',
+                      active
+                        ? 'bg-nav-active text-text-inverse font-medium'
+                        : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                    ].join(' ')}
                   >
                     <item.icon className="size-4 shrink-0" aria-hidden="true" />
-                    <span className="flex-1">{item.label}</span>
-                    <span className="text-[10px] bg-nav-hover px-1.5 py-0.5 rounded text-text-inverse/50">
-                      Soon
-                    </span>
-                  </span>
+                    {item.label}
+                  </Link>
                 );
-              }
-
-              const active = isActive(item.href, pathname);
-              return (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  onClick={onClose}
-                  aria-current={active ? 'page' : undefined}
-                  className={[
-                    'flex items-center gap-2.5 px-4 py-2 text-sm rounded-none transition-colors',
-                    active
-                      ? 'bg-nav-active text-text-inverse font-medium'
-                      : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
-                  ].join(' ')}
-                >
-                  <item.icon className="size-4 shrink-0" aria-hidden="true" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+              })}
+            </div>
+          );
+        })}
 
         {/* Administration — expandable, permission-aware */}
         {hasAnyAdminPermission && (
