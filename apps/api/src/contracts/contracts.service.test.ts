@@ -18,6 +18,8 @@ const mockTxContractFindUnique = vi.fn();
 const mockTxActivityCreate = vi.fn();
 const mockTxCommentCreate = vi.fn();
 const mockTxSecurityAuditEventCreate = vi.fn();
+const mockTxBoqItemCreateMany = vi.fn();
+const mockTxBoqItemDeleteMany = vi.fn();
 
 const mockTx = {
   contract: {
@@ -28,6 +30,7 @@ const mockTx = {
   },
   contractActivity: { create: mockTxActivityCreate },
   contractComment: { create: mockTxCommentCreate },
+  contractBoqItem: { createMany: mockTxBoqItemCreateMany, deleteMany: mockTxBoqItemDeleteMany },
   securityAuditEvent: { create: mockTxSecurityAuditEventCreate },
 };
 
@@ -146,6 +149,21 @@ function makeContract(overrides: Record<string, unknown> = {}): Record<string, u
     startDate: null,
     endDate: null,
     renewalNoticeDate: null,
+    clientContactName: null,
+    clientContactPhone: null,
+    forecastCompletionDate: null,
+    originalContractValue: null,
+    originalCurrency: null,
+    projectSiteLocation: null,
+    scopeDescription: null,
+    scopeExclusions: null,
+    deliverables: null,
+    milestones: null,
+    scheduleSummary: null,
+    quantitiesSpecifications: null,
+    craneRequired: null,
+    craneProvidedBy: null,
+    estimatedCraneCapacity: null,
     ownerUserId: 'user-admin-1',
     departmentId: null,
     plantId: null,
@@ -182,6 +200,11 @@ let service: ContractsService;
 beforeEach(() => {
   vi.clearAllMocks();
   service = new ContractsService(mockDb, mockRef, mockDeptAccess);
+  // create() always re-fetches the full record via findUniqueOrThrow after the
+  // initial insert (and after any BOQ items are created) — default it to a
+  // sane contract so tests that don't care about the exact shape don't crash.
+  // Tests that do care override this with their own .mockResolvedValue(...).
+  mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract());
 });
 
 // ---------------------------------------------------------------------------
@@ -477,6 +500,284 @@ describe('ContractsService.create', () => {
     expect(createCall.data['scopeOfWork']).toBeUndefined();
     expect(createCall.data['paymentTerms']).toBeUndefined();
   });
+
+  it('creates BOQ items and computes totalPrice from originalEstimatedQty × unitPrice', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        boqItems: [
+          { description: 'Precast concrete panels', originalEstimatedQty: 100, unitPrice: 25.5, itemCode: 'PC-001' },
+        ],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data).toHaveLength(1);
+    expect(boqCall.data[0]!['sortOrder']).toBe(1);
+    expect(boqCall.data[0]!['itemCode']).toBe('PC-001');
+    expect(boqCall.data[0]!['totalPrice']).toBe(2550);
+  });
+
+  it('uses revisedQty over originalEstimatedQty for totalPrice when both provided', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        boqItems: [
+          { description: 'Precast concrete panels', originalEstimatedQty: 100, revisedQty: 120, unitPrice: 25.5 },
+        ],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data[0]!['totalPrice']).toBe(3060);
+  });
+
+  it('sets totalPrice to null when quantity or unitPrice is missing', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      { title: 'T', counterpartyName: 'V', boqItems: [{ description: 'No price yet' }] },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data[0]!['totalPrice']).toBeNull();
+  });
+
+  it('recalculates contractValue as the sum of BOQ totalPrice values when BOQ items are provided', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        contractValue: 999999, // should be ignored/overridden — BOQ totals are the source of truth
+        boqItems: [
+          { description: 'Item A', originalEstimatedQty: 100, unitPrice: 25.5 },
+          { description: 'Item B', originalEstimatedQty: 10, unitPrice: 2 },
+        ],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['contractValue']).toBe(2570);
+    expect(createCall.data['currency']).toBe('KWD');
+  });
+
+  it('preserves manually-provided contractValue when no BOQ items are given', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V', contractValue: 500 }, ACTOR_VIEWER);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['contractValue']).toBe(500);
+    expect(createCall.data['currency']).toBeUndefined();
+    expect(mockTxBoqItemCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate BOQ item codes within the same contract', async () => {
+    await expect(
+      service.create(
+        {
+          title: 'T',
+          counterpartyName: 'V',
+          boqItems: [
+            { description: 'Item A', itemCode: 'DUP-1' },
+            { description: 'Item B', itemCode: 'DUP-1' },
+          ],
+        },
+        ACTOR_VIEWER,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows multiple BOQ items with no itemCode (nulls are not duplicates)', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        boqItems: [{ description: 'Item A' }, { description: 'Item B' }],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data).toHaveLength(2);
+  });
+
+  it('rejects Ex-Factory selected together with Erection on create', async () => {
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', scopeOfWork: { exFactory: true, erection: true } },
+        ACTOR_VIEWER,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows Delivery and Erection together when Ex-Factory is not selected', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', scopeOfWork: { delivery: true, erection: true } },
+        ACTOR_VIEWER,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects Not Applicable selected together with an active scope option', async () => {
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', scopeOfWork: { notApplicable: true, production: true } },
+        ACTOR_VIEWER,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows Not Applicable alone', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.create({ title: 'T', counterpartyName: 'V', scopeOfWork: { notApplicable: true } }, ACTOR_VIEWER),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects Other selected without otherDescription', async () => {
+    await expect(
+      service.create({ title: 'T', counterpartyName: 'V', scopeOfWork: { other: true } }, ACTOR_VIEWER),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows Other selected with a non-empty otherDescription', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', scopeOfWork: { other: true, otherDescription: 'Custom scope item' } },
+        ACTOR_VIEWER,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects crane fields when Erection is not selected', async () => {
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', craneRequired: 'YES' },
+        ACTOR_VIEWER,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows crane fields when Erection is selected', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.create(
+        {
+          title: 'T',
+          counterpartyName: 'V',
+          scopeOfWork: { erection: true },
+          craneRequired: 'YES',
+          craneProvidedBy: 'RECAFCO',
+          estimatedCraneCapacity: '50 tons',
+        },
+        ACTOR_VIEWER,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('persists the new client/date/value/scope-detail/crane fields', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        clientContactName: 'Jane Client',
+        clientContactPhone: '+965 1234 5678',
+        forecastCompletionDate: '2026-12-01',
+        projectSiteLocation: 'Kuwait City, Block 4',
+        scopeDescription: 'Full precast supply and install',
+        scopeExclusions: 'Excludes foundation works',
+        deliverables: 'Shop drawings, panels, erection',
+        milestones: 'M1: Design, M2: Production, M3: Erection',
+        scheduleSummary: '6 months from award',
+        quantitiesSpecifications: '500 m² precast, C40',
+        scopeOfWork: { erection: true },
+        craneRequired: 'NOT_DECIDED',
+        craneProvidedBy: 'CLIENT',
+        estimatedCraneCapacity: '25 tons',
+      },
+      ACTOR_VIEWER,
+    );
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['clientContactName']).toBe('Jane Client');
+    expect(createCall.data['clientContactPhone']).toBe('+965 1234 5678');
+    expect(createCall.data['forecastCompletionDate']).toEqual(new Date('2026-12-01'));
+    expect(createCall.data['projectSiteLocation']).toBe('Kuwait City, Block 4');
+    expect(createCall.data['scopeDescription']).toBe('Full precast supply and install');
+    expect(createCall.data['scopeExclusions']).toBe('Excludes foundation works');
+    expect(createCall.data['deliverables']).toBe('Shop drawings, panels, erection');
+    expect(createCall.data['milestones']).toBe('M1: Design, M2: Production, M3: Erection');
+    expect(createCall.data['scheduleSummary']).toBe('6 months from award');
+    expect(createCall.data['quantitiesSpecifications']).toBe('500 m² precast, C40');
+    expect(createCall.data['craneRequired']).toBe('NOT_DECIDED');
+    expect(createCall.data['craneProvidedBy']).toBe('CLIENT');
+    expect(createCall.data['estimatedCraneCapacity']).toBe('25 tons');
+  });
+
+  it('defaults originalContractValue/originalCurrency to the initial contractValue/currency when not provided', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create({ title: 'T', counterpartyName: 'V', contractValue: 1000, currency: 'KWD' }, ACTOR_VIEWER);
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['originalContractValue']).toBe(1000);
+    expect(createCall.data['originalCurrency']).toBe('KWD');
+  });
+
+  it('uses an explicitly provided originalContractValue instead of defaulting', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      { title: 'T', counterpartyName: 'V', contractValue: 1000, originalContractValue: 1500 },
+      ACTOR_VIEWER,
+    );
+
+    const createCall = mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(createCall.data['contractValue']).toBe(1000);
+    expect(createCall.data['originalContractValue']).toBe(1500);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -666,6 +967,220 @@ describe('ContractsService.update', () => {
       'CONTRACTS_MANAGEMENT',
       'dept-2',
     );
+  });
+
+  it('replaces the BOQ item set: deletes existing rows then creates the new set', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      { version: 1, boqItems: [{ description: 'New item', originalEstimatedQty: 10, unitPrice: 5 }] },
+      ACTOR_ADMIN,
+    );
+
+    expect(mockTxBoqItemDeleteMany).toHaveBeenCalledWith({ where: { contractId: 'id-1' } });
+    const createCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(createCall.data).toHaveLength(1);
+    expect(createCall.data[0]!['sortOrder']).toBe(1);
+    expect(createCall.data[0]!['totalPrice']).toBe(50);
+  });
+
+  it('clears BOQ items when boqItems is an explicit empty array, preserving manual contractValue', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, boqItems: [], contractValue: 500 }, ACTOR_ADMIN);
+
+    expect(mockTxBoqItemDeleteMany).toHaveBeenCalledWith({ where: { contractId: 'id-1' } });
+    expect(mockTxBoqItemCreateMany).not.toHaveBeenCalled();
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['contractValue']).toBe(500);
+  });
+
+  it('does not touch BOQ items when boqItems is omitted from the update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, title: 'New Title' }, ACTOR_ADMIN);
+
+    expect(mockTxBoqItemDeleteMany).not.toHaveBeenCalled();
+    expect(mockTxBoqItemCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('recalculates contractValue from BOQ totals and defaults currency to KWD', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      {
+        version: 1,
+        contractValue: 999999, // should be overridden — BOQ totals are the source of truth
+        boqItems: [{ description: 'Item A', originalEstimatedQty: 10, unitPrice: 5 }],
+      },
+      ACTOR_ADMIN,
+    );
+
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['contractValue']).toBe(50);
+    expect(updateCall.data['currency']).toBe('KWD');
+  });
+
+  it('rejects duplicate BOQ item codes on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update(
+        'id-1',
+        {
+          version: 1,
+          boqItems: [
+            { description: 'Item A', itemCode: 'DUP-1' },
+            { description: 'Item B', itemCode: 'DUP-1' },
+          ],
+        },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects Ex-Factory selected together with Delivery on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update(
+        'id-1',
+        { version: 1, scopeOfWork: { exFactory: true, delivery: true } },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows Ex-Factory alone (no Delivery/Erection) on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.update('id-1', { version: 1, scopeOfWork: { exFactory: true, delivery: false } }, ACTOR_ADMIN),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects Not Applicable together with an active scope option on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update(
+        'id-1',
+        { version: 1, scopeOfWork: { notApplicable: true, shopDrawing: true } },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects Other selected without otherDescription on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update('id-1', { version: 1, scopeOfWork: { other: true } }, ACTOR_ADMIN),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects crane fields when the update does not select Erection and the contract has none stored', async () => {
+    const draftContract = makeContract({ scopeOfWork: { erection: false } });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update('id-1', { version: 1, craneRequired: 'YES' }, ACTOR_ADMIN),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows crane fields when the existing stored scope already has Erection selected', async () => {
+    const draftContract = makeContract({ scopeOfWork: { erection: true } });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    // scopeOfWork itself is untouched by this update — only crane fields change —
+    // so the effective erection state must come from the contract's existing scope.
+    await expect(
+      service.update('id-1', { version: 1, craneRequired: 'YES' }, ACTOR_ADMIN),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects crane fields when this update turns Erection off, even if it was previously on', async () => {
+    const draftContract = makeContract({ scopeOfWork: { erection: true } });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+
+    await expect(
+      service.update(
+        'id-1',
+        { version: 1, scopeOfWork: { erection: false }, craneRequired: 'YES' },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('persists the new client/date/value/scope-detail fields on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      {
+        version: 1,
+        clientContactName: 'Jane Client',
+        clientContactPhone: '+965 1234 5678',
+        forecastCompletionDate: '2026-12-01',
+        originalContractValue: 2000,
+        originalCurrency: 'KWD',
+        projectSiteLocation: 'Kuwait City',
+      },
+      ACTOR_ADMIN,
+    );
+
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['clientContactName']).toBe('Jane Client');
+    expect(updateCall.data['clientContactPhone']).toBe('+965 1234 5678');
+    expect(updateCall.data['forecastCompletionDate']).toEqual(new Date('2026-12-01'));
+    expect(updateCall.data['originalContractValue']).toBe(2000);
+    expect(updateCall.data['originalCurrency']).toBe('KWD');
+    expect(updateCall.data['projectSiteLocation']).toBe('Kuwait City');
+  });
+
+  it('does not auto-default originalContractValue on update when omitted', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update('id-1', { version: 1, contractValue: 5000 }, ACTOR_ADMIN);
+
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['contractValue']).toBe(5000);
+    expect(updateCall.data['originalContractValue']).toBeUndefined();
   });
 });
 

@@ -5,12 +5,13 @@ import {
   UnprocessableEntityException,
   ConflictException,
 } from '@nestjs/common';
-import { ContractStatus, ModuleIdentifier, DepartmentAccessScope } from '@recafco/database';
+import { ContractStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsRefService } from './contracts-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractDto } from './dto/create-contract.dto';
+import type { CreateContractBoqItemDto } from './dto/create-contract-boq-item.dto';
 import type { UpdateContractDto } from './dto/update-contract.dto';
 import type { ContractListQueryDto, PaginatedResult } from './dto/contract-list-query.dto';
 import type { ActivateContractDto } from './dto/activate-contract.dto';
@@ -78,6 +79,21 @@ const CONTRACT_SELECT = {
   startDate: true,
   endDate: true,
   renewalNoticeDate: true,
+  clientContactName: true,
+  clientContactPhone: true,
+  forecastCompletionDate: true,
+  originalContractValue: true,
+  originalCurrency: true,
+  projectSiteLocation: true,
+  scopeDescription: true,
+  scopeExclusions: true,
+  deliverables: true,
+  milestones: true,
+  scheduleSummary: true,
+  quantitiesSpecifications: true,
+  craneRequired: true,
+  craneProvidedBy: true,
+  estimatedCraneCapacity: true,
   ownerUserId: true,
   departmentId: true,
   plantId: true,
@@ -101,6 +117,27 @@ const CONTRACT_SELECT = {
   department: { select: { id: true, name: true } },
   plant: { select: { id: true, name: true } },
   location: { select: { id: true, name: true } },
+  boqItems: {
+    select: {
+      id: true,
+      sortOrder: true,
+      itemCode: true,
+      category: true,
+      description: true,
+      drawingReference: true,
+      specificationReference: true,
+      originalEstimatedQty: true,
+      revisedQty: true,
+      unitOfMeasure: true,
+      mixDesignType: true,
+      concreteGrade: true,
+      unitPrice: true,
+      totalPrice: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: { sortOrder: 'asc' },
+  },
 } as const;
 
 type ContractRecord = Awaited<
@@ -118,6 +155,99 @@ function withLifecycle(contract: ContractRecord): ContractWithLifecycle {
       renewalNoticeDate: contract.renewalNoticeDate as Date | null,
     }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// BOQ item helpers
+//
+// totalPrice is always recalculated server-side, never trusted from the
+// client. Preferred quantity: revisedQty when present, else
+// originalEstimatedQty. If either quantity or unitPrice is missing, the line
+// has no computable total — reported as null (not 0, to keep "no data" and
+// "zero value" visibly distinct).
+// ---------------------------------------------------------------------------
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function computeBoqItemTotal(item: CreateContractBoqItemDto): number | null {
+  const qty = item.revisedQty ?? item.originalEstimatedQty;
+  if (qty === undefined || item.unitPrice === undefined) return null;
+  return round3(qty * item.unitPrice);
+}
+
+function findDuplicateBoqItemCodes(items: CreateContractBoqItemDto[]): string[] {
+  const codes = items.map((i) => i.itemCode).filter((c): c is string => c !== undefined && c !== '');
+  const duplicates = codes.filter((code, index) => codes.indexOf(code) !== index);
+  return [...new Set(duplicates)];
+}
+
+// ---------------------------------------------------------------------------
+// Scope of Work validation
+//
+// Enforced server-side on both create and update so none of these rules can
+// be bypassed by calling the API directly:
+//   - Ex-Factory is incompatible with Delivery/Erection.
+//   - Not Applicable is incompatible with any other active scope option.
+//   - Other requires a non-empty otherDescription.
+// ---------------------------------------------------------------------------
+
+const ACTIVE_SCOPE_KEYS = ['shopDrawing', 'designProduction', 'production', 'delivery', 'erection', 'exFactory', 'other'];
+
+function assertScopeOfWorkValid(scopeOfWork: Record<string, boolean | string> | undefined): void {
+  if (!scopeOfWork) return;
+  const isTrue = (key: string): boolean => scopeOfWork[key] === true;
+
+  if (isTrue('exFactory') && (isTrue('delivery') || isTrue('erection'))) {
+    throw new UnprocessableEntityException({
+      code: 'CONTRACT_SCOPE_EX_FACTORY_CONFLICT',
+      message: 'Ex-Factory cannot be selected together with Delivery or Erection.',
+    });
+  }
+
+  if (isTrue('notApplicable') && ACTIVE_SCOPE_KEYS.some(isTrue)) {
+    throw new UnprocessableEntityException({
+      code: 'CONTRACT_SCOPE_NOT_APPLICABLE_CONFLICT',
+      message: 'Not Applicable cannot be selected together with any other scope option.',
+    });
+  }
+
+  if (isTrue('other')) {
+    const otherDescription = scopeOfWork['otherDescription'];
+    if (typeof otherDescription !== 'string' || otherDescription.trim() === '') {
+      throw new UnprocessableEntityException({
+        code: 'CONTRACT_SCOPE_OTHER_DESCRIPTION_REQUIRED',
+        message: 'Other Description is required when Other scope is selected.',
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Erection / crane validation
+//
+// Crane fields only make sense when Erection is part of scope. Rejecting
+// (rather than silently dropping) keeps stored data clean and matches the
+// task's preferred approach.
+// ---------------------------------------------------------------------------
+
+function assertCraneFieldsValid(
+  erectionSelected: boolean,
+  fields: {
+    craneRequired?: string | undefined;
+    craneProvidedBy?: string | undefined;
+    estimatedCraneCapacity?: string | undefined;
+  },
+): void {
+  const anyCraneField =
+    fields.craneRequired !== undefined || fields.craneProvidedBy !== undefined || fields.estimatedCraneCapacity !== undefined;
+  if (anyCraneField && !erectionSelected) {
+    throw new UnprocessableEntityException({
+      code: 'CONTRACT_CRANE_REQUIRES_ERECTION',
+      message: 'Crane fields can only be provided when Erection is selected in Scope of Work.',
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +272,22 @@ const AUDITABLE_UPDATE_FIELDS = [
   'startDate',
   'endDate',
   'renewalNoticeDate',
+  'clientContactName',
+  'clientContactPhone',
+  'forecastCompletionDate',
+  'originalContractValue',
+  'originalCurrency',
+  'projectSiteLocation',
+  'craneRequired',
+  'craneProvidedBy',
+  'estimatedCraneCapacity',
   'departmentId',
   'plantId',
   'locationId',
   'ownerUserId',
 ] as const;
 
-const DATE_UPDATE_FIELDS = new Set(['startDate', 'endDate', 'renewalNoticeDate', 'contractDate']);
+const DATE_UPDATE_FIELDS = new Set(['startDate', 'endDate', 'renewalNoticeDate', 'contractDate', 'forecastCompletionDate']);
 
 type AuditScalar = string | number | boolean | null;
 
@@ -199,11 +338,35 @@ function buildUpdateAuditMetadata(
   if (dto.notes !== undefined && dto.notes !== (existing.notes as string | null)) {
     changedFields.push('notes');
   }
+  if (dto.scopeDescription !== undefined && dto.scopeDescription !== (existing.scopeDescription as string | null)) {
+    changedFields.push('scopeDescription');
+  }
+  if (dto.scopeExclusions !== undefined && dto.scopeExclusions !== (existing.scopeExclusions as string | null)) {
+    changedFields.push('scopeExclusions');
+  }
+  if (dto.deliverables !== undefined && dto.deliverables !== (existing.deliverables as string | null)) {
+    changedFields.push('deliverables');
+  }
+  if (dto.milestones !== undefined && dto.milestones !== (existing.milestones as string | null)) {
+    changedFields.push('milestones');
+  }
+  if (dto.scheduleSummary !== undefined && dto.scheduleSummary !== (existing.scheduleSummary as string | null)) {
+    changedFields.push('scheduleSummary');
+  }
+  if (
+    dto.quantitiesSpecifications !== undefined &&
+    dto.quantitiesSpecifications !== (existing.quantitiesSpecifications as string | null)
+  ) {
+    changedFields.push('quantitiesSpecifications');
+  }
   if (dto.scopeOfWork !== undefined) {
     changedFields.push('scopeOfWork');
   }
   if (dto.paymentTerms !== undefined) {
     changedFields.push('paymentTerms');
+  }
+  if (dto.boqItems !== undefined) {
+    changedFields.push('boqItems');
   }
 
   return { changedFields, previousValues, newValues };
@@ -253,6 +416,37 @@ export class ContractsService {
       });
     }
 
+    assertScopeOfWorkValid(dto.scopeOfWork);
+    assertCraneFieldsValid(dto.scopeOfWork?.['erection'] === true, {
+      craneRequired: dto.craneRequired,
+      craneProvidedBy: dto.craneProvidedBy,
+      estimatedCraneCapacity: dto.estimatedCraneCapacity,
+    });
+
+    const boqItems = dto.boqItems ?? [];
+    if (boqItems.length > 0) {
+      const duplicates = findDuplicateBoqItemCodes(boqItems);
+      if (duplicates.length > 0) {
+        throw new UnprocessableEntityException({
+          code: 'CONTRACT_BOQ_DUPLICATE_ITEM_CODE',
+          message: `Duplicate BOQ item code(s) in the same contract: ${duplicates.join(', ')}`,
+        });
+      }
+    }
+
+    const boqItemTotals = boqItems.map((item) => computeBoqItemTotal(item));
+    // BOQ items provided → contractValue is derived from their totals (source of truth).
+    // No BOQ items → preserve prior behavior: use contractValue exactly as submitted.
+    const effectiveContractValue =
+      boqItems.length > 0
+        ? round3(boqItemTotals.reduce((sum: number, t) => sum + (t ?? 0), 0))
+        : dto.contractValue;
+    const effectiveCurrency = dto.currency ?? (boqItems.length > 0 ? 'KWD' : undefined);
+    // Original Value defaults to the initial current value when not explicitly entered —
+    // only meaningful at creation time; update() never re-derives it this way.
+    const effectiveOriginalContractValue = dto.originalContractValue ?? effectiveContractValue;
+    const effectiveOriginalCurrency = dto.originalCurrency ?? effectiveCurrency;
+
     const ownerUserId = dto.ownerUserId ?? actor.id;
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -277,18 +471,54 @@ export class ContractsService {
           ...(dto.projectNumber !== undefined ? { projectNumber: dto.projectNumber } : {}),
           ...(dto.scopeOfWork !== undefined ? { scopeOfWork: dto.scopeOfWork } : {}),
           ...(dto.paymentTerms !== undefined ? { paymentTerms: dto.paymentTerms } : {}),
-          ...(dto.contractValue !== undefined ? { contractValue: dto.contractValue } : {}),
-          ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
+          ...(effectiveContractValue !== undefined ? { contractValue: effectiveContractValue } : {}),
+          ...(effectiveCurrency !== undefined ? { currency: effectiveCurrency } : {}),
           ...(dto.startDate !== undefined ? { startDate: new Date(dto.startDate) } : {}),
           ...(dto.endDate !== undefined ? { endDate: new Date(dto.endDate) } : {}),
           ...(dto.renewalNoticeDate !== undefined ? { renewalNoticeDate: new Date(dto.renewalNoticeDate) } : {}),
+          ...(dto.clientContactName !== undefined ? { clientContactName: dto.clientContactName } : {}),
+          ...(dto.clientContactPhone !== undefined ? { clientContactPhone: dto.clientContactPhone } : {}),
+          ...(dto.forecastCompletionDate !== undefined ? { forecastCompletionDate: new Date(dto.forecastCompletionDate) } : {}),
+          ...(effectiveOriginalContractValue !== undefined ? { originalContractValue: effectiveOriginalContractValue } : {}),
+          ...(effectiveOriginalCurrency !== undefined ? { originalCurrency: effectiveOriginalCurrency } : {}),
+          ...(dto.projectSiteLocation !== undefined ? { projectSiteLocation: dto.projectSiteLocation } : {}),
+          ...(dto.scopeDescription !== undefined ? { scopeDescription: dto.scopeDescription } : {}),
+          ...(dto.scopeExclusions !== undefined ? { scopeExclusions: dto.scopeExclusions } : {}),
+          ...(dto.deliverables !== undefined ? { deliverables: dto.deliverables } : {}),
+          ...(dto.milestones !== undefined ? { milestones: dto.milestones } : {}),
+          ...(dto.scheduleSummary !== undefined ? { scheduleSummary: dto.scheduleSummary } : {}),
+          ...(dto.quantitiesSpecifications !== undefined ? { quantitiesSpecifications: dto.quantitiesSpecifications } : {}),
+          ...(dto.craneRequired !== undefined ? { craneRequired: dto.craneRequired } : {}),
+          ...(dto.craneProvidedBy !== undefined ? { craneProvidedBy: dto.craneProvidedBy } : {}),
+          ...(dto.estimatedCraneCapacity !== undefined ? { estimatedCraneCapacity: dto.estimatedCraneCapacity } : {}),
           ...(departmentId !== undefined ? { departmentId } : {}),
           ...(dto.plantId !== undefined ? { plantId: dto.plantId } : {}),
           ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
           ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
         },
-        select: CONTRACT_SELECT,
+        select: { id: true },
       });
+
+      if (boqItems.length > 0) {
+        await tx.contractBoqItem.createMany({
+          data: boqItems.map((item, index) => ({
+            contractId: created.id,
+            sortOrder: index + 1,
+            ...(item.itemCode !== undefined ? { itemCode: item.itemCode } : {}),
+            ...(item.category !== undefined ? { category: item.category } : {}),
+            description: item.description,
+            ...(item.drawingReference !== undefined ? { drawingReference: item.drawingReference } : {}),
+            ...(item.specificationReference !== undefined ? { specificationReference: item.specificationReference } : {}),
+            ...(item.originalEstimatedQty !== undefined ? { originalEstimatedQty: item.originalEstimatedQty } : {}),
+            ...(item.revisedQty !== undefined ? { revisedQty: item.revisedQty } : {}),
+            ...(item.unitOfMeasure !== undefined ? { unitOfMeasure: item.unitOfMeasure } : {}),
+            ...(item.mixDesignType !== undefined ? { mixDesignType: item.mixDesignType as ContractBoqMixDesignType } : {}),
+            ...(item.concreteGrade !== undefined ? { concreteGrade: item.concreteGrade } : {}),
+            ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
+            totalPrice: boqItemTotals[index] ?? null,
+          })),
+        });
+      }
 
       await tx.contractActivity.create({
         data: {
@@ -297,7 +527,7 @@ export class ContractsService {
           actorName: actor.displayName,
           event: 'created',
           newStatus: ContractStatus.DRAFT,
-          metadata: { referenceNumber },
+          metadata: { referenceNumber, boqItemCount: boqItems.length },
         },
       });
 
@@ -314,7 +544,7 @@ export class ContractsService {
         },
       });
 
-      return created;
+      return tx.contract.findUniqueOrThrow({ where: { id: created.id }, select: CONTRACT_SELECT });
     });
 
     return withLifecycle(contract as ContractRecord);
@@ -350,6 +580,46 @@ export class ContractsService {
       await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, dto.departmentId ?? null);
     }
 
+    assertScopeOfWorkValid(dto.scopeOfWork);
+
+    // Crane fields are validated against the EFFECTIVE erection state: the
+    // submitted scopeOfWork if this update touches it, otherwise the
+    // contract's existing stored scope (an update that only changes crane
+    // fields must still be checked against what erection is actually set to).
+    const existingScopeOfWork = contract.scopeOfWork as Record<string, boolean | string> | null;
+    const effectiveErectionSelected =
+      dto.scopeOfWork !== undefined
+        ? dto.scopeOfWork['erection'] === true
+        : existingScopeOfWork?.['erection'] === true;
+    assertCraneFieldsValid(effectiveErectionSelected, {
+      craneRequired: dto.craneRequired,
+      craneProvidedBy: dto.craneProvidedBy,
+      estimatedCraneCapacity: dto.estimatedCraneCapacity,
+    });
+
+    // undefined boqItems = BOQ untouched by this update. An explicit array
+    // (including []) replaces the full BOQ item set for the contract.
+    const replacingBoq = dto.boqItems !== undefined;
+    const boqItems = dto.boqItems ?? [];
+    if (replacingBoq && boqItems.length > 0) {
+      const duplicates = findDuplicateBoqItemCodes(boqItems);
+      if (duplicates.length > 0) {
+        throw new UnprocessableEntityException({
+          code: 'CONTRACT_BOQ_DUPLICATE_ITEM_CODE',
+          message: `Duplicate BOQ item code(s) in the same contract: ${duplicates.join(', ')}`,
+        });
+      }
+    }
+    const boqItemTotals = boqItems.map((item) => computeBoqItemTotal(item));
+    // BOQ items present after this update → contractValue is derived from their totals.
+    // BOQ untouched or explicitly cleared → fall back to manual contractValue behavior.
+    const effectiveContractValue =
+      replacingBoq && boqItems.length > 0
+        ? round3(boqItemTotals.reduce((sum: number, t) => sum + (t ?? 0), 0))
+        : dto.contractValue;
+    const effectiveCurrency =
+      dto.currency ?? (replacingBoq && boqItems.length > 0 ? 'KWD' : undefined);
+
     const data: Record<string, unknown> = {};
     if (dto.title !== undefined) data['title'] = dto.title;
     if (dto.description !== undefined) data['description'] = dto.description;
@@ -361,11 +631,26 @@ export class ContractsService {
     if (dto.projectNumber !== undefined) data['projectNumber'] = dto.projectNumber;
     if (dto.scopeOfWork !== undefined) data['scopeOfWork'] = dto.scopeOfWork;
     if (dto.paymentTerms !== undefined) data['paymentTerms'] = dto.paymentTerms;
-    if (dto.contractValue !== undefined) data['contractValue'] = dto.contractValue;
-    if (dto.currency !== undefined) data['currency'] = dto.currency;
+    if (effectiveContractValue !== undefined) data['contractValue'] = effectiveContractValue;
+    if (effectiveCurrency !== undefined) data['currency'] = effectiveCurrency;
     if (dto.startDate !== undefined) data['startDate'] = new Date(dto.startDate);
     if (dto.endDate !== undefined) data['endDate'] = new Date(dto.endDate);
     if (dto.renewalNoticeDate !== undefined) data['renewalNoticeDate'] = new Date(dto.renewalNoticeDate);
+    if (dto.clientContactName !== undefined) data['clientContactName'] = dto.clientContactName;
+    if (dto.clientContactPhone !== undefined) data['clientContactPhone'] = dto.clientContactPhone;
+    if (dto.forecastCompletionDate !== undefined) data['forecastCompletionDate'] = new Date(dto.forecastCompletionDate);
+    if (dto.originalContractValue !== undefined) data['originalContractValue'] = dto.originalContractValue;
+    if (dto.originalCurrency !== undefined) data['originalCurrency'] = dto.originalCurrency;
+    if (dto.projectSiteLocation !== undefined) data['projectSiteLocation'] = dto.projectSiteLocation;
+    if (dto.scopeDescription !== undefined) data['scopeDescription'] = dto.scopeDescription;
+    if (dto.scopeExclusions !== undefined) data['scopeExclusions'] = dto.scopeExclusions;
+    if (dto.deliverables !== undefined) data['deliverables'] = dto.deliverables;
+    if (dto.milestones !== undefined) data['milestones'] = dto.milestones;
+    if (dto.scheduleSummary !== undefined) data['scheduleSummary'] = dto.scheduleSummary;
+    if (dto.quantitiesSpecifications !== undefined) data['quantitiesSpecifications'] = dto.quantitiesSpecifications;
+    if (dto.craneRequired !== undefined) data['craneRequired'] = dto.craneRequired;
+    if (dto.craneProvidedBy !== undefined) data['craneProvidedBy'] = dto.craneProvidedBy;
+    if (dto.estimatedCraneCapacity !== undefined) data['estimatedCraneCapacity'] = dto.estimatedCraneCapacity;
     if (dto.ownerUserId !== undefined) data['ownerUserId'] = dto.ownerUserId;
     if (dto.departmentId !== undefined) data['departmentId'] = dto.departmentId;
     if (dto.plantId !== undefined) data['plantId'] = dto.plantId;
@@ -392,6 +677,32 @@ export class ContractsService {
         });
       }
 
+      // Replace-in-place: no BOQ version history yet (CM-23C), so the whole set
+      // for this contract is simply deleted and recreated from the submission.
+      if (replacingBoq) {
+        await tx.contractBoqItem.deleteMany({ where: { contractId: id } });
+        if (boqItems.length > 0) {
+          await tx.contractBoqItem.createMany({
+            data: boqItems.map((item, index) => ({
+              contractId: id,
+              sortOrder: index + 1,
+              ...(item.itemCode !== undefined ? { itemCode: item.itemCode } : {}),
+              ...(item.category !== undefined ? { category: item.category } : {}),
+              description: item.description,
+              ...(item.drawingReference !== undefined ? { drawingReference: item.drawingReference } : {}),
+              ...(item.specificationReference !== undefined ? { specificationReference: item.specificationReference } : {}),
+              ...(item.originalEstimatedQty !== undefined ? { originalEstimatedQty: item.originalEstimatedQty } : {}),
+              ...(item.revisedQty !== undefined ? { revisedQty: item.revisedQty } : {}),
+              ...(item.unitOfMeasure !== undefined ? { unitOfMeasure: item.unitOfMeasure } : {}),
+              ...(item.mixDesignType !== undefined ? { mixDesignType: item.mixDesignType as ContractBoqMixDesignType } : {}),
+              ...(item.concreteGrade !== undefined ? { concreteGrade: item.concreteGrade } : {}),
+              ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
+              totalPrice: boqItemTotals[index] ?? null,
+            })),
+          });
+        }
+      }
+
       const refreshed = await tx.contract.findUniqueOrThrow({ where: { id }, select: CONTRACT_SELECT });
 
       await tx.contractActivity.create({
@@ -400,6 +711,7 @@ export class ContractsService {
           actorUserId: actor.id,
           actorName: actor.displayName,
           event: 'updated',
+          ...(replacingBoq ? { metadata: { boqItemCount: boqItems.length } } : {}),
         },
       });
 

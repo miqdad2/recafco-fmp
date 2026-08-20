@@ -11,6 +11,7 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ContractsService } from './contracts.service';
+import { ContractPaymentsService } from './contract-payments.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractListQueryDto } from './dto/contract-list-query.dto';
@@ -18,6 +19,9 @@ import { ActivateContractDto } from './dto/activate-contract.dto';
 import { TerminateContractDto } from './dto/terminate-contract.dto';
 import { CloseContractDto } from './dto/close-contract.dto';
 import { AddCommentDto } from './dto/add-comment.dto';
+import { CreateContractPaymentDto } from './dto/create-contract-payment.dto';
+import { UpdateContractPaymentDto } from './dto/update-contract-payment.dto';
+import { ContractPaymentListQueryDto } from './dto/contract-payment-list-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -34,7 +38,10 @@ function meta(): { requestId?: string } {
 @Controller('contracts')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class ContractsController {
-  constructor(private readonly contractsService: ContractsService) {}
+  constructor(
+    private readonly contractsService: ContractsService,
+    private readonly contractPaymentsService: ContractPaymentsService,
+  ) {}
 
   // summary and people MUST be declared before /:id to avoid route conflict
 
@@ -112,6 +119,19 @@ export class ContractsController {
   ): Promise<ApiSuccessResponse<unknown>> {
     const contract = await this.contractsService.create(dto, actor);
     return { data: contract, meta: meta(), error: null };
+  }
+
+  // payments MUST be declared before /:id to avoid route conflict (same reason
+  // summary/people/etc. are declared above) — this is the module-level payments
+  // register (all contracts), distinct from a single contract's own payments.
+  @Get('payments')
+  @Permissions('contracts.read')
+  async listPayments(
+    @Query() query: ContractPaymentListQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const result = await this.contractPaymentsService.findAll(query, actor);
+    return { data: result, meta: meta(), error: null };
   }
 
   @Get(':id')
@@ -201,5 +221,30 @@ export class ContractsController {
   ): Promise<ApiSuccessResponse<unknown[]>> {
     const activities = await this.contractsService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
+  }
+
+  @Post(':id/payments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createPayment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractPaymentDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const payment = await this.contractPaymentsService.create(id, dto, actor);
+    return { data: payment, meta: meta(), error: null };
+  }
+
+  // 2 path segments (payments/:paymentId) — cannot collide with the 1-segment
+  // ':id' pattern above regardless of declaration order.
+  @Patch('payments/:paymentId')
+  @Permissions('contracts.update')
+  async updatePayment(
+    @Param('paymentId', new ParseUUIDPipe({ version: '4' })) paymentId: string,
+    @Body() dto: UpdateContractPaymentDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const payment = await this.contractPaymentsService.update(paymentId, dto, actor);
+    return { data: payment, meta: meta(), error: null };
   }
 }

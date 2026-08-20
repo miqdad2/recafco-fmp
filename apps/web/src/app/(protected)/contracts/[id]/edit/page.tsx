@@ -43,7 +43,7 @@ export default async function EditContractPage({ params }: PageProps): Promise<R
 
   return (
     <div className="min-h-full p-8">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <Breadcrumbs items={[
           { label: 'Contract Management', href: '/contracts/dashboard' },
           { label: 'Contract List', href: '/contracts' },
@@ -67,11 +67,33 @@ export default async function EditContractPage({ params }: PageProps): Promise<R
             counterpartyName: contract.counterpartyName,
             ...(contract.description !== undefined ? { description: contract.description } : {}),
             ...(contract.counterpartyContact !== undefined ? { counterpartyContact: contract.counterpartyContact } : {}),
+            ...(contract.jobOrder !== undefined ? { jobOrder: contract.jobOrder } : {}),
+            ...(contract.contractDate !== undefined ? { contractDate: contract.contractDate } : {}),
+            ...(contract.quotationNumber !== undefined ? { quotationNumber: contract.quotationNumber } : {}),
+            ...(contract.projectNumber !== undefined ? { projectNumber: contract.projectNumber } : {}),
+            ...(contract.scopeOfWork !== undefined ? { scopeOfWork: contract.scopeOfWork } : {}),
+            ...(contract.paymentTerms !== undefined ? { paymentTerms: contract.paymentTerms } : {}),
+            ...(contract.boqItems !== undefined ? { boqItems: contract.boqItems } : {}),
             ...(contract.contractValue !== undefined ? { contractValue: contract.contractValue } : {}),
             ...(contract.currency !== undefined ? { currency: contract.currency } : {}),
             ...(contract.startDate !== undefined ? { startDate: contract.startDate } : {}),
             ...(contract.endDate !== undefined ? { endDate: contract.endDate } : {}),
             ...(contract.renewalNoticeDate !== undefined ? { renewalNoticeDate: contract.renewalNoticeDate } : {}),
+            ...(contract.clientContactName !== undefined ? { clientContactName: contract.clientContactName } : {}),
+            ...(contract.clientContactPhone !== undefined ? { clientContactPhone: contract.clientContactPhone } : {}),
+            ...(contract.forecastCompletionDate !== undefined ? { forecastCompletionDate: contract.forecastCompletionDate } : {}),
+            ...(contract.originalContractValue !== undefined ? { originalContractValue: contract.originalContractValue } : {}),
+            ...(contract.originalCurrency !== undefined ? { originalCurrency: contract.originalCurrency } : {}),
+            ...(contract.projectSiteLocation !== undefined ? { projectSiteLocation: contract.projectSiteLocation } : {}),
+            ...(contract.scopeDescription !== undefined ? { scopeDescription: contract.scopeDescription } : {}),
+            ...(contract.scopeExclusions !== undefined ? { scopeExclusions: contract.scopeExclusions } : {}),
+            ...(contract.deliverables !== undefined ? { deliverables: contract.deliverables } : {}),
+            ...(contract.milestones !== undefined ? { milestones: contract.milestones } : {}),
+            ...(contract.scheduleSummary !== undefined ? { scheduleSummary: contract.scheduleSummary } : {}),
+            ...(contract.quantitiesSpecifications !== undefined ? { quantitiesSpecifications: contract.quantitiesSpecifications } : {}),
+            ...(contract.craneRequired !== undefined ? { craneRequired: contract.craneRequired } : {}),
+            ...(contract.craneProvidedBy !== undefined ? { craneProvidedBy: contract.craneProvidedBy } : {}),
+            ...(contract.estimatedCraneCapacity !== undefined ? { estimatedCraneCapacity: contract.estimatedCraneCapacity } : {}),
             ownerUserId: contract.ownerUser.id,
             ...(contract.department !== undefined ? { departmentId: contract.department?.id } : {}),
             ...(contract.plant !== undefined ? { plantId: contract.plant?.id } : {}),

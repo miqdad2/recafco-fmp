@@ -3,6 +3,7 @@ import {
   getContractDepartmentBadgeState,
   getVisibleContractTransitions,
   hasAnyVisibleTransition,
+  formatContractValue,
 } from './contract-ui-helpers';
 
 // ---------------------------------------------------------------------------
@@ -110,5 +111,31 @@ describe('hasAnyVisibleTransition', () => {
   it('returns true when at least one transition is visible', () => {
     expect(hasAnyVisibleTransition({ activate: true, terminate: false, close: false })).toBe(true);
     expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: true })).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatContractValue
+// ---------------------------------------------------------------------------
+
+describe('formatContractValue', () => {
+  it('formats with 3 decimal places and a currency prefix', () => {
+    expect(formatContractValue('25.5', 'KWD')).toBe('KWD 25.500');
+  });
+
+  it('adds thousands separators', () => {
+    expect(formatContractValue('2550', 'KWD')).toBe('KWD 2,550.000');
+  });
+
+  it('omits the currency prefix when currency is missing', () => {
+    expect(formatContractValue('2550', undefined)).toBe('2,550.000');
+  });
+
+  it('returns em dash for missing value', () => {
+    expect(formatContractValue(undefined, 'KWD')).toBe('—');
+  });
+
+  it('returns em dash for unparseable value', () => {
+    expect(formatContractValue('not-a-number', 'KWD')).toBe('—');
   });
 });

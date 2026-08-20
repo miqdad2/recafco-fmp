@@ -226,6 +226,8 @@ model User {
   contractsTerminated  Contract[]        @relation("ContractTerminatedBy")
   contractsClosed      Contract[]        @relation("ContractClosedBy")
   contractComments     ContractComment[] @relation("ContractCommentAuthor")
+  contractPaymentsCreated ContractPayment[] @relation("ContractPaymentCreatedBy")
+  contractPaymentsUpdated ContractPayment[] @relation("ContractPaymentUpdatedBy")
 
   productionOrdersCreated   ProductionOrder[] @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[] @relation("ProdOrderSupervisor")
@@ -968,6 +970,26 @@ enum ContractStatus {
   @@map("contract_status")
 }
 
+enum ContractBoqMixDesignType {
+  GRAY
+  WHITE
+  NOT_APPLICABLE
+
+  @@map("contract_boq_mix_design_type")
+}
+
+enum ContractPaymentStatus {
+  DRAFT
+  SUBMITTED
+  CERTIFIED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+
+  @@map("contract_payment_status")
+}
+
 model ContractSequence {
   year    Int @id
   lastSeq Int @default(0) @map("last_seq")
@@ -990,11 +1012,26 @@ model Contract {
   projectNumber       String?        @map("project_number") @db.VarChar(100)
   scopeOfWork         Json?          @map("scope_of_work") @db.JsonB
   paymentTerms        Json?          @map("payment_terms") @db.JsonB
-  contractValue       Decimal?       @map("contract_value") @db.Decimal(18, 2)
+  contractValue       Decimal?       @map("contract_value") @db.Decimal(18, 3)
   currency            String?        @db.VarChar(3)
   startDate           DateTime?      @map("start_date") @db.Date
   endDate             DateTime?      @map("end_date") @db.Date
   renewalNoticeDate   DateTime?      @map("renewal_notice_date") @db.Date
+  clientContactName   String?        @map("client_contact_name") @db.VarChar(150)
+  clientContactPhone  String?        @map("client_contact_phone") @db.VarChar(50)
+  forecastCompletionDate    DateTime? @map("forecast_completion_date") @db.Date
+  originalContractValue     Decimal?  @map("original_contract_value") @db.Decimal(18, 3)
+  originalCurrency          String?   @map("original_currency") @db.VarChar(3)
+  projectSiteLocation       String?   @map("project_site_location") @db.VarChar(255)
+  scopeDescription          String?   @map("scope_description") @db.Text
+  scopeExclusions           String?   @map("scope_exclusions") @db.Text
+  deliverables              String?   @db.Text
+  milestones                String?   @db.Text
+  scheduleSummary           String?   @map("schedule_summary") @db.Text
+  quantitiesSpecifications  String?   @map("quantities_specifications") @db.Text
+  craneRequired             String?   @map("crane_required") @db.VarChar(30)
+  craneProvidedBy           String?   @map("crane_provided_by") @db.VarChar(30)
+  estimatedCraneCapacity    String?   @map("estimated_crane_capacity") @db.VarChar(100)
   ownerUserId         String         @map("owner_user_id") @db.Uuid
   departmentId        String?        @map("department_id") @db.Uuid
   plantId             String?        @map("plant_id") @db.Uuid
@@ -1022,6 +1059,8 @@ model Contract {
 
   comments   ContractComment[]
   activities ContractActivity[]
+  boqItems   ContractBoqItem[]
+  payments   ContractPayment[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1031,6 +1070,35 @@ model Contract {
   @@index([endDate, status])
   @@index([renewalNoticeDate, status])
   @@map("contracts")
+}
+
+// BOQ / contract item line details captured during Contract Register.
+// Invoice Qty, P/R, and Remaining Amount are deliberately NOT stored here —
+// those are calculated later from the payment/progress modules (not yet built).
+model ContractBoqItem {
+  id                     String                     @id @default(uuid()) @db.Uuid
+  contractId             String                     @map("contract_id") @db.Uuid
+  sortOrder              Int                        @map("sort_order")
+  itemCode               String?                    @map("item_code") @db.VarChar(100)
+  category               String?                    @db.VarChar(100)
+  description            String                     @db.VarChar(500)
+  drawingReference       String?                    @map("drawing_reference") @db.VarChar(150)
+  specificationReference String?                    @map("specification_reference") @db.VarChar(150)
+  originalEstimatedQty   Decimal?                   @map("original_estimated_qty") @db.Decimal(14, 3)
+  revisedQty             Decimal?                   @map("revised_qty") @db.Decimal(14, 3)
+  unitOfMeasure          String?                    @map("unit_of_measure") @db.VarChar(50)
+  mixDesignType          ContractBoqMixDesignType?  @map("mix_design_type")
+  concreteGrade          String?                    @map("concrete_grade") @db.VarChar(50)
+  unitPrice              Decimal?                   @map("unit_price") @db.Decimal(18, 3)
+  totalPrice             Decimal?                   @map("total_price") @db.Decimal(18, 3)
+  createdAt              DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@unique([contractId, itemCode])
+  @@index([contractId, sortOrder])
+  @@map("contract_boq_items")
 }
 
 model ContractComment {
@@ -1064,6 +1132,40 @@ model ContractActivity {
 
   @@index([contractId, createdAt(sort: Asc)])
   @@map("contract_activities")
+}
+
+// Module-level payments register (CM-28) — tracks payments across ALL contracts,
+// distinct from any single contract's own workspace view. paymentNo is optional
+// but unique per contract when provided (same pattern as ContractBoqItem.itemCode).
+// No hard delete: cancellation goes through status = CANCELLED via update.
+model ContractPayment {
+  id               String                @id @default(uuid()) @db.Uuid
+  contractId       String                @map("contract_id") @db.Uuid
+  paymentNo        String?               @map("payment_no") @db.VarChar(50)
+  invoiceNumber    String?               @map("invoice_number") @db.VarChar(100)
+  invoiceDate      DateTime?             @map("invoice_date") @db.Date
+  paymentTerm      String?               @map("payment_term") @db.VarChar(100)
+  submittedAmount  Decimal?              @map("submitted_amount") @db.Decimal(18, 3)
+  certifiedAmount  Decimal?              @map("certified_amount") @db.Decimal(18, 3)
+  paidAmount       Decimal?              @map("paid_amount") @db.Decimal(18, 3)
+  dueDate          DateTime?             @map("due_date") @db.Date
+  paidDate         DateTime?             @map("paid_date") @db.Date
+  status           ContractPaymentStatus @default(DRAFT)
+  remarks          String?               @db.Text
+  createdByUserId  String                @map("created_by_user_id") @db.Uuid
+  updatedByUserId  String?               @map("updated_by_user_id") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract      Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdByUser User     @relation("ContractPaymentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser User?    @relation("ContractPaymentUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, paymentNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([dueDate, status])
+  @@map("contract_payments")
 }
 
 // ---------------------------------------------------------------------------

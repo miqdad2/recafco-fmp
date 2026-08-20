@@ -4,6 +4,7 @@ import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import type { ValidationError } from 'class-validator';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { flattenValidationErrors } from './common/validation/flatten-validation-errors';
 import { RuntimeStateService } from './health/runtime-state.service';
 import { loadApiEnv } from './env';
 import { createLogger } from '@recafco/observability';
@@ -21,16 +22,10 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: true,
       transform: true,
       exceptionFactory: (errors: ValidationError[]) => {
-        const fields: Record<string, string[]> = {};
-        for (const err of errors) {
-          if (err.property && err.constraints) {
-            fields[err.property] = Object.values(err.constraints);
-          }
-        }
         return new BadRequestException({
           code: 'VALIDATION_ERROR',
           message: 'Request validation failed',
-          details: { fields },
+          details: { fields: flattenValidationErrors(errors) },
         });
       },
     }),

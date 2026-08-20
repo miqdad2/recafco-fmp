@@ -62,7 +62,7 @@ export function NewContractRegisterModal({ depts, plantsData, locations, people,
           aria-modal="true"
           aria-labelledby="new-contract-register-title"
         >
-          <div className="flex max-h-[90vh] w-[min(96vw,1320px)] my-4 sm:my-8 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+          <div className="flex h-[92vh] w-[min(94vw,1700px)] my-2 sm:my-4 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
             <div className="shrink-0 flex items-start justify-between gap-4 border-b border-border bg-surface px-8 py-5">
               <div>
                 <h2 id="new-contract-register-title" className="text-xl font-semibold text-text-primary">

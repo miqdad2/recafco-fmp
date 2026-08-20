@@ -74,7 +74,16 @@ async function actionFetch(
 // Create contract
 // ---------------------------------------------------------------------------
 
-const SCOPE_OF_WORK_KEYS = ['shopDrawing', 'designProduction', 'production', 'delivery', 'erection', 'exFactory'];
+const SCOPE_OF_WORK_KEYS = [
+  'shopDrawing',
+  'designProduction',
+  'production',
+  'delivery',
+  'erection',
+  'exFactory',
+  'other',
+  'notApplicable',
+];
 const PAYMENT_TERM_KEYS = ['advance', 'retention', 'performanceBond', 'insurance', 'interimPayment', 'taxClearance'];
 
 function readCheckboxGroup(formData: FormData, prefix: string, keys: string[]): Record<string, boolean> | undefined {
@@ -86,6 +95,17 @@ function readCheckboxGroup(formData: FormData, prefix: string, keys: string[]): 
     if (checked) anyChecked = true;
   }
   return anyChecked ? group : undefined;
+}
+
+function readScopeOfWork(formData: FormData): Record<string, boolean | string> | undefined {
+  const group = readCheckboxGroup(formData, 'scope', SCOPE_OF_WORK_KEYS);
+  if (group === undefined) return undefined;
+  const scopeOfWork: Record<string, boolean | string> = { ...group };
+  if (group['other'] === true) {
+    const otherDescription = (formData.get('scope_otherDescription') as string | null)?.trim();
+    if (otherDescription) scopeOfWork['otherDescription'] = otherDescription;
+  }
+  return scopeOfWork;
 }
 
 export async function createContractAction(
@@ -104,8 +124,18 @@ export async function createContractAction(
   const contractDate = (formData.get('contractDate') as string | null) || undefined;
   const quotationNumber = (formData.get('quotationNumber') as string | null)?.trim() || undefined;
   const projectNumber = (formData.get('projectNumber') as string | null)?.trim() || undefined;
-  const scopeOfWork = readCheckboxGroup(formData, 'scope', SCOPE_OF_WORK_KEYS);
+  const scopeOfWork = readScopeOfWork(formData);
   const paymentTerms = readCheckboxGroup(formData, 'paymentTerm', PAYMENT_TERM_KEYS);
+  const boqItemsRaw = (formData.get('boqItems') as string | null)?.trim();
+  let boqItems: unknown[] | undefined;
+  if (boqItemsRaw) {
+    try {
+      const parsed: unknown = JSON.parse(boqItemsRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) boqItems = parsed;
+    } catch {
+      // Malformed payload — treat as no BOQ items rather than failing the whole submit.
+    }
+  }
   const contractValueRaw = (formData.get('contractValue') as string | null)?.trim();
   const contractValue = contractValueRaw ? parseFloat(contractValueRaw) : undefined;
   const currency = (formData.get('currency') as string | null)?.trim() || undefined;
@@ -117,6 +147,22 @@ export async function createContractAction(
   const plantId = (formData.get('plantId') as string | null) || undefined;
   const locationId = (formData.get('locationId') as string | null) || undefined;
   const notes = (formData.get('notes') as string | null)?.trim() || undefined;
+  const clientContactName = (formData.get('clientContactName') as string | null)?.trim() || undefined;
+  const clientContactPhone = (formData.get('clientContactPhone') as string | null)?.trim() || undefined;
+  const forecastCompletionDate = (formData.get('forecastCompletionDate') as string | null) || undefined;
+  const originalContractValueRaw = (formData.get('originalContractValue') as string | null)?.trim();
+  const originalContractValue = originalContractValueRaw ? parseFloat(originalContractValueRaw) : undefined;
+  const originalCurrency = (formData.get('originalCurrency') as string | null)?.trim() || undefined;
+  const projectSiteLocation = (formData.get('projectSiteLocation') as string | null)?.trim() || undefined;
+  const scopeDescription = (formData.get('scopeDescription') as string | null)?.trim() || undefined;
+  const scopeExclusions = (formData.get('scopeExclusions') as string | null)?.trim() || undefined;
+  const deliverables = (formData.get('deliverables') as string | null)?.trim() || undefined;
+  const milestones = (formData.get('milestones') as string | null)?.trim() || undefined;
+  const scheduleSummary = (formData.get('scheduleSummary') as string | null)?.trim() || undefined;
+  const quantitiesSpecifications = (formData.get('quantitiesSpecifications') as string | null)?.trim() || undefined;
+  const craneRequired = (formData.get('craneRequired') as string | null)?.trim() || undefined;
+  const craneProvidedBy = (formData.get('craneProvidedBy') as string | null)?.trim() || undefined;
+  const estimatedCraneCapacity = (formData.get('estimatedCraneCapacity') as string | null)?.trim() || undefined;
 
   const result = await actionFetch('/contracts', 'POST', {
     title,
@@ -129,6 +175,7 @@ export async function createContractAction(
     ...(projectNumber !== undefined ? { projectNumber } : {}),
     ...(scopeOfWork !== undefined ? { scopeOfWork } : {}),
     ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+    ...(boqItems !== undefined ? { boqItems } : {}),
     ...(contractValue !== undefined && !isNaN(contractValue) ? { contractValue } : {}),
     ...(currency !== undefined ? { currency } : {}),
     ...(startDate !== undefined ? { startDate } : {}),
@@ -139,6 +186,21 @@ export async function createContractAction(
     ...(plantId !== undefined ? { plantId } : {}),
     ...(locationId !== undefined ? { locationId } : {}),
     ...(notes !== undefined ? { notes } : {}),
+    ...(clientContactName !== undefined ? { clientContactName } : {}),
+    ...(clientContactPhone !== undefined ? { clientContactPhone } : {}),
+    ...(forecastCompletionDate !== undefined ? { forecastCompletionDate } : {}),
+    ...(originalContractValue !== undefined && !isNaN(originalContractValue) ? { originalContractValue } : {}),
+    ...(originalCurrency !== undefined ? { originalCurrency } : {}),
+    ...(projectSiteLocation !== undefined ? { projectSiteLocation } : {}),
+    ...(scopeDescription !== undefined ? { scopeDescription } : {}),
+    ...(scopeExclusions !== undefined ? { scopeExclusions } : {}),
+    ...(deliverables !== undefined ? { deliverables } : {}),
+    ...(milestones !== undefined ? { milestones } : {}),
+    ...(scheduleSummary !== undefined ? { scheduleSummary } : {}),
+    ...(quantitiesSpecifications !== undefined ? { quantitiesSpecifications } : {}),
+    ...(craneRequired !== undefined ? { craneRequired } : {}),
+    ...(craneProvidedBy !== undefined ? { craneProvidedBy } : {}),
+    ...(estimatedCraneCapacity !== undefined ? { estimatedCraneCapacity } : {}),
   });
 
   if (!result.ok) return { error: result.message ?? 'Contract could not be created.' };
@@ -164,6 +226,24 @@ export async function updateContractAction(
   const counterpartyName = (formData.get('counterpartyName') as string | null)?.trim() || undefined;
   const description = (formData.get('description') as string | null)?.trim() || undefined;
   const counterpartyContact = (formData.get('counterpartyContact') as string | null)?.trim() || undefined;
+  const jobOrder = (formData.get('jobOrder') as string | null)?.trim() || undefined;
+  const contractDate = (formData.get('contractDate') as string | null) || undefined;
+  const quotationNumber = (formData.get('quotationNumber') as string | null)?.trim() || undefined;
+  const projectNumber = (formData.get('projectNumber') as string | null)?.trim() || undefined;
+  const scopeOfWork = readScopeOfWork(formData);
+  const paymentTerms = readCheckboxGroup(formData, 'paymentTerm', PAYMENT_TERM_KEYS);
+  // Always present on the edit form (even as "[]") so the backend can tell
+  // "cleared to zero items" apart from "not touched by this request".
+  const boqItemsRaw = (formData.get('boqItems') as string | null)?.trim();
+  let boqItems: unknown[] | undefined;
+  if (boqItemsRaw) {
+    try {
+      const parsed: unknown = JSON.parse(boqItemsRaw);
+      if (Array.isArray(parsed)) boqItems = parsed;
+    } catch {
+      // Malformed payload — leave BOQ items untouched rather than failing the whole save.
+    }
+  }
   const contractValueRaw = (formData.get('contractValue') as string | null)?.trim();
   const contractValue = contractValueRaw ? parseFloat(contractValueRaw) : undefined;
   const currency = (formData.get('currency') as string | null)?.trim() || undefined;
@@ -175,6 +255,22 @@ export async function updateContractAction(
   const plantId = (formData.get('plantId') as string | null) || undefined;
   const locationId = (formData.get('locationId') as string | null) || undefined;
   const notes = (formData.get('notes') as string | null)?.trim() || undefined;
+  const clientContactName = (formData.get('clientContactName') as string | null)?.trim() || undefined;
+  const clientContactPhone = (formData.get('clientContactPhone') as string | null)?.trim() || undefined;
+  const forecastCompletionDate = (formData.get('forecastCompletionDate') as string | null) || undefined;
+  const originalContractValueRaw = (formData.get('originalContractValue') as string | null)?.trim();
+  const originalContractValue = originalContractValueRaw ? parseFloat(originalContractValueRaw) : undefined;
+  const originalCurrency = (formData.get('originalCurrency') as string | null)?.trim() || undefined;
+  const projectSiteLocation = (formData.get('projectSiteLocation') as string | null)?.trim() || undefined;
+  const scopeDescription = (formData.get('scopeDescription') as string | null)?.trim() || undefined;
+  const scopeExclusions = (formData.get('scopeExclusions') as string | null)?.trim() || undefined;
+  const deliverables = (formData.get('deliverables') as string | null)?.trim() || undefined;
+  const milestones = (formData.get('milestones') as string | null)?.trim() || undefined;
+  const scheduleSummary = (formData.get('scheduleSummary') as string | null)?.trim() || undefined;
+  const quantitiesSpecifications = (formData.get('quantitiesSpecifications') as string | null)?.trim() || undefined;
+  const craneRequired = (formData.get('craneRequired') as string | null)?.trim() || undefined;
+  const craneProvidedBy = (formData.get('craneProvidedBy') as string | null)?.trim() || undefined;
+  const estimatedCraneCapacity = (formData.get('estimatedCraneCapacity') as string | null)?.trim() || undefined;
 
   const result = await actionFetch(`/contracts/${contractId}`, 'PATCH', {
     version,
@@ -182,6 +278,13 @@ export async function updateContractAction(
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(counterpartyContact !== undefined ? { counterpartyContact } : {}),
+    ...(jobOrder !== undefined ? { jobOrder } : {}),
+    ...(contractDate !== undefined ? { contractDate } : {}),
+    ...(quotationNumber !== undefined ? { quotationNumber } : {}),
+    ...(projectNumber !== undefined ? { projectNumber } : {}),
+    ...(scopeOfWork !== undefined ? { scopeOfWork } : {}),
+    ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+    ...(boqItems !== undefined ? { boqItems } : {}),
     ...(contractValue !== undefined && !isNaN(contractValue) ? { contractValue } : {}),
     ...(currency !== undefined ? { currency } : {}),
     ...(startDate !== undefined ? { startDate } : {}),
@@ -192,11 +295,27 @@ export async function updateContractAction(
     ...(plantId !== undefined ? { plantId } : {}),
     ...(locationId !== undefined ? { locationId } : {}),
     ...(notes !== undefined ? { notes } : {}),
+    ...(clientContactName !== undefined ? { clientContactName } : {}),
+    ...(clientContactPhone !== undefined ? { clientContactPhone } : {}),
+    ...(forecastCompletionDate !== undefined ? { forecastCompletionDate } : {}),
+    ...(originalContractValue !== undefined && !isNaN(originalContractValue) ? { originalContractValue } : {}),
+    ...(originalCurrency !== undefined ? { originalCurrency } : {}),
+    ...(projectSiteLocation !== undefined ? { projectSiteLocation } : {}),
+    ...(scopeDescription !== undefined ? { scopeDescription } : {}),
+    ...(scopeExclusions !== undefined ? { scopeExclusions } : {}),
+    ...(deliverables !== undefined ? { deliverables } : {}),
+    ...(milestones !== undefined ? { milestones } : {}),
+    ...(scheduleSummary !== undefined ? { scheduleSummary } : {}),
+    ...(quantitiesSpecifications !== undefined ? { quantitiesSpecifications } : {}),
+    ...(craneRequired !== undefined ? { craneRequired } : {}),
+    ...(craneProvidedBy !== undefined ? { craneProvidedBy } : {}),
+    ...(estimatedCraneCapacity !== undefined ? { estimatedCraneCapacity } : {}),
   });
 
-  if (!result.ok) return { error: result.message ?? 'Failed to update contract' };
+  if (!result.ok) return { error: result.message ?? 'Contract could not be updated.' };
 
   revalidatePath('/contracts');
+  revalidatePath(`/contracts/${contractId}`);
   redirect(`/contracts/${contractId}`);
 }
 
@@ -260,5 +379,74 @@ export async function addContractCommentAction(
   if (!result.ok) return { error: result.message ?? 'Failed to add comment' };
 
   revalidatePath('/contracts');
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Payments Register (module-level — /contracts/payments)
+// ---------------------------------------------------------------------------
+
+function readPaymentFields(formData: FormData): Record<string, unknown> {
+  const paymentNo = (formData.get('paymentNo') as string | null)?.trim() || undefined;
+  const invoiceNumber = (formData.get('invoiceNumber') as string | null)?.trim() || undefined;
+  const invoiceDate = (formData.get('invoiceDate') as string | null) || undefined;
+  const paymentTerm = (formData.get('paymentTerm') as string | null)?.trim() || undefined;
+  const submittedAmountRaw = (formData.get('submittedAmount') as string | null)?.trim();
+  const submittedAmount = submittedAmountRaw ? parseFloat(submittedAmountRaw) : undefined;
+  const certifiedAmountRaw = (formData.get('certifiedAmount') as string | null)?.trim();
+  const certifiedAmount = certifiedAmountRaw ? parseFloat(certifiedAmountRaw) : undefined;
+  const paidAmountRaw = (formData.get('paidAmount') as string | null)?.trim();
+  const paidAmount = paidAmountRaw ? parseFloat(paidAmountRaw) : undefined;
+  const dueDate = (formData.get('dueDate') as string | null) || undefined;
+  const paidDate = (formData.get('paidDate') as string | null) || undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(paymentNo !== undefined ? { paymentNo } : {}),
+    ...(invoiceNumber !== undefined ? { invoiceNumber } : {}),
+    ...(invoiceDate !== undefined ? { invoiceDate } : {}),
+    ...(paymentTerm !== undefined ? { paymentTerm } : {}),
+    ...(submittedAmount !== undefined && !isNaN(submittedAmount) ? { submittedAmount } : {}),
+    ...(certifiedAmount !== undefined && !isNaN(certifiedAmount) ? { certifiedAmount } : {}),
+    ...(paidAmount !== undefined && !isNaN(paidAmount) ? { paidAmount } : {}),
+    ...(dueDate !== undefined ? { dueDate } : {}),
+    ...(paidDate !== undefined ? { paidDate } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createPaymentAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const contractId = (formData.get('contractId') as string | null) || '';
+  if (!contractId) return { error: 'Please select a contract.' };
+
+  const result = await actionFetch(`/contracts/${contractId}/payments`, 'POST', readPaymentFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Payment could not be created.' };
+
+  revalidatePath('/contracts/payments');
+  return { error: null };
+}
+
+export async function updatePaymentAction(
+  paymentId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/payments/${paymentId}`, 'PATCH', readPaymentFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Payment could not be updated.' };
+
+  revalidatePath('/contracts/payments');
+  return { error: null };
+}
+
+export async function cancelPaymentAction(paymentId: string): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/payments/${paymentId}`, 'PATCH', { status: 'CANCELLED' });
+  if (!result.ok) return { error: result.message ?? 'Failed to cancel payment' };
+
+  revalidatePath('/contracts/payments');
   return { error: null };
 }

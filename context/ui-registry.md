@@ -594,6 +594,67 @@ Living document. Update after every reusable component or established visual pat
 
 ---
 
+## Contract Register Shared Form Fields (CM-24)
+
+### contract-form-fields.tsx (shared field-group components)
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-form-fields.tsx`
+- Purpose: Field-group components (`ClientContactFields`, `ContractDatesFields`, `ContractValueFields`, `ProjectSiteFields`, `ScopeOfWorkFieldset`, `CraneFields`) plus shared style tokens (`inputCls`, `labelCls`, `gridCls3`, `InfoBox`), consumed identically by both New Contract Register and Edit Contract so the two screens never diverge in field set or labeling.
+- Key tokens/classes: `inputCls`/`labelCls`/`gridCls3` reused from prior contract form styling; textareas use `${inputCls} resize-y`.
+- Accessibility behavior: All inputs have associated `<label htmlFor>`; required fields (`Other Description`) marked with `<span className="text-danger">*</span>` and `required`.
+- Used by: `contracts/new/_components/new-contract-form.tsx`, `contracts/[id]/edit/_components/edit-contract-form.tsx`.
+- Notes: `ScopeOfWorkFieldset` is fully controlled by the parent (`scope`, `onScopeChange`, `exFactory`, `onExFactoryChange`, `otherDescription`, `onOtherDescriptionChange`) so the parent can also derive `erectionSelected` for conditional Erection/Crane section visibility and read the same state at submit time. Mutual-exclusivity rules enforced client-side (mirrored server-side in `ContractsService`): checking "Not Applicable" clears every other option; checking "Ex-Factory" disables/clears Delivery+Erection; checking "Other" reveals a required `scope_otherDescription` text input (plain field, not a `scope_<key>` checkbox) whose value is merged into the `scopeOfWork.otherDescription` JSON key by the server action, not stored as its own DB column. When building a `{ ...scope, key: value }` object from a `Record<string, boolean>` state, annotate the result type explicitly (`const next: Record<string, boolean> = ...`) — TS narrows the inferred type to just the literal key otherwise and later `next['x'] = ...` index writes fail typecheck.
+
+### ContractScopeDetailsCard / ContractCraneDetailsCard
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-scope-details-card.tsx`, `contract-crane-details-card.tsx`
+- Purpose: Read-only Contract Detail Overview cards for the CM-24 long-text scope/schedule fields and the Erection/Crane fields, respectively.
+- Key tokens/classes: Same `Field`/`dt`/`dd` pattern as `contract-info-card.tsx` / `contract-register-details-card.tsx`; long-text values use `whitespace-pre-wrap`.
+- Used by: `contracts/[id]/(workspace)/page.tsx`.
+- Notes: `ContractCraneDetailsCard` is rendered conditionally — only when `contract.scopeOfWork?.['erection'] === true` — matching the same "only when relevant" rule used for the create/edit form's crane section. Missing values render `—`, never blank/undefined, so old (pre-CM-24) contracts without these columns display cleanly.
+
+### optionLabel() helper
+- Path: `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts`
+- Purpose: `optionLabel(options: OptionDef[], key: string | undefined): string` — looks up a coded value's display label from an `OptionDef[]` list (e.g. `CRANE_REQUIRED_OPTIONS`), returning `—` for empty and the raw key as a fallback if unmapped.
+- Used by: `ContractCraneDetailsCard`.
+
+---
+
+## Contract Management Sidebar Navigation (CM-26)
+
+### ContractPlaceholderPage
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-placeholder-page.tsx`
+- Purpose: Shared shell for module-level Contract Management pages with no backend yet (Schedule, Payments, Issue Log, Claim Log) — breadcrumb + title/subtitle + a single bordered card with a "Not started" pill and one line of plain-language body copy. Never renders fake/sample data.
+- Props: `breadcrumbLabel`, `title`, `subtitle`, `body` (all plain strings).
+- Key tokens/classes: Same `px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-6` page container as `contracts/page.tsx` / `contracts/dashboard/page.tsx`, so it feels like a real (if empty) module page rather than an error state.
+- Used by: `contracts/schedule/page.tsx`, `contracts/issues/page.tsx`, `contracts/claims/page.tsx`. (`contracts/payments/page.tsx` moved off this shell in CM-28 — it's now a real register, see below.)
+- Notes: each caller page is itself gated by `getUserPermissions().includes('contracts.read')` → `notFound()` otherwise, since these pages make no API call of their own and would otherwise have no permission gate at all (existing contract pages are indirectly gated by their API calls failing for unauthorized users).
+
+### Sidebar — Contract-Management-only flattening
+- Path: `apps/web/src/app/(protected)/_components/sidebar.tsx`
+- Pattern: `isContractManagementOnlyAccess(user.permissions)` (from `module-visibility.ts`) drives two changes at once — the top-level "Dashboard" link (`href: '/'`, `MAIN_GROUPS[0]`) is filtered out, and the "Contract Management" group renders as a flat top-level section (own `<p>` label, plain `<Link>`s, no toggle button/chevron) instead of nested under "Operations" behind a dropdown. Any user with contracts access *plus* at least one other module (including Admin/Super Admin) keeps the original nested-dropdown-under-Operations rendering — same `CONTRACT_ITEMS` array and `visibleContractItems` filter feed both render paths, so the two never drift out of sync on which items are shown.
+- Notes: `isContractItemActive(href, pathname)` must special-case each fixed module-level slug (`dashboard`, `schedule`, `payments`, `issues`, `claims`) individually — a route added to `CONTRACT_ITEMS` without a matching branch will silently fall through to Contract List's catch-all and highlight the wrong link. `CONTRACT_TOP_LEVEL_SLUGS` is the single list both the catch-all check and future additions need to stay in sync with.
+
+---
+
+## Contract Payments Register (CM-28)
+
+### PaymentFormModal
+- Path: `apps/web/src/app/(protected)/contracts/payments/_components/payment-form-modal.tsx`
+- Purpose: Single modal for both Add and Edit payment, sharing `contract-form-fields.tsx`'s `inputCls`/`labelCls`/`gridCls3` tokens for visual consistency with the Contract Register forms.
+- Pattern: Footer submit button lives outside the `<form>` element (so it can sit in a sticky footer bar) and is wired via the standard HTML `form="payment-form"` attribute rather than DOM traversal — the robust way to submit a form from a sibling element. Closes itself and calls `router.refresh()` on successful submit via a `submittedRef` flag checked in a `useEffect` watching `useActionState`'s state/pending — `useActionState`'s initial state shape (`{error: null}`) is indistinguishable from a "just succeeded" state, so a ref tracking "a submit actually happened" is required to avoid closing on first render.
+- Used by: `payment-register-table.tsx` (both `mode="add"` and `mode="edit"`).
+
+### PaymentRegisterTable / PaymentStatusBadge / PaymentSummaryCards / PaymentFilterBar
+- Path: `apps/web/src/app/(protected)/contracts/payments/_components/`
+- Purpose: The module-level Payments Register's table (client component — owns Add/Edit modal state and the Cancel action), status badge (7-state `ContractPaymentStatus` → color+label maps), 5-card `MetricCard` summary row, and GET-form filter bar (URL-search-params driven, same pattern as `contract-filter-bar.tsx`).
+- Notes: Table and filter bar both mark their interactive chrome (buttons, Action column, filter form) `print:hidden`; the page adds a `hidden print:block` header with a generated timestamp so the printed/PDF output has context the on-screen title doesn't need. Reused as-is for the per-contract read-only tab (`contracts/[id]/(workspace)/payments/page.tsx`) via `PaymentStatusBadge` — the table itself is not reused there since that view is deliberately simpler (no Add/Edit/Cancel).
+
+### contract-payment-csv.ts
+- Path: `apps/web/src/app/(protected)/contracts/_lib/contract-payment-csv.ts`
+- Purpose: `csvField()` (RFC-4180-style escaping — quotes wrap any value containing a comma/quote/newline, embedded quotes doubled), `buildPaymentsCsv()`. Extracted from the `payments/export/route.ts` Route Handler specifically so the escaping logic has unit test coverage — Route Handlers aren't otherwise tested in this codebase.
+- Used by: `contracts/payments/export/route.ts` (first Route Handler in the web app — Next.js Route Handlers run outside page layouts, so this route re-checks `contracts.read` itself via `getUserPermissions()` rather than relying on any page-level guard).
+
+---
+
 ---
 
 ## Production Management Components (Unit 13)

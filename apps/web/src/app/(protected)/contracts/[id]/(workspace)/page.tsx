@@ -3,9 +3,17 @@ import { ContractTransitions } from '../../_components/contract-transitions';
 import { ContractInfoCard } from '../../_components/contract-info-card';
 import { ContractRegisterDetailsCard } from '../../_components/contract-register-details-card';
 import { ContractBadgeGroupCard } from '../../_components/contract-badge-group-card';
+import { ContractScopeDetailsCard } from '../../_components/contract-scope-details-card';
+import { ContractCraneDetailsCard } from '../../_components/contract-crane-details-card';
+import { ContractBoqItemsCard } from '../../_components/contract-boq-items-card';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
-import { getVisibleContractTransitions, hasAnyVisibleTransition } from '../../_lib/contract-ui-helpers';
+import {
+  getVisibleContractTransitions,
+  hasAnyVisibleTransition,
+  SCOPE_OF_WORK_OPTIONS,
+  PAYMENT_TERM_OPTIONS,
+} from '../../_lib/contract-ui-helpers';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -14,24 +22,6 @@ interface PageProps {
 const KEY_STATUS_AREAS = [
   'Payments', 'Production Status', 'Variations', 'Claims Registry', 'Risk Assessment',
   'Documents & Obligations', 'Workflow & Team Tasks', 'Issue Log', 'Attachments', 'Closeout',
-];
-
-const SCOPE_OF_WORK_OPTIONS = [
-  { key: 'shopDrawing', label: 'Shop Drawing' },
-  { key: 'designProduction', label: 'Design Production' },
-  { key: 'production', label: 'Production' },
-  { key: 'delivery', label: 'Delivery' },
-  { key: 'erection', label: 'Erection' },
-  { key: 'exFactory', label: 'Ex-Factory' },
-];
-
-const PAYMENT_TERM_OPTIONS = [
-  { key: 'advance', label: 'Advance' },
-  { key: 'retention', label: 'Retention' },
-  { key: 'performanceBond', label: 'Performance Bond' },
-  { key: 'insurance', label: 'Insurance' },
-  { key: 'interimPayment', label: 'Interim Payment' },
-  { key: 'taxClearance', label: 'Tax Clearance' },
 ];
 
 function formatDateTime(iso: string): string {
@@ -56,6 +46,7 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
   const activities = activitiesRes.status === 'fulfilled' ? activitiesRes.value : [];
 
   const hasActions = hasAnyVisibleTransition(getVisibleContractTransitions(contract.status, permissions));
+  const erectionSelected = contract.scopeOfWork?.['erection'] === true;
 
   const latestActivity = [...activities]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -66,9 +57,17 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
       <ContractInfoCard contract={contract} />
       <ContractRegisterDetailsCard contract={contract} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ContractBadgeGroupCard title="Scope of Work" options={SCOPE_OF_WORK_OPTIONS} selected={contract.scopeOfWork} />
+        <ContractBadgeGroupCard
+          title="Scope of Work"
+          options={SCOPE_OF_WORK_OPTIONS}
+          selected={contract.scopeOfWork}
+          descriptionKey="other"
+        />
         <ContractBadgeGroupCard title="Payment Terms" options={PAYMENT_TERM_OPTIONS} selected={contract.paymentTerms} />
       </div>
+      <ContractScopeDetailsCard contract={contract} />
+      {erectionSelected && <ContractCraneDetailsCard contract={contract} />}
+      <ContractBoqItemsCard contract={contract} />
 
       {hasActions && (
         <section>

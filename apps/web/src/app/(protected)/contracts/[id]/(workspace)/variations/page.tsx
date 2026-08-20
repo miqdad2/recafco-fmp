@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { Plus } from 'lucide-react';
 import { contractsApi } from '../../../../../../lib/contracts-api';
+import { formatContractValue } from '../../../_lib/contract-ui-helpers';
 
 export const metadata: Metadata = { title: 'Variations — Contract Management — RECAFCO FMP' };
 
@@ -18,7 +19,7 @@ export default async function ContractVariationsTab({ params }: PageProps): Prom
   if (!contract) notFound();
 
   const currentContractValue = contract.contractValue
-    ? (contract.currency ? `${contract.contractValue} ${contract.currency}` : contract.contractValue)
+    ? formatContractValue(contract.contractValue, contract.currency)
     : 'Not started';
 
   return (

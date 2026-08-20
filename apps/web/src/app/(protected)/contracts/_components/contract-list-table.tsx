@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ContractLifecycleBadge } from './contract-lifecycle-badge';
+import { formatContractValue } from '../_lib/contract-ui-helpers';
 import type { Contract } from '@/lib/contracts-api';
 
 interface Props {
@@ -19,7 +20,7 @@ function formatDate(iso: string | undefined): React.ReactNode {
 
 function formatValue(contract: Contract): React.ReactNode {
   if (!contract.contractValue) return <span className="text-text-muted">—</span>;
-  return contract.currency ? `${contract.contractValue} ${contract.currency}` : contract.contractValue;
+  return formatContractValue(contract.contractValue, contract.currency);
 }
 
 function formatDaysRemaining(endDate: string | undefined): React.ReactNode {
@@ -78,8 +79,11 @@ export function ContractListTable({ contracts, canUpdate }: Props): React.JSX.El
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Contract Type</th>}
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Contract Manager</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Start Date</th>
+              {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">End Date</th>}
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden sm:table-cell">Forecast Completion</th>}
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Current Value</th>}
+              {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden lg:table-cell">Original Value</th>}
+              {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Site Location</th>}
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Physical Progress %</th>}
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Payment Progress %</th>}
               {full && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hidden xl:table-cell">Open Claims</th>}
@@ -135,8 +139,25 @@ export function ContractListTable({ contracts, canUpdate }: Props): React.JSX.El
                     </td>
                   )}
                   {full && (
+                    <td className="px-4 py-3 text-sm text-text-secondary hidden sm:table-cell">
+                      {formatDate(contract.forecastCompletionDate)}
+                    </td>
+                  )}
+                  {full && (
                     <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
                       {formatValue(contract)}
+                    </td>
+                  )}
+                  {full && (
+                    <td className="px-4 py-3 text-sm text-text-secondary hidden lg:table-cell">
+                      {contract.originalContractValue
+                        ? formatContractValue(contract.originalContractValue, contract.originalCurrency)
+                        : <span className="text-text-muted">—</span>}
+                    </td>
+                  )}
+                  {full && (
+                    <td className="px-4 py-3 text-sm text-text-secondary hidden xl:table-cell">
+                      {contract.projectSiteLocation || <span className="text-text-muted">—</span>}
                     </td>
                   )}
                   {full && (

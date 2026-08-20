@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** Safe Lifecycle Management — Users, Departments, Plants, Locations (2026-07-05)
+- **Last completed:** CM-28 — Contract Payments Register Backend + Filter/Print/Export (2026-08-20)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -1814,6 +1814,153 @@ Note: VIEWER receives `maintenance.read`, `maintenance.create`, `maintenance.sta
 ### New Dependencies
 
 None — all used packages were already installed.
+
+## CM-28 — Contract Payments Register Backend + Filter/Print/Export (Completed 2026-08-20)
+
+### Summary
+
+Converted the module-level `/contracts/payments` placeholder into a real Payments Register spanning all contracts (distinct from the per-contract `/contracts/[id]/payments` workspace tab). New additive `ContractPayment` model/table with a `ContractPaymentStatus` enum (DRAFT/SUBMITTED/CERTIFIED/PARTIALLY_PAID/PAID/OVERDUE/CANCELLED), `NUMERIC(18,3)` amount columns, no hard delete (cancel = status update). `outstandingAmount` and `overdueDays` are never stored — always computed in the service/response from `certifiedAmount ?? submittedAmount` minus `paidAmount`, and `today − dueDate` when unpaid and past due, respectively. New `ContractPaymentsService` (list with filters + department-scope enforcement + full-filtered-set summary totals, create, update/cancel) reuses the existing `contracts.read`/`contracts.update` permissions — no new RBAC codes added. Department scoping combines the actor's scope filter with any explicit department filter via `AND` (stricter than, and consistent with, the existing contracts-list overwrite pattern — never wider). Frontend: summary cards, a full filter bar (search, contract, company, status, department, manager, invoice/due date ranges, overdue-only), an Add/Edit Payment modal (no hard delete — Cancel sets status), Print (browser print-to-PDF layout via `@media print`), and Export Excel as a filtered CSV (no xlsx/pdf library exists in this project, so CSV + print-to-PDF is the deliberate "first version" per the task's explicit instruction not to add a heavy dependency without approval). The individual contract payments tab was safely converted from static placeholder rows to a real read-only view sourced from the same `GET /contracts/payments?contractId=` endpoint — pure read reuse, no new write paths, judged safe rather than left as a follow-up.
+
+### Changes
+
+- **Migration** `20260822000000_add_contract_payments` — new `contract_payment_status` enum + `contract_payments` table (FKs to `contracts` and `users`, `UNIQUE(contract_id, payment_no)` allowing multiple NULLs, 3 indexes). Zero impact on existing contracts/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new model/enum + exports
+- `apps/api/src/contracts/dto/{create,update}-contract-payment.dto.ts`, `contract-payment-list-query.dto.ts` (new)
+- `apps/api/src/contracts/contract-payments.service.ts` (new) + `contract-payments.service.test.ts` (new, 39 tests)
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/payments` (declared before `:id`, same reason as `summary`/`people`), `POST /contracts/:id/payments`, `PATCH /contracts/payments/:paymentId`
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractPaymentsService`
+- `apps/web/src/lib/contracts-api.ts` — `ContractPayment`/`ContractPaymentSummary`/list-query types + `listPayments()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `createPaymentAction`, `updatePaymentAction`, `cancelPaymentAction`
+- `apps/web/src/app/(protected)/contracts/payments/page.tsx` — rewritten from placeholder to full register
+- `apps/web/src/app/(protected)/contracts/payments/_components/*` (new) — summary cards, filter bar, status badge, register table, Add/Edit modal, actions bar
+- `apps/web/src/app/(protected)/contracts/payments/export/route.ts` (new) — filtered CSV download; first Route Handler in the web app
+- `apps/web/src/app/(protected)/contracts/_lib/contract-payment-csv.ts` (new) + `.test.ts` (new, 8 tests) — extracted CSV building/escaping for testability, matching this codebase's established `_lib` pattern
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/page.tsx` — rewritten to show real per-contract data via the same endpoint (read-only; Add/Edit still happens in the module register)
+
+### Verification Results (2026-08-20)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 127/127 tests (+8 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 764/764 tests (+39 new) |
+| `pnpm build` | ✓ 8/8 tasks; new routes `/contracts/payments`, `/contracts/payments/export` built cleanly |
+| `pnpm db:migrate:status` | ✓ 20 migrations, up to date |
+| Live scenarios A–H (create/derived fields, status/company/contract filters, invalid-amount and duplicate-paymentNo rejection, cancel-not-delete, dept isolation both directions, CSV export respects filters, empty states, individual-tab reuse) | ✓ 19/20 automated (1 "failure" was a test-script assumption error, not a product bug — re-verified passing) |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone (`pnpm --filter @recafco/api dev`) after adding the new service/controller routes/module wiring — plain `ts-node` process, no hot reload, web dev server unaffected.
+- No visual/interactive browser test of the Add/Edit modal was possible (no browser automation tool in this environment, same limitation noted in the CM-26 modal-polish unit) — confidence comes from the underlying REST endpoints being directly verified live, clean build/typecheck/lint, and careful code review of the `useActionState` + `form="payment-form"` wiring.
+
+## CM-26 — Contract Management Sidebar Navigation Cleanup (Completed 2026-08-20)
+
+### Summary
+
+Note: this unit shares the "CM-26" code with the New Contract Register Modal UI/UX Polish unit logged just below — both were dated 2026-08-20 and are kept as separate entries since they touch different files. No backend/schema changes. Removed the duplicate top-level "Dashboard" link and the "Operations" grouping for Contract-Management-only users (`isContractManagementOnlyAccess()`, already existed in `module-visibility.ts`): they now see a single flat "Contract Management" section with no dropdown/chevron, listing all 6 items directly. Admin/Super Admin (and any user with more than just Contract Management) keep the existing nested "Contract Management" dropdown under "Operations," now with the same 6 items. Extended `CONTRACT_ITEMS` from 2 to 6 entries (Dashboard, Contract List, Schedule, Payments, Issue Log, Claim Log) and rewrote `isContractItemActive()` — the old 2-item version treated "not the dashboard" as "must be Contract List," which would have made all 4 new sibling pages incorrectly highlight Contract List as active; the new version matches each item on its own path and only falls through to Contract List for pathnames whose first segment isn't one of the 5 fixed module-level slugs (correctly still covering `/contracts/new` and `/contracts/{id}/...`). Added 4 new placeholder pages (`/contracts/schedule`, `/payments`, `/issues`, `/claims`) via a shared `ContractPlaceholderPage` component — plain "Not started" copy only, no backend calls, no fake data — each gated by a `contracts.read` permission check (`notFound()` otherwise), since these pages have no API call of their own to fall back on for authorization the way existing contract pages do.
+
+### Changes
+
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `CONTRACT_ITEMS` extended to 6 items; `isContractItemActive()` rewritten; flat top-level "Contract Management" section added for `isContractManagementOnlyAccess()` users; top "Dashboard" link and nested Operations nesting suppressed for that same case
+- `apps/web/src/app/(protected)/contracts/_components/contract-placeholder-page.tsx` (NEW) — shared placeholder shell
+- `apps/web/src/app/(protected)/contracts/{schedule,payments,issues,claims}/page.tsx` (NEW, 4 files) — permission-gated placeholder pages
+
+### Verification Results (2026-08-20)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 119/119 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; 4 new routes built (`/contracts/schedule`, `/payments`, `/issues`, `/claims`) with no static/dynamic route conflicts |
+| Live: CM-only user (`cm18e.uat`) sidebar — flat "Contract Management" section, no top Dashboard, no dropdown, no other modules | ✓ |
+| Live: Admin (`test.manager`) sidebar — unchanged Operations/nested dropdown, all modules, 6 contract items | ✓ |
+| Live: active-state highlighting on all 6 contract routes + `/contracts` + `/contracts/dashboard` | ✓ 6/6 |
+| Live: all 4 new pages render exact required copy, "Not started" badge, no fake data | ✓ |
+| Live: unauthenticated request → 307 redirect (existing protected-layout guard, unaffected) | ✓ |
+
+### Key Implementation Notes
+
+- All seeded UAT test accounts (`test.manager`, `test.operator`, `test.selected`, `test.nodept`) carry a broad role that includes `contracts.read`, so the negative half of Scenario D (a logged-in user with no contract permission hitting the new pages) could not be exercised live without creating new test data — verified by code review instead: the `notFound()` guard uses the exact same `permissions.includes('contracts.read')` pattern already used and tested throughout this module (e.g. `canCreate`/`canUpdate` in `contracts/page.tsx`).
+
+## CM-26 — New Contract Register Modal UI/UX Polish (Completed 2026-08-20)
+
+### Summary
+
+Pure UI/UX unit — no backend, DTO, service, or schema changes. Widened the New Contract Register modal (`w-[min(96vw,1320px)]`/`max-h-[90vh]` → `w-[min(94vw,1700px)]`/`h-[92vh]`) so it reads as a workspace rather than a cramped dialog. Split the previously-inline "Actions" section card out of the modal's scrollable body into a genuinely sticky footer (`shrink-0` flex row below the `overflow-y-auto` body, inside the same `<form>`) so Cancel/Save Draft/Create Draft Contract and the BOQ/validation error banner stay visible regardless of scroll position; the page route (`/contracts/new`) keeps the numbered Section 10 card unchanged. Tightened `SectionCard` spacing (`p-6`→`p-5 sm:p-6`, added a `border-b` under each heading, bumped heading to `text-base`) and reduced inter-section spacing (`space-y-6`→`space-y-5`) for less wasted vertical space. Widened BOQ table columns to fit the wider modal (`min-w-[1400px]`, Description `min-w-[240px]`, Concrete Grade/Unit Price bumped to `w-28`, explicit `w-14` on the Action column), strengthened the header row (`border-b-2 border-border-strong`), and gave the Total Amount a bordered card treatment at `text-base` for visibility. All changes are Tailwind className edits only — no state, handlers, field `name`/`id` attributes, or business logic touched, so Add/Remove item, total calculation, validation, and submit behavior are provably unchanged.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_components/new-contract-register-modal.tsx` — dialog width/height
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — `SectionCard` spacing, sticky footer for `layout="modal"` (shared with `/contracts/new` page layout, which keeps its inline Section 10)
+- `apps/web/src/app/(protected)/contracts/_components/contract-boq-table.tsx` — column widths, header contrast, Total Amount styling
+
+### Verification Results (2026-08-20)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 119/119 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Structural HTML regression check (`/contracts/new`, all section headings/BOQ columns/buttons/helper text/new width classes present) | ✓ |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment — visual/interactive confirmation of the modal itself wasn't possible. Confidence instead comes from: the modal shares 100% of its section JSX with the already-verified `/contracts/new` page route (only the wrapping — scrollable body vs. natural flow, sticky footer vs. inline — differs); the edits were exclusively `className` changes (no state/handler/attribute changes); and a clean production build.
+
+## CM-25 — Save Draft and Register Contract UX (Completed 2026-08-20)
+
+### Summary
+
+Audit-driven UX unit — no schema, DTO, or service changes. Confirmed `ContractsService.create()` always writes `ContractStatus.DRAFT` (no separate draft/register backend status exists, per design) and that BOQ validation (description required, positive qty, non-negative price, duplicate item-code rejection) is already enforced both client-side (`validateBoqRows`) and server-side. Reworded `new-contract-form.tsx` so the UI stops implying the contract becomes active/registered on creation: "Register Contract" → "Create Draft Contract" (primary), and the previously-disabled "Save Draft" button is now enabled (secondary). Both buttons submit the same `<form>` to the same `createContractAction`/`ContractsService.create()` and therefore produce an identical Draft contract today — documented inline in code and in the unit report rather than inventing a backend distinction that doesn't exist. Added the required helper text near the action buttons clarifying that both stay in Draft and that Activate Contract (a separate lifecycle action) is the next step. Searched the whole Contract Management UI for "Register Contract"/"Registered"/"Submitted Contract"/"SAP"/"Planned" — only the New Contract form's own copy was misleading; all other "Register" occurrences are the module's own naming (Contract Register, Risk Register, Team Task Register) and were left untouched.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — button labels/behavior, helper text; no backend changes
+
+### Verification Results (2026-08-20)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 119/119 tests (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 725/725 tests (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 19 migrations, up to date (no new migration) |
+| Live scenarios A–G (minimum-fields draft, full-data draft, duplicate BOQ code, Ex-Factory/Erection conflict, edit Save Changes, dept-scoped user) | ✓ 15/15 API checks + button/text checks on rendered HTML |
+
+## CM-24 — Required Contract Information and Erection/Crane Fields (Completed 2026-08-20)
+
+### Summary
+
+Added reviewer-requested Contract fields (client contact, forecast completion date, original vs. current contract value, project/site/scope details, and erection/crane details) to both New Contract Register and Edit Contract, plus extended Scope of Work with `other`/`notApplicable` options. Continues the CM-18E→CM-23B contract module hardening work (not separately logged in this tracker prior to this entry).
+
+### Changes
+
+- **Migration** `20260821000000_add_contract_client_dates_value_scope_crane_fields` — 15 additive nullable columns on `contracts` (clientContactName/Phone, forecastCompletionDate, originalContractValue/Currency, projectSiteLocation, scopeDescription, scopeExclusions, deliverables, milestones, scheduleSummary, quantitiesSpecifications, craneRequired, craneProvidedBy, estimatedCraneCapacity)
+- `CreateContractDto`/`UpdateContractDto` — new fields + `CRANE_REQUIRED_OPTIONS`/`CRANE_PROVIDED_BY_OPTIONS`; `scopeOfWork` widened to `Record<string, boolean | string>` to carry `otherDescription`
+- `ContractsService` — `assertScopeOfWorkValid()` extended (Not Applicable conflicts with any other option; Other requires `otherDescription`); new `assertCraneFieldsValid()` (crane fields require Erection in scope, including on update where erection state may come from existing stored data); `originalContractValue`/`originalCurrency` default to the initial `contractValue`/`currency` on create when not supplied
+- Frontend: new shared `contract-form-fields.tsx` field-group components consumed identically by New Contract Register and Edit Contract; `ScopeOfWorkFieldset` enforces Ex-Factory/Not Applicable/Other mutual exclusivity client-side; Erection/Crane section conditional on Erection being selected; Contract Detail Overview shows all new fields (`—` when empty) via `ContractRegisterDetailsCard`, new `ContractScopeDetailsCard`, and conditional `ContractCraneDetailsCard`; Contract List "Full View" gained End Date, Forecast Completion (fixed a pre-existing mislabeled column that was rendering End Date under that header), Original Value, Site Location
+
+### Verification Results (2026-08-20)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 119/119 tests |
+| `pnpm --filter @recafco/api test --run` | ✓ 725/725 tests (16 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 19 migrations, up to date |
+| Live API scenario checks (create/update, scope conflicts, crane/erection, defaulting) | ✓ 19/19 |
+
+### Key Implementation Notes
+
+- API dev server (`node -r ts-node/register src/main.ts`) has no hot reload — must be restarted standalone (`pnpm --filter @recafco/api dev`) after service/DTO changes before live verification; killing only that PID does not affect the standalone web dev server
+- `originalContractValue` is only auto-defaulted on **create**, never on **update**, to avoid silently overwriting a value the user intentionally left unset
 
 ## Risks
 

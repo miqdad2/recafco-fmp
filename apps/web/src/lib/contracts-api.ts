@@ -9,6 +9,27 @@ const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 export type ContractStatus = 'DRAFT' | 'ACTIVE' | 'TERMINATED' | 'CLOSED';
 export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED';
 
+export type ContractBoqMixDesignType = 'GRAY' | 'WHITE' | 'NOT_APPLICABLE';
+
+export interface ContractBoqItem {
+  id: string;
+  sortOrder: number;
+  itemCode?: string;
+  category?: string;
+  description: string;
+  drawingReference?: string;
+  specificationReference?: string;
+  originalEstimatedQty?: string;
+  revisedQty?: string;
+  unitOfMeasure?: string;
+  mixDesignType?: ContractBoqMixDesignType;
+  concreteGrade?: string;
+  unitPrice?: string;
+  totalPrice?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Contract {
   id: string;
   referenceNumber: string;
@@ -23,13 +44,29 @@ export interface Contract {
   contractDate?: string;
   quotationNumber?: string;
   projectNumber?: string;
-  scopeOfWork?: Record<string, boolean>;
+  scopeOfWork?: Record<string, boolean | string>;
   paymentTerms?: Record<string, boolean>;
+  boqItems?: ContractBoqItem[];
   contractValue?: string;
   currency?: string;
   startDate?: string;
   endDate?: string;
   renewalNoticeDate?: string;
+  clientContactName?: string;
+  clientContactPhone?: string;
+  forecastCompletionDate?: string;
+  originalContractValue?: string;
+  originalCurrency?: string;
+  projectSiteLocation?: string;
+  scopeDescription?: string;
+  scopeExclusions?: string;
+  deliverables?: string;
+  milestones?: string;
+  scheduleSummary?: string;
+  quantitiesSpecifications?: string;
+  craneRequired?: string;
+  craneProvidedBy?: string;
+  estimatedCraneCapacity?: string;
   ownerUser: { id: string; displayName: string };
   department?: { id: string; name: string };
   plant?: { id: string; name: string };
@@ -115,6 +152,76 @@ export interface LocationRef extends OrgRef {
   plantId?: string;
 }
 
+export type ContractPaymentStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'CERTIFIED'
+  | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'OVERDUE'
+  | 'CANCELLED';
+
+export interface ContractPayment {
+  id: string;
+  contractId: string;
+  paymentNo?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  paymentTerm?: string;
+  submittedAmount?: string;
+  certifiedAmount?: string;
+  paidAmount?: string;
+  outstandingAmount: string | null;
+  overdueDays: number | null;
+  dueDate?: string;
+  paidDate?: string;
+  status: ContractPaymentStatus;
+  remarks?: string;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  contract: {
+    id: string;
+    referenceNumber: string;
+    title: string;
+    counterpartyName: string;
+    contractValue?: string;
+    currency?: string;
+    ownerUser: { id: string; displayName: string };
+    department?: { id: string; name: string };
+  };
+}
+
+export interface ContractPaymentSummary {
+  totalSubmitted: string;
+  totalCertified: string;
+  totalPaid: string;
+  totalOutstanding: string;
+  overdueCount: number;
+  overdueValue: string;
+}
+
+export interface ContractPaymentListResponse extends ListResponse<ContractPayment> {
+  summary: ContractPaymentSummary;
+}
+
+export interface ContractPaymentListQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  company?: string;
+  contractId?: string;
+  status?: string;
+  departmentId?: string;
+  ownerUserId?: string;
+  invoiceDateFrom?: string;
+  invoiceDateTo?: string;
+  dueDateFrom?: string;
+  dueDateTo?: string;
+  overdueOnly?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Internal response types
 // ---------------------------------------------------------------------------
@@ -186,6 +293,25 @@ function buildQuery(q: ContractListQuery): string {
   return str ? `?${str}` : '';
 }
 
+function buildPaymentQuery(q: ContractPaymentListQuery): string {
+  const params = new URLSearchParams();
+  if (q.page !== undefined) params.set('page', String(q.page));
+  if (q.pageSize !== undefined) params.set('pageSize', String(q.pageSize));
+  if (q.search) params.set('search', q.search);
+  if (q.company) params.set('company', q.company);
+  if (q.contractId) params.set('contractId', q.contractId);
+  if (q.status) params.set('status', q.status);
+  if (q.departmentId) params.set('departmentId', q.departmentId);
+  if (q.ownerUserId) params.set('ownerUserId', q.ownerUserId);
+  if (q.invoiceDateFrom) params.set('invoiceDateFrom', q.invoiceDateFrom);
+  if (q.invoiceDateTo) params.set('invoiceDateTo', q.invoiceDateTo);
+  if (q.dueDateFrom) params.set('dueDateFrom', q.dueDateFrom);
+  if (q.dueDateTo) params.set('dueDateTo', q.dueDateTo);
+  if (q.overdueOnly) params.set('overdueOnly', 'true');
+  const str = params.toString();
+  return str ? `?${str}` : '';
+}
+
 // ---------------------------------------------------------------------------
 // contractsApi namespace
 // ---------------------------------------------------------------------------
@@ -220,4 +346,7 @@ export const contractsApi = {
 
   locations: (plantId?: string) =>
     apiFetch<LocationRef[]>(`/contracts/locations${plantId ? `?plantId=${encodeURIComponent(plantId)}` : ''}`),
+
+  listPayments: (params: ContractPaymentListQuery = {}) =>
+    apiFetch<ContractPaymentListResponse>(`/contracts/payments${buildPaymentQuery(params)}`),
 };

@@ -1,4 +1,5 @@
 import type { Contract } from '@/lib/contracts-api';
+import { formatContractValue } from '../_lib/contract-ui-helpers';
 
 interface Props {
   contract: Contract;
@@ -27,10 +28,12 @@ export function ContractRegisterDetailsCard({ contract }: Props): React.JSX.Elem
         <Field label="Contract Date" value={formatDate(contract.contractDate)} />
         <Field label="Quotation #" value={contract.quotationNumber || '—'} />
         <Field label="Project Number" value={contract.projectNumber || '—'} />
-        <Field
-          label="Contract Value"
-          value={contract.contractValue ? (contract.currency ? `${contract.contractValue} ${contract.currency}` : contract.contractValue) : '—'}
-        />
+        <Field label="Current Contract Value" value={formatContractValue(contract.contractValue, contract.currency)} />
+        <Field label="Original Value" value={formatContractValue(contract.originalContractValue, contract.originalCurrency)} />
+        <Field label="Forecast Completion Date" value={formatDate(contract.forecastCompletionDate)} />
+        <Field label="Client Contact" value={contract.clientContactName || '—'} />
+        <Field label="Client Telephone" value={contract.clientContactPhone || '—'} />
+        <Field label="Project / Site Location" value={contract.projectSiteLocation || '—'} />
       </dl>
     </section>
   );

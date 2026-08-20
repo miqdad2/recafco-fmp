@@ -16,13 +16,17 @@ import {
   Shield,
   Building2,
   MapPin,
+  Calendar,
+  Wallet,
+  AlertCircle,
+  Receipt,
   ChevronDown,
   ChevronRight,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
-import { canSeeModule } from '../_lib/module-visibility';
+import { canSeeModule, isContractManagementOnlyAccess } from '../_lib/module-visibility';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -79,7 +83,14 @@ const MAIN_GROUPS: NavGroup[] = [
 const CONTRACT_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Contract List', href: '/contracts', icon: FileText, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Schedule', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Payments', href: '/contracts/payments', icon: Wallet, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Issue Log', href: '/contracts/issues', icon: AlertCircle, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Claim Log', href: '/contracts/claims', icon: Receipt, module: 'CONTRACTS_MANAGEMENT' },
 ];
+
+/** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
+const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'payments', 'issues', 'claims'];
 
 const ADMIN_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/administration/dashboard', icon: Settings },
@@ -90,12 +101,20 @@ const ADMIN_ITEMS: NavItem[] = [
   { label: 'Locations', href: '/administration/locations', icon: MapPin, permission: 'org.locations.read' },
 ];
 
-/** Contract List is active for /contracts and any of its sub-routes except the Dashboard itself. */
+/**
+ * Contract List is active for /contracts itself and any sub-route that isn't one of the
+ * other fixed module-level pages (Dashboard, Schedule, Payments, Issue Log, Claim Log) —
+ * this covers /contracts/new and individual /contracts/{id}/... detail pages. Every other
+ * item matches on its own exact path (or a sub-route of it).
+ */
 function isContractItemActive(href: string, pathname: string): boolean {
-  if (href === '/contracts/dashboard') {
-    return pathname === '/contracts/dashboard';
+  if (href === '/contracts') {
+    if (pathname === '/contracts') return true;
+    if (!pathname.startsWith('/contracts/')) return false;
+    const firstSegment = pathname.slice('/contracts/'.length).split('/')[0];
+    return !CONTRACT_TOP_LEVEL_SLUGS.includes(firstSegment ?? '');
   }
-  return pathname === '/contracts' || (pathname.startsWith('/contracts/') && !pathname.startsWith('/contracts/dashboard'));
+  return pathname === href || pathname.startsWith(href + '/');
 }
 
 interface SidebarProps {
@@ -143,6 +162,11 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
     (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
   );
 
+  // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:
+  // no duplicate top-level Dashboard link, and Contract Management becomes its own
+  // top-level section instead of a nested group under Operations.
+  const contractManagementOnly = isContractManagementOnlyAccess(user.permissions);
+
   const sidebarContent = (
     <div className="flex flex-col h-full">
       {/* Logo / Brand */}
@@ -172,10 +196,13 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-0.5" aria-label="Primary navigation">
         {MAIN_GROUPS.map((group) => {
-          const visibleItems = group.items.filter(
-            (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
-          );
-          const showContractsHere = group.label === 'Operations' && hasAnyContractPermission;
+          const visibleItems = group.items.filter((item) => {
+            // The top-level Dashboard link duplicates Contract Management's own Dashboard
+            // for a Contract-Management-only user — hide it there instead of showing two.
+            if (contractManagementOnly && group.label === null && item.href === '/') return false;
+            return isNavItemVisible(item, user.permissions, hasAnyAdminPermission);
+          });
+          const showContractsHere = group.label === 'Operations' && hasAnyContractPermission && !contractManagementOnly;
           if (visibleItems.length === 0 && !showContractsHere) return null;
 
           return (
@@ -277,6 +304,36 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
             </div>
           );
         })}
+
+        {/* Contract Management — flat top-level section for Contract-Management-only users (no dropdown, since it's the only module they have). Other users see it nested under Operations instead, above. */}
+        {contractManagementOnly && (
+          <div className="mb-1">
+            <p className="px-4 mb-2 mt-3 text-sm font-bold uppercase tracking-wide text-text-inverse">
+              Contract Management
+            </p>
+            {visibleContractItems.map((item) => {
+              if (!item.href) return null;
+              const active = isContractItemActive(item.href, pathname);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={onClose}
+                  aria-current={active ? 'page' : undefined}
+                  className={[
+                    'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
+                    active
+                      ? 'bg-nav-active text-text-inverse font-medium'
+                      : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                  ].join(' ')}
+                >
+                  <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        )}
 
         {/* Administration — expandable, permission-aware */}
         {hasAnyAdminPermission && (
