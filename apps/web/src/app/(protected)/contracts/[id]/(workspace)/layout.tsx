@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronDown, Printer } from 'lucide-react';
 import { Breadcrumbs } from '../../../_components/breadcrumbs';
@@ -8,6 +8,7 @@ import { ContractDepartmentBadge } from '../../_components/contract-department-b
 import { ContractWorkspaceTabs } from '../../_components/contract-workspace-tabs';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
+import { isContractStaffOnlyAccess } from '../../../_lib/module-visibility';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -33,6 +34,16 @@ export default async function ContractWorkspaceLayout({ params, children }: Layo
   const viewerScope = dashboardRes.status === 'fulfilled' ? dashboardRes.value.scope : undefined;
 
   const permissions = permissionsRes.status === 'fulfilled' ? permissionsRes.value : [];
+
+  // CM-44 — Contract Staff (contracts.workflow_update only, no update/close)
+  // never see the manager's full contract detail — Payments, Claims,
+  // Closeout, Issue Log, Attachments, Activity, etc. They only ever work
+  // from My Tasks. This single redirect covers every workspace sub-route
+  // (Schedule, Payments, Production, Variations, Claims, Risks, Documents,
+  // Workflow, Issues, Attachments, Closeout, Activity) since they all share
+  // this one layout — no per-tab hiding needed.
+  if (isContractStaffOnlyAccess(permissions)) redirect('/contracts/workflow?mode=my-tasks');
+
   const canEdit = contract.status === 'DRAFT' && permissions.includes('contracts.update');
 
   return (

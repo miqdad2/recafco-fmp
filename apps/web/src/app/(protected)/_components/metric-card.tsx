@@ -12,6 +12,8 @@ export interface MetricCardProps {
   href?: string | undefined;
   status: MetricStatus;
   source?: string | undefined;
+  /** CM-39C — slightly tighter padding/type scale for dashboards that need more vertical room. Defaults to the original size everywhere else. */
+  dense?: boolean | undefined;
 }
 
 export function MetricCard({
@@ -22,12 +24,15 @@ export function MetricCard({
   href,
   status,
   source,
+  dense = false,
 }: MetricCardProps): React.JSX.Element {
   const inner = (
-    <div className="bg-surface rounded-lg border border-border p-5 shadow-sm h-full flex flex-col gap-3">
+    <div
+      className={`bg-surface rounded-lg border border-border shadow-sm h-full flex flex-col ${dense ? 'p-4 gap-2' : 'p-5 gap-3'}`}
+    >
       <div className="flex items-start justify-between">
         <span className={`${iconColor} shrink-0`}>
-          <Icon className="size-5" aria-hidden="true" />
+          <Icon className={dense ? 'size-4' : 'size-5'} aria-hidden="true" />
         </span>
         {status === 'restricted' && (
           <span className="inline-flex items-center gap-1 text-xs text-text-muted bg-surface-secondary px-2 py-0.5 rounded-full">
@@ -43,7 +48,7 @@ export function MetricCard({
         )}
       </div>
       <div>
-        <p className="text-2xl font-semibold text-text-primary leading-none">
+        <p className={`font-semibold text-text-primary leading-none ${dense ? 'text-xl' : 'text-2xl'}`}>
           {status === 'ok' ? (value ?? '—') : '—'}
         </p>
         <p className="text-sm text-text-secondary mt-1">{label}</p>

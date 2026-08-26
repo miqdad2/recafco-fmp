@@ -2,6 +2,7 @@ import { Injectable, CanActivate, type ExecutionContext, ForbiddenException } fr
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { ANY_PERMISSION_KEY } from '../decorators/any-permission.decorator';
 import type { AuthUser } from '../types/auth-user';
 
 @Injectable()
@@ -13,14 +14,24 @@ export class PermissionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    const anyOf = this.reflector.getAllAndOverride<string[]>(ANY_PERMISSION_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-    if (!required?.length) return true;
+    if (!required?.length && !anyOf?.length) return true;
 
     const user = context.switchToHttp().getRequest<Request & { user?: AuthUser }>().user;
     if (!user) throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Insufficient permissions' });
 
-    const missing = required.filter((p) => !user.permissions.includes(p));
-    if (missing.length > 0) {
+    if (required?.length) {
+      const missing = required.filter((p) => !user.permissions.includes(p));
+      if (missing.length > 0) {
+        throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Insufficient permissions' });
+      }
+    }
+
+    if (anyOf?.length && !anyOf.some((p) => user.permissions.includes(p))) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Insufficient permissions' });
     }
 

@@ -98,4 +98,43 @@ describe('PermissionGuard', () => {
     const ctx = makeContext(undefined);
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
+
+  describe('@AnyPermission (OR semantics, additive to @Permissions)', () => {
+    // getAllAndOverride is called once for PERMISSIONS_KEY then once for
+    // ANY_PERMISSION_KEY — mockImplementation lets each test control both
+    // return values independently via call order.
+    function mockKeys(required: string[] | undefined, anyOf: string[] | undefined): void {
+      mockReflectorGet.mockImplementationOnce(() => required).mockImplementationOnce(() => anyOf);
+    }
+
+    it('returns true when actor has at least one of the AnyPermission codes', () => {
+      mockKeys(undefined, ['contracts.update', 'contracts.workflow_update']);
+      const ctx = makeContext({ ...ACTOR_VIEWER, permissions: ['contracts.workflow_update'] });
+      expect(guard.canActivate(ctx)).toBe(true);
+    });
+
+    it('throws 403 when actor has none of the AnyPermission codes', () => {
+      mockKeys(undefined, ['contracts.update', 'contracts.workflow_update']);
+      const ctx = makeContext({ ...ACTOR_VIEWER, permissions: ['contracts.read'] });
+      expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+    });
+
+    it('requires both the @Permissions AND-list and the @AnyPermission OR-list when both are present', () => {
+      mockKeys(['contracts.read'], ['contracts.update', 'contracts.workflow_update']);
+      const ctx = makeContext({ ...ACTOR_VIEWER, permissions: ['contracts.read', 'contracts.workflow_update'] });
+      expect(guard.canActivate(ctx)).toBe(true);
+    });
+
+    it('throws 403 when the AND-list passes but the OR-list fails', () => {
+      mockKeys(['contracts.read'], ['contracts.update', 'contracts.workflow_update']);
+      const ctx = makeContext({ ...ACTOR_VIEWER, permissions: ['contracts.read'] });
+      expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+    });
+
+    it('existing single-@Permissions routes are unaffected when no @AnyPermission is present', () => {
+      mockKeys(['users.read'], undefined);
+      const ctx = makeContext(ACTOR_VIEWER);
+      expect(guard.canActivate(ctx)).toBe(true);
+    });
+  });
 });

@@ -20,3 +20,18 @@ export async function getUserPermissions(): Promise<string[]> {
   const meResult = await authApi.me(accessToken);
   return meResult.ok ? meResult.data.permissions : [];
 }
+
+/**
+ * CM-35 — pages that need to tell "assigned to me" apart from "assigned to
+ * someone else" (e.g. the Workflow board, where Contract Staff may only edit
+ * their own tasks) need the actor's id alongside their permissions. Same
+ * /auth/me call as getUserPermissions() above, just returning one more field.
+ */
+export async function getCurrentUserContext(): Promise<{ id: string | null; permissions: string[] }> {
+  const store = await cookies();
+  const accessToken = store.get('recafco_access')?.value;
+  if (!accessToken) return { id: null, permissions: [] };
+
+  const meResult = await authApi.me(accessToken);
+  return meResult.ok ? { id: meResult.data.id, permissions: meResult.data.permissions } : { id: null, permissions: [] };
+}

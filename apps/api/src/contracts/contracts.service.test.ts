@@ -48,6 +48,7 @@ const mockDepartmentFindMany = vi.fn();
 const mockPlantFindMany = vi.fn();
 const mockLocationFindMany = vi.fn();
 const mockGetScope = vi.fn();
+const mockCloseoutRequestFindFirst = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
 const mockClient = {
@@ -58,6 +59,7 @@ const mockClient = {
   },
   contractComment: { findMany: mockCommentFindMany },
   contractActivity: { findMany: mockActivityFindMany },
+  contractCloseoutRequest: { findFirst: mockCloseoutRequestFindFirst },
   user: { findMany: mockUserFindMany },
   department: { findMany: mockDepartmentFindMany },
   plant: { findMany: mockPlantFindMany },
@@ -205,6 +207,11 @@ beforeEach(() => {
   // sane contract so tests that don't care about the exact shape don't crash.
   // Tests that do care override this with their own .mockResolvedValue(...).
   mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract());
+  // close() now requires an APPROVED closeout request (CM-33) — default one
+  // present so existing close() tests (which are about version conflicts,
+  // activity logging, etc., not the approval gate) keep passing unmodified.
+  // The one test that specifically covers the gate overrides this to null.
+  mockCloseoutRequestFindFirst.mockResolvedValue({ id: 'closeout-request-1' });
 });
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1342,15 @@ describe('ContractsService.close', () => {
     mockContractFindUnique.mockResolvedValue(draftContract);
 
     await expect(service.close('id-1', { version: 1 }, ACTOR_ADMIN)).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('throws UnprocessableEntityException when no APPROVED closeout request exists (CM-33 approval gate)', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockCloseoutRequestFindFirst.mockResolvedValue(null);
+
+    await expect(service.close('id-1', { version: 1 }, ACTOR_ADMIN)).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
   });
 
   it('closes an ACTIVE contract on correct version', async () => {

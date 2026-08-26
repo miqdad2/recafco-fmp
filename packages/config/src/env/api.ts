@@ -53,6 +53,8 @@ export const ApiEnvSchema = z
       .min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
     JWT_ACCESS_EXPIRES_SECONDS: z.string().optional(),
     REFRESH_TOKEN_EXPIRES_DAYS: z.string().optional(),
+    WORKFLOW_ATTACHMENTS_DIR: z.string().optional(),
+    CLOSEOUT_ATTACHMENTS_DIR: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -83,6 +85,8 @@ export const ApiEnvSchema = z
         raw.REFRESH_TOKEN_EXPIRES_DAYS,
         DEFAULT_REFRESH_TOKEN_EXPIRES_DAYS,
       ),
+      workflowAttachmentsDir: raw.WORKFLOW_ATTACHMENTS_DIR ?? './storage/workflow-attachments',
+      closeoutAttachmentsDir: raw.CLOSEOUT_ATTACHMENTS_DIR ?? './storage/closeout-attachments',
     };
   });
 

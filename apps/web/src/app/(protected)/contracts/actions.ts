@@ -19,29 +19,16 @@ export interface ActionResult {
 // Internal fetch helper for server actions
 // ---------------------------------------------------------------------------
 
-async function actionFetch(
-  path: string,
-  method: string,
-  body?: unknown,
-): Promise<{ ok: boolean; id?: string; code?: string; message?: string }> {
-  let token: string | undefined;
+async function getAccessToken(): Promise<string | undefined> {
   try {
     const store = await cookies();
-    token = store.get('recafco_access')?.value;
+    return store.get('recafco_access')?.value;
   } catch {
-    // not in request context
+    return undefined;
   }
+}
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    cache: 'no-store',
-  });
-
+async function handleActionResponse(res: Response): Promise<{ ok: boolean; id?: string; code?: string; message?: string }> {
   if (res.ok) {
     try {
       const json = (await res.json()) as { data?: { id?: string } };
@@ -68,6 +55,43 @@ async function actionFetch(
     ...(code !== undefined ? { code } : {}),
     ...(message !== undefined ? { message } : {}),
   };
+}
+
+async function actionFetch(
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<{ ok: boolean; id?: string; code?: string; message?: string }> {
+  const token = await getAccessToken();
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    cache: 'no-store',
+  });
+
+  return handleActionResponse(res);
+}
+
+/** Multipart variant for file uploads — never sets Content-Type manually, letting fetch attach the correct multipart boundary for the FormData body. */
+async function actionFetchMultipart(
+  path: string,
+  formData: FormData,
+): Promise<{ ok: boolean; id?: string; code?: string; message?: string }> {
+  const token = await getAccessToken();
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+    cache: 'no-store',
+  });
+
+  return handleActionResponse(res);
 }
 
 // ---------------------------------------------------------------------------
@@ -448,5 +472,380 @@ export async function cancelPaymentAction(paymentId: string): Promise<ActionResu
   if (!result.ok) return { error: result.message ?? 'Failed to cancel payment' };
 
   revalidatePath('/contracts/payments');
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Workflow & Team Tasks (module-level — /contracts/workflow)
+// ---------------------------------------------------------------------------
+
+// CM-46B/CM-49/CM-50/CM-51 — optional Contract Staff task-intake fields for
+// every task-specific work form the focused task screen renders (Drawing
+// Received's Receipt Details / Drawing-Task Information / Follow-up;
+// SD & Calculation Submission's Submission Information; Getting Approval's
+// Approval Information; FD Issuance's FD Issuance Information). Present
+// only on the staff panel's form (marked by the hasTaskFormFields hidden
+// input) — the manager drawer's form has none of these inputs, so
+// formData is simply never sent for a manager save, leaving the existing
+// value untouched server-side. Each task-specific form only renders its
+// own field names, so only those actually get collected here per save —
+// this list is just the full superset of names to check. The backend's
+// sanitizeWorkflowTaskFormData() is the real allow-list.
+const TASK_FORM_DATA_TEXT_FIELDS = [
+  // Drawing Received
+  'receivedDate', 'receivedFrom', 'senderName', 'drawingType', 'drawingReferenceNo',
+  'revisionNo', 'numberOfSheets', 'drawingDescription', 'relatedAreaPackage',
+  'linkedContractStage', 'internalReferenceNo', 'internalNotes', 'plannedReviewStart',
+  // SD & Calculation Submission (CM-49) — drawingReferenceNo/revisionNo above are reused, not duplicated.
+  'submissionDate', 'submissionType', 'submittedTo', 'targetApprovalDate',
+  'relatedDrawingReceived', 'calculationType', 'numberOfSheetsFiles', 'scopeDescription',
+  'submittedBy', 'designation', 'submissionMethod', 'submissionReferenceNo',
+  'contactNo', 'email',
+  // Getting Approval (CM-50) — submittedBy/revisionNo above are reused, not duplicated.
+  'submittedOn', 'submittedToReviewerClient', 'approvalStatus', 'expectedApprovalDate',
+  'reviewedOn', 'reviewedBy', 'clientReviewerComments', 'resubmissionDate',
+  'resubmissionReasonComments',
+  // FD Issuance (CM-51) — drawingReferenceNo/revisionNo/numberOfSheetsFiles/designation/
+  // contactNo/email above are reused, not duplicated.
+  'fdIssueDate', 'issuedTo', 'purposeFor', 'issueType', 'approvedReferenceNo',
+  'approvedDate', 'scale', 'distribution', 'issueMethod', 'issuedBy',
+] as const;
+const TASK_FORM_DATA_BOOLEAN_FIELDS = ['requiresImmediateReview', 'additionalDocumentsReceived', 'resubmissionRequired'] as const;
+
+export async function updateWorkflowTaskAction(
+  taskId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const status = (formData.get('status') as string | null) || undefined;
+  const responsibleUserId = (formData.get('responsibleUserId') as string | null) || undefined;
+  const startDate = (formData.get('startDate') as string | null) || undefined;
+  const dueDate = (formData.get('dueDate') as string | null) || undefined;
+  const completedDate = (formData.get('completedDate') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+  const priority = (formData.get('priority') as string | null) || undefined;
+  const delayReason = (formData.get('delayReason') as string | null)?.trim() || undefined;
+
+  let taskFormData: Record<string, string | boolean> | undefined;
+  if (formData.get('hasTaskFormFields') === 'true') {
+    taskFormData = {};
+    for (const key of TASK_FORM_DATA_TEXT_FIELDS) {
+      const value = (formData.get(key) as string | null)?.trim();
+      if (value) taskFormData[key] = value;
+    }
+    for (const key of TASK_FORM_DATA_BOOLEAN_FIELDS) {
+      if (formData.get(key) === 'on') taskFormData[key] = true;
+    }
+  }
+
+  const result = await actionFetch(`/contracts/workflow/tasks/${taskId}`, 'PATCH', {
+    ...(status !== undefined ? { status } : {}),
+    ...(responsibleUserId !== undefined ? { responsibleUserId } : {}),
+    ...(startDate !== undefined ? { startDate } : {}),
+    ...(dueDate !== undefined ? { dueDate } : {}),
+    ...(completedDate !== undefined ? { completedDate } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+    ...(priority !== undefined ? { priority } : {}),
+    ...(delayReason !== undefined ? { delayReason } : {}),
+    ...(taskFormData !== undefined ? { formData: taskFormData } : {}),
+  });
+  if (!result.ok) return { error: result.message ?? 'Task could not be updated.' };
+
+  revalidatePath('/contracts/workflow');
+  revalidatePath(`/contracts/${contractId}/workflow`);
+  return { error: null };
+}
+
+export async function addWorkflowTaskCommentAction(
+  taskId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const comment = (formData.get('comment') as string | null)?.trim();
+  if (!comment) return { error: 'Comment is required.' };
+
+  const result = await actionFetch(`/contracts/workflow/tasks/${taskId}/comments`, 'POST', { comment });
+  if (!result.ok) return { error: result.message ?? 'Comment could not be added.' };
+
+  revalidatePath('/contracts/workflow');
+  revalidatePath(`/contracts/${contractId}/workflow`);
+  return { error: null };
+}
+
+export async function uploadWorkflowTaskAttachmentAction(
+  taskId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/workflow/tasks/${taskId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath('/contracts/workflow');
+  revalidatePath(`/contracts/${contractId}/workflow`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Issue Log (module-level — /contracts/issues)
+// ---------------------------------------------------------------------------
+
+function readIssueFields(formData: FormData): Record<string, unknown> {
+  const issueNo = (formData.get('issueNo') as string | null)?.trim() || undefined;
+  const title = (formData.get('title') as string | null)?.trim() || undefined;
+  const description = (formData.get('description') as string | null)?.trim() || undefined;
+  const category = (formData.get('category') as string | null) || undefined;
+  const priority = (formData.get('priority') as string | null) || undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const responsibleUserId = (formData.get('responsibleUserId') as string | null) || undefined;
+  const raisedDate = (formData.get('raisedDate') as string | null) || undefined;
+  const dueDate = (formData.get('dueDate') as string | null) || undefined;
+  const closedDate = (formData.get('closedDate') as string | null) || undefined;
+  const resolution = (formData.get('resolution') as string | null)?.trim() || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(issueNo !== undefined ? { issueNo } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(category !== undefined ? { category } : {}),
+    ...(priority !== undefined ? { priority } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(responsibleUserId !== undefined ? { responsibleUserId } : {}),
+    ...(raisedDate !== undefined ? { raisedDate } : {}),
+    ...(dueDate !== undefined ? { dueDate } : {}),
+    ...(closedDate !== undefined ? { closedDate } : {}),
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createIssueAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const contractId = (formData.get('contractId') as string | null) || '';
+  if (!contractId) return { error: 'Please select a contract.' };
+
+  const title = (formData.get('title') as string | null)?.trim();
+  if (!title) return { error: 'Issue Title is required.' };
+
+  const result = await actionFetch(`/contracts/${contractId}/issues`, 'POST', readIssueFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Issue could not be created.' };
+
+  revalidatePath('/contracts/issues');
+  revalidatePath(`/contracts/${contractId}/issues`);
+  return { error: null };
+}
+
+export async function updateIssueAction(
+  issueId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/issues/${issueId}`, 'PATCH', readIssueFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Issue could not be updated.' };
+
+  revalidatePath('/contracts/issues');
+  revalidatePath(`/contracts/${contractId}/issues`);
+  return { error: null };
+}
+
+export async function closeIssueAction(issueId: string, contractId: string): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/issues/${issueId}/close`, 'PATCH');
+  if (!result.ok) return { error: result.message ?? 'Failed to close issue' };
+
+  revalidatePath('/contracts/issues');
+  revalidatePath(`/contracts/${contractId}/issues`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Claim Log (module-level — /contracts/claims)
+// ---------------------------------------------------------------------------
+
+function readClaimFields(formData: FormData): Record<string, unknown> {
+  const claimNo = (formData.get('claimNo') as string | null)?.trim() || undefined;
+  const claimTitle = (formData.get('claimTitle') as string | null)?.trim() || undefined;
+  const claimType = (formData.get('claimType') as string | null) || undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const eventDate = (formData.get('eventDate') as string | null) || undefined;
+  const claimDate = (formData.get('claimDate') as string | null) || undefined;
+  const submittedValueRaw = (formData.get('submittedValue') as string | null)?.trim() || undefined;
+  const approvedValueRaw = (formData.get('approvedValue') as string | null)?.trim() || undefined;
+  const eotClaimedDaysRaw = (formData.get('eotClaimedDays') as string | null)?.trim() || undefined;
+  const eotApprovedDaysRaw = (formData.get('eotApprovedDays') as string | null)?.trim() || undefined;
+  const responsibleUserId = (formData.get('responsibleUserId') as string | null) || undefined;
+  const nextAction = (formData.get('nextAction') as string | null)?.trim() || undefined;
+  const dueDate = (formData.get('dueDate') as string | null) || undefined;
+  const closedDate = (formData.get('closedDate') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(claimNo !== undefined ? { claimNo } : {}),
+    ...(claimTitle !== undefined ? { claimTitle } : {}),
+    ...(claimType !== undefined ? { claimType } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(eventDate !== undefined ? { eventDate } : {}),
+    ...(claimDate !== undefined ? { claimDate } : {}),
+    ...(submittedValueRaw !== undefined ? { submittedValue: Number(submittedValueRaw) } : {}),
+    ...(approvedValueRaw !== undefined ? { approvedValue: Number(approvedValueRaw) } : {}),
+    ...(eotClaimedDaysRaw !== undefined ? { eotClaimedDays: Number(eotClaimedDaysRaw) } : {}),
+    ...(eotApprovedDaysRaw !== undefined ? { eotApprovedDays: Number(eotApprovedDaysRaw) } : {}),
+    ...(responsibleUserId !== undefined ? { responsibleUserId } : {}),
+    ...(nextAction !== undefined ? { nextAction } : {}),
+    ...(dueDate !== undefined ? { dueDate } : {}),
+    ...(closedDate !== undefined ? { closedDate } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createClaimAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const contractId = (formData.get('contractId') as string | null) || '';
+  if (!contractId) return { error: 'Please select a contract.' };
+
+  const claimTitle = (formData.get('claimTitle') as string | null)?.trim();
+  if (!claimTitle) return { error: 'Claim Title is required.' };
+
+  const result = await actionFetch(`/contracts/${contractId}/claims`, 'POST', readClaimFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Claim could not be created.' };
+
+  revalidatePath('/contracts/claims');
+  revalidatePath(`/contracts/${contractId}/claims`);
+  return { error: null };
+}
+
+export async function updateClaimAction(
+  claimId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/claims/${claimId}`, 'PATCH', readClaimFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Claim could not be updated.' };
+
+  revalidatePath('/contracts/claims');
+  revalidatePath(`/contracts/${contractId}/claims`);
+  return { error: null };
+}
+
+export async function closeClaimAction(
+  claimId: string,
+  contractId: string,
+  targetStatus: 'CLOSED' | 'SETTLED' = 'CLOSED',
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/claims/${claimId}/close`, 'PATCH', { status: targetStatus });
+  if (!result.ok) return { error: result.message ?? 'Failed to close claim' };
+
+  revalidatePath('/contracts/claims');
+  revalidatePath(`/contracts/${contractId}/claims`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Closeout Approval Flow (CM-33 — per-contract only, no module page)
+// ---------------------------------------------------------------------------
+
+function revalidateCloseout(contractId: string): void {
+  revalidatePath(`/contracts/${contractId}`);
+  revalidatePath(`/contracts/${contractId}/closeout`);
+}
+
+export async function createCloseoutRequestAction(
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const closeoutSummary = (formData.get('closeoutSummary') as string | null)?.trim();
+  if (!closeoutSummary) return { error: 'Closeout Summary is required.' };
+  const requestedRemarks = (formData.get('requestedRemarks') as string | null)?.trim() || undefined;
+
+  const result = await actionFetch(`/contracts/${contractId}/closeout/request`, 'POST', {
+    closeoutSummary,
+    ...(requestedRemarks !== undefined ? { requestedRemarks } : {}),
+  });
+  if (!result.ok) return { error: result.message ?? 'Closeout request could not be submitted.' };
+
+  revalidateCloseout(contractId);
+  return { error: null };
+}
+
+export async function reviewCloseoutRequestAction(requestId: string, contractId: string): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/closeout/${requestId}/review`, 'POST', {});
+  if (!result.ok) return { error: result.message ?? 'Failed to start review.' };
+
+  revalidateCloseout(contractId);
+  return { error: null };
+}
+
+export async function approveCloseoutRequestAction(
+  requestId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const reviewRemarks = (formData.get('reviewRemarks') as string | null)?.trim() || undefined;
+
+  const result = await actionFetch(`/contracts/closeout/${requestId}/approve`, 'POST', {
+    ...(reviewRemarks !== undefined ? { reviewRemarks } : {}),
+  });
+  if (!result.ok) return { error: result.message ?? 'Failed to approve closeout request.' };
+
+  revalidateCloseout(contractId);
+  return { error: null };
+}
+
+export async function rejectCloseoutRequestAction(
+  requestId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const rejectionReason = (formData.get('rejectionReason') as string | null)?.trim();
+  if (!rejectionReason) return { error: 'Rejection reason is required.' };
+
+  const result = await actionFetch(`/contracts/closeout/${requestId}/reject`, 'POST', { rejectionReason });
+  if (!result.ok) return { error: result.message ?? 'Failed to reject closeout request.' };
+
+  revalidateCloseout(contractId);
+  return { error: null };
+}
+
+export async function closeContractFromCloseoutAction(requestId: string, contractId: string): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/closeout/${requestId}/close-contract`, 'POST', {});
+  if (!result.ok) return { error: result.message ?? 'Failed to close the contract.' };
+
+  revalidateCloseout(contractId);
+  return { error: null };
+}
+
+export async function uploadCloseoutAttachmentAction(
+  requestId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/closeout/${requestId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidateCloseout(contractId);
   return { error: null };
 }

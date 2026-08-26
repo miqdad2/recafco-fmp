@@ -44,6 +44,12 @@ Use semantic tokens throughout. Never hardcode colors in feature components and 
   --color-info-light: #eaf2ff;
   --color-focus: #2563eb;
 
+  /* CM-40B — Production team accent (Assignment Queue Kanban board). Added
+     because no existing token covers "indigo/purple"; Technical/Erection/
+     QS-Commercial reuse info/warning/success instead of new tokens. */
+  --color-team-production: #4f46e5;
+  --color-team-production-light: #eef2ff;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;

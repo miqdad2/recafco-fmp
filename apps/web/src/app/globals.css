@@ -39,6 +39,14 @@
   --color-info-light: #eaf2ff;
   --color-focus: #2563eb;
 
+  /* CM-40B — Production team accent for the Assignment Queue Kanban board.
+     Technical/Erection/QS-Commercial reuse the existing info/warning/success
+     tokens (their hues already match "blue/orange/green"); no existing token
+     covers "indigo/purple", so this one was added rather than hardcoding a
+     raw Tailwind color in the feature component. */
+  --color-team-production: #4f46e5;
+  --color-team-production-light: #eef2ff;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;

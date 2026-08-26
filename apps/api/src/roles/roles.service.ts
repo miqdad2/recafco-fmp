@@ -21,6 +21,11 @@ const ROLE_SELECT = {
   updatedAt: true,
 } as const;
 
+const ROLE_SELECT_WITH_PERMISSION_COUNT = {
+  ...ROLE_SELECT,
+  _count: { select: { permissions: true } },
+} as const;
+
 export interface RoleSummary {
   id: string;
   code: string;
@@ -32,6 +37,14 @@ export interface RoleSummary {
   updatedAt: Date;
 }
 
+// CM-35 — the roles list view additionally shows a permission count per role
+// (see RolesController.list / roles page). Only findAll() needs this; the
+// mutation endpoints (create/update/deactivate) keep returning plain
+// RoleSummary since their callers never display a count.
+export interface RoleListItem extends RoleSummary {
+  permissionCount: number;
+}
+
 export interface RoleDetail extends RoleSummary {
   permissions: { id: string; code: string; name: string; module: string }[];
 }
@@ -40,11 +53,12 @@ export interface RoleDetail extends RoleSummary {
 export class RolesService {
   constructor(private readonly db: DatabaseService) {}
 
-  async findAll(): Promise<RoleSummary[]> {
-    return this.db.getClient().role.findMany({
-      select: ROLE_SELECT,
+  async findAll(): Promise<RoleListItem[]> {
+    const roles = await this.db.getClient().role.findMany({
+      select: ROLE_SELECT_WITH_PERMISSION_COUNT,
       orderBy: { name: 'asc' },
     });
+    return roles.map(({ _count, ...role }) => ({ ...role, permissionCount: _count.permissions }));
   }
 
   async findOne(id: string): Promise<RoleDetail> {

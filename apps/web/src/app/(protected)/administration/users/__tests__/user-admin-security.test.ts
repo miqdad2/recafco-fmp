@@ -13,7 +13,7 @@ const ORG_LIST_DTO = path.join(
 const COMPONENTS = path.join(ROOT, '_components');
 const PERM_SUMMARY = path.join(COMPONENTS, 'role-permission-summary.tsx');
 const MODULE_PANEL = path.join(COMPONENTS, 'module-access-panel.tsx');
-const NEW_FORM = path.join(COMPONENTS, 'new-user-form.tsx');
+const NEW_WIZARD = path.join(COMPONENTS, 'new-user-wizard.tsx');
 const EDIT_TABS = path.join(COMPONENTS, 'edit-user-tabs.tsx');
 
 // P1: Backend @Max restored to 100; frontend corrected to pageSize ≤ 100
@@ -49,7 +49,7 @@ describe('Error state propagation in server pages', () => {
     expect(source).toMatch(/deptData\.status === .rejected./);
   });
 
-  it('T16 - new/page.tsx passes deptApiError to NewUserForm', () => {
+  it('T16 - new/page.tsx passes deptApiError to NewUserWizard', () => {
     const source = fs.readFileSync(NEW_PAGE, 'utf-8');
     expect(source).toContain('deptApiError={deptApiError}');
     expect(source).toContain('plantApiError={plantApiError}');
@@ -81,8 +81,8 @@ describe('RolePermissionSummary write-permission warning', () => {
     expect(source).toContain('write permissions');
   });
 
-  it('T23 - both new-user-form and edit-user-tabs pass showWriteWarning', () => {
-    const newForm = fs.readFileSync(NEW_FORM, 'utf-8');
+  it('T23 - both new-user-wizard and edit-user-tabs pass showWriteWarning', () => {
+    const newForm = fs.readFileSync(NEW_WIZARD, 'utf-8');
     const editTabs = fs.readFileSync(EDIT_TABS, 'utf-8');
     expect(newForm).toContain('showWriteWarning');
     expect(editTabs).toContain('showWriteWarning');
@@ -91,18 +91,18 @@ describe('RolePermissionSummary write-permission warning', () => {
 
 // P4: Organization empty-state messages
 describe('Organization field empty-state messaging', () => {
-  it('T24 - new-user-form shows "No active plants found" for empty plant list', () => {
-    const source = fs.readFileSync(NEW_FORM, 'utf-8');
+  it('T24 - new-user-wizard shows "No active plants found" for empty plant list', () => {
+    const source = fs.readFileSync(NEW_WIZARD, 'utf-8');
     expect(source).toContain('No active plants found');
   });
 
-  it('T25 - new-user-form shows "Select a plant before assigning a location" when no plant chosen', () => {
-    const source = fs.readFileSync(NEW_FORM, 'utf-8');
+  it('T25 - new-user-wizard shows "Select a plant before assigning a location" when no plant chosen', () => {
+    const source = fs.readFileSync(NEW_WIZARD, 'utf-8');
     expect(source).toContain('Select a plant before assigning a location');
   });
 
-  it('T26 - new-user-form shows "No active locations found for this plant" when plant chosen but no locs', () => {
-    const source = fs.readFileSync(NEW_FORM, 'utf-8');
+  it('T26 - new-user-wizard shows "No active locations found for this plant" when plant chosen but no locs', () => {
+    const source = fs.readFileSync(NEW_WIZARD, 'utf-8');
     expect(source).toContain('No active locations found for this plant');
   });
 
@@ -113,8 +113,8 @@ describe('Organization field empty-state messaging', () => {
     expect(source).toContain('No active locations found for this plant');
   });
 
-  it('T28 - no-dept warning in new-user-form mentions "fails closed"', () => {
-    const source = fs.readFileSync(NEW_FORM, 'utf-8');
+  it('T28 - no-dept warning in new-user-wizard mentions "fails closed"', () => {
+    const source = fs.readFileSync(NEW_WIZARD, 'utf-8');
     expect(source).toContain('fails closed');
   });
 

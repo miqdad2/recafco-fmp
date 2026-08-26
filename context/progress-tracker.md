@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** CM-28 — Contract Payments Register Backend + Filter/Print/Export (2026-08-20)
+- **Last completed:** CM-53 — Manager Workflow Task Review Drawer Upgrade (2026-08-26)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -1814,6 +1814,1423 @@ Note: VIEWER receives `maintenance.read`, `maintenance.create`, `maintenance.sta
 ### New Dependencies
 
 None — all used packages were already installed.
+
+## CM-39 — Manager Dashboard Simplification (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UI/UX unit — no backend, DTO, service, or schema changes. Simplified the Contract Manager Dashboard built in CM-37: top action button labels shortened to 4 compact items (New Contract / Assign Tasks / Schedule / Closeout Requests), the duplicate 8-card Quick Actions grid removed entirely (component file deleted, was unused everywhere else), primary KPI cards reduced from 9 to 5 (Needs Action / Overdue Tasks / Open Issues / Open Claims / Pending Closeout), the remaining 5 metrics (Active/Draft/Awaiting Activation/Outstanding Payments/Due This Week) moved into a compact "Active: 4 · Draft: 17 · …" text strip beneath the cards, the attention table simplified from 7 to 6 columns (Contract ID + Contract Name merged into one "Contract" cell), and the three previously always-stacked sections (Workflow Assignment Overview / Upcoming Schedule / Recently Updated Contracts) consolidated into a single "Workflow Load / Upcoming / Recent" tab strip defaulting to Workflow Load, so only one is visible at a time. "Needs Manager Action" now appears immediately after the cards as the dashboard's clear main focus. The Staff dashboard branch in `page.tsx` was not touched at all (verified line-for-line unchanged); the one shared component, `UpcomingScheduleList`, only had its *manager-branch call site's* prop values changed (empty-state text), not the component itself, so Staff's own call site and behavior are provably unaffected.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — Manager branch restructured (Quick Actions section removed, cards+strip → Needs Manager Action → tabs); Staff and fallback branches untouched
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-top-actions.tsx` — shortened button labels (title attributes retain the full original wording for tooltips/accessibility)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-summary-cards.tsx` — rewritten: 5-card `ManagerSummaryCards` (new `needsAction` prop) + new exported `SecondaryMetricsStrip`
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-attention-table.tsx` — columns reduced 7→6, new empty-state copy per spec
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-secondary-tabs.tsx` (new) — client component, receives all 3 panels as pre-rendered server JSX props, toggles visibility only (no client-side data fetching)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-quick-actions.tsx` — deleted (only consumer was the page being simplified)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 159/159 (unchanged — pure layout/copy restructuring, no new pure-function logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1111/1111 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 26 migrations, unchanged |
+| Rendered HTML (manager: compact actions/5 cards/no Quick Actions/simplified table/tabs; staff: fully unchanged) | ✓ all confirmed, including SSR-level check that only the default "Workflow Load" tabpanel renders (`aria-selected="true"` count = 1) |
+
+### Key Implementation Notes
+
+- "Needs Action" is computed client-side from `data.manager.attentionItems.length` — the same array already returned by the (untouched) API, capped at 30 server-side since CM-37. On the rare contract portfolio with more than 30 simultaneous attention items, this undercounts; adding an uncapped total would need a one-line backend addition, deliberately skipped per this unit's "prefer no backend change unless absolutely needed" instruction. Documented here for future reference.
+- The tabs are a Server-Components-as-props-into-a-Client-Component pattern: `page.tsx` (a Server Component) renders all three panels' JSX and passes them to `ManagerSecondaryTabs` (`'use client'`), which only toggles which one is visible via `useState` — no additional client-side data fetching, no new API calls, keeping the "prefer no backend change" and performance characteristics identical to CM-37.
+- No live API scripting was needed/run since the backend response shape is provably unchanged (not touched) — verification relied on rendered SSR HTML plus the full existing automated test suites (both unchanged in count, confirming no regressions).
+
+## CM-53 — Manager Workflow Task Review Drawer Upgrade (Completed 2026-08-26)
+
+### Summary
+
+Frontend-only upgrade to the manager task card (`WorkflowTaskCard`) and task drawer (`WorkflowTaskDrawer`) — both used from `WorkflowBoard` on the "Contract Workflows" modal board (CM-52) and the per-contract Workflow tab. No backend change; every value shown is real data already returned by `ContractWorkflowTask`/`ContractWorkflowTaskComment`/`ContractWorkflowTaskAttachment` (contracts-api.ts) — the drawer was reorganized and had display-only additions layered in, not rewired.
+
+**Task card**: gained a subtle single-color left-border accent (`cardAccentCls`) for at-a-glance state — overdue (danger) > rejected/on hold (warning) > completed/approved (success) > submitted/under review (info) > unassigned (muted) > default, in that priority order when more than one applies; "Due …" now reads "No due date" when `dueDate` is null instead of an em dash; and a new "Submitted: …" / "Completed: …" line appears using `completedDate` for COMPLETED tasks or `lastActivityAt` for SUBMITTED/UNDER_REVIEW tasks (no invented `submittedAt` — this project's schema has no such column, confirmed during the audit).
+
+**Task drawer**: restructured into the spec's 7 labeled sections (Task Summary, Assignment & Dates, Staff Submission, Uploaded Documents, Progress Comments, Manager Update, Recent Activity) without changing any of the existing form/action wiring — the same `updateWorkflowTaskAction`/`addWorkflowTaskCommentAction`/`uploadWorkflowTaskAttachmentAction` bindings, the same field names, the same `canManage`/`canEdit` gating, just regrouped visually with read-only review blocks (Sections 1–3) added ahead of the pre-existing editable form (now "Manager Update", Section 6). A new `FORM_DATA_FIELD_LABELS` map (mirroring the backend's `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS`/`BOOLEAN_KEYS` one-for-one) renders a saved task's `formData` as a labeled key/value grid instead of raw JSON — one flat map covers all four Technical-step task-specific forms (Drawing Received/SD/Getting Approval/FD Issuance) with no taskKey branching, since a task's `formData` only ever contains the keys its own frontend form saved. "Recent Activity" (Section 7) merges three already-fetched real sources — task created/last-updated, comments, attachments — into one time-sorted feed, explicitly labeled as not a full audit trail (this schema has no task-history table).
+
+Contract identity ("Task Summary" → Contract) is optional and only shown when the caller already has it: `WorkflowBoard` gained optional `contractReference`/`contractTitle` props, wired from `WorkflowBoardModal` (CM-52, has `detail.contract`) and the per-contract Workflow tab (`contracts/[id]/(workspace)/workflow/page.tsx`, has `workflow.contract`) — never fabricated where absent.
+
+### Changes
+
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-card.tsx` — `cardAccentCls()`, `submissionLine()`, "No due date" text.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-drawer.tsx` — full section restructure, `FORM_DATA_FIELD_LABELS`, `recentActivity` (`useMemo`), attachment row gained an uploaded-date/time column, header gained status/priority badges, optional `contractReference`/`contractTitle` props.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-board.tsx` — optional `contractReference`/`contractTitle` props, passed through to `WorkflowTaskDrawer`.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-board-modal.tsx` — passes `contract.referenceNumber`/`contract.title` to `WorkflowBoard`.
+- **Modified:** `apps/web/src/app/(protected)/contracts/[id]/(workspace)/workflow/page.tsx` — destructures `contract` from the existing `workflow` response, passes it to `WorkflowBoard` the same way.
+
+### Verification Results
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | Pass, 0 errors |
+| `pnpm typecheck` | Pass, 0 errors (12/12 turbo tasks) |
+| `pnpm --filter @recafco/web test --run` | 224/224 passed (unchanged — no existing test covers these two components, confirmed via grep before editing) |
+| `pnpm --filter @recafco/api test --run` | 1136/1136 passed (unchanged — no backend touched) |
+| `pnpm build` | 8/8 tasks successful |
+
+### Key Implementation Notes
+
+- No distinct `submittedAt` column exists anywhere in the schema for `ContractWorkflowTask` — confirmed by reading `ContractWorkflowTask` in `contracts-api.ts` during the audit (only `createdAt`/`updatedAt`/`lastActivityAt`/`startDate`/`dueDate`/`completedDate`). Both the card and the drawer's "Staff Submission" section use the spec's own documented fallback (`completedDate` for COMPLETED, else `lastActivityAt`) and label it accordingly ("Last submitted/updated") rather than implying a stored instant that doesn't exist — reported here as intentionally deferred, exactly as the spec asked.
+- "Manager remarks" (Section 6) is the same single `remarks` column the existing form already edited — there is no second backend field for a manager-only remark. Rather than requesting a migration for this ("prefer frontend-first using existing data" + "do not edit migrations unless absolutely required"), the drawer shows the current `remarks` value read-only in "Staff Submission" (Section 3) and keeps it editable in "Manager Update" (Section 6) — same field, reviewed then optionally overwritten, not two independent values.
+- Assignment Queue (`AssignmentQueueTaskCard`/`AssignmentQueueBoard`/`AssignTaskModal`) is a completely separate component tree from `WorkflowTaskCard`/`WorkflowTaskDrawer` — confirmed during the audit — so it was correctly left untouched rather than force-fitting a "shared card" change that doesn't actually apply here.
+
+## CM-52C — Assign Work Contract Board Modal (Completed 2026-08-26)
+
+### Summary
+
+Extended CM-52's "board opens in a focused modal instead of expanding inline" pattern to the Assign Work (Assignment Queue) tab. Previously, clicking "Assign Tasks" on a contract card replaced the entire landing page (summary cards, contract picker, advanced filters, contract cards, needing-setup section, advanced all-contracts section) with the selected contract's board — a full-page swap, not an overlay. Now the landing content always renders, and a new `AssignmentQueueBoardModal` (mirroring `WorkflowBoardModal` from CM-52) opens as a large focused overlay on top of it whenever `?mode=assignment&contractId=<id>` is present, closing back to `?mode=assignment` (contract cards, filters etc. were never hidden, so "closing" is just removing the modal — no re-render of hidden content).
+
+Frontend-only. `assignment-queue-view.tsx` already computed the selected contract's board data only when `contractId` was present (existing CM-40C behavior, untouched) — the fix restructures the same computation into modal-header/modal-body pieces instead of a single inline JSX block, and stops gating the landing sections on "no contract selected". The existing `AssignmentQueueViewSwitcher` (Board/Table toggle), `AssignmentQueueBoard`, `AssignmentQueueTaskCard`, and `AssignTaskModal` are all reused completely unchanged as the modal's body — assigning a task still calls the same `updateWorkflowTaskAction` path, `router.refresh()` still re-fetches the parent server data, an assigned task still drops out of the board and the unassigned count still updates, exactly as before CM-52C.
+
+The now-unused `assignment-queue-selected-contract-header.tsx` (the old inline panel's header, only ever imported by `assignment-queue-view.tsx`, confirmed via grep before deleting) was deleted rather than left as dead code — its "Contract ID/name/client + unassigned badge + Back to Contracts" content is now the modal's own header instead.
+
+The one case where the modal is deliberately NOT used: when the selected `contractId` fails to resolve at all (`getWorkflow()` throws — out of department scope or invalid id), there is no real contract identity available to put in the modal's header, and fabricating one would violate "do not use fake data" — so that case stays a plain inline error banner above the landing content, same as before this unit.
+
+### Changes
+
+- **New:** `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-board-modal.tsx` — client component, structurally identical to CM-52's `WorkflowBoardModal` (large centered modal, Escape-to-close, header with title/contract identity/unassigned-count badge/"Open Contract Detail"/Close, independently-scrolling body).
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — replaced the single `selectedContractPanel` computation/render with separate `modalHeader`/`modalBody`/`scopeError` values; landing sections (`AssignmentQueueContractList`, `ContractsNeedingSetupSection`, `AssignmentQueueAdvancedSection`) now render unconditionally; the "all tasks assigned" empty state gained an explicit `[Close] [Back to Contracts]` button pair per the spec (both currently navigate to the same `contractListHref` — there is only one "back" destination, so no functional difference between them, only the two labels the spec asked for).
+- **Deleted:** `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-selected-contract-header.tsx` — superseded by the modal's own header, confirmed unused elsewhere before deleting.
+
+### Verification Results
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | Pass, 0 errors |
+| `pnpm typecheck` | Pass, 0 errors (12/12 turbo tasks) |
+| `pnpm --filter @recafco/web test --run` | 224/224 passed (unchanged) |
+| `pnpm --filter @recafco/api test --run` | 1136/1136 passed (unchanged — no backend touched) |
+| `pnpm build` | 8/8 tasks successful |
+
+### Key Implementation Notes
+
+- Direct navigation to `/contracts/workflow?mode=assignment&contractId=<id>` already opened the (then-inline) board before this unit, since `selectedContractId` is read straight from `searchParams` on every request — CM-52C's modal wrapping doesn't change that, so the "open automatically on direct URL" requirement was satisfied with no extra logic, exactly as it was for CM-52's own modal.
+- `AssignTaskModal` (opened from inside the board) and the new `AssignmentQueueBoardModal` are both `fixed inset-0 z-50` — same reasoning as CM-52's note on `WorkflowTaskDrawer`: the inner dialog mounts as a later DOM node in the same stacking context, so it continues to paint above the board modal with no z-index conflict.
+- Deferred: nothing — URL persistence, automatic modal-open on direct link, and the Board/Table toggle moving inside the modal were all achieved directly from the existing query-param-driven data flow.
+
+## CM-52B — Simplify Manager Workflow Page Tabs and Wording (Completed 2026-08-26)
+
+### Summary
+
+Relabeled the manager-facing `/contracts/workflow` page for plain-language business wording, with zero route/query-param changes — every href (`mode=assignment`, `mode=my-tasks`, `overdueOnly=true`, etc.) is byte-for-byte unchanged, only the visible text differs. Page title: "Workflow & Team Tasks" → "Contract Work Progress" (h1, breadcrumb, and `<title>` metadata). Subtitle: "Monitor contract tasks, assign work to staff, and follow delayed items."
+
+`workflow-mode-tabs.tsx`'s single `label` field was split into `managerLabel`/`staffLabel` per tab entry, selected by the existing `hideAllWorkflows` flag (already the staff/manager audience signal from CM-41/45 — no new prop needed for this part). Manager labels: All Workflows → Contract Workflows, Assignment Queue → Assign Work, Overdue → Delayed Tasks. Staff labels (My Tasks, Overdue) are untouched — `StaffMyTasksView` passes `hideAllWorkflows` unconditionally, so its wording never changes.
+
+"My Tasks" is no longer a main tab for the manager audience (`managerHidden` filter flag, mirroring the existing `staffHidden`/`managerOnly` pattern). Per the task's detection exception, a smaller secondary "My Assigned Work (N)" pill link appears next to the main tabs — but only when the manager actually has tasks assigned to them (`summary.myOpenTasks > 0`, the exact same real count `WorkflowSummaryCards` already displays as "My Open Tasks" — no new backend call, no invented count). It still routes to `mode=my-tasks`, so the URL/content behind it is completely unchanged; only its visual prominence and the surrounding "is this a main tab" framing differ.
+
+The Assignment Queue page's own breadcrumb ("Workflow & Team Tasks" / "Assignment Queue") was updated to "Contract Work Progress" / "Assign Work" for consistency with the renamed parent page it links back to — its own h1 ("Assign Workflow Tasks") and all of its functionality were already unchanged and untouched. The manager-only `WorkflowFilterBar`'s "My Tasks only" checkbox (never rendered for staff, confirmed by grep before editing) was renamed "Assigned to me only" per the spec; "Overdue only" was left as-is since the spec named only the My-Tasks-only label for this rename.
+
+### Changes
+
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-mode-tabs.tsx` — `managerLabel`/`staffLabel` split, `managerHidden` filter flag for the `my-tasks` entry, new optional `myAssignedTaskCount` prop driving the secondary "My Assigned Work" link. Routes/hrefs unchanged.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — h1/subtitle/breadcrumb/`<title>` metadata text; passes `{...(summary ? { myAssignedTaskCount: summary.myOpenTasks } : {})}` to `WorkflowModeTabs` (conditional spread, not a bare `undefined`, per this repo's `exactOptionalPropertyTypes: true` tsconfig).
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-filter-bar.tsx` — checkbox label text only.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — breadcrumb label text only.
+
+### Verification Results
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | Pass, 0 errors |
+| `pnpm typecheck` | Pass, 0 errors (12/12 turbo tasks) — one `exactOptionalPropertyTypes` error caught and fixed during this unit (see below) |
+| `pnpm --filter @recafco/web test --run` | 224/224 passed (unchanged) |
+| `pnpm --filter @recafco/api test --run` | 1136/1136 passed (unchanged — no backend touched) |
+| `pnpm build` | 8/8 tasks successful |
+
+### Key Implementation Notes
+
+- First pass passed `myAssignedTaskCount={summary?.myOpenTasks}` directly, which is `number | undefined` — this repo's web tsconfig has `exactOptionalPropertyTypes: true`, which rejects assigning `undefined` to an optional `number` prop (as opposed to simply omitting the prop). Fixed by conditionally spreading the prop in, matching the existing `{...(myTasksOnly ? { emptyMessage: '...' } : {})}` pattern already used elsewhere in this same file (CM-51/CM-52) rather than widening the prop's type to accept `undefined`.
+- The bare `/contracts/workflow` URL for a Contract Staff account without `?mode=my-tasks`/`?mode=overdue` (which would fall through to the manager-style register content with `hideAllWorkflows=true` tabs) was confirmed to be pre-existing behavior from CM-41, not something this unit touches or changes.
+- Deferred/not needed: hiding "My Tasks only" for manager entirely — renaming to "Assigned to me only" satisfied the spec's stated alternative ("or renamed... if kept") and keeps the filter functional, which is simpler and lower-risk than conditionally removing a working filter control.
+
+## CM-52 — Manager Workflow Board Modal for Selected Contract (Completed 2026-08-26)
+
+### Summary
+
+The manager-facing "All Workflows" / Overdue register at `/contracts/workflow` no longer expands the selected contract's details and Team Task Board inline below the table — clicking "View Board" now opens a large focused modal (`WorkflowBoardModal`, new file) instead. The table, tabs, summary cards and filters stay exactly where they were; the page itself never grows long regardless of how many tasks a selected contract has, since only the modal body scrolls.
+
+Frontend-only, as instructed. The fix is a pure presentation change: `page.tsx` already fetched `ContractWorkflowDetail` only when `?contractId=<id>` is present (existing behavior, untouched), so opening the modal required no new data fetching — the existing `View Board` links (`workflow-contract-table.tsx`) and any other link that routes with `contractId` (dashboard shortcuts, contract-list shortcuts) open the modal automatically, with zero new wiring, because they all resolve to the same query param the page already reads. `WorkflowContractHeader` and `WorkflowBoard` (task lanes, task cards, `WorkflowTaskDrawer`) are reused completely unchanged inside the modal body — no new task-card or task-detail logic was written.
+
+Closing the modal (✕ button or Escape) navigates to `buildHref({ contractId: undefined })` — the same existing query-builder helper, just with `contractId` cleared — so the URL always reflects what's open/closed; this is a real navigation, not client-only state, satisfying the spec's URL-persistence preference without any extra param-parsing code.
+
+### Changes
+
+- **New:** `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-board-modal.tsx` — client component. Large centered modal (`max-w-[1800px]`, near-full-height), header with title/contract ref/name/client/status/workflow-progress badge + "Open Contract Detail"/Close actions, Escape-to-close, `role="dialog" aria-modal="true"`. Body (independently scrollable, `flex-1 min-h-0 overflow-y-auto`) renders the unchanged `WorkflowContractHeader`, a Total/Completed/In Progress/Overdue/Unassigned summary strip (Unassigned computed client-side from `detail.tasks.filter(t => !t.responsibleUserId).length` — real per-task data, not invented), then the unchanged `WorkflowBoard`.
+- **Modified:** `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — replaced the `{contractId && (<div className="space-y-4 pt-2 border-t border-border">...<WorkflowContractHeader/><WorkflowBoard/>...)}` inline block with `{contractId && workflowDetail && <WorkflowBoardModal .../>}`, passing through the exact same props (`people`, `canManage`, `canUpdateAssigned`, `currentUserId`, the `myTasksOnly` empty-message override) plus a new `closeHref={buildHref({ contractId: undefined })}`. No other logic in `page.tsx` (data fetching, filters, tabs, pagination, Assignment Queue dispatch, Staff dispatch) was touched.
+
+### Verification Results
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | Pass, 0 errors |
+| `pnpm typecheck` | Pass, 0 errors (12/12 turbo tasks) |
+| `pnpm --filter @recafco/web test --run` | 224/224 passed (unchanged — presentation-only change, no new/modified test-relevant logic) |
+| `pnpm --filter @recafco/api test --run` | 1136/1136 passed (unchanged — no backend touched) |
+| `pnpm build` | 8/8 tasks successful |
+
+### Key Implementation Notes
+
+- The per-contract Workflow tab at `/contracts/[id]/workflow` (a different page — no table above it, already scoped to one contract) still renders `WorkflowBoard` inline as before. Out of scope for this unit and deliberately untouched.
+- Assignment Queue (`mode=assignment`) and the staff-only My Tasks/Overdue views (`StaffMyTasksView`) are separate code paths in `page.tsx` that return before any of this logic runs — neither was touched, and neither was exercised by this change.
+- `WorkflowTaskDrawer` (opened from a task card inside `WorkflowBoard`) is itself a `fixed inset-0 z-50` dialog, same z-index as the new modal's own `fixed inset-0 z-50` wrapper. Because it mounts as a later DOM node within the same document stacking context, it continues to paint above the board modal exactly as it already painted above the page before this change — no z-index conflict introduced.
+- Deferred: full query-string-driven modal state (e.g. reading `contractId` client-side to animate open/close without a full navigation) — the simpler "modal renders whenever `contractId` + `workflowDetail` are present, closes via real navigation" approach already satisfies the spec's URL-persistence preference and avoids adding client-side duplication of server-fetched state.
+
+## CM-51 — Task-Specific Staff Work Forms: FD Issuance (Completed 2026-08-25)
+
+### Summary
+
+Fourth and final Technical-step task-specific form, completing the set started in CM-49. `staff-task-update-panel.tsx` now detects `technical_fd_issuance` via the same stable `taskKey` mechanism and renders a dedicated "FD Issuance Information" layout — the main-content ternary is now a clean 4-way chain (`isFdIssuance ? ... : isGettingApproval ? ... : isSdCalculation ? ... : ...`), with Drawing Received still the untouched final fallback. Reused CM-46B's `formData` column as instructed — `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS` grew from 36 to 46 (10 new FD keys: fdIssueDate, issuedTo, purposeFor, issueType, approvedReferenceNo, approvedDate, scale, distribution, issueMethod, issuedBy — drawingReferenceNo, revisionNo, numberOfSheetsFiles, designation, contactNo and email all reused as-is from earlier forms). No new boolean keys, no schema or migration change; `pnpm db:migrate:status` confirmed 27 migrations, unchanged, before and after.
+
+FD Issuance needed the exact same right rail as SD and Getting Approval, so it reuses the `compactRightRail` block CM-50 already extracted — no third copy of that markup. Its Attachments card reuses `attachmentsSection()`, titled "Final Drawing Attachments". Six of its fields (issuedTo, purposeFor, issueType, scale, distribution, issueMethod) are `<select>`s with the exact option lists the spec named, stored as plain strings in formData — no new database enum, per the task's own instruction.
+
+The bottom action bar's existing "Submit" button (built for SD in CM-49) now also covers FD Issuance — `canSubmit` widened from `isSdCalculation` to `isSdCalculation || isFdIssuance`, both mapping to the same pre-existing `SUBMITTED` status, no new handler needed. "Mark Complete" is now a 3-way label (`isGettingApproval` → "Approve & Continue", `isFdIssuance` → "Mark Complete & Continue", otherwise → "Mark Complete") reusing the same COMPLETED-mapping handler in all three cases. No Return/Reopen button was added — the spec explicitly said only to add it if a safe existing mapping was obvious, and none of the four already-built actions (Save Draft, Save Update, Submit, Mark Complete & Continue) left an unaddressed "reopen a completed FD task" need worth inventing a mapping for.
+
+### Persistence — Migration Reused, Not Added
+
+- No new migration. `ContractWorkflowTask.formData` (CM-46B) is reused unchanged for a fourth task type; `pnpm db:migrate:status` confirmed 27 migrations, up to date, both before and after this unit.
+
+### Changes
+
+- `apps/api/src/contracts/contract-workflow.service.ts` — `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS` grew from 36 to 46 keys (10 new); no boolean-key change
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — new test covering all 10 new FD Issuance keys together, plus reused drawingReferenceNo/revisionNo/numberOfSheetsFiles/designation/contactNo/email
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `TASK_FORM_DATA_TEXT_FIELDS` grew to match
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — `isFdIssuance` task-type detection; header description/guidance/remarks-placeholder lookups extended to a 4-way branch; new "FD Issuance Information" main-content layout (6 select fields + 4 text/date fields, reusing `compactRightRail`/`attachmentsSection('Final Drawing Attachments')`); `canSubmit` widened to cover FD Issuance; Mark Complete's button label gained a third variant
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm lint` (web + api, contracts area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — the new logic lives in a client component form, not a separately-tested pure function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1136/1136 (1 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 27 migrations, up to date (none added — form_data reused per instruction) |
+| Live scenarios A–M | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-50; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- All four Technical-step task-specific forms (Drawing Received, SD & Calculation Submission, Getting Approval, FD Issuance) now exist and share one flat, task-agnostic `formData` allow-list — the pattern established in CM-49 (grow the list, never fork it by taskKey) held cleanly through all three additional forms with no backend architecture change needed.
+- Deferred nothing beyond Return/Reopen, which the spec itself only asked for "if there is already a safe existing mapping and authorization" — none was obvious, so it was left out rather than guessed at.
+- Multi-assignee correctness required no new code, same as CM-49/CM-50 — `StaffMyTasksView`'s per-task `responsibleUserId` filtering (CM-44) already means each staff member's My Tasks list only shows tasks actually assigned to them, so all four Technical steps on the same contract, assigned to four different people, already render correctly and independently.
+
+## CM-50 — Task-Specific Staff Work Forms: Getting Approval (Completed 2026-08-25)
+
+### Summary
+
+Third task-specific form, following the exact pattern CM-49 established: `staff-task-update-panel.tsx` now detects `technical_getting_approval` (from `contract-workflow-templates.ts`) via the same stable `taskKey` mechanism and renders a dedicated "Approval Information" layout instead of Drawing Received's or SD's. Reused CM-46B's `formData` column as instructed — `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS` grew from 27 to 36 (9 new Getting Approval keys: submittedOn, submittedToReviewerClient, approvalStatus, expectedApprovalDate, reviewedOn, reviewedBy, clientReviewerComments, resubmissionDate, resubmissionReasonComments — `submittedBy` and `revisionNo` reused as-is from SD/Drawing Received) and `WORKFLOW_TASK_FORM_DATA_BOOLEAN_KEYS` gained `resubmissionRequired`. No schema or migration change; `pnpm db:migrate:status` confirmed 27 migrations, unchanged, before and after.
+
+Structurally, Getting Approval and SD & Calculation Submission turned out to need the *exact same* right rail (Workflow Steps / Task Details / Recent Activity) — this was pulled out into one shared `compactRightRail` JSX block (and the previously-duplicated Attachments card into a small `attachmentsSection(title)` function, since Getting Approval needed its own "Approval Attachments" title) rather than writing the same markup a third time, so the two task types can never silently drift apart in that shared area. `approvalStatus` is a 5-option `<select>` (Under Review / Approved / Approved with Comments / Changes Required / Rejected) stored purely in `formData` — per the spec's own instruction, it is *not* auto-synced by the bottom-bar action buttons, which map to the core `status` column independently. `resubmissionRequired` is implemented as a checkbox (not a separate Yes/No select) for consistency with the two existing boolean fields from Drawing Received, conditionally revealing Resubmission Date/Reason exactly as spec required, with neither made mandatory.
+
+The bottom action bar gained two new buttons, Getting-Approval-only: **Send Back for Changes** (status → `ON_HOLD`) and **Reject** (status → `REJECTED`) — both existing statuses, never invented. "Approve & Continue" reuses the exact same COMPLETED-mapping handler Mark Complete already had, just relabeled for this task type. A genuinely useful side effect of the ON_HOLD/REJECTED mapping: both are already in `DELAY_REASON_STATUSES`, so clicking either button reveals the existing Delay Reason textarea automatically — a real, already-built place to record why, with zero new field added for it.
+
+### Persistence — Migration Reused, Not Added
+
+- No new migration. `ContractWorkflowTask.formData` (CM-46B) is reused unchanged for a third task type; `pnpm db:migrate:status` confirmed 27 migrations, up to date, both before and after this unit.
+
+### Changes
+
+- `apps/api/src/contracts/contract-workflow.service.ts` — `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS` grew from 27 to 36 keys (9 new); `WORKFLOW_TASK_FORM_DATA_BOOLEAN_KEYS` gained `resubmissionRequired`
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — new test covering all 9 new Getting Approval keys (text + boolean) together, plus reused `submittedBy`/`revisionNo`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `TASK_FORM_DATA_TEXT_FIELDS`/`TASK_FORM_DATA_BOOLEAN_FIELDS` grew to match
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — `isGettingApproval` task-type detection; header description/guidance/remarks-placeholder lookups extended to a 3-way branch; new "Approval Information" main-content layout; `attachmentsSection(title)` extracted (was a fixed `attachmentsBlock`) so Getting Approval can title its card "Approval Attachments"; `compactRightRail` extracted and shared between SD and Getting Approval instead of being duplicated a second time; `handleSendBackForChanges`/`handleReject` added alongside the existing `handleMarkComplete`/`handleSubmitForReview`, all four sharing the same generalized `pendingStatusSubmit` flow; Mark Complete's button label becomes "Approve & Continue" for Getting Approval
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm lint` (web + api, contracts area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — the new logic lives in a client component form, not a separately-tested pure function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1135/1135 (1 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 27 migrations, up to date (none added — form_data reused per instruction) |
+| Live scenarios A–L | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-49; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- **Status mapping rationale, documented in the component's own doc comment so the choice isn't silently lost:** "Reject" → REJECTED and "Send Back for Changes" → ON_HOLD were chosen specifically to avoid both buttons mapping to the same status (which would make them functionally identical) — ON_HOLD reads naturally as "paused pending a resubmission," distinct from REJECTED's more terminal "rejected" meaning. Neither is a new status; both were already in `STATUS_OPTIONS` before this unit.
+- Deferred nothing this unit — unlike CM-49 (which deferred "Submit & Send for Approval" and "Request Clarification"), every button the spec asked for maps cleanly to an existing status or existing comment behavior, so all of Save Draft, Save Update, Approve & Continue, Send Back for Changes, and Reject were implemented.
+- Multi-assignee correctness required no new code, same as CM-49 — `StaffMyTasksView`'s per-task `responsibleUserId` filtering (CM-44) already means each staff member's My Tasks list only shows tasks actually assigned to them, so Drawing Received/SD/Getting Approval on the same contract assigned to three different people already render correctly and independently.
+
+## CM-49 — Task-Specific Staff Work Forms: SD & Calculation Submission (Completed 2026-08-25)
+
+### Summary
+
+First task-type-aware unit for the focused staff work screen: until now, `StaffTaskUpdatePanel` rendered the exact same Drawing Received-shaped A/B/C/D form for every workflow task regardless of what it actually was. CM-49 adds a second, genuinely different form — SD & Calculation Submission — dispatched by the task's stable, backend-defined `taskKey` (`technical_sd_calculation_submission`, from `contract-workflow-templates.ts`), never the display `taskName`. Every other task, Drawing Received included, falls through to the exact same form it already had — confirmed unchanged by re-reading the file's Drawing Received branch after the split.
+
+Per the task's own instruction, reused CM-46B's `formData` JSONB column rather than adding a new one: the backend's `sanitizeWorkflowTaskFormData()` allow-list grew from 13 to 27 text keys (14 new SD-specific ones — submissionDate, submissionType, submittedTo, targetApprovalDate, relatedDrawingReceived, calculationType, numberOfSheetsFiles, scopeDescription, submittedBy, designation, submissionMethod, submissionReferenceNo, contactNo, email — plus `drawingReferenceNo`/`revisionNo` reused as-is, not duplicated), with no schema or migration change. The allow-list stays deliberately task-agnostic (one flat superset, not keyed by taskKey): each task-specific frontend form only ever renders and submits its own field names, so there's no cross-task contamination risk in sharing one list — confirmed with a new sanitizer test covering all 14 new keys together. The web action (`updateWorkflowTaskAction`) grew the matching named-field list it collects from the submitted browser FormData.
+
+The SD form itself replaces Drawing Received's A/B/C/D split with the reference design's own shape: one wide "Submission Information" card (Status + the 15 optional fields, 4-per-row on desktop, Scope Description and Remarks as full-width fields below the grid) spanning the main+middle grid columns, then Attachments, then Progress Updates — all using the exact same three server actions and the exact same `<form form="staff-task-update-form">` cross-column-association technique CM-46C established. The right rail swaps Drawing Received's Checklist/Activity Timeline/Task Details for Workflow Steps (a compact vertical version of the same real `task.teamTasks` data the horizontal stepper already used) / Task Details (now including Created On and Priority, both real fields not shown on Drawing Received's version) / Recent Activity (identical underlying `activity` data, just relabeled). Header description and Step Guidance copy are also task-specific, using the spec's own literal wording — nothing invented.
+
+The bottom action bar gained one new button, SD-only: **Submit**, which sets the already-existing `SUBMITTED` status (never a new one) and saves through the same form, hidden once the task is already SUBMITTED/UNDER_REVIEW/APPROVED/COMPLETED. "Submit & Send for Approval" and "Request Clarification" were both deliberately deferred — see Key Implementation Notes.
+
+### Persistence — Migration Reused, Not Added
+
+- No new migration. `ContractWorkflowTask.formData` (added in CM-46B, `20260829000000_add_contract_workflow_task_form_data`) is reused unchanged; `pnpm db:migrate:status` confirmed 27 migrations, up to date, both before and after this unit.
+
+### Changes
+
+- `apps/api/src/contracts/contract-workflow.service.ts` — `WORKFLOW_TASK_FORM_DATA_TEXT_KEYS` grew from 13 to 27 keys (14 new SD-specific)
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — new test covering all 14 new SD keys (plus reused drawingReferenceNo/revisionNo) passing through the sanitizer together
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `TASK_FORM_DATA_TEXT_FIELDS` grew to match, so `updateWorkflowTaskAction` collects the new named inputs when present
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — `isSdCalculation` task-type detection (by `taskKey`); task-specific header description and Step Guidance copy; the main work grid and right rail now each branch between the original, unchanged Drawing Received layout and the new SD & Calculation Submission layout; `pendingComplete` (boolean) generalized to `pendingStatusSubmit` (string | null) so Mark Complete and the new Submit button share one "set status, wait for it to land, then submit" flow; shared Attachments/Progress-Updates JSX extracted into local `attachmentsBlock`/`progressUpdatesBlock` expressions reused by both layouts instead of being duplicated
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm lint` (web + api, contracts area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — the new logic lives in a client component form, not a separately-tested pure function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1134/1134 (1 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 27 migrations, up to date (none added — form_data reused per instruction) |
+| Live scenarios A–J | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-48C; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- **Deferred, per the task's own instruction to report rather than invent:** "Submit & Send for Approval" was not added — it would need to combine a status change with some notification/routing behavior that doesn't exist anywhere in this codebase, and inventing one wasn't in scope. "Request Clarification" was also not added — mapping it onto a plain comment would mislabel an ordinary progress-update comment as a distinct clarification-request type the backend has no concept of. Plain **Submit** (status → SUBMITTED, an already-existing status) was added since it maps cleanly with no invention.
+- Multi-assignee correctness (spec's own audit item 10/16) required no code change — it was already correct by construction: `StaffMyTasksView`'s per-task flattening already filters `responsibleUserId === currentUserId` per task (from CM-44), so each staff member's My Tasks list only ever contains tasks actually assigned to them, and the panel receives whichever specific task object was selected. A Drawing Received task assigned to one staff member and an SD & Calculation task assigned to another already render correctly and independently — confirmed by re-reading, not by adding a new check.
+- Right rail's "Workflow Steps" card for SD reuses `task.teamTasks` (the same real, sortOrder-sequenced sibling-task list already powering the horizontal stepper above it) rather than a hardcoded 4-name list — so it stays accurate if a contract's actual scope ever omits one of the four TECHNICAL steps.
+
+## CM-48C — Staff My Tasks Clickable Task Cards (Completed 2026-08-25)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or data change; one file touched. Audit confirmed `StaffTaskCard` (`contracts/workflow/_components/staff-task-card.tsx`) is used exclusively by `staff-my-tasks-view.tsx` for both the My Tasks bucketed list and the Overdue list — never shared with any manager component — so this change carries zero manager-facing risk by construction, not just by care. Both callers already pass the correct mode-aware `updateHref` (`?mode=my-tasks&taskId=` / `?mode=overdue&taskId=`), so no URL-format change was needed.
+
+Implemented via the standard "stretched link" technique rather than a `<div onClick>` handler: the task name is a real `<Link>` whose `::after` pseudo-element is `absolute inset-0` against the card's `relative` container, so its clickable area covers the entire card. The "Update Task" button remains a separate, sibling `<Link>` (never nested inside the stretched one — nesting anchors is invalid HTML) raised above the overlay with `relative z-10` so it stays independently clickable. Both anchors point at the identical `updateHref` and are native `<a>` elements — no JS click handler, no `stopPropagation()`, and therefore no double-navigation risk by construction: clicking the button triggers exactly one native navigation via its own href, completely independent of the stretched link underneath it. This also preserves native anchor behaviors (Ctrl/Cmd-click and middle-click open in a new tab, right-click offers "copy link") that a JS `onClick`-based card-click approach would have silently broken.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-card.tsx` — task name became a stretched `<Link>` covering the whole card; Update Task button raised to `relative z-10`; outer card gained `hover:border-accent/50 hover:bg-surface-secondary/50` and `focus-within:ring-2 focus-within:ring-focus` for hover/keyboard-focus feedback across the whole card
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — pure markup/CSS change, no new pure logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–F | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-48B; the user has already indicated they will verify live behavior themselves. Click/keyboard/hover behavior specifically benefits from a real-browser check |
+
+### Key Implementation Notes
+
+- No explicit `cursor-pointer` class was added to the card — hovering any part of the card (including the area covered only by the stretched pseudo-element) is still hovering the anchor's hit-testing box, so the browser already shows the pointer cursor natively across the whole card without an extra class.
+- `focus-within:ring-2` on the outer card (rather than only each link's own `focus:ring-2`) means Tabbing to either the task-name link or the Update Task button highlights the entire card, reinforcing that the whole card is the clickable unit — a deliberate accessibility choice, not just a styling one.
+
+## CM-48B — Contract Staff Dashboard Layout Balance Polish (Completed 2026-08-25)
+
+### Summary
+
+Pure layout unit — no backend, DTO, service, migration, or data change, and only one file's JSX was reordered (`staff-dashboard-view.tsx`; every other CM-48 component is untouched). CM-48's `[Today's Work + Assigned Tasks] / [Summary + Schedule + Recent Updates]` column split left the left column empty below Assigned Tasks on a normal screen while stacking three sections in the right column — exactly the imbalance the task described. Fixed by moving Today's Work out of the left column entirely to its own full-width `shrink-0` row above the two-column grid, and moving My Recent Task Updates from the right column into the left column, under My Assigned Tasks. The right column now holds only My Work Summary and My Upcoming Schedule. No component's internal markup changed — `StaffTodaysWorkPanel`, `StaffTaskTable`, `StaffRecentUpdates`, `StaffSummaryCards`, and `UpcomingScheduleList` are called with the exact same props (`limit={5}`/`limit={3}` unchanged) as CM-48, just arranged differently in the parent grid.
+
+The `h-full flex flex-col` root structure, the single `flex-1 min-h-0 overflow-y-auto` scroll region for the grid, and the `lg:grid-cols-[1.6fr_1fr]` column split are all unchanged from CM-48 — this unit is a pure rearrangement within that existing structure, not a new layout mechanism.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-dashboard-view.tsx` — Today's Work moved to a full-width row above the grid; My Recent Task Updates moved from the right column to the left column (under My Assigned Tasks); right column now holds only My Work Summary + My Upcoming Schedule
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — pure JSX reorder, no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–J | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-48; the user has already indicated they will verify live behavior themselves. As with CM-46C/CM-48, this unit's visual-balance claims specifically benefit from a real-browser check |
+
+### Key Implementation Notes
+
+- `StaffTodaysWorkPanel`'s own root `<div>` already carried `shrink-0` from CM-48 (it needed that class as a flex child of the left column back then), so moving it to be a direct child of the new `h-full flex-col` root needed no additional wrapper — the existing class already does the right thing in the new position.
+- Deliberately did not touch any component's internal markup or props this unit — every visual change is a consequence of where each `<section>` sits in the parent JSX, keeping the diff minimal and the risk of a behavioral regression close to zero.
+
+## CM-48 — Contract Staff Dashboard Single-Window Layout (Completed 2026-08-25)
+
+### Summary
+
+Pure layout unit — no backend, DTO, service, migration, or data change; the same `h-full` flexbox pattern CM-46C established for the focused task screen (any direct child of `app-shell.tsx`'s `<main class="flex-1 overflow-auto">` gets a definite, viewport-derived height for free) applied here to the Staff Dashboard. The one structural decision this unit made: rather than reworking the shared `page.tsx` return tree to be conditionally height-bound, Contract Staff now gets a completely separate early-return JSX tree (`StaffDashboardView`, new) before the existing MANAGER/legacy/unavailable code is ever reached — that existing tree is untouched (title/subtitle collapsed from a now-always-manager ternary to fixed constants, with byte-identical rendered output). This mirrors CM-46C's own choice ("dispatch to a wholly separate view rather than parameterize the shared one") and gives the strongest possible guarantee against a manager-dashboard regression, at the cost of a small amount of duplicated header markup (breadcrumb/toolbar wiring) between the two trees.
+
+`StaffDashboardView`'s root is `h-full flex flex-col`: a compact `shrink-0` header (breadcrumb + title/subtitle + `DashboardToolbar`, all close together — the "As of" date chip, scope badge and View My Tasks button the toolbar already rendered didn't need to change, just sit closer to the title) followed by the single `flex-1 min-h-0 overflow-y-auto` two-column grid (`lg:grid-cols-[1.6fr_1fr]`) that's the only region that scrolls if content overflows. Left column: Today's Work (shrunk from a taller banner to a compact card) above My Assigned Tasks (capped to 5 rows + a "View My Tasks — N more" link). Right column: My Work Summary (fixed 2-column mini-stat grid, was responsive up to 4-across), My Upcoming Schedule (capped to 3 + link), My Recent Task Updates (capped to 3 + link) — all real CM-47 data, just capped and reflowed, never paginated with fake placeholders.
+
+`UpcomingScheduleList` (shared with the Manager Dashboard) gained optional `limit`/`moreHref`/`moreLabel` props defaulting to the old unlimited behavior — the Manager Dashboard's own call site passes none of them and is completely unaffected. `StaffTaskTable` and `StaffRecentUpdates` (already staff-only since CM-47) gained their own `limit` prop the same way.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-dashboard-view.tsx` (new) — the single-window layout described above; owns the Today's Work/focused-counts/next-task derivation and the Upcoming Schedule filter+remap moved out of `page.tsx`
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — early-returns `<StaffDashboardView>` when `dashboardType === 'STAFF'`; MANAGER/legacy/unavailable tree below is otherwise unchanged (title/subtitle simplified from an always-manager ternary to fixed constants — same rendered output)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-todays-work-panel.tsx` — shrunk padding/type scale for the left-column compact card
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-task-table.tsx` — new optional `limit` prop + "View My Tasks — N more" link when truncated
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-recent-updates.tsx` — new optional `limit` prop + "View My Tasks — N more updates" link when truncated
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/upcoming-schedule-list.tsx` (shared with Manager Dashboard) — new optional `limit`/`moreHref`/`moreLabel` props, all defaulting to the prior unlimited behavior
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-summary-cards.tsx` — fixed 2-column grid (was responsive up to 4-across) to suit the narrower right column
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (unchanged — layout-only, no new pure logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–J | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-47; the user has already indicated they will verify live behavior themselves. As with CM-46C, this unit's visual/layout claims specifically benefit from a real-browser check |
+
+### Key Implementation Notes
+
+- Capping "My Assigned Tasks" to 5 rows (and Upcoming Schedule/Recent Updates to 3) is itself real, honest behavior, not a fake summary — every capped list links to `/contracts/workflow?mode=my-tasks` for the rest, and the counts/labels ("N more") are computed from the actual array length, never a placeholder number.
+- `DashboardToolbar` needed no changes — its existing `dashboardType === 'STAFF'` branch (View My Tasks button, unchanged since before this unit) already renders correctly inside the new compact header; `StaffDashboardView` just calls it with `canCreate={false} canClose={false}` since those two props are manager-only and irrelevant to the staff branch it renders.
+
+## CM-47 — Contract Staff Dashboard Focused Work UX (Completed 2026-08-25)
+
+### Summary
+
+Audit found the Staff Dashboard's data plumbing was already almost entirely sufficient: `buildStaffTaskRows()`/`buildStaffRecentUpdates()` on the backend already return the actor's *complete, unfiltered* task/activity lists (not a capped preview), so the new "Due Today" and "Submitted/Waiting Review" counts and the "Today's Work / Next Task" pick could all be computed purely client-side from data already being fetched — no new endpoint. The one real gap was `StaffTaskRow`/`DashboardContractRow` never carrying `counterpartyName` (Client), needed for the spec's explicit "Task name / Contract ID / Project name / Client" field list in both the new focus panel and the assigned-task cards — a small, additive backend change (one more already-authorized column on an existing `contracts.read`-gated query, not new data or a new authorization boundary).
+
+Audit also surfaced two real, pre-existing navigation bugs squarely in this unit's scope: `StaffRecentUpdate.actionUrl` and `ScheduleItem.actionUrl` (for `WORKFLOW_TASK`-sourced items) both still pointed at `/contracts/{id}/workflow` — the manager workspace CM-44's redirect guard now bounces Contract Staff away from. CM-44 had already fixed this for the assigned-task table's own action link but missed Recent Updates and Upcoming Schedule. Both are now remapped, frontend-only, to `/contracts/workflow?mode=my-tasks&taskId=<id>` using `taskId`/`sourceId` fields the API responses already carried.
+
+The 6-card "mini manager" summary (My Open Tasks, My In Progress Tasks, My Overdue Tasks, Due This Week, Completed Tasks, My Active Contracts) is replaced by 4 focused cards — Due Today, Overdue, In Progress, Submitted/Waiting Review — with Due This Week/Completed/Active Contracts demoted to a small secondary stat strip (same `SecondaryMetricsStrip` visual pattern the Manager Dashboard already uses, but a separate implementation so the two dashboards never share this logic). A new "Today's Work" panel sits above everything: `pickNextTask()` selects the single most urgent task in the spec's stated priority order (overdue → due today → high-priority not-started → in-progress → earliest due date), with a clean "No assigned work pending. You are clear for now." empty state. "My Assigned Tasks" changed from a plain `<table>` to task-first cards (highlighting overdue/due-today), and "My Upcoming Schedule" now filters to `WORKFLOW_TASK` items only, closing the "contract-level schedule unrelated to user tasks" gap the spec explicitly called out.
+
+### Changes
+
+- `apps/api/src/contracts/contract-dashboard.service.ts` — `counterpartyName` added to `CONTRACT_DASHBOARD_SELECT`, `DashboardContractRow`, `StaffTaskRow`, and `buildStaffTaskRows()`'s output
+- `apps/api/src/contracts/contract-dashboard.service.test.ts` — `makeContract()` factory default + one new assertion for `counterpartyName`
+- `apps/web/src/lib/contracts-api.ts` — `StaffTaskRow.counterpartyName: string`
+- `apps/web/src/app/(protected)/contracts/_lib/staff-dashboard-focus.ts` (new, +14 tests) — pure `computeStaffFocusedCounts()` and `pickNextTask()`, deliberately separate from the Manager Dashboard's own `contract-dashboard-focus.ts` so the two dashboards' business logic never shares a file
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-task-badges.tsx` (new) — small status/priority badges for `StaffTaskRow`'s plain-`string` fields (the workflow module's own badge components require the narrower `ContractWorkflowTaskStatus` enum type)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-todays-work-panel.tsx` (new) — the focus panel described above
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-summary-cards.tsx` — rewritten: 4 focused cards + secondary stat strip, replacing the old 6-card grid
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-task-table.tsx` — rewritten from a `<table>` to task-first cards; takes a new `todayIso` prop for the due-today highlight
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-recent-updates.tsx` — `actionUrl` bug fix (routes to the staff task screen, not the manager workspace) + empty-state copy now matches the spec exactly ("No recent task updates.")
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — STAFF branch reordered (Today's Work → Summary → Assigned Tasks → Upcoming Schedule → Recent Updates), computes `todayIso`/`focusedCounts`/`nextTask`/`staffUpcomingSchedule`; MANAGER and legacy (`!dashboardType`) branches untouched
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm lint` (web + api, contracts area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 224/224 (13 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (unchanged count — one existing test gained an added assertion, not a new test) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–H | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-46C; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- Deliberately did **not** touch `contract-dashboard-focus.ts` (the Manager Dashboard's own "Today's Focus" sentence builder) even though the new `staff-dashboard-focus.ts` looks structurally similar — the safety rule "do not break Contract Manager dashboard" was read as reason enough to duplicate a small amount of logic rather than risk coupling the two dashboards' business rules together.
+- "My Active Contracts" was dropped as a primary card and demoted to the secondary stat strip rather than removed outright — it's real, already-available data, and the spec's own wording ("if needed, move it to a small secondary text/stat") preferred relocation over deletion.
+- "Completed This Week" (spec's other named optional secondary metric) was not added — no backend computation for it exists yet and the spec marks it explicitly optional; the existing all-time "Completed" count was kept in the secondary strip instead, honest about what it actually measures rather than mislabeled.
+
+## CM-46C — Staff Task Work Screen Single-Window Reference Layout (Completed 2026-08-25)
+
+### Summary
+
+Pure layout/CSS unit — no backend, DTO, service, migration, data, or action change; every hook/handler in `staff-task-update-panel.tsx` carried over from CM-46B unchanged, only the JSX/class structure moved. Audit of `app-shell.tsx` found the key enabling fact: the app's persistent chrome is already `<div className="flex h-screen overflow-hidden">` with `<main class="flex-1 overflow-auto">` as the actual scroll container (not `<body>`) — meaning any direct child of `<main>` given `h-full` already receives a definite, viewport-derived height through ordinary flexbox, with zero need for a `calc(100vh-Npx)` guess. `StaffMyTasksView` was the only other file touched: when a task is selected it now renders *only* `<StaffTaskUpdatePanel>` (skipping the list page's own breadcrumb/title/subtitle/tabs), since the panel already has its own back-link and header — repeating the list chrome above it would have burned into the single-window height budget for no benefit once a specific task is open.
+
+`StaffTaskUpdatePanel`'s root became `h-full flex flex-col`: header, contract summary, stepper, and guidance strip are `shrink-0` fixed-height sections; the A/B/C/D + right-rail grid is the single `flex-1 min-h-0 overflow-y-auto` region (the *only* place that scrolls if content overflows); the bottom action bar is simply the last flex child — not `sticky` anymore, since a true single-window layout doesn't need position tricks to stay visible, and non-sticky avoids CM-46's small risk of the bar visually covering a focused input. The 3-column desktop grid (`grid-cols-[2fr_2fr_1fr]`) now matches the reference exactly: left column A above C, middle column B above D (Progress Updates folded inside D, no longer a separate full-width card below everything), right column Checklist/Activity/Task Details — Activity gained its own internal `max-h-32 overflow-y-auto` per the spec's explicit fallback for a long list. The page width cap for the focused screen widened to `max-w-[1900px]` (list mode's `max-w-[1400px]` is untouched). All CM-46B fields survive unchanged — B and D's optional inputs are now DOM-outside the `<form>` (they live in different grid columns) and reference it via the standard HTML `form="staff-task-update-form"` attribute, the same technique CM-46 already used for the bottom bar's buttons, just extended to input/textarea/checkbox elements — a native browser form-association feature, not React-specific, so `useActionState`'s FormData collection is unaffected.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — full JSX/class restructuring into the single-window `h-full flex flex-col` shell + 3-column A/C-left, B/D-middle, right-rail grid; new compact `fieldCls`/`fieldLabelCls` scoped to this file only (shared `inputCls`/`labelCls` in `contract-form-fields.tsx` untouched, still used by every other contract form); Progress Updates moved inside Card D; bottom bar no longer `sticky` (now a plain last flex child)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-my-tasks-view.tsx` — when a task is selected, renders only the panel (skips breadcrumb/title/subtitle/tabs) inside a `h-full min-h-0` wrapper; list-mode branch (My Tasks / Overdue) is byte-for-byte unchanged
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 211/211 (unchanged — layout-only, no new pure logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (unchanged — no backend touched) |
+| `pnpm build` | ✓ compiled + typechecked + all routes generated |
+| Live scenarios A–J | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-46B; the user has already indicated they will verify live behavior themselves. This unit specifically needs a real-browser check more than most prior ones (see Key Implementation Notes) |
+
+### Key Implementation Notes
+
+- **Verification risk worth flagging explicitly:** moving B/D's fields outside the `<form>` DOM subtree and associating them via `form="staff-task-update-form"` is standard, well-supported HTML5 behavior (form-associated elements participate in that form's submission regardless of DOM position), but it could not be exercised in a live browser this unit (no dev-database session). Scenarios C and D (save A/B fields, confirm they persist after refresh) are the ones most worth the user's first live check, specifically because this technique — while safe in principle — is new to this component in this unit.
+- The single-window behavior itself rests on `app-shell.tsx`'s existing `<main class="flex-1 overflow-auto">` already being the scroll container instead of `<body>` — this was discovered by audit, not assumed; it's what makes `h-full` on this component's root a reliable, non-fragile way to bound its height without guessing pixel offsets.
+- If the grid area's combined content is still taller than the available height on some real screen size, the design degrades gracefully: only the `flex-1 min-h-0 overflow-y-auto` grid region scrolls internally first; if that still isn't enough (e.g., a very short browser window), `<main>`'s own `overflow-auto` remains a safety net and the page scrolls normally rather than clipping content unrecoverably.
+
+## CM-46B — Staff Task Work Screen Reference UI Alignment + Optional Task Fields (Completed 2026-08-25)
+
+### Summary
+
+First backend-touching CM-4x unit in this run: one additive nullable JSONB migration, DTO/service changes, and a full A/B/C/D redesign of the staff focused task screen from CM-46. Audit confirmed `ContractWorkflowTask` had no existing JSON/metadata column, so per the task's own instruction added one — `form_data JSONB` (Prisma `formData`) — following the exact convention already established by `contracts.scope_of_work`/`contracts.payment_terms` (`Json? @db.JsonB`, plain `ALTER TABLE ... ADD COLUMN` migration, `@IsOptional() @IsObject()` DTO field, service-side allow-list sanitization rather than a nested-DTO shape).
+
+`sanitizeWorkflowTaskFormData()` (new, exported for testing, in `contract-workflow.service.ts`) is a fixed allow-list of exactly the fields the redesigned UI actually renders — 13 text keys (receivedDate, receivedFrom, senderName, drawingType, drawingReferenceNo, revisionNo, numberOfSheets, drawingDescription, relatedAreaPackage, linkedContractStage, internalReferenceNo, internalNotes, plannedReviewStart) and 2 boolean keys (requiresImmediateReview, additionalDocumentsReceived) — trimmed, 500-char-capped, blank/false values dropped, unknown keys silently dropped, and an all-blank result collapses to `null` (clearing the column) rather than an empty-but-present `{}`. `priority` and `assignedToLabel`, both named in the task spec's broader persistence list, were deliberately excluded: `priority` is already a real core column (the task itself says never duplicate core state), and `assignedToLabel` isn't rendered anywhere in the actual A/B/C/D field list the spec later gives — only fields the UI genuinely saves were added to the allow-list. `formData` was added to `WORKFLOW_TASK_SELECT` and to `updateTask()`'s write path, but deliberately NOT added to `MANAGER_ONLY_WORKFLOW_FIELDS` — Contract Staff can set it on their own assigned task through the exact same `assertWorkflowTaskAssigned`/`assertCanAccessDepartment` checks every other staff-writable field (remarks, delayReason) already goes through; no new authorization path, no scope bypass.
+
+`StaffTaskUpdatePanel` was restructured into the literal A/B/C/D shape: **A. Receipt Details** (Status — core — plus 7 optional intake fields), **B. Drawing/Task Information** (description + 3 optional text fields + 2 checkboxes), **C. Attachments** (unchanged from CM-44 — no delete/remove button added, since the audit confirmed the backend has no attachment-delete support at all), **D. Remarks & Follow-up** (Remarks — core — plus Internal Notes/Planned Review Start, optional; Add Progress Update stays its own separate comment form/action, not folded into the task-update form). All optional inputs use `defaultValue`/`defaultChecked` from `task.formData` so a page refresh shows exactly what was last saved. The bottom action bar gained a genuine 4-way split — **Save Draft** (saves the same form, stays on-screen via `router.refresh()` only) and **Back to My Tasks** on the left; **Mark Complete** and **Save Update** (saves the same form, then navigates back) on the right — distinguished by a `submitIntentRef` set in each button's `onClick` before the shared form (`form="staff-task-update-form"`) submits, so "which button was pressed" survives the async action round-trip without needing three separate forms or three separate server actions.
+
+Field naming stayed intentionally generic ("Drawing / Document Type", "Drawing / Document Reference No", "Number of Sheets / Pages") rather than hardcoded to Drawing Received specifically, per the spec's own instruction — the component has no task-type detection and doesn't need one, since every field is optional and blank for any task that isn't a drawing-intake step.
+
+### Persistence Requirement — Migration Added
+
+- **Migration:** `20260829000000_add_contract_workflow_task_form_data` — `ALTER TABLE "contract_workflow_tasks" ADD COLUMN "form_data" JSONB;` (additive, nullable, no default) — applied to the dev database via `prisma migrate deploy` (no shadow database needed, unlike `migrate dev`) and confirmed with `db:migrate:status` → "Database schema is up to date!" both before and after.
+- **Schema:** `ContractWorkflowTask.formData Json? @map("form_data") @db.JsonB` added; Prisma client regenerated and `@recafco/database` rebuilt.
+
+### Changes
+
+- `packages/database/prisma/migrations/20260829000000_add_contract_workflow_task_form_data/migration.sql` (new)
+- `packages/database/prisma/schema.prisma` — `ContractWorkflowTask.formData` field
+- `apps/api/src/contracts/dto/update-contract-workflow-task.dto.ts` — optional `formData?: Record<string, string | boolean>` (`@IsOptional() @IsObject()`, same convention as `CreateContractDto.scopeOfWork`)
+- `apps/api/src/contracts/contract-workflow.service.ts` — new exported `sanitizeWorkflowTaskFormData()`; `formData: true` added to `WORKFLOW_TASK_SELECT`; `updateTask()` sanitizes and writes `dto.formData` when present, leaves the column untouched when the dto omits it entirely
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — 6 new `sanitizeWorkflowTaskFormData` tests + 3 new `updateTask` formData tests (staff can save sanitized formData; formData untouched when omitted; blank formData clears to null); `makeTaskRow()` helper gained a `formData: null` default
+- `apps/web/src/lib/contracts-api.ts` — `ContractWorkflowTask.formData?: Record<string, string | boolean> | null`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `updateWorkflowTaskAction` reads the 13 text + 2 boolean named fields (gated by a `hasTaskFormFields` hidden-input marker so the manager drawer's unrelated form never sends an empty `formData`) and forwards them as `formData` on the PATCH
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — full A/B/C/D restructure described above (layout, fields, checklist redefinition, sticky bottom bar with Save Draft/Mark Complete/Save Update/Back to My Tasks)
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area, web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 211/211 (unchanged — the new logic lives in a client component form, not a separately-tested pure function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1133/1133 (10 new: `sanitizeWorkflowTaskFormData` + `updateTask` formData wiring) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 27 migrations, up to date (1 new, applied via `migrate deploy`) |
+| Live scenarios A–K | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-46; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- Kept "Save Update" accent-colored (matching CM-44/45/46's existing styling and the project's `ui-tokens.md` convention that red/danger is reserved for destructive actions) rather than the spec's literal "primary red button" suggestion — a routine save action styled as a warning color would contradict the app's own semantic-color rule everywhere else. Flagged here as a deliberate, judged deviation rather than applied silently.
+- "Save Draft" and "Save Update" submit the identical form/action — the only difference is post-save navigation (Save Draft stays on-screen via `router.refresh()`; Save Update returns to the task list). This gives both buttons genuinely different, working behavior rather than being decorative duplicates, and directly serves scenario H (open the task again, saved fields still visible) without leaving the screen to check.
+- Contract summary strip shows only "Contract ID" and "Contract Name" — no separate "Contract No" or "Project Name" row — because the data available to this component (`StaffFlatTask`) has no field distinct from `contractReference`/`contractTitle` for either; the task's own instruction ("do not duplicate awkwardly... show only available real values") was applied literally rather than fabricating a second label for the same value.
+- No delete/remove control was added to Attachments — `ContractWorkflowTaskAttachment`'s own schema comment (CM-32) already documents "No hard delete in this unit," confirmed still true; per the spec's explicit fallback ("otherwise do not show delete button"), none was added.
+
+## CM-46 — Staff Task Work Screen Compact Layout (Completed 2026-08-25)
+
+### Summary
+
+Pure layout/UX unit — no backend, DTO, service, migration, RBAC, data field, or action change. `StaffTaskUpdatePanel` (CM-44/CM-45's focused task work screen) rendered every section as a full-height, generously-padded stacked card, requiring a long scroll to reach Progress Updates/Work Documents/the right rail on a normal desktop viewport. Reworked purely as a layout pass: same 7 sections the spec named (header, contract summary strip, workflow stepper, guidance strip, two-column work area, right rail, bottom action bar), each tightened and, for the stepper, reoriented.
+
+Header now shows the task name with one compact, data-derived subtitle line (`"{Team} · Step {n} of {total}"`, computed from the same `task.teamTasks` sequence the stepper already used — not invented per-task copy) instead of nothing, alongside the same Status/Priority/Due-or-Overdue badges as before. The contract summary card collapses to a single `lg:grid-cols-6` row (Contract ID/Project/Client/Contract Manager/Current Stage, with Next Stage moved to a one-line footnote) instead of a tall multi-row grid. The workflow stepper is now horizontal (small numbered/checked circles connected by a thin line, each step's name truncated to two lines under it, wrapping on narrow screens) instead of a vertical list, which was the single biggest height contributor for any team with 4+ steps. The guidance note shrank from a full bordered card with its own heading to a single-line info strip with an inline icon. Card padding dropped from `p-4`/`space-y-4` to `p-3`/`space-y-3` throughout.
+
+The Save Update / Mark Complete buttons moved out of the Task Update card and into a new sticky bottom action bar (`Back to My Tasks` / `Mark Complete` / `Save Update`), wired to the still-single, still-unchanged update `<form>` via the standard HTML `form="staff-task-update-form"` attribute on buttons that now live physically outside that form — not a second form, not a duplicated action. Every field that renders is exactly the same field that saved before (Status, Remarks, Delay Reason, Comment, File) through exactly the same three server actions; nothing new was added, and nothing that renders is decorative-only.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — layout-only rewrite: compact header with derived step-context subtitle, single-row contract summary strip, horizontal workflow stepper, single-line guidance strip, tightened card padding throughout, Save Update/Mark Complete moved into a new sticky bottom action bar wired to the existing form via `form="staff-task-update-form"`
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 211/211 (unchanged — layout-only change, no new pure logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ compiled + typechecked + all routes generated |
+| Live scenarios A–I | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-45; the user has already indicated they will verify live behavior themselves. Visual/pixel verification of the compact layout (actual scroll height on a real desktop viewport) was also not performed — see Key Implementation Notes |
+
+### Key Implementation Notes
+
+- No new data was added anywhere: the header's step-context subtitle and the summary strip's "Current Stage"/"Next Stage" all reuse fields already computed for CM-44's contract-context card and stepper (`task.teamTasks`, `task.taskName`) — nothing resembling drawing reference/revision/received date/sender name/drawing type was added, per the explicit constraint against inventing task-specific fields.
+- Buttons outside a `<form>` submitting it via the `form="id"` HTML attribute (rather than moving the form itself into the bottom bar, which would have forced Progress Updates/Work Documents — genuinely separate forms — into an awkward nesting) is the standard, framework-agnostic way to relocate submit controls away from their form; confirmed this doesn't change `useActionState`/`FormData` behavior since the form element itself, not its buttons' DOM position, is what `action` binds to.
+- The sticky bottom bar is a self-contained rounded card (`sticky bottom-0`) rather than an edge-to-edge fixed bar bleeding past the page's own padding — kept it inside the component's own layout flow rather than assuming the outer page's padding values, which this component doesn't own.
+- Could not visually confirm actual on-screen scroll height without a live browser/rendered viewport (no dev-database session available this unit, consistent with the ongoing credentials gap) — the compaction (tighter padding, horizontal stepper, single-line guidance, single-row summary) is a substantial, verifiable *reduction* in total DOM height versus the CM-44/CM-45 version, but "visible without heavy scroll on normal desktop height" specifically should be confirmed by the user against a real screen.
+
+## CM-45 — Contract Staff Overdue Tasks Cleanup (Completed 2026-08-25)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or RBAC changes; closes the gap flagged at the end of CM-44 ("the top-level Overdue tab still routes Contract Staff to the generic manager-worded page"). Audit confirmed the Contract Staff tab set (`WorkflowModeTabs` with `hideAllWorkflows`) already showed only My Tasks + Overdue — that part of the spec was already satisfied. The actual gap was narrower: the Overdue *tab's link* (`?overdueOnly=true`) and the Staff Dashboard's "My Overdue Tasks" metric card (`?myTasksOnly=true&overdueOnly=true`) both still routed into the generic manager "All Workflows" register+board, which CM-44's staff dispatch in `contracts/workflow/page.tsx` never intercepted (it only matched `mode=my-tasks` / `myTasksOnly=true`).
+
+Fixed by extending the same CM-44 dispatch pattern: `WorkflowModeTabs` now computes the Overdue tab's own href per caller — `?mode=overdue` when `hideAllWorkflows` (Contract Staff), the original `?overdueOnly=true` when not (everyone else, unchanged) — and `contracts/workflow/page.tsx` gained a symmetrical `isOverdueMode` check (`mode=overdue` or the legacy `overdueOnly=true`, for staff robustness against old links/bookmarks) dispatched to the same `StaffMyTasksView` component, now parameterized by a `mode: 'my-tasks' | 'overdue'` prop instead of being My-Tasks-only. In overdue mode it shows a single flat list — filtered by the backend's own `isOverdue` field (never a client re-derived rule) — with the spec's exact title/subtitle/empty-state copy, instead of the 5-bucket grouping used for My Tasks. The Staff Dashboard's "My Overdue Tasks" card link was corrected to point at the new route (it was silently landing on the full My Tasks bucketed view before, since `myTasksOnly=true` in the URL matched CM-44's dispatch condition first).
+
+The CM-44 focused task screen is reused unchanged for both entry points — only a new optional `backLabel` prop was added ("Back to My Tasks" vs. "Back to Overdue Tasks") so returning from a task opened via Overdue lands back on the Overdue list, not silently on My Tasks. The header's overdue badge now reads "Overdue by N days" (computed client-side from `dueDate`, only ever shown when the backend's `isOverdue` is already true) instead of a plain due date, matching the same computation added to each `StaffTaskCard` row. Confirmed by reading `contract-workflow.service.ts`'s `computeTaskIsOverdue()` that COMPLETED/APPROVED are excluded from "overdue" server-side, so completing a task via the existing Mark Complete flow correctly drops it off the Overdue list on the `router.refresh()` that already follows a save — no new code needed for that behavior.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-mode-tabs.tsx` — Overdue tab's href now computed per-caller (`?mode=overdue` when `hideAllWorkflows`, else unchanged `?overdueOnly=true`)
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — new `isOverdueMode` check alongside the existing `isMyTasksMode`, both dispatched to `StaffMyTasksView({ mode, taskId, currentUserId })`; the later generic-page `overdueOnly` derivation also now recognizes `mode=overdue` for non-staff actors, closing a residual gap where a manager manually visiting `mode=overdue` would have landed on an inactive tab
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-my-tasks-view.tsx` — takes a `mode: 'my-tasks' | 'overdue'` prop; title/subtitle/breadcrumb/back-href/back-label and the rendered list (5-bucket grouping vs. a flat `isOverdue`-filtered list with its own empty state) all branch on it
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — new optional `backLabel` prop (defaults to "Back to My Tasks"); due-date header badge shows "Overdue by N days" when `task.isOverdue`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-card.tsx` — due-date column shows "· N days overdue" when `task.isOverdue`
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-summary-cards.tsx` — "My Overdue Tasks" card now links to `/contracts/workflow?mode=overdue`
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 211/211 (unchanged — no new pure-function file needed; overdue filtering reuses the backend's own `isOverdue` field) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ compiled + typechecked + all routes generated |
+| Live scenarios A–H | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42 through CM-44; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- Deliberately did **not** add a new pure-function test file for "is this task overdue" — the backend already computes and returns `isOverdue` per task (`computeTaskIsOverdue()` in `contract-workflow.service.ts`, excluding COMPLETED/APPROVED), and the spec explicitly says "use existing project status helpers if available, do not invent new task statuses." The frontend only filters on the field it's given.
+- `days overdue` (client-side, in both the card and the focused panel) is a simple presentational calculation from `dueDate` to today, matching the existing untested-pure-helper convention already used by sibling `formatDate`/`formatBytes` functions in the same files — not a business rule, so not separately unit-tested.
+- The Overdue tab now behaves identically in spirit to My Tasks — the same `StaffMyTasksView` component, the same N+1 fetch, the same `StaffTaskCard`/`StaffTaskUpdatePanel` — the only difference is which tasks are shown and the header copy, keeping the two staff task surfaces from silently drifting apart in behavior over time.
+
+## CM-44 — Contract Staff Task-First Work Page (Completed 2026-08-25)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or RBAC changes. Contract Staff (`contracts.workflow_update` without `contracts.update`/`contracts.close`, classified by the existing `isContractStaffOnlyAccess()`) previously had their Staff Dashboard's "Update Task" link route into the manager contract workspace (`/contracts/{id}/workflow`), and could reach the full manager contract detail (Payments, Claims, Closeout, Issue Log, Attachments, Activity, etc.) via any `/contracts/[id]` link or a direct URL — there was no staff-appropriate task-first work surface and no boundary stopping staff from landing on manager-only tabs.
+
+`/contracts/workflow?mode=my-tasks` is now dispatched, for Contract Staff only, to a new self-contained `StaffMyTasksView` (title "My Tasks", subtitle "Update your assigned contract workflow tasks, comments and documents.") instead of the generic manager "All Workflows" register+board. It lists the actor's own tasks grouped into Overdue / My Open Tasks / In Progress / Submitted-Under Review / Completed, each with an "Update Task" link to `?taskId=<id>`, which swaps the list for a focused `StaffTaskUpdatePanel` styled after the reference "Drawing Received" work-form layout: a header (task name + Team/Status/Priority/Due-date badges), a Contract Context card (Contract ID, Project, Client, Contract Manager, Current Stage, Next Stage), a same-team workflow-progress stepper, a neutral step-guidance note, the Status/Remarks update form (Save Update + Mark Complete + Back to My Tasks), Progress Updates (comments) and Work Documents (attachments) sections, and a right rail with a derived Checklist (update note added / attachment uploaded / status updated), a merged Activity timeline (comments + attachments + last-updated), and Task Details (assigned to, team, last updated). No responsible-person, due-date, priority, payment, claim, or closeout fields are rendered at all (not merely disabled), and the panel binds the exact same `updateWorkflowTaskAction` / `addWorkflowTaskCommentAction` / `uploadWorkflowTaskAttachmentAction` server actions the manager's `WorkflowTaskDrawer` already uses — zero new mutations. Chose the safer of the spec's two options for direct `/contracts/[id]` access (Option B, redirect) over a new simplified read-only page (Option A): a single guard added to the shared `contracts/[id]/(workspace)/layout.tsx` redirects any Contract-Staff-only actor to My Tasks before any manager header/tabs/children render, covering all twelve workspace sub-routes (Schedule, Payments, Production, Variations, Claims, Risks, Documents, Workflow, Issues, Attachments, Closeout, Activity) at one interception point rather than hiding tabs individually.
+
+Task data needed no new backend endpoint: `listWorkflow({myTasksOnly:true})` gives the set of contracts the actor has an assigned task on, then the FULL `getWorkflow(contractId)` (no `myTasksOnly` filter — `GET :id/workflow` only requires `contracts.read`, which every Contract Staff member already has) is fetched per contract (`Promise.allSettled`, small N — bounded by how many contracts one staff member actually has work on), filtered client-side to the actor's own tasks (`responsibleUserId === currentUserId`). Fetching the full list rather than the pre-filtered one is deliberate: each of the actor's tasks also needs its team's full sibling-task list (sorted by `sortOrder`) to power the workflow-progress stepper and the current/next-stage names — `sortOrder` within a team is a real, backend-defined step sequence (`contract-workflow-templates.ts`, e.g. TECHNICAL: Drawing Received → SD & Calculation Submission → Getting Approval → FD Issuance), not an invented concept.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/staff-task-grouping.ts` — pure `groupStaffTasksByBucket()`; overdue takes priority over status buckets (never duplicated), ON_HOLD/REJECTED fold into "In Progress"; `StaffFlatTask` also carries `contractManagerName` and `teamTasks` (sortOrder-sorted sibling tasks in the same team) for the focused screen's context/stepper
+- `apps/web/src/app/(protected)/contracts/_lib/staff-task-grouping.test.ts` — 7 tests: empty input, overdue-priority, each status bucket, and a mixed-set "every task lands in exactly one bucket" check
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-card.tsx` — presentational task row: name, contract reference/title/counterparty, team, status/priority badges, due date, Update Task link
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` (client) — the full focused work screen described above; deliberately a separate component from `WorkflowTaskDrawer` rather than a "staff mode" of it, since manager-only fields must not render at all, not just be disabled; "Mark Complete" sets status to COMPLETED and submits via `formRef.current.requestSubmit()` from a `useEffect` gated on the state update landing first, so the native form submission always carries the updated value
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-my-tasks-view.tsx` — top-level dispatched view: N+1 fetch (full `getWorkflow` per contract), local filter to the actor's own tasks + same-team sibling attachment, group, and render either the grouped list or `StaffTaskUpdatePanel` depending on `?taskId=`; takes `currentUserId` since filtering is no longer server-side
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — new dispatch branch: `(mode=my-tasks || myTasksOnly=true) && isContractStaffOnlyAccess(permissions)` renders `StaffMyTasksView` before any of the existing "All Workflows" logic runs; manager `mode=my-tasks` behavior is completely unchanged
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/staff-task-table.tsx` — "Update Task" link now points to `/contracts/workflow?mode=my-tasks&taskId=<id>` instead of the backend-computed `actionUrl` (which pointed at the manager workspace)
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/layout.tsx` — added `if (isContractStaffOnlyAccess(permissions)) redirect('/contracts/workflow?mode=my-tasks')` immediately after permissions are resolved, before any manager header/tabs/children render
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm lint` (contracts feature area) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 211/211 (7 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ compiled + typechecked + all routes generated |
+| Live scenarios A–H | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42/CM-42B/CM-43; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- The top-level "Overdue" tab in `WorkflowModeTabs` (`?overdueOnly=true`, distinct from `?mode=my-tasks`) was deliberately left unchanged and still routes Contract Staff to the generic manager-worded workflow page — out of this unit's explicit scope (the spec's verification scenarios only cover the My Tasks page's internal Overdue *section*, which `StaffMyTasksView` does provide). Flagged here rather than silently left as a gap.
+- `contracts/[id]/edit` (DRAFT-only, outside the `(workspace)` route group) was left unguarded: Contract Staff never has `contracts.update` so the page's own "Edit Contract" link never renders for them, and the underlying mutation is backend-permission-gated regardless — not a reachable path from any staff-visible UI.
+- Backend restrictions (`ContractWorkflowService.assertWorkflowTaskAssigned`, `assertNoManagerOnlyFields` in `contract-workflow.service.ts`) were re-confirmed by reading, not modified — they already reject staff touching unassigned tasks or manager-only fields regardless of what the UI shows.
+
+## CM-43 — Manager Contract List Quick Actions (Completed 2026-08-25)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or RBAC changes. The Contract List's action column previously offered only "Open Contract" and, for Drafts a manager could edit, "Edit" — every other manager task (activating, assigning workflow tasks, reviewing closeout, checking payments/issues/claims/schedule) required navigating into the contract detail page first. It now shows **Open** (always), one status-driven **primary quick action** (Activate for Draft, Assign Tasks for Active, Review Closeout when a closeout request is awaiting review, Open as the neutral fallback for Closed/Terminated), and a **More actions** dropdown with the remaining relevant links — never a free status dropdown, never a direct Close-from-list.
+
+The one genuinely new piece of data needed — "does this contract have a closeout request awaiting review" — is not on the contract list response, but audit found it didn't need to be added there: CM-38's existing closeout register endpoint already supports `pendingOnly: true` and returns each pending request's `contractId`. The list page now fetches that alongside its existing calls and cross-references it into a `Set<contractId>` — zero new backend surface. Every navigation target (workflow/payments/issues/claims/schedule/closeout/edit) is an existing route; the only mutation (Activate) reuses the exact same `activateContractAction` the detail page's `ContractTransitions` component already calls, wrapped in a new confirmation dialog that follows the exact same dialog/dropdown architecture already established by `administration/users/_components/user-lifecycle-actions.tsx` (useTransition + router.refresh(), a local dialog state machine for confirm/error) rather than inventing a new one.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — new pure `computeContractRowActionPlan(contract, permissions, hasPendingCloseout)`, reusing the existing `getVisibleContractTransitions` for the Activate-visibility check
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.test.ts` — 12 new tests covering every status/permission combination named in the spec, including the "Edit is DRAFT-only at the route level" and "pending closeout overrides the generic Active behavior, but never overrides Closed" cases
+- `apps/web/src/app/(protected)/contracts/_components/contract-row-actions.tsx` (new, client) — Open link + primary action button/link + More actions dropdown + Activate confirmation dialog + error dialog
+- `apps/web/src/app/(protected)/contracts/_components/contract-list-table.tsx` — action column now renders `ContractRowActions`; `canUpdate: boolean` prop replaced with the full `permissions: string[]` (needed for `computeContractRowActionPlan`'s permission-specific checks) plus `pendingCloseoutContractIds: Set<string>`
+- `apps/web/src/app/(protected)/contracts/page.tsx` — fetches `contractsApi.listCloseouts({ pendingOnly: true, pageSize: 100 })` alongside its existing `Promise.allSettled` batch, derives `pendingCloseoutContractIds`, passes `permissions` (not just `canUpdate`) and the new set down to the table
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 204/204 (12 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–I | **Not run by the agent this unit** — same dev-database credentials blocker as CM-42/CM-42B; the user has already indicated they will verify live behavior themselves |
+
+### Key Implementation Notes
+
+- **Draft row:** primary is Activate only when the actor holds `contracts.activate` (reuses `getVisibleContractTransitions`, never a separately-derived check); More has Edit (only if `contracts.update`), View Schedule, View Workflow.
+- **Active row:** primary is Assign Tasks (routes to `/contracts/workflow?mode=assignment&contractId=<id>`, the exact CM-40 Assignment Queue URL) only when the actor holds `contracts.update`; More has Workflow/Payments/Issues/Claims/Schedule/Closeout — no Close item anywhere in this branch.
+- **Pending-closeout row:** takes priority over the generic Active behavior (and over Terminated) but never overrides an already-Closed contract; primary is Review Closeout (→ `/contracts/{id}/closeout`) gated by `contracts.update` OR `contracts.close`, matching the sidebar's existing Closeout Requests `anyPermission` gate.
+- **Closed row:** primary Open only; More has View Closeout/Payments/Claims/Schedule — deliberately no Workflow, no Issues, no Edit, no Activate, matching the spec's explicit list exactly.
+- **Deliberate deviation from the literal spec text, documented for transparency:** section 6's fallback wording ("Edit if user has update permission and contract is not closed") would offer Edit for Terminated contracts too — but the actual `/contracts/[id]/edit/page.tsx` calls `notFound()` for any contract whose `status !== 'DRAFT'`. Offering Edit there would be a dead 404 link, so the fallback (Terminated, in practice the only status that reaches it) omits Edit — justified by the safety rule "Do not break Contract Detail actions." Every other fallback item (Workflow/Payments/Issues/Claims/Schedule/Closeout) is offered exactly as specified.
+- Confirmation dialog copy matches the spec verbatim: "Activate Contract?" / "This will move the contract from Draft to Active and allow workflow tracking and task assignment." / Cancel / Activate Contract.
+- "Open" is never duplicated: when the computed primary action type is `'open'` (Closed/Terminated/no-permission fallbacks), the row shows only the one always-present Open link rather than a second, visually-redundant "Open" button next to it — the spec's intent ("a way to open the contract exists") is satisfied either way.
+
+## CM-42B — Users Page Tabs for Module Creation and All Users (Completed 2026-08-25)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or RBAC changes. CM-42 put module cards and the full All Platform Users table on the same page; as the audit's own business problem statement noted, together they make the page long once the system has many users. CM-42B splits them into two link-based tabs — **Create by Module** (default) and **All Platform Users** — matching the established `WorkflowModeTabs` (CM-40)/`AssignmentQueueAdvancedSection` (CM-40C) pattern: plain `<Link>`s driven by a `?tab=` query param, not client state, so the active tab survives a refresh or a shared URL for free.
+
+Only one correctness risk existed in this refactor: the All Platform Users filter form (Search/Role/Status/Module/Filter/Clear) had no way to say "stay on this tab" — submitting it, or clicking Clear, would have produced a URL with no `?tab=` param at all, which (per the spec's own default) silently bounces back to Create by Module. Fixed with a hidden `tab=all-users` field in the form and an explicit `?tab=all-users` on the Clear link — the same technique CM-40's `AssignmentQueueFilterBar` already uses for its own `mode=assignment` hidden field.
+
+### Changes
+
+- `apps/web/src/app/(protected)/administration/users/_components/users-page-tabs.tsx` (new) — the 2-tab link strip
+- `apps/web/src/app/(protected)/administration/users/page.tsx` — reads `?tab=` (default `'modules'`), wraps `ModuleUserCards` and the entire All Platform Users section (heading/filter form/table/empty/error states) in mutually exclusive `activeTab === ...` branches; filter form gets the hidden `tab=all-users` field; Clear link updated to `?tab=all-users`
+- `apps/web/src/app/(protected)/administration/users/_components/module-user-cards.tsx` — "Manage Users" href changed from `/administration/users?module=<slug>#all-platform-users` to `/administration/users?tab=all-users&module=<slug>` (drops the now-redundant anchor fragment — the target section is the only thing rendered on that tab, nothing to scroll past)
+- Everything else the audit checked — `module-catalog.ts`, `module-user-counts.ts`, the wizard's `preselectedModule` prop, `new/page.tsx`'s `?module=` handling, and every backend permission check — **confirmed already correct, not modified**
+
+### Verification Results (2026-08-25)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 192/192 (unchanged — pure presentational restructuring, no new pure-function logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–G | **Not run by the agent this unit either** — same blocker as CM-42 (dev database has no working test credentials available to the agent); the user again confirmed they will verify live behavior themselves rather than share credentials |
+
+### Key Implementation Notes
+
+- Both tabs render off the exact same server fetch (`usersData`/`rolePermissions`/`moduleUserCounts`) the page already computes — switching tabs is a pure conditional-render change, never a second network round trip.
+- The hidden `tab=all-users` field in the filter form was the one non-obvious fix this unit needed — without it, "Filter" and "Clear" would have silently thrown the admin back to the Create by Module tab after every search. Verified by code inspection (form field present, Clear href explicit) since live click-through wasn't available this unit.
+- `UsersPageTabs` intentionally has no permission-based tab hiding (unlike `WorkflowModeTabs`' manager-only Assignment Queue tab) — the whole `/administration/users` page is already `users.read`-gated (Super Admin/Admin only), so both tabs are always appropriate for anyone who can reach the page at all.
+
+## CM-42 — Module-Based User Management Cards (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UX unit — no backend, DTO, service, migration, or RBAC changes. `/administration/users` now leads with **"Create Users by Module"**: one card per operational module (Contract Management, Factory Tasks Management, Incident Report, Maintenance Requests, Safety & Compliance, Production Dashboard) showing a total user count (and, for Contract Management only, a Manager/Staff split), with **Create User** and **Manage Users** actions. The existing **All Platform Users** table (search/role/status filters, New User button, edit actions) is preserved below, unchanged, plus one small addition: an optional Module filter.
+
+Audit found the user list API carries no module-access data and adding it would require a backend change — but it also found the data needed already exists elsewhere: each active role's full permission list (already fetched by the New User wizard via `rolesApi.get()` per role) plus `module-visibility.ts`'s existing `MODULE_READ_PERMISSION` map (the same rule that decides sidebar visibility) are enough to bucket the *already-fetched* user list by module, entirely client/server-composed with zero new API surface. The same audit — reading every role-seeding migration, not just the two Contract Management ones — confirmed Contract Management is the *only* module with a dedicated Staff/Manager role split (`CONTRACT_STAFF`/`CONTRACT_MANAGER`, CM-35); every other module's access today comes only through Admin/Super Admin/custom roles, so the Manager/Staff breakdown is correctly shown only on that one card, per the task's own "only if supported by roles" instruction.
+
+The New User wizard already had an internal `targetModule` state and a `TEMPLATE_ROLE_CODE` auto-mapping (Contract Management only) — CM-42 added one optional `preselectedModule` prop that seeds those same state values on mount (mirroring what `handleTargetModuleChange` already does when picked by hand), so `?module=contracts` lands with Contract Management already selected and, since the wizard's default Access Template is already "Module Staff," Contract Staff auto-selected too — the manager path is one click away (switch template to "Module Manager"). Direct `/administration/users/new` with no query param is provably unaffected: `moduleBySlug(undefined)` is `undefined`, so the prop is omitted and every initializer falls back to its original expression.
+
+### Changes
+
+- `apps/web/src/app/(protected)/_lib/module-visibility.ts` — exported the existing `MODULE_READ_PERMISSION` map (was module-local) so this feature can reuse it instead of duplicating it
+- `apps/web/src/app/(protected)/administration/users/_components/module-catalog.ts` (new) — `MODULE_CATALOG` (code/slug/name/shortDescription for the 6 operational modules) + `moduleBySlug()`/`moduleByCode()`, the shared slug↔module mapping used by the cards, the optional filter, and the wizard's `?module=` param
+- `apps/web/src/app/(protected)/administration/users/_components/module-user-counts.ts` (new) — pure `computeModuleUserCounts(users, rolePermissions)`, bucketing already-fetched users by module read permission, with the Contract Management-only staff/manager split
+- `apps/web/src/app/(protected)/administration/users/__tests__/module-user-counts.test.ts` (new) — 7 tests
+- `apps/web/src/app/(protected)/administration/users/_components/module-user-cards.tsx` (new) — the "Create Users by Module" card grid
+- `apps/web/src/app/(protected)/administration/users/page.tsx` — fetches each active role's full permissions (same pattern the wizard already uses), renders `ModuleUserCards`, adds an "All Platform Users" heading (`id="all-platform-users"`, matches the Manage Users card links' `#all-platform-users` anchor), adds a Module filter `<select>` to the existing filter form, applies the module filter to the table/empty-state/row-count (frontend-only, layered on top of the existing search/role/status-filtered fetch)
+- `apps/web/src/app/(protected)/administration/users/new/page.tsx` — now reads `searchParams` (`module?: string`), resolves it via `moduleBySlug()`, passes `preselectedModule` to the wizard only when present
+- `apps/web/src/app/(protected)/administration/users/_components/new-user-wizard.tsx` — new optional `preselectedModule?: ModuleIdentifier` prop; `targetModule`/`selectedRoleId`/`moduleScopes` initial state seeded from it (mirrors `handleTargetModuleChange`'s existing logic, not a new code path); a small confirmation banner ("Creating a user for {module}…") shown when set
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 192/192 (7 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live scenarios A–H | **Not run by the agent this unit** — see note below |
+
+**Live verification note:** mid-unit, the dev database was found to have been reset/reseeded outside this session (only 3 accounts remain: `superadmin`, and two real-looking accounts — `managercontract`/`usercontract` — that appear to be the user's own manual UI testing, not synthetic fixtures from earlier units). The agent had no working credentials and, rather than resetting a password on what looked like the user's real login, asked; the user confirmed they will run live verification (scenarios A–H) themselves. This is the first unit in this session where the "Verification Results" table's live-scenario row is user-performed rather than agent-performed — flagging this explicitly rather than fabricating results.
+
+### Key Implementation Notes
+
+- Module user counts are computed from the same up-to-100-users page the table already fetches (the list endpoint's existing `pageSize` cap, pre-existing and unrelated to this unit) — on an install with more than 100 users, counts would undercount exactly as the table itself already would. Documented, not fixed, since fixing it is a pre-existing pagination gap outside this unit's scope.
+- Contract Management's Manager/Staff split treats every non-`CONTRACT_STAFF` role with module access (`CONTRACT_MANAGER`, the legacy `CONTRACT_MANAGEMENT_USER`, Admin/Super Admin) as "Manager" — a deliberate simplification (two buckets, matching the spec's literal "Manager: 1 · Staff: 1" example) rather than a third "Legacy"/"Admin" bucket the spec never asked for.
+- The Module filter is genuinely applied (not the degraded "at minimum" fallback the spec allowed for) — audit found the same role-permission data used for the cards is sufficient to filter the table too, so `?module=contracts` does real filtering, with the row-count footer falling back to the backend's accurate `pagination.total` whenever no module filter is active (preserving the exact prior footer behavior for that case).
+
+## CM-41 — Contract Staff Simplified Sidebar + My Tasks Experience (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UI-visibility unit — no backend, DTO, service, migration, or RBAC changes. Audit confirmed Contract Staff (CM-35's `CONTRACT_STAFF` role: `contracts.read`, `contracts.comment`, `contracts.workflow_update` — no `contracts.update`/`contracts.close`) were seeing the *entire* manager-facing `CONTRACT_ITEMS` sidebar list (Dashboard, Contract List, Schedule, Workflow & Team Tasks, Payments, Issue Log, Claim Log), because every one of those items was gated only by `module: 'CONTRACTS_MANAGEMENT'` (i.e. bare `contracts.read`) — none of them checked whether the actor was staff- vs. manager-tier. The Staff Dashboard (CM-37) and its 6 summary cards, "My Assigned Tasks" section, title, and subtitle already matched this task's required spec exactly (confirmed by audit, not re-built) — the only real dashboard gap was the toolbar's primary CTA text/link. The fix is a new permission-only classifier, `isContractStaffOnlyAccess()`, used to swap the sidebar's Contract Management item list down to just Dashboard + My Tasks, and to hide the "All Workflows" tab on the workflow page (Assignment Queue was already manager-gated since CM-40). Backend authorization (CM-32/33/35's field- and department-scoped checks) was not touched and was re-verified live to still reject every staff write attempt regardless of what the sidebar shows.
+
+"My Schedule" (mentioned as optional in the spec, with an explicit "if not simple, defer" escape hatch) was evaluated and deferred: `ShellUser` (the object passed into `Sidebar`) carries `displayName`/`username`/`roleCode`/`roleName`/`permissions` but not the actor's own user id, so a properly self-filtered `/contracts/schedule?responsibleUserId=<self>` link isn't a same-file, zero-plumbing change — it would require threading the id through `app-shell.tsx` and whatever calls `/auth/me` today. Deferred per the task's own contingency, not silently dropped.
+
+### Changes
+
+- `apps/web/src/app/(protected)/_lib/module-visibility.ts` — new `isContractStaffOnlyAccess(permissions)`: true only when `contracts.workflow_update` is present and both `contracts.update` and `contracts.close` are absent
+- `apps/web/src/app/(protected)/_lib/module-visibility.test.ts` — 6 new tests (Contract Staff true; Contract Manager, legacy `CONTRACT_MANAGEMENT_USER`, no-workflow_update, close-without-update edge case, and empty permissions all false)
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — new `CONTRACT_STAFF_ITEMS` (Dashboard + My Tasks → `/contracts/workflow?mode=my-tasks`); `visibleContractItems` now sourced from `CONTRACT_STAFF_ITEMS` when `isContractStaffOnlyAccess()` is true, `CONTRACT_ITEMS` otherwise (both the nested-under-Operations and the flat Contract-Management-only rendering paths pick this up automatically, no duplicated JSX); `isContractItemActive()` generalized to strip a query string from `href` before comparing against `pathname` (needed for My Tasks' `?mode=my-tasks` suffix; no behavior change for any existing query-string-free href)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-mode-tabs.tsx` — new optional `hideAllWorkflows?: boolean` prop (default `false`); the "All Workflows" tab is now also `staffHidden`-gated alongside Assignment Queue's existing `managerOnly` gate
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — computes `isStaffOnly = isContractStaffOnlyAccess(permissions)`, passes `hideAllWorkflows={isStaffOnly}` to `WorkflowModeTabs`
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/dashboard-toolbar.tsx` — Staff Dashboard's primary CTA label changed "View My Workflow Tasks" → "View My Tasks", href changed `?myTasksOnly=true` → `?mode=my-tasks` (both filters are equivalent; the canonical link now matches the sidebar's)
+- Everything else the audit checked — `StaffSummaryCards` (6 cards), the STAFF branch of `dashboard/page.tsx` (title/subtitle/"My Assigned Tasks" section), `AssignmentQueueView`'s manager-only gating, and every backend permission/department-scope check — **confirmed already correct, not modified**
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 185/185 (6 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live A — staff sidebar + dashboard (fresh CONTRACT_STAFF user) | ✓ sidebar shows only Dashboard/My Tasks; no Contract List/Payments/Issue Log/Claim Log/Closeout Requests/Schedule/Workflow & Team Tasks anywhere in the rendered page; dashboard title "My Contract Work Dashboard"; no manager sections; CTA reads "View My Tasks" |
+| Live B — My Tasks page | ✓ neither "Assignment Queue" nor "All Workflows" tab present; My Tasks tab active; Overdue tab still present |
+| Live C — direct `?mode=assignment` | ✓ no Assignment Queue heading rendered; redirects (meta-refresh) to `mode=my-tasks`; API still returns 403 |
+| Live D — direct manager routes | ✓ pages themselves still return 200 (sidebar-only change, not a route block, as designed) but a staff `PATCH` on a payment and an issue both still return 403 — backend authorization unaffected |
+| Live E — Contract Manager (fresh CONTRACT_MANAGER user) | ✓ full sidebar (Contract List/Payments/Issue Log/Claim Log/Schedule/Workflow & Team Tasks) and "Contract Manager Dashboard" title unchanged |
+| Live F — legacy `CONTRACT_MANAGEMENT_USER` (fresh user, confirmed permission set has `contracts.update`/`close`, no `workflow_update`) | ✓ full sidebar unchanged |
+| Live G — Admin-tier actor (broad permission set) | ✓ Contract Management items unchanged |
+
+### Key Implementation Notes
+
+- `isContractStaffOnlyAccess()` is permission-only, never role-code-based — matches every other visibility rule in this app (`canSeeModule`, `isContractManagementOnlyAccess`, CM-37's dashboard-type detection). It is naturally `false` for Contract Manager (has `contracts.update`), the legacy `CONTRACT_MANAGEMENT_USER` (has `contracts.update`/`close`, predates `contracts.workflow_update` and never received it), and Admin/Super Admin (have `contracts.update`) — confirmed live with a freshly seeded user of each role rather than assumed from migration text alone.
+- Hiding "All Workflows" for staff is a **UI discoverability change, not a security boundary** — the route (`/contracts/workflow` with no mode) is left fully reachable and still department-scoped exactly as before; only the tab that links to it is gated. This was an explicit, spec-permitted judgment call ("if hiding All Workflows for staff is safe, hide it") rather than a forced redirect, since the underlying data is already read-only and dept-scoped regardless of which tab a manager or staff member arrives from.
+- `isContractItemActive()`'s query-string-stripping fix is additive/backward-compatible: every pre-existing `CONTRACT_ITEMS` href is bare (no `?`), so `href.split('?')[0]` is a no-op for all of them — only `CONTRACT_STAFF_ITEMS`' new `?mode=my-tasks` href needed it.
+
+## CM-40D — Assignment Queue Search Suggestions + True Contract Kanban (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UX polish on top of CM-40C — no backend, DTO, service, migration, or RBAC changes; confirmed during audit that every field the new picker needs (`contractReference`, `contractTitle`, `counterpartyName`, plus the already-computed per-contract `unassignedCount`/`teams` from CM-40C's `groupAssignmentQueueByContract()`) was already present in data the page already fetches. The Assignment Queue's landing view previously required typing into a form field and clicking Apply Filters just to find one contract. It's now a genuine "Choose Contract" guided step: a search box with **live, client-side typeahead suggestions** (matched against reference/name/client as the manager types, no request per keystroke, no Apply button) sits above the existing contract-card grid. The remaining structured filters (team/department/manager/status/priority/due-date-missing) — deliberately *not including* search, which the spec excluded from the "keep" list — were demoted into a collapsed "Advanced filters" disclosure, expanded automatically only when one of those filters is already active via the URL.
+
+Because free-text search moved entirely to the client, it also stopped being a server-submitted query parameter: `getAssignmentQueue()` is now only ever called with the structured Advanced Filters, never `search` — a small simplification of the module-level list logic, not a capability loss (the backend DTO's `search` field is untouched and still used by other callers; this view just no longer sends it).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-contract-picker.tsx` (new, client) — the live search box + typeahead suggestion list, filtering the already-fetched `AssignmentQueueContractGroup[]` from CM-40C client-side (`useMemo`, capped to 6 visible matches)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-advanced-filters.tsx` (new, client) — collapsible wrapper around the CM-40/40C filter form, same disclosure pattern as CM-40C's `AssignmentQueueAdvancedSection`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-filter-bar.tsx` — removed the `search` field/prop entirely (now exactly "Advanced filters": Team/Department/Contract Manager/Contract Status/Priority/Due date missing)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-contract-card.tsx` — team labels changed from plain comma-joined text to small colored badges (reusing the same info/team-production/warning/success tokens as the Kanban board), card padding tightened slightly
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — dropped `search` from state/API-call/`hasActiveFilters`/`buildAssignmentHref`; subtitle updated to "Search a contract, then assign responsible users, due dates and priorities for its workflow tasks."; renders the new picker + collapsible advanced filters in place of the old always-visible filter bar; added a "Contracts needing assignment" heading above the existing card grid
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-contract-list.tsx`, `assignment-queue-selected-contract-header.tsx`, `assignment-queue-board.tsx`, `assignment-queue-view-switcher.tsx`, `assignment-queue-advanced-section.tsx`, `assignment-queue-grouping.ts`, `contracts-needing-setup-section.tsx` — **not modified** (the selected-contract Kanban board, its team-column grouping, and the "needs setup" section from CM-40/40B/40C were already exactly what this unit asked for; confirmed by audit rather than re-implemented)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 179/179 (unchanged — pure presentational/UI-structure change, no new pure-function logic beyond what CM-40C's grouping already covers) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live A — guided picker as first section | ✓ new subtitle present, "Choose Contract" heading + exact-placeholder search input present, Advanced filters collapsed by default (Team `<select>` absent from initial rendered body) |
+| Live B — suggestion data available client-side | ✓ a sample contract's reference is present in the page's initial payload with zero extra fetch, confirming the typeahead has everything it needs without a round trip |
+| Live C/D — select via URL, focused Kanban | ✓ `?contractId=` shows the correct header, all 4 team columns, Board View default, contract reference appears exactly once in the rendered body (not per card), and the contract-card grid is hidden while a contract is selected |
+| Live E — assign from the board | ✓ `PATCH` 200; that contract's remaining unassigned count 7→6; task no longer listed |
+| Live F — advanced filters | ✓ `?team=PRODUCTION` narrows the API response (76→40, all PRODUCTION); the Advanced filters section auto-expands (Team `<select>` present) with an "Active" badge when a filter is already applied via URL |
+| Live G — staff regression | ✓ no Assignment Queue tab; API still 403 |
+| Live H — other modes | ✓ All Workflows, My Tasks (tab active), Overdue all unchanged |
+
+### Key Implementation Notes
+
+- **Confirmed frontend-only, per the audit's own instruction**: no backend field or endpoint change was needed. Search suggestions read from `AssignmentQueueContractGroup[]`, the exact same client-computable aggregate CM-40C already built from the CM-40 API response.
+- The picker (`assignment-queue-contract-picker.tsx`) is a **Client Component** — this ruled out passing CM-40C's `buildAssignmentHref` closure into it directly, since functions cannot cross the Server→Client Component prop boundary in the App Router. Solved by passing a plain `baseHref: string` (the same string previously used for "Back to Contracts") and having the client component append `&contractId=...` itself — data across the boundary, not a function.
+- Advanced Filters starts **expanded** only when a filter from that set is already active (`useState(hasActiveFilters)`), so a manager arriving via a filtered link (e.g. from an email or a saved bookmark) isn't left wondering why the list looks narrowed with no visible reason; otherwise it starts collapsed, keeping the guided search as the visually dominant first action.
+- Search was deliberately dropped from `hasActiveFilters` and the server-side query entirely — it's spec-scoped to the client-side picker only, matching the spec's own "Keep: Team, Department, Contract Manager, Contract Status, Priority, Due date missing only" list for Advanced Filters (Search conspicuously absent from that list).
+
+## CM-40C — Contract-First Assignment Queue UX (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UX restructuring on top of CM-40/CM-40B — no backend, DTO, service, migration, or RBAC changes; entirely driven by the same `WorkflowAssignmentQueueItem[]` the CM-40 API already returns (confirmed during audit: every field the new views need — `contractId`, `contractReference`, `contractTitle`, `counterpartyName`, `team`, `taskName`, `status`, `priority`, `dueDate` — was already there). The Assignment Queue previously landed directly on a 4-column, all-contracts Kanban board (CM-40B), which the task's own audit found "becomes long and confusing" once multiple contracts have unassigned work. It now defaults to a **contract-first landing view**: one card per contract needing assignment (reference, name, client, unassigned count, teams involved, "Assign Tasks" button). Selecting a contract swaps that out for a **focused, single-contract board** — the same CM-40B team-column Kanban (plus its Board/Table toggle), but scoped to only that contract's unassigned tasks, with the contract identity shown once in a header instead of repeated on every card. The CM-40B "all contracts at once" board/table is preserved (not removed, per the safety rules) but demoted to a collapsed "Advanced" section below the contract cards, never shown by default.
+
+Contract selection is **URL-based** (`?mode=assignment&contractId=<id>`, the spec's preferred option) rather than client state, achieved without a new endpoint: `AssignmentQueueView` (a Server Component) already fetches the full flat item list every render, so selecting a contract is a pure client-side filter (`getContractQueueItems`) of data already in hand — no second fetch on the common path. The one edge case — a stale/typed URL for a contract whose last unassigned task was *just* assigned — falls back to the existing `GET /contracts/:id/workflow` endpoint (already department-scope-checked) purely to recover the contract's name/reference for the "fully assigned" message; this fallback is skipped entirely on the normal path.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/assignment-queue-grouping.ts` (new) + `.test.ts` (new, 8 tests) — pure `groupAssignmentQueueByContract()` (one row per contract, urgent-first by earliest unassigned-task due date) and `getContractQueueItems()`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-contract-card.tsx` (new) — one contract card
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-contract-list.tsx` (new) — the contract-first landing grid + its own empty state
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-selected-contract-header.tsx` (new) — "← Back to Contracts" + contract identity + unassigned count, shown once above a focused board
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-advanced-section.tsx` (new, client) — collapsed-by-default wrapper around the CM-40B all-contracts `AssignmentQueueViewSwitcher`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-task-card.tsx` — added optional `hideContractInfo?: boolean` (default `false`, existing all-contracts board unaffected)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-board.tsx` — added optional `hideContractInfo?: boolean`, forwarded to each card
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view-switcher.tsx` — added optional `hideContractInfo?: boolean`, forwarded to the board
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — rewritten composition: resolves `?contractId=`, renders the selected-contract panel (or the fallback/"not in scope" messages) when present, otherwise the contract list + contracts-needing-setup + collapsed Advanced section; subtitle updated to "Choose a contract, then assign responsible users, due dates and priorities for its workflow tasks."
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-table.tsx` — **not modified**
+- `apps/web/src/app/(protected)/contracts/workflow/_components/contracts-needing-setup-section.tsx` — **not modified** (only repositioned in `assignment-queue-view.tsx`'s JSX, still below the contract cards)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 179/179 (8 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live A — contract-first landing | ✓ new subtitle present, "Assign Tasks" contract-card buttons present, no 4-column team board rendered by default, Advanced section collapsed (verified with the RSC hydration payload `<script>` blocks stripped out — see note below) |
+| Live B — select a contract | ✓ header shows the correct contract reference, all 4 team columns present, contract reference appears exactly once in the rendered body (not per task card) |
+| Live C — assign from selected board | ✓ `PATCH` 200; that contract's remaining unassigned count 8→7; task no longer listed |
+| Live D — contract fully assigned | ✓ after assigning its last 2 tasks, revisiting `?contractId=` shows "All workflow tasks for this contract are assigned." + a working "Back to Contracts" link |
+| Live E — filters | ✓ `?team=PRODUCTION` narrows both the API response (77→40 items, all PRODUCTION) and the contract-first list; a selected contract combined with the same filter shows only its Production column populated, other columns showing "No unassigned tasks for this team." |
+| Live F — contracts needing setup | ✓ section and "Generate / View Board" link still present and positioned below the contract cards |
+| Live G — staff regression | ✓ no Assignment Queue tab; API still 403 |
+| Live H — other modes | ✓ All Workflows, My Tasks (tab active), Overdue all return 200 and render unchanged |
+
+### Key Implementation Notes
+
+- **Confirmed frontend-only, per the audit's own instruction**: no new backend endpoint or DTO field was needed — CM-40's `WorkflowAssignmentQueueItem` already carried every field the contract-first view uses.
+- Contract selection is genuinely URL-based (not client `useState`), so a page refresh, bookmark, or shared link preserves the selected contract — the spec's "preferred" option was achievable without extra complexity, nothing was deferred to client-state as a fallback.
+- `groupAssignmentQueueByContract()` sorts contracts urgent-first (earliest unassigned-task due date, no-due-date contracts last) — the same "date ascending, nulls last" convention already established by `buildAttentionRows()` (CM-39B) and the CM-40 API's own task-level sort, so the ordering logic stays consistent across the module rather than inventing a new rule.
+- `hideContractInfo` was added as an optional, default-`false` prop on 3 already-existing components rather than forking them into contract-scoped duplicates — the exact same "additive prop, verify only the intended caller passes it" pattern used for `MetricCard`'s `dense` prop in CM-39C.
+- Testing note: Next.js embeds a serialized RSC "flight payload" inside `<script>` tags for client hydration, which duplicates every piece of rendered text at least once more in the raw HTML response. Early live-verification checks that did plain substring counts against the full HTML produced false negatives/positives (e.g., counting a contract reference 9 times when it visually appears once); re-run with the `<script>` blocks stripped out first, which resolved cleanly. Noting this here since it will recur for any future live-HTML verification script in this app.
+- Nothing was deferred for URL persistence — it works. The one intentionally-scoped-down behavior: submitting the filter bar while a contract is selected returns to the (now-filtered) contract list rather than staying on that contract's board, since the filter bar has no hidden `contractId` field — a deliberate simplification (filters change *scope*, which reasonably resets the focused view) rather than an oversight.
+
+## CM-40B — Workflow Assignment Queue Kanban Board View (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend UI addition on top of CM-40 — no backend, DTO, service, migration, or RBAC changes; reuses the exact same `getAssignmentQueue()` API response CM-40 already fetches. The Assignment Queue previously showed only a long table; it now defaults to a **Board View** — unassigned tasks grouped into 4 team columns (Technical/Production/Erection/QS-Commercial), each with a count badge, subtle team-accent-colored cards, and an Assign button that opens the identical CM-40 `AssignTaskModal`. A client-side **Board View / Table View** toggle (`AssignmentQueueViewSwitcher`) sits above the list; both views render off the same server-fetched `items`/`people`/`truncated` props, so switching never refetches or loses filter state — matching the toggle pattern already established by CM-39's `ManagerSecondaryTabs`. The existing `AssignmentQueueTable` component from CM-40 is completely untouched (same file, zero edits), satisfying "keep the table view available" literally.
+
+One design-token addition was needed: `ui-tokens.md` explicitly forbids hardcoded/raw Tailwind colors in feature components, and the existing semantic palette (accent/success/warning/error/info) had no "indigo/purple" entry for the Production team accent the spec asked for. Technical (blue), Erection (orange) and QS/Commercial (green) map directly onto the existing `info`/`warning`/`success` tokens; a new `--color-team-production` / `--color-team-production-light` pair was added to `globals.css` (and mirrored in `ui-tokens.md`) rather than hardcoding an indigo hex value inline — keeping every team color routed through the same token system as the rest of the app.
+
+### Changes
+
+- `apps/web/src/app/globals.css` — added `--color-team-production` / `--color-team-production-light` tokens
+- `context/ui-tokens.md` — mirrored the same token addition for documentation parity
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-task-card.tsx` (new) — one Kanban card: contract ref/name/client, task name, status + priority badges, due date ("No due date" when null), Assign button, team-accent top border
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-board.tsx` (new) — 4-column team grid (`grid-cols-1 md:grid-cols-2 lg:grid-cols-4`), per-column count + empty state ("No unassigned tasks for this team."), global empty state ("All generated workflow tasks are assigned. Use the workflow board to monitor progress."), opens `AssignTaskModal` on Assign
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view-switcher.tsx` (new, client) — Board View / Table View toggle, Board is the default (`useState<ViewMode>('board')`)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — swapped the direct `AssignmentQueueTable` render for `AssignmentQueueViewSwitcher`; everything else (heading, subtitle, mode tabs, summary cards, filters, contracts-needing-setup section) unchanged
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-table.tsx` — **not modified** (verified via diff — zero changes)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 171/171 (unchanged — pure presentational addition, no new pure-function logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live A — default view | ✓ `aria-pressed="true"` on Board View button, `"false"` on Table View, confirmed via raw HTML inspection; all 4 team column labels present |
+| Live B — assign from card | ✓ same `PATCH /contracts/workflow/tasks/:taskId` (200); queue count 81→80; task no longer returned |
+| Live C — Table View | Verified by code review, not live click-through: `AssignmentQueueTable` is byte-for-byte unchanged from CM-40 and the switcher's `view === 'table'` branch renders it with identical props — a static HTTP fetch (used for all other live checks this session) can't observe a client-only `useState` toggle without executing JS, so this one relies on component reuse + the passing web test suite rather than a captured HTML diff |
+| Live D — empty team column | ✓ with real data (Technical: 40, Production: 40, Erection: 0, QS-Commercial: 0 unassigned), "No unassigned tasks for this team." appears in the rendered HTML |
+| Live E — fully empty | ✓ logic verified (renders only when `items.length === 0`, mutually exclusive with D's per-column check, which correctly returned false when items existed) |
+| Live F — contracts needing setup | ✓ section and "Generate / View Board" link still present, untouched |
+| Live G — staff regression | ✓ no "Assignment Queue" tab, no "Board View"/"Table View" toggle on the staff-visible All Workflows page; API still returns 403 |
+
+### Key Implementation Notes
+
+- Both views share one server fetch (`AssignmentQueueView` → `getAssignmentQueue()` once), consistent with CM-40's own data-fetching; the toggle is purely a client-side render choice, never a second network request.
+- The global "all assigned" empty state and the per-column "no tasks for this team" empty state are mutually exclusive by construction: the board only reaches the per-column empty check when `items.length > 0` overall (the top-level `if (items.length === 0)` returns the global message first), so there's no risk of both messages appearing at once.
+- Card design deliberately omits opening a task-detail drawer on click (unlike CM-32's `WorkflowTaskCard`, which opens the full board drawer) — an unassigned task's only relevant action here is Assign, so the card is a static block with one explicit button, not a clickable surface.
+- Responsive grid (`grid-cols-1 md:grid-cols-2 lg:grid-cols-4`) avoids horizontal scrolling entirely (cards reflow/stack), unlike the table view's `overflow-x-auto` — satisfies "avoid horizontal overflow" for the board specifically without needing to touch the table's existing (and unavoidable, given its column count) horizontal scroll behavior.
+
+## CM-40 — Workflow Assignment Queue for Managers (Completed 2026-08-24)
+
+### Summary
+
+Fixed the "Assign Tasks" flow: clicking it from the Manager Dashboard used to open the generic Workflow & Team Tasks register (a full contract list + board), leaving the manager to hunt for unassigned work themselves. Now it lands on a focused, manager-only **Assignment Queue** (`/contracts/workflow?mode=assignment`) — a flat list of every unassigned workflow task in the manager's department scope, with contract context, team, due date and priority, and a one-click **Assign** action.
+
+Audit findings that shaped the design: (1) workflow tasks are generated lazily, only when a contract's board is first opened (`ContractWorkflowService.getWorkflowForContract`) — the module-level list never generates anything; (2) an existing `regenerate()` method already exists and is additive-only/idempotent but is for a different purpose (re-syncing an already-initialized contract after a scope change); (3) CM-35 already enforces staff (`contracts.workflow_update`) vs. manager (`contracts.update`) field-level restrictions on `PATCH /contracts/workflow/tasks/:taskId` — `responsibleUserId`/`dueDate`/`priority` are manager-only server-side, unchanged. Given this, the **safer approach** for "Not Generated" contracts was chosen: the Assignment Queue never generates anything itself. Contracts whose saved scope would produce tasks but have none yet appear in a separate "Contracts needing workflow setup" list; clicking "Generate / View Board" simply opens the existing board view, which already lazily (and idempotently) generates on that explicit click — never silently in the background.
+
+The Assignment Queue required one new backend read endpoint (task-level, not contract-level data the existing `findAll()` doesn't expose), but the Assign action itself reuses the existing `PATCH /contracts/workflow/tasks/:taskId` endpoint and its existing server action — no new write path, no RBAC change, no migration.
+
+### Changes
+
+**Backend (additive only — no migration, no existing-endpoint change):**
+- `apps/api/src/contracts/dto/contract-workflow-assignment-queue-query.dto.ts` (new) — search/status/departmentId/ownerUserId/team/priority/dueDateMissing
+- `apps/api/src/contracts/contract-workflow.service.ts` — new `findAssignmentQueue()` (manager-only, dept-scoped, returns unassigned task rows + summary + contractsNeedingSetup) + `AssignmentQueueSummary` interface + `ASSIGNMENT_QUEUE_MAX_ROWS = 300` cap
+- `apps/api/src/contracts/contracts.controller.ts` — new `GET /contracts/workflow/assignment-queue` (`@Permissions('contracts.update')`), declared alongside the existing `GET /contracts/workflow` per the file's established route-ordering convention
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — 13 new tests (permission gating, dept scope, unassigned-only filtering, summary accuracy under a display filter, team/priority/dueDateMissing filters, due-date sort, contractsNeedingSetup ACTIVE/scope/existing-tasks conditions)
+
+**Frontend:**
+- `apps/web/src/lib/contracts-api.ts` — `WorkflowAssignmentQueueItem`/`Summary`/`ContractNeedingSetup`/`Response`/`Query` types + `getAssignmentQueue()` + `buildAssignmentQueueQuery()`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-mode-tabs.tsx` (new) — All Workflows / Assignment Queue (manager-only) / My Tasks / Overdue link tabs
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` (new) — the Assignment Queue's own server-rendered page body (heading/subtitle/tabs/cards/filters/list/setup section)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-summary-cards.tsx` (new) — 6 cards (Contracts Needing Assignment, Unassigned Tasks, + 4 per-team)
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-filter-bar.tsx` (new) — Search/Team/Department/Contract Manager/Contract Status/Priority/Due date missing
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-table.tsx` (new, client) — unassigned task list + Assign button, opens the modal
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assign-task-modal.tsx` (new, client) — compact modal (Responsible Person / Due Date / Priority / Remarks), submits through the existing `updateWorkflowTaskAction`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/contracts-needing-setup-section.tsx` (new) — "Contracts needing workflow setup" list, Action links to the existing board
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` — dispatches to `AssignmentQueueView` for `mode=assignment`/`assignmentOnly=true` (redirecting non-managers to `mode=my-tasks`), adds `mode=my-tasks` as a `myTasksOnly` alias, renders `WorkflowModeTabs`; the rest of the "All Workflows" logic is byte-for-byte unchanged
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-top-actions.tsx` — dashboard "Assign Tasks" button now links to `/contracts/workflow?mode=assignment`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-attention.ts` (+ its test) — the grouped Priority Actions "Assign Tasks" row's link updated to the same assignment-mode URL for consistency
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 171/171 (1 updated) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1123/1123 (13 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 26 migrations, up to date — no migration added |
+| Live A — dashboard button + Assignment Queue page | ✓ button → `/contracts/workflow?mode=assignment`; heading "Assign Workflow Tasks", subtitle, 6 cards, all 7 filters, all 10 table columns, mode tabs all present |
+| Live B — assign a task | ✓ `PATCH` 200; queue count 82→81; assigned task no longer listed; board shows the new responsible user |
+| Live C — contracts needing setup | ✓ 5 contracts listed with scope summary + "Generate / View Board" link |
+| Live D — staff direct access | ✓ API returns 403; web request redirects (Next dev meta-refresh) to `/contracts/workflow?mode=my-tasks`, which renders with the My Tasks tab active and no Assignment Queue tab anywhere (including the All Workflows tab strip) |
+| Live E — department scope | ✓ a genuinely `OWN_DEPARTMENT`-scoped Contract Manager sees only their own department's 18 items; querying `?departmentId=<other dept>` directly returns 0 items — no leak |
+| Live F — All Workflows unchanged | ✓ heading, contract table columns, pagination all unchanged; tabs show "All Workflows" active |
+| Live G — dashboard link | ✓ confirmed same as A |
+
+### Key Implementation Notes
+
+- **Lazy-generation decision (explicit per the task's own instruction to "choose the safer approach and report it")**: the Assignment Queue never generates workflow tasks as a side effect of being viewed. Only the pre-existing `getWorkflowForContract()` board-open path generates tasks, and only when the manager explicitly clicks through from "Contracts needing workflow setup." This avoids any surprise bulk-generation and required zero changes to the generation logic itself.
+- **Why a new backend endpoint was necessary despite "prefer no backend change"**: the existing `GET /contracts/workflow` list returns *contract-level* aggregates (open/overdue task counts) and deliberately never selects individual task identity (id/name/priority) for the summary computation. Assignment Queue needs one row per unassigned *task* with contract context — that shape doesn't exist anywhere in the current API and can't be assembled client-side without fetching every contract's full task list. The new endpoint is purely additive (new route, new DTO, new service method) and touches none of the 4 existing workflow endpoints' behavior or response shape.
+- Summary card counts are computed from the **full** unassigned-task set in scope, before the team/priority/dueDateMissing display filters and before the 300-row display cap — so the cards stay accurate even while a manager is filtering or if the true backlog exceeds the cap (verified live: filtering by team narrowed the visible list from 2 to 1 row while both team-summary counts stayed correct).
+- `contractsNeedingSetup` intentionally requires `status === 'ACTIVE'` (workflow is only expected after activation, per the stated business flow) **and** `generateWorkflowTaskTemplates(...).length > 0` (an ACTIVE contract with a genuinely empty/not-applicable scope has nothing to generate and is correctly omitted) **and** zero existing tasks.
+- The Assign modal is a new, deliberately narrower client component (Responsible Person / Due Date / Priority / Remarks only — no status/comments/attachments) but submits through the exact same `updateWorkflowTaskAction` server action already used by the full `WorkflowTaskDrawer` on the board — one write path, two entry points.
+- `mode=my-tasks` is a thin alias that sets the existing `myTasksOnly` filter internally; the "My Tasks" and "Overdue" tabs needed no new UI at all — they link to already-existing, already-tested filters on the same "All Workflows" page.
+- Local dev note: Next.js 16 Turbopack dev mode delivers a Server Component `redirect()` call as a 200 response containing a `<meta http-equiv="refresh">` tag rather than an HTTP 3xx when the response has already begun streaming — functionally identical for a browser, but a plain HTTP client (used here for live verification) must fetch the `content="1;url=…"` target directly to see the final page. Confirmed the actual destination renders correctly.
+
+## CM-39C — Manager Dashboard Command Center Polish (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend visual/wording polish on top of CM-39B — no backend, DTO, service, migration, or RBAC changes; the role-based dashboard-type logic and all API fields are unchanged. Goal was to make the Manager Dashboard read as a command center rather than a data report. Added a new "Today's Focus" panel directly under the header/actions that turns the same real summary counts already used by the KPI cards into one plain-language sentence (e.g. "5 closeout requests waiting review · 3 overdue workflow tasks · 8 open issues · 6 open claims"), built by a new pure function `buildTodaysFocusSegments()` that omits zero-count items and shows "All caught up — nothing urgent right now." when nothing is outstanding. The 5 primary KPI cards were renamed (Needs Action → Manager Actions), given short helper copy and, for Manager Actions, an in-page anchor link (`#priority-actions`) down to the table below; `MetricCard` gained an additive, opt-in `dense` prop (default off, zero effect on the other 20 call sites) used only here to shave card height. The secondary metrics strip changed from one muted sentence to a row of labeled chips in a soft background. The "Needs Manager Action" section was renamed to "Priority Actions" with a one-line subtext, and its table got clearer column names (Type → Action Needed, "What needs attention" → Details), a bolder priority badge, a bolder contract reference, a pill-style action button, and spec-exact empty-state copy. The three lower tabs were renamed (Workflow Load → Team Workload, Upcoming → Upcoming Deadlines, Recent → Recent Updates); the Team Workload cards' "View" link became "View team tasks" and Unassigned/Overdue now carry a small colored dot for at-a-glance scanning. Top action buttons were restyled onto two shared button classes for consistent sizing/alignment (same 4 buttons, same hrefs, same wording). The Staff branch and the `!dashboardType` (Admin/Super Admin/legacy) fallback branch in `page.tsx` were not touched.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-focus.ts` (new) — pure `buildTodaysFocusSegments()`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-focus.test.ts` (new) — 5 unit tests
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/todays-focus-panel.tsx` (new) — renders the focus sentence / positive empty state
+- `apps/web/src/app/(protected)/_components/metric-card.tsx` — added optional `dense?: boolean` prop (default `false`; only affects callers that opt in)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-summary-cards.tsx` — "Needs Action"→"Manager Actions" + `#priority-actions` href, per-card helper copy, `dense` cards; `SecondaryMetricsStrip` restyled to chips
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-attention-table.tsx` — column renames, stronger priority badge/contract reference/action pill, exact spec empty-state copy
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-secondary-tabs.tsx` — tab label renames only
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/workflow-overview-panel.tsx` — "View"→"View team tasks", colored-dot indicators, reworded empty state
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-top-actions.tsx` — shared button classes for consistent compact sizing (same 4 buttons/hrefs/labels)
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — renders `TodaysFocusPanel`, renamed "Priority Actions" section + subtext + `id="priority-actions"` anchor; Staff/fallback branches unchanged
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm exec tsc --noEmit` (web) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 171/171 (5 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1111/1111 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live manager dashboard (real portfolio: 5 pending closeout, 3 overdue tasks, 8 open issues, 6 open claims) | ✓ Today's Focus renders "5 closeout requests waiting review · 3 overdue workflow tasks · 8 open issues · 6 open claims"; "Manager Actions" label present, "Needs Action" gone; "Priority Actions" heading + subtext present, "Needs Manager Action" gone; anchor `id="priority-actions"` and card `href="#priority-actions"` both present; tabs read Team Workload/Upcoming Deadlines/Recent Updates, old labels gone; "View team tasks" present; Priority Actions table still capped at 5 rows |
+| Live top action buttons | ✓ New Contract / Assign Tasks / Schedule / Closeout Requests all present |
+| Live staff dashboard (fresh CONTRACT_STAFF user) | ✓ unaffected — no Today's Focus, no Priority Actions, no Team Workload tabs, "My Assigned Tasks" intact |
+
+### Key Implementation Notes
+
+- `buildTodaysFocusSegments()` reuses the exact same `summary` fields the KPI cards already read (`pendingCloseoutRequests`, `overdueWorkflowTasks`, `openIssues`, `openClaims`) — no new data, no new API call, so the sentence and the cards can never disagree.
+- `MetricCard`'s new `dense` prop is additive and defaults to `false`; verified via grep that only `manager-summary-cards.tsx` passes it, so the other ~19 call sites (Staff/Production/Safety/Incidents/Maintenance/Factory Tasks dashboards, closeout/schedule/claim/issue/payment/workflow summary cards, root dashboard, contract KPI grid) render byte-identical to before.
+- The Priority Actions table's grouping/capping/ordering logic from CM-39B (`buildAttentionRows`, `ATTENTION_ROW_CAP = 5`) is untouched — CM-39C only restyled the already-built rows (column labels, badge/link styling), not the data pipeline feeding them.
+- Card layout vs. table for Priority Actions: kept the existing table (per the task's own "if not, keep table but polish it" fallback) rather than switching to cards — the table is already well-tested, responsive, and handles the mixed grouped/non-grouped row shapes from CM-39B cleanly; a card rewrite would have added risk for a change the spec itself treated as optional.
+
+## CM-39B — Manager Dashboard Above-the-Fold Cleanup (Completed 2026-08-24)
+
+### Summary
+
+Pure frontend follow-up to CM-39 — no backend, DTO, service, migration, or RBAC changes. CM-39 had already reduced the dashboard from 9 cards to 5 and consolidated three sections into tabs, but the "Needs Manager Action" table itself was still unbounded (up to the backend's existing 30-item cap), which on a busy portfolio (e.g. 65 draft contracts, 14 contracts with unassigned tasks) pushed the Workflow Load/Upcoming/Recent tabs far below the fold. Fixed entirely on the frontend: a new pure function, `buildAttentionRows()` in `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-attention.ts`, takes the existing `attentionItems`/`summary`/`workflowOverview` API fields (all already returned, none added), collapses every `ACTIVATE_CONTRACT` item into one "N draft contracts" row (count from the accurate, uncapped `summary.contractsAwaitingActivation`, not from counting rows in the capped items array) and every `ASSIGN_TASKS` item into one "N unassigned workflow tasks across M contracts" row (task total summed from the accurate `workflowOverview[].unassignedTasks`, contract count from the matching rows in the items array), then re-sorts everything by an urgent-first type order (Closeout Review > Overdue Task > Open Issue > Open Claim > Outstanding Payment > Ending Soon > Assign Tasks > Activate Contracts) instead of the backend's plain HIGH/MEDIUM/LOW-then-date order. `ManagerAttentionTable` now displays only the top 5 rows of that grouped/reordered list and adds a compact footer ("Showing 5 of N actions. Open related registers: Draft Contracts / Workflow / Issues / Claims / Payments / Closeout") so the rest of the backlog stays reachable. The Manager section of `page.tsx` was wrapped in its own `space-y-5` (down from the page's `space-y-8`) and the attention table's row padding tightened (`py-2`→`py-1.5`) for additional vertical compactness; the Staff branch and the `!dashboardType` (Admin/Super Admin) fallback branch were not touched.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-attention.ts` (new) — pure `buildAttentionRows()` grouping/reordering function + `AttentionDisplayRow` type + `ATTENTION_ROW_CAP = 5`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-dashboard-attention.test.ts` (new) — 7 unit tests covering grouping counts/phrasing, urgent-first ordering, date tiebreak, empty input
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-attention-table.tsx` — rewritten to accept pre-grouped `rows: AttentionDisplayRow[]`, caps display to `ATTENTION_ROW_CAP`, renders grouped rows without a per-contract link, adds the register-links footer, tightened row padding
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — computes `attentionRows` via `buildAttentionRows()`, passes to `ManagerAttentionTable`, wraps the Manager branch in a tighter `space-y-5` container (Staff/fallback branches unchanged)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-summary-cards.tsx` — card grid gap tightened `gap-4`→`gap-3` (no other change)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm exec tsc --noEmit` (web) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 166/166 (7 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1111/1111 (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live manager dashboard (real portfolio: 65 draft contracts, 14 contracts with unassigned tasks) | ✓ attention table renders exactly 5 rows; footer reads "Showing 5 of 11 actions" (9 ungrouped high-priority rows + 2 grouped rows, confirming grouping collapsed 21 raw items to 2); rows ordered Closeout Review first per the new urgent-first order; tabs render ~7.3k chars after the heading instead of spanning an unbounded table |
+| Live footer register links (manager token) | ✓ all 6 return 200: `/contracts?status=DRAFT`, `/contracts/workflow`, `/contracts/issues`, `/contracts/claims`, `/contracts/payments`, `/contracts/closeouts?pendingOnly=true` |
+| Live staff dashboard (fresh CONTRACT_STAFF user) | ✓ unaffected — no "Needs Manager Action" section, no register-links footer, no manager tabs |
+
+### Key Implementation Notes
+
+- Grouping intentionally uses `summary.contractsAwaitingActivation` and the sum of `workflowOverview[].unassignedTasks` — both accurate, uncapped figures already computed server-side — rather than counting rows in the (backend-capped-at-30) `attentionItems` array, so the grouped counts stay correct even when the true total exceeds the 30-item cap.
+- The "N contracts" portion of the grouped Assign Tasks row (`across M contracts`) is still derived from counting `ASSIGN_TASKS` rows in the capped array; since that action type is HIGH priority it sorts near the front of the backend's own pre-cap ordering, so it is very unlikely to be trimmed away in practice. Documented as a known minor limitation, consistent with CM-39's own capped "Needs Action" caveat.
+- Grouped rows are visually distinguished by having no per-contract link (`contractHref: null`) — the table renders plain text for the Contract cell instead of a `Link`, and the group's Action link goes to the relevant register rather than a single contract page.
+- On a busy portfolio, the 5 visible rows can be entirely non-grouped items (verified live: 5 Closeout Review rows filled the cap, pushing both grouped rows out of view but still counted in "Showing 5 of 11 actions") — this is correct per the spec's explicit urgent-first ordering, not a bug.
+
+## CM-38 — Closeout Register Page (Completed 2026-08-24)
+
+### Summary
+
+Added the module-level Closeout Requests register (`/contracts/closeouts`) that CM-37's Manager Dashboard already referenced but which didn't exist yet — completing the set of module-level registers alongside Payments/Issues/Claims/Schedule/Workflow. No new table: `ContractCloseoutService.findAll()` reads directly from `ContractCloseoutRequest` joined to its parent `Contract`, following the exact "candidate contracts scoped via `contract: { departmentId }`" pattern CM-31's Claims register established (simpler than the Workflow/Schedule "candidate-then-join" pattern since `ContractCloseoutRequest` has a direct FK to `Contract`). The register's Workflow/Issues/Claims Open and Outstanding Payment columns deliberately read from each request's own stored `riskSnapshot` (captured at submission, refreshed at review per CM-33) rather than recomputing live per row — avoiding an N+1 query fan-out across 4 more tables for every request, and more correct besides (shows the risk picture as of the request's own submission/review moment). Per the spec's own safety guidance, no quick approve/reject/final-close actions were added to the register — every action row links to the existing, already-tested per-contract Closeout tab, avoiding a duplicate/riskier second implementation of that workflow. Sidebar visibility uses a new `anyPermission` (OR) field on `NavItem`, mirroring CM-35's backend `@AnyPermission` decorator, so Contract Manager/Admin/Super Admin/legacy Contract Management User (all `contracts.update`) see the link while Contract Staff (`contracts.workflow_update` only) does not — while the API itself stays open to `contracts.read` per the spec (Contract Staff can still reach it directly, just isn't guided there by the sidebar).
+
+### Changes
+
+- `apps/api/src/contracts/dto/contract-closeout-list-query.dto.ts` (new) — filters: search/contractId/status/requestedByUserId/reviewedByUserId/departmentId/requestedDateFrom-To/reviewedDateFrom-To/approvedDateFrom-To/pendingOnly/page/pageSize
+- `apps/api/src/contracts/contract-closeout.service.ts` — `computeCloseoutListSummary()`, `buildCloseoutListWhere()`, `toCloseoutListItem()`, `ContractCloseoutService.findAll()` (+13 new tests, 51 total)
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/closeouts` (plural, declared before `:id` per the established route-ordering convention)
+- `apps/web/src/lib/contracts-api.ts` — `CloseoutListItem`, `CloseoutListSummary`, `ContractCloseoutListQuery`, `ContractCloseoutListResponse` types + `listCloseouts()`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-closeout-csv.ts` (new, +`.test.ts`, 5 tests) — reuses `csvField` from `contract-payment-csv.ts`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — `CONTRACT_CLOSEOUT_STATUS_OPTIONS`
+- `apps/web/src/app/(protected)/contracts/closeouts/` (new) — `page.tsx`, `export/route.ts`, `_components/{closeout-summary-cards,closeout-filter-bar,closeout-register-table,closeout-status-badge,closeout-actions-bar}.tsx`
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — new `anyPermission?: string[]` field on `NavItem` (OR-semantics visibility check); "Closeout Requests" added to `CONTRACT_ITEMS` (last position, matching the spec's recommended order) gated on `['contracts.update', 'contracts.close']`; `'closeouts'` added to `CONTRACT_TOP_LEVEL_SLUGS`
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-top-actions.tsx` — "Review Closeout Requests" now links to `/contracts/closeouts?pendingOnly=true` (previously `/contracts`)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/manager-quick-actions.tsx` — "Review Closeout" now links to `/contracts/closeouts` (previously `/contracts`)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 159/159 (+5 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1111/1111 (+13 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/closeouts` and `/contracts/closeouts/export` routes built |
+| `pnpm db:migrate:status` | ✓ 26 migrations, unchanged — no migration needed, as designed |
+| Live API scenarios A–L (+ Admin) | ✓ 26/26 |
+| Rendered HTML (register page, sidebar shown for manager / hidden for staff) | ✓ all confirmed |
+
+### Key Implementation Notes
+
+- Quick approve/reject/final-close from the register itself was intentionally NOT built — the spec explicitly permitted deferring this ("Do not duplicate full approve/reject modal if risky... link to existing Closeout tab"), and the per-contract tab's `CloseoutReviewerPanel` already handles optimistic-concurrency (`version`) correctly; duplicating that logic in a second UI surface would risk drift.
+- The register's Action column label adapts to status + `contracts.close`: "Review Closeout" for SUBMITTED/UNDER_REVIEW, "Final Close" for APPROVED, "View Closeout" otherwise (or always, for an actor without `contracts.close`) — all pointing to the same existing `/contracts/{id}/closeout` tab.
+- Manager Dashboard's per-item "Contracts Requiring Manager Action" closeout entries were left unchanged (still link directly to `/contracts/{id}/closeout`), per the spec's explicit permission to keep that behavior — only the dashboard's top-level "Review Closeout Requests" button and Quick Actions' "Review Closeout" card were repointed to the new register.
+- API dev server restarted standalone after backend changes; web dev server unaffected (route/component files only).
+
+## CM-37 — Role-Based Contract Dashboard Upgrade: Manager Control + Staff My Work (Completed 2026-08-24)
+
+### Summary
+
+Split `/contracts/dashboard` into two purpose-built dashboards — Contract Manager Dashboard and My Contract Work Dashboard (staff) — selected server-side purely from the actor's permissions (`contracts.update` or `contracts.close` → MANAGER; everything else, including a bare `contracts.workflow_update` staff actor or a plain read-only Viewer, → STAFF), never from role code. This single rule transparently covers every case the spec named (Contract Manager, legacy Contract Management User, Super Admin, Admin all carry `contracts.update`; Contract Staff does not) with no special-casing. A new `ContractDashboardService` composes on top of the existing (untouched) `ContractsService.getDashboard()` — deliberately not modified, to keep its 132 existing tests and every other page that calls `contractsApi.dashboard()` just for `.scope` working unchanged — and aggregates live data from `Contract`/`ContractWorkflowTask`/`ContractIssue`/`ContractClaim`/`ContractPayment`/`ContractCloseoutRequest`, reusing CM-34's `ContractScheduleService.findAll()` directly for both dashboards' "Upcoming Schedule" panels (staff's additionally filtered by `responsibleUserId`). Overdue/open/outstanding logic reuses each owning module's own already-audited pure function (`computeTaskIsOverdue`, `computeIssueSummary`, `computeClaimSummary`, `computeOverdueDays`/`computeOutstandingAmount`) rather than re-deriving a new definition — the "Contracts Requiring Manager Action" list's own open/final status judgment is this unit's own (documented, separate from CM-33's closeout-readiness lists, following the same precedent CM-34 set). No new database table — deliberately, per the spec's own preference.
+
+### Changes
+
+- `apps/api/src/contracts/contract-dashboard.service.ts` (new) — `computeContractDashboardType()`, `buildWorkflowOverview()`, `buildManagerAttentionItems()` (8 source categories: draft contracts, unassigned tasks, overdue tasks, open high/critical issues, open claims, outstanding payments, pending closeout, contracts ending soon), `computeManagerSummary()`, `computeStaffSummary()`, `buildStaffTaskRows()`, `buildStaffRecentUpdates()`, `ContractDashboardService` (composes `ContractsService.getDashboard()` + own aggregation + `ContractScheduleService.findAll()`) + `.test.ts` (36 tests)
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/dashboard` now calls `ContractDashboardService.getDashboard()` instead of `ContractsService.getDashboard()` directly
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractDashboardService`
+- `apps/web/src/lib/contracts-api.ts` — `ContractDashboardType`, `ManagerAttentionItem`, `TeamWorkflowOverview`, `ManagerDashboardData`, `StaffTaskRow`, `StaffRecentUpdate`, `StaffDashboardData` types; `ContractDashboardData` extended additively (`dashboardType`, `manager?`, `staff?`)
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/` (new) — `manager-summary-cards.tsx`, `manager-top-actions.tsx`, `manager-quick-actions.tsx`, `manager-attention-table.tsx`, `workflow-overview-panel.tsx`, `upcoming-schedule-list.tsx` (shared), `staff-summary-cards.tsx`, `staff-task-table.tsx`, `staff-recent-updates.tsx`
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/dashboard-toolbar.tsx` — branches by `dashboardType` (manager top actions / staff "View My Workflow Tasks" CTA / legacy fallback)
+- `apps/web/src/app/(protected)/contracts/dashboard/page.tsx` — rewritten to branch entirely on `data.dashboardType`, with the pre-existing `ContractKpiGrid`/`TopContractsPanels` kept as the total-API-failure fallback
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 154/154 (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1098/1098 (+36 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 26 migrations, unchanged — no migration needed, as designed |
+| Live API scenarios A–J | ✓ 33/33 |
+| Rendered HTML (Manager dashboard, Staff dashboard incl. empty state) | ✓ all confirmed |
+
+### Key Implementation Notes
+
+- `ContractsService.getDashboard()` intentionally untouched — `ContractDashboardService` wraps it rather than replacing it, so its 132 tests and every other `contractsApi.dashboard()` caller (workflow/schedule/claims/issues/payments/new/list pages, root dashboard, workspace layout — all read `.scope` only) keep working with zero changes.
+- "Contracts Awaiting Activation" is deliberately the same population as "Draft Contracts" — this codebase has no separate activation-readiness concept (e.g. a BOQ-complete flag); shown as two cards per the spec's literal list rather than inventing a new readiness rule.
+- No module-level Closeout register page exists yet (CM-33 only built the per-contract tab) — the top-level "Review Closeout Requests" button links to the Contract List with an explanatory tooltip; actual per-request review happens via the "Contracts Requiring Manager Action" table's own `/contracts/{id}/closeout` links, which are fully functional.
+- "My Recent Task Updates" is honest about what's derivable: `ContractWorkflowTask` has no field-level change log (unlike `Contract`'s own `ContractActivity`), so "status update" and "due date changed" are both represented by one generic "Task updated" entry sourced from `lastActivityAt` — no fabricated specificity about which field changed.
+- API dev server restarted standalone after backend changes; web dev server unaffected (route/component files only, picked up via Next.js hot reload).
+
+## CM-36 — Super Admin User Creation Wizard UI (Completed 2026-08-24)
+
+### Summary
+
+Converted the New User page's long single-scroll form into a 5-step guided wizard (Account → Organization → Access Template → Module Access → Review & Create) — a pure UI/UX unit with **zero backend changes**. All step content stays mounted the entire time (visibility toggled via CSS, never unmounted), so every field keeps its exact original `name` attribute and the final `<form>` submission produces byte-identical `FormData` to the pre-wizard form — `createUserWithAccessAction` and the REST calls it makes were not touched. `ModuleAccessEditor` was refactored from internally-managed per-row state to a controlled component (scope/department selections lifted into the wizard's own state) so the new Review step can render an accurate module-access summary and so three of the four spec'd mismatch warnings could be computed (Contract Staff + All Departments, Contract Manager + never-configured Contract Management access, Viewer + Module Manager template) alongside a fourth informational one (Platform Admin's broad-access notice). The success screen was extended with Role name, Module Access summary, an explicit "must change password after first login" note, and a combined "Copy Credentials" button, on top of the existing username/temp-password display. Two existing white-box source-regression test files (`user-admin-security.test.ts`, `uat-org-selectors.test.ts`) referenced the old `new-user-form.tsx` file path and the old `selectedPlantId`/`setSelectedPlantId` naming by literal string match — updated to the new file (`new-user-wizard.tsx`) and confirmed the wizard kept the same variable names (renamed the wizard's plant state back to `selectedPlantId` to match the established convention shared with `edit-user-tabs.tsx`, after an accidental blanket rename briefly broke the `plantId` form field name and the `LocationEntity.plantId` property reference — caught immediately by `tsc`).
+
+### Changes
+
+- `apps/web/src/app/(protected)/administration/users/_components/new-user-wizard.tsx` (new, replaces the deleted `new-user-form.tsx`) — 5-step wizard, step indicator, per-step controlled state, `computeAccessWarnings()`, `buildModuleAccessSummary()`, enhanced success screen
+- `apps/web/src/app/(protected)/administration/users/_components/module-access-editor.tsx` — `ModuleRow`/`ModuleAccessEditor` refactored from internal `useState` to controlled props (`scopes`, `deptIdsByModule`, `onScopeChange`, `onDeptIdsChange`); compact single-line-per-module card layout (no manual collapse toggle — see Key Implementation Notes)
+- `apps/web/src/app/(protected)/administration/users/new/page.tsx` — imports/renders `NewUserWizard` instead of `NewUserForm`
+- `apps/web/src/app/(protected)/administration/users/__tests__/user-admin-security.test.ts`, `uat-org-selectors.test.ts` — updated file-path and variable-name string literals to match the renamed component (behavior assertions unchanged)
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 154/154 (unchanged count — existing tests updated in place, no new pure-function logic requiring new tests) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Rendered HTML structural check (`/administration/users/new`) | ✓ all 5 step labels, all Account/Organization field `name` attributes, Access Template cards + role hints, all 7 module `module_scope_*` fields, required clarifying sentences all present |
+
+### Key Implementation Notes
+
+- **No backend change of any kind** — `apps/api` was not touched; `createUserWithAccessAction` in `actions.ts` was not modified; CM-35's roles/permissions are unaffected.
+- No browser automation tool is available in this environment, so step-by-step click-through verification (Scenarios A–G) could not be performed interactively. Confidence instead comes from: rendered SSR HTML confirming every field/name attribute survives into the DOM regardless of which step is CSS-hidden, a clean production build, and the fact that the actual server-side integration point (`usersApi.create`/`usersApi.setModuleAccess`) is byte-for-byte unchanged and was already live-verified end-to-end in CM-35.
+- "Collapsed by default" for Module Access (spec's minimum-acceptable fallback wording) was interpreted as a **compact single-line-per-module layout**, not an interactive expand/collapse disclosure widget — a manual collapse toggle would have required conditionally unmounting the `<select name="module_scope_*">` field, which risks silently dropping that module's scope from `FormData` on submit if left collapsed. The chosen interpretation avoids that risk entirely while still being visually denser than the pre-CM-36 per-module blocks.
+- The "Contract Manager with no Contract Management module access" warning is seeded/cleared automatically: choosing the Module Manager template + Contract Management as the target module pre-populates that module's scope to My Department (so the warning correctly does NOT fire), while reaching `CONTRACT_MANAGER` any other way (e.g. Custom template, manual role pick) without ever visiting the Module Access step correctly DOES trigger it.
+
+## CM-35 — Contract Roles, User Creation Templates, and Workflow Assignment Rules (Completed 2026-08-24)
+
+### Summary
+
+Split the previously-broad `CONTRACT_MANAGEMENT_USER` role into two purpose-built roles — `CONTRACT_STAFF` (daily work: view + assigned workflow tasks only) and `CONTRACT_MANAGER` (full operational access: create/edit contracts, all workflow tasks in scope, closeout approval, final close) — via a purely additive/idempotent seed migration, matching CM-18C's pattern exactly. `CONTRACT_MANAGEMENT_USER` is untouched and kept active as the legacy/full-access option; existing accounts on it continue to work identically (same 7 permissions, same behavior). A new narrower permission, `contracts.workflow_update`, lets staff update/comment/attach only on workflow tasks assigned to them, without granting the broader `contracts.update` (which since CM-28–CM-33 also covers payments, issues, claims, and closeout). Since the platform's `PermissionGuard` only supports AND semantics (`@Permissions('a','b')` requires both), a new additive `@AnyPermission(...)` decorator + guard OR-check was added so a route can accept either a manager or a staff permission, with the real assignment/field-level restriction enforced in `ContractWorkflowService`. Manager-only fields (`responsibleUserId`, `dueDate`, `priority`, and — as a conservative extension not explicit in the spec — `startDate`) are rejected server-side (403) for any actor without `contracts.update`, even on their own assigned task; staff may still change `status`, `completedDate`, `remarks`, and `delayReason`. The New User form's 3-option "Access Preset" was replaced with a 5-template "Access Template" (Module Staff / Module Manager / Multi-Module User / Platform Admin / Custom) that, for Contract Management, auto-selects the matching role and surfaces all 4 relevant role choices (Staff/Manager/Legacy/Viewer); other modules fall back to manual role selection since no dedicated staff/manager roles exist for them yet (explicitly out of scope for this unit). The Module Access editor keeps its existing dropdown UI (the task's own "minimum acceptable" fallback) rather than a full card/checklist redesign, with clearer text distinguishing role (actions) from module access (data visibility). Sidebar visibility required no changes — it was already permission-driven (`contracts.read` alone gates the whole Contract Management section), so `CONTRACT_STAFF`/`CONTRACT_MANAGER` automatically get the same single-module sidebar as `CONTRACT_MANAGEMENT_USER`. Contract-level transition buttons (Activate/Terminate/Close) and closeout actions also required no changes — they were already gated on `contracts.activate`/`contracts.terminate`/`contracts.close`, none of which `CONTRACT_STAFF` receives.
+
+### Changes
+
+- **Migration** `20260828000000_add_contract_staff_manager_roles` — additive/idempotent seed only (no schema change): 1 new permission (`contracts.workflow_update`, granted to `SUPER_ADMIN`/`ADMIN` explicitly), 2 new roles (`CONTRACT_STAFF`, `CONTRACT_MANAGER`) with their permission grants. `CONTRACT_MANAGEMENT_USER` untouched.
+- `apps/api/src/common/decorators/any-permission.decorator.ts` (new) — `@AnyPermission(...codes)`, OR semantics, additive metadata key
+- `apps/api/src/common/guards/permission.guard.ts` — checks the existing AND-list and the new OR-list independently; unaffected when no `@AnyPermission` is present (+5 new tests)
+- `apps/api/src/contracts/contracts.controller.ts` — `PATCH workflow/tasks/:taskId`, `POST .../comments`, `POST .../attachments` now use `@AnyPermission('contracts.update','contracts.workflow_update')` instead of `@Permissions('contracts.update')`
+- `apps/api/src/contracts/contract-workflow.service.ts` — `assertWorkflowTaskAssigned()` (manager: unrestricted; staff: must be `responsibleUserId`) and `assertNoManagerOnlyFields()` (staff may not submit `responsibleUserId`/`dueDate`/`priority`/`startDate`) applied in `updateTask`/`addComment`/`createAttachment`; `loadTaskDepartment()` extended to also return `responsibleUserId` (+13 new tests)
+- `apps/api/src/roles/roles.service.ts` / `roles.controller.ts` — `findAll()` now returns `RoleListItem` (adds `permissionCount` via Prisma `_count`); mutation endpoints unchanged (`RoleSummary`)
+- `apps/web/src/lib/roles-api.ts` — `RoleListItem` type, `list()` return type updated
+- `apps/web/src/app/(protected)/administration/roles/page.tsx` — Permissions column (count) + short capability-hint text for `CONTRACT_STAFF`/`CONTRACT_MANAGER`/`CONTRACT_MANAGEMENT_USER`/`VIEWER`/`ADMIN`/`SUPER_ADMIN`
+- `apps/web/src/app/(protected)/administration/users/_components/new-user-form.tsx` — `AccessPreset` (3 options) replaced with `AccessTemplate` (5 options); target-module selector for Module Staff/Manager; role dropdown shows capability hints; Contract Management recommended-roles callout
+- `apps/web/src/app/(protected)/contracts/_lib/get-user-permissions.ts` — new `getCurrentUserContext()` (id + permissions) alongside the existing `getUserPermissions()`
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-board.tsx` / `workflow-task-drawer.tsx` — `canUpdate` split into `canManage` (contracts.update) and `canEdit`/`canUpdateAssigned` (contracts.workflow_update + assignment match); manager-only fields disabled with an inline "(manager only)" label for staff
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` and `contracts/[id]/(workspace)/workflow/page.tsx` — pass `canManage`/`canUpdateAssigned`/`currentUserId` to `WorkflowBoard`
+
+### Verification Results (2026-08-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 154/154 (unchanged — no new pure-function frontend logic needing coverage) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1062/1062 (+18 new: 13 workflow assignment/field-scope, 5 AnyPermission guard) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 26 migrations, up to date |
+| Live API scenarios A–N | ✓ 48/48 |
+| Rendered HTML (New User form templates/roles, Roles page permission counts/hints) | ✓ all confirmed |
+
+### Key Implementation Notes
+
+- `startDate` was treated as manager-only even though the CM-35 spec's explicit field split only names `responsibleUserId`/`dueDate`/`priority` — the conservative reading, since it's a scheduling field like `dueDate` with no precedent for staff self-service. Documented in code comments.
+- `contracts.manage` was deliberately NOT granted to `CONTRACT_MANAGER`, per the spec's explicit instruction to reserve it for Admin/Super Admin.
+- Full multi-role-per-user schema and additional module-specific Staff/Manager role pairs (Factory Tasks, Incident Report, etc.) were explicitly out of scope and not built — `User.roleId` remains a single required FK, confirmed via schema audit before starting.
+- Module Access UI took the spec's own "minimum acceptable" path (existing dropdowns + clearer text) rather than a card/checklist redesign — the task explicitly permitted this fallback.
+- API dev server restarted standalone after backend changes; web dev server unaffected (route/component files only).
+
+## CM-34 — Contract Schedule Backend + Timeline Register (Completed 2026-08-23)
+
+### Summary
+
+Converted the `/contracts/schedule` placeholder into a real, read-only aggregation register — deliberately **no new database table**, the first CM-28-through-CM-34 unit to add zero schema. `ContractScheduleService` fetches candidate contracts (dept-scoped, cap 1000) then joins the 5 already-existing source tables in parallel (`ContractWorkflowTask`, `ContractIssue`, `ContractClaim`, `ContractPayment`, `ContractCloseoutRequest`), mapping every row into a common `ScheduleItem` shape via pure exported functions and merging/filtering/sorting/paginating in-memory — the same "candidate contracts then join" pattern CM-29 established for the Workflow module list, generalized from 1 joined source to 5. Overdue logic deliberately **reuses** each source module's own already-tested pure function (`computeTaskIsOverdue` from CM-32, `computeIssueIsOverdue`/`computeIssueOverdueDays` from CM-30, `computeClaimIsOverdue`/`computeClaimOverdueDays` from CM-31, `computeOverdueDays` from CM-28) rather than re-deriving a fifth definition. Two new overdue rules were needed where no precedent existed: contract dates (`CONTRACT_START` is never overdue — a historical marker, not a deadline; `CONTRACT_END`/`FORECAST_COMPLETION` are overdue only when past AND the contract isn't `CLOSED`) and closeout milestones (`CLOSEOUT_REQUEST`/`CLOSEOUT_APPROVAL`/`CLOSEOUT_CLOSED` are always `isOverdue: false` — they're point-in-time markers, and since `requestedAt` is inherently in the past the moment a request exists, naive date-vs-today logic would flag every request as overdue from day one). The "at least 2 views" requirement is satisfied without duplicating timeline-rendering code: the module list IS the chronological Timeline/List view, and the vertical grouped "Contract Timeline View" lives once in a shared `ScheduleTimelineView` component reused both by the new per-contract Schedule tab and via a "Timeline" link in each list row's Action column.
+
+### Changes
+
+- `apps/api/src/contracts/dto/contract-schedule-list-query.dto.ts` (new) — `SCHEDULE_ITEM_TYPES` (10 values) + filter DTO (search/contractId/itemType/status/departmentId/responsibleUserId/ownerUserId/dateFrom/dateTo/overdueOnly/upcomingOnly/page/pageSize)
+- `apps/api/src/contracts/contract-schedule.service.ts` (new) — `ScheduleItem`/`ScheduleSummary` types, per-source pure mappers (`contractToScheduleItems`, `workflowTaskToScheduleItem`, `issueToScheduleItem`, `claimToScheduleItem`, `paymentToScheduleItem`, `closeoutRequestToScheduleItems`), `filterScheduleItems`/`sortScheduleItems`/`computeScheduleSummary`, `ContractScheduleService.findAll()`/`findAllForContract()` + `.test.ts` (43 tests)
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/schedule` (declared before `:id`) and `GET /contracts/:id/schedule`, both gated on `contracts.read` only (no new permission code)
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractScheduleService`
+- `apps/web/src/lib/contracts-api.ts` — `ScheduleItem`/`ScheduleSummary`/`ContractScheduleListQuery` types + `listSchedule()`/`getContractSchedule()`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-schedule-csv.ts` (new) + `.test.ts` (new, 4 tests) — CSV builder, reuses `csvField` from CM-28's `contract-payment-csv.ts`
+- `apps/web/src/app/(protected)/contracts/schedule/` (new) — `page.tsx` (module register), `export/route.ts` (CSV export), `_components/schedule-{summary-cards,item-type-badge,status-badge,filter-bar,list-table,actions-bar,timeline-view}.tsx`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/schedule/page.tsx` (new) — per-contract Schedule tab, reuses `ScheduleTimelineView`
+- `apps/web/src/app/(protected)/contracts/_components/contract-workspace-tabs.tsx` — added "Schedule" tab (first in `SCROLLABLE_TABS`, `CalendarDays` icon)
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 154/154 (+4 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1044/1044 (+43 new) |
+| `pnpm build` | ✓ 8/8 tasks; 3 new routes built (`/contracts/schedule`, `/contracts/schedule/export`, `/contracts/[id]/schedule`) |
+| `pnpm db:migrate:status` | ✓ 25 migrations, unchanged — no migration added by design |
+| Live API scenarios A–L | ✓ 37/38 (1 false negative from leftover same-named test contracts across retried script runs, confirmed by inspection — not a functional defect) |
+| Rendered HTML (module page title/subtitle/8 cards/filters/export/print, per-contract tab timeline, empty state, workspace tab link) | ✓ all confirmed |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone after backend changes; web dev server unaffected (no changes needed there beyond the new route files, which Next.js picks up without restart).
+- Calendar view (3rd optional view) was **not** built — the task explicitly permitted deferring it if not simple, and a real calendar grid would have meaningfully expanded scope beyond "read-only aggregation register" for no spec-required benefit.
+- Excel export is the established CSV-fallback pattern (no `xlsx` dependency in this codebase) — same as every CM-28–CM-32 export. PDF is browser print-to-PDF only, no native PDF generation library.
+- `ScheduleStatusBadge` is a single generic badge covering all 10 item types (heuristic `TERMINAL_STATUS_WORDS` list drives green/neutral/red), not 10 dedicated badges — each source register already has its own precise status badge, reachable via the schedule item's action link.
+
+## CM-33 — Contract Closeout Approval Flow (Completed 2026-08-23)
+
+### Summary
+
+Added a controlled, auditable approval gate in front of final contract closure, per explicit business decision: workflow tasks stay approval-free (unchanged from CM-32), but a contract can now only reach CLOSED through an APPROVED `ContractCloseoutRequest`. Additive migration adds one enum and two tables: `ContractCloseoutRequest` (the request/review/approval record — `requestNo` auto-generated as `<contract reference>-CLO-<02d sequence>`, `riskSnapshot` JSONB captured at submission and refreshed at review) and `ContractCloseoutAttachment` (closeout supporting documents, reusing CM-32's validation constants — 10MB limit, 5 MIME types — via a structurally-identical-but-separate `CloseoutAttachmentStorageService` so CM-32's already-shipped storage code is never touched). The pre-existing direct `POST /contracts/:id/close` endpoint (`ContractsService.close()`) now hard-requires an APPROVED request to exist before proceeding, throwing `CONTRACT_CLOSEOUT_APPROVAL_REQUIRED` with the exact spec'd message otherwise — this is a defensive backstop; the real path is the new `POST /contracts/closeout/:requestId/close-contract`, which atomically closes the contract AND the request together in one transaction (so they can never disagree) and writes both an activity-log entry and a `SecurityAuditEvent`. Approval and closure are deliberately two separate actions (per explicit business decision: "Approval marks closeout request APPROVED... Separate 'Close Contract' action closes the contract") — live-verified the contract stays ACTIVE immediately after approval and only transitions to CLOSED on the explicit final action. Readiness checks are read-only, direct-Prisma cross-module counts (workflow/issues/claims/payments) computed fresh on every request/review, never gating request submission or approval — only surfaced as warnings, matching the explicit "do not block too aggressively" instruction. Only one active request (DRAFT/SUBMITTED/UNDER_REVIEW/APPROVED) may exist per contract at a time; a new one may only be submitted after the previous is REJECTED or CANCELLED (CANCELLED has no dedicated endpoint in this unit — see Key Implementation Notes).
+
+### Changes
+
+- **Migration** `20260827000000_add_contract_closeout_requests` — 1 new enum + 2 new tables (`contract_closeout_requests`, `contract_closeout_attachments`). Zero impact on existing contracts/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new models/enum + exports
+- `packages/config/src/env/api.ts` — `CLOSEOUT_ATTACHMENTS_DIR` optional env var (default `./storage/closeout-attachments`)
+- `apps/api/src/contracts/closeout-attachment-storage.service.ts` (new) — local-disk storage, reuses CM-32's size/type constants
+- `apps/api/src/contracts/dto/{create,update,review,reject}-contract-closeout-request.dto.ts` (new)
+- `apps/api/src/contracts/contract-closeout.service.ts` (new) — `computeCloseoutChecks`/`toRiskSnapshot` (pure, exported), full request lifecycle (create/update/review/approve/reject/closeContract) + attachments, + `.test.ts` (38 tests)
+- `apps/api/src/contracts/contracts.service.ts` — `close()` gated on an APPROVED closeout request existing; `.test.ts` updated (default-approved mock + 1 new gate test)
+- `apps/api/src/contracts/contracts.controller.ts` — 11 new routes under `:id/closeout/*` and `closeout/:requestId/*`
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractCloseoutService`, `CloseoutAttachmentStorageService`
+- `apps/web/src/lib/contracts-api.ts` — closeout types + `getCloseoutChecks()`/`listCloseoutRequests()`/`listCloseoutAttachments()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — 7 new closeout Server Actions (request/review/approve/reject/close-contract/upload)
+- `apps/web/src/app/(protected)/contracts/closeout/[requestId]/attachments/[attachmentId]/download/route.ts` (new) — download proxy, mirrors CM-32's pattern
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — `getClosureAction()`, `computeCloseoutWarnings()` (+11 new tests)
+- `apps/web/src/app/(protected)/contracts/_components/contract-transitions.tsx` — direct "Close Contract" button removed
+- `apps/web/src/app/(protected)/contracts/_components/contract-closure-action.tsx` (new) — closeout-state-aware Available Actions slot
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/page.tsx` — fetches latest closeout request, renders `ContractClosureAction` alongside `ContractTransitions`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/closeout/page.tsx` + `_components/*` (5 new) — rewritten from static placeholder to the full readiness/warnings/request/review/attachments workflow
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 150/150 (+11 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1001/1001 (+38 new, +1 changed) |
+| `pnpm build` | ✓ 8/8 tasks; all new routes built including the download proxy |
+| `pnpm db:migrate:status` | ✓ 25 migrations, up to date |
+| Live scenarios A–L | ✓ 44/44 on the first run |
+| Rendered HTML (Overview across DRAFT/pending/approved/closed states, Closeout tab across all states) | ✓ all confirmed |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone after the service/controller/module changes — web dev server unaffected.
+- **Deferred**: a dedicated `CANCELLED` transition endpoint — the task's own recommended endpoint list never lists one (only review/approve/reject/close-contract), so it wasn't added; `CANCELLED` remains a valid enum value but is only reachable by direct DB action for now. Also deferred: `PATCH /contracts/closeout/:requestId` exists but is intentionally restricted to DRAFT/SUBMITTED requests only (once review starts, remarks are considered part of the audit trail and shouldn't change); the `submit` endpoint from the spec's optional list #5 was skipped entirely since `POST .../request` creates SUBMITTED directly, exactly as the spec's own text permits ("If POST request creates submitted directly, this can be skipped").
+- Scenario D (a user with `contracts.read`/`contracts.update` but explicitly *not* `contracts.close` attempting to approve/reject) was verified via the `ContractCloseoutService` unit tests (`ForbiddenException` path), not live — no seeded UAT user in this environment has that exact permission combination. Live testing instead confirmed the equivalent department-scope block (a `contracts.close` actor in the wrong department still gets 403), which exercises the same guard clause.
+- `RESOLVED` issues and `REJECTED`/`ON_HOLD` workflow tasks are treated as still-open for closeout readiness purposes — a deliberately conservative choice the spec explicitly permitted either way, documented in code and in `ui-registry.md`.
+
+## CM-32 — Workflow Operations Upgrade: Attachments, Comments, My Tasks, Delay Tracking, Kanban UI (Completed 2026-08-23)
+
+### Summary
+
+Upgraded Contract Workflow & Team Tasks (CM-29) from basic status tracking into a daily work-control system, per explicit business decisions: no approval flow added (team members update status directly; manager approval deferred to a future closeout unit), attachments added now, real-time means 20-second polling + instant refresh (no WebSocket/SSE). Additive migration adds `priority` (`ContractWorkflowTaskPriority` enum, default MEDIUM), `delayReason` (text), and `lastActivityAt` (backfilled from each task's existing `updatedAt`) to `contract_workflow_tasks`, plus two new tables: `ContractWorkflowTaskAttachment` (metadata + disk path only, never binary in the DB) and `ContractWorkflowTaskComment`. New `WorkflowAttachmentStorageService` writes files to a local, server-controlled folder (`WORKFLOW_ATTACHMENTS_DIR` env var, default `./storage/workflow-attachments`) using a random UUID filename per file (the original filename is never used on disk, eliminating path-traversal/overwrite risk) — no MinIO/S3 exists anywhere in this project (confirmed by audit), so this is intentionally a swappable local abstraction. Upload validation: exactly the 5 spec'd MIME types (PDF, PNG, JPEG, XLSX, DOCX), 10MB hard limit enforced via Multer's own `limits.fileSize` (bounds memory before any buffering completes) plus a redundant service-level check; both produce clean `{code, message}` errors via NestJS's automatic `MulterError` → `PayloadTooLargeException` translation and a custom `fileFilter` callback. All new comment/attachment/download endpoints re-verify department access through the parent task → contract chain on every call — live-verified that a dept-scoped user is blocked (403) from downloading, listing, commenting on, or updating another department's task, while an ALL_DEPARTMENTS actor is unaffected. Per-task Kanban cards replace the old compact list; a full-height task drawer (not a small modal, deliberately — it stays open after any save/comment/upload so the user can keep working, closed only via its own X button) hosts the update form, comments thread, and attachment list/upload/download. Two intentional, spec-directed behavior changes from CM-29: (1) `completedDate` auto-sets to today when a task reaches COMPLETED without one, instead of the old hard-reject; (2) a NEW per-task overdue definition (`computeTaskIsOverdue`, excludes only COMPLETED/APPROVED) drives the Kanban badge and is deliberately kept separate from the pre-existing contract-level `computeWorkflowProgress` overdue count (excludes COMPLETED/REJECTED, unchanged for backward compatibility) — documented in `ui-registry.md` so the two are never accidentally merged.
+
+### Changes
+
+- **Migration** `20260826000000_add_contract_workflow_task_upgrades` — 1 new enum + 3 additive columns on `contract_workflow_tasks` (with a data backfill, not just a schema change) + 2 new tables (`contract_workflow_task_attachments`, `contract_workflow_task_comments`). Zero impact on existing tasks/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new model/enum + exports
+- `packages/config/src/env/api.ts` — `WORKFLOW_ATTACHMENTS_DIR` optional env var (default `./storage/workflow-attachments`)
+- `apps/api/src/contracts/workflow-attachment-storage.service.ts` (new) — local-disk storage abstraction, 10MB limit, 5-type allowlist
+- `apps/api/src/contracts/dto/create-contract-workflow-task-comment.dto.ts`, `get-contract-workflow-query.dto.ts` (new); `update-contract-workflow-task.dto.ts` (+priority/delayReason), `contract-workflow-list-query.dto.ts` (+myTasksOnly/taskStatus/responsibleUserId)
+- `apps/api/src/contracts/contract-workflow.service.ts` — `computeTaskIsOverdue`, `resolveWorkflowTaskCompletedDate`, `withTaskDerivedFields`, `myOpenTasks`/`myTasksOnly`/`taskStatus`/`responsibleUserId` filtering in `findAll`, `myTasksOnly` support in `getWorkflowForContract`, `listComments`/`addComment`/`listAttachments`/`createAttachment`/`getAttachmentForDownload` + `.test.ts` (72 tests, +37 new/changed)
+- `apps/api/src/contracts/contracts.controller.ts` — 5 new routes: `GET/POST workflow/tasks/:taskId/comments`, `GET/POST workflow/tasks/:taskId/attachments`, `GET workflow/tasks/:taskId/attachments/:attachmentId/download` (via `FileInterceptor` + `StreamableFile`)
+- `apps/api/src/contracts/contracts.module.ts` — registers `WorkflowAttachmentStorageService`
+- `apps/web/src/lib/contracts-api.ts` — extended `ContractWorkflowTask` (priority/delayReason/lastActivityAt/attachmentsCount/commentsCount/isOverdue), new `ContractWorkflowTaskComment`/`ContractWorkflowTaskAttachment` types, `myOpenTasks` in summary, `listWorkflowTaskComments()`/`listWorkflowTaskAttachments()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — extended `updateWorkflowTaskAction` (+priority/delayReason), new `addWorkflowTaskCommentAction`, `uploadWorkflowTaskAttachmentAction` (multipart via a new `actionFetchMultipart` helper)
+- `apps/web/src/app/(protected)/contracts/workflow/tasks/[taskId]/{comments,attachments}/route.ts` (new) — client-fetchable JSON proxies for the task drawer (a `'use client'` component that cannot call `contractsApi` directly)
+- `apps/web/src/app/(protected)/contracts/workflow/tasks/[taskId]/attachments/[attachmentId]/download/route.ts` (new) — streams the file through with forwarded headers
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-priority-badge.tsx`, `workflow-task-card.tsx`, `workflow-task-drawer.tsx`, `workflow-polling-refresher.tsx` (new); `workflow-board.tsx` (rewritten for Kanban cards + drawer), `workflow-summary-cards.tsx` (+My Open Tasks, relabeled per spec), `workflow-filter-bar.tsx` (+Task Status/Responsible Person/My Tasks only), `workflow-contract-table.tsx` (columns aligned to spec); `workflow-update-task-modal.tsx` deleted (superseded by the drawer)
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx`, `apps/web/src/app/(protected)/contracts/[id]/(workspace)/workflow/page.tsx` — rewritten for the new filters/cards/board/polling/My-Tasks-toggle
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 139/139 (unchanged — this unit's new logic is server-side/component-level, not covered by new web unit tests) |
+| `pnpm --filter @recafco/api test --run` | ✓ 962/962 (+72 workflow service tests, was 68 in CM-29/CM-30/CM-31 sessions, +37 net new/changed for CM-32) |
+| `pnpm build` | ✓ 8/8 tasks; all new routes built including the 3 proxy/download route handlers |
+| `pnpm db:migrate:status` | ✓ 24 migrations, up to date |
+| Live scenarios A–L | ✓ 36/38 on first pass; the 2 "failures" (Scenario I) were the same pre-existing "null-department visible to everyone" test artifact seen in every prior unit this session — re-verified 10/10 against a contract with an explicit department, confirming real cross-department blocking on download/list-comments/list-attachments/update/add-comment, with ALL_DEPARTMENTS access unaffected |
+| Proxy routes (what the browser's task drawer actually calls) | ✓ comments/attachments JSON proxies and the download stream all verified end-to-end with correct `Content-Type`/`Content-Disposition` headers |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone after the service/controller/module changes — web dev server unaffected.
+- No manager-approval workflow was added anywhere in this unit (explicit business decision) — `updateTask()` still allows direct status changes by any `contracts.update` actor, unchanged from CM-29's permission model.
+- Chose to keep the task drawer open after Save/Comment/Upload (unlike the small close-on-success modals used in CM-28/29/30/31's Payments/Issues/Claims) since it's a richer, session-oriented panel; `openTaskId` (not a task snapshot) drives the drawer so it always reflects the latest `tasks` prop after a `router.refresh()`.
+- Deferred: `DELETE` attachment endpoint (task spec explicitly permits reporting this as future work when no existing soft-delete pattern exists in the schema to reuse — none does, checked across all prior units); polling interval timing itself could only be verified by code review + one manual two-call diff (no way to drive two independent browser sessions in this environment), consistent with this session's established "no browser automation tool" limitation noted since CM-26.
+
+## CM-31 — Contract Claim Log Backend + Filter/Print/Export (Completed 2026-08-23)
+
+### Summary
+
+Converted the module-level `/contracts/claims` placeholder into a real Claim Register spanning all contracts (distinct from the per-contract `/contracts/[id]/claims` Claims Registry tab, which now reads the same backend filtered to one contract) — same architecture as CM-28 (Payments), CM-29 (Workflow), and CM-30 (Issues). New additive `ContractClaim` model with `ContractClaimType` (7 values) and `ContractClaimStatus` (10 values) enums, `NUMERIC(18,3)` value columns. No hard delete — closing/settling goes through `status = CLOSED`/`SETTLED` (dedicated `PATCH /claims/:claimId/close` accepting an optional `{status: 'CLOSED'|'SETTLED'}` body, defaulting to CLOSED). `outstandingValue` (`submittedValue - approvedValue`) and `overdueDays`/`isOverdue` are never stored — always computed fresh in the service. Two distinct status groupings are deliberately kept separate: `OVERDUE_EXCLUDED_STATUSES` (SETTLED/CLOSED/CANCELLED/REJECTED — APPROVED is NOT excluded, since an approved claim can still be overdue if the follow-up action like payment hasn't happened) versus `FINAL_STATUSES` for the Open Claims summary count (APPROVED/REJECTED/SETTLED/CLOSED/CANCELLED — an approved claim is no longer "open" even if still overdue). This is an intentional, spec-directed distinction, not an inconsistency. Summary totals (Open Claims, Submitted Value, Approved Value, Outstanding Value, Overdue Claims, Closed/Settled Claims) are computed over the full filtered result set. Reuses `contracts.read`/`contracts.update` — no new RBAC permissions. Department scope enforced identically to CM-28/29/30 (AND-combined scope filter + explicit filter, verified live in both directions). Cross-field validation added per spec: `approvedValue` cannot exceed `submittedValue` (rejected, not clamped), `dueDate` cannot be before `claimDate`, EOT days must be non-negative integers, `responsibleUserId` validated against a real user. All 40 live verification checks passed on the first run (no bugs found, unlike CM-30 where two were caught late) — attributed to directly reusing CM-30's now-corrected `raisedDate`/`responsibleUserId` patterns from the start rather than re-deriving them.
+
+### Changes
+
+- **Migration** `20260825000000_add_contract_claims` — 2 new enums + `contract_claims` table (FKs to `contracts` and `users`, `UNIQUE(contract_id, claim_no)` allowing multiple NULLs, 3 indexes). Zero impact on existing contracts/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new model/enums + exports
+- `apps/api/src/contracts/dto/{create,update}-contract-claim.dto.ts`, `close-contract-claim.dto.ts`, `contract-claim-list-query.dto.ts` (new)
+- `apps/api/src/contracts/contract-claims.service.ts` (new) + `.test.ts` (new, 57 tests) — list/create/update/close-or-settle, derived outstanding/overdue fields, summary computation
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/claims` (declared before `:id`), `POST /contracts/:id/claims`, `PATCH /contracts/claims/:claimId`, `PATCH /contracts/claims/:claimId/close`
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractClaimsService`
+- `apps/web/src/lib/contracts-api.ts` — claim types + `listClaims()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `createClaimAction`, `updateClaimAction`, `closeClaimAction` (accepts a `targetStatus` of `CLOSED` or `SETTLED`)
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — `CONTRACT_CLAIM_TYPE_OPTIONS`, `CONTRACT_CLAIM_STATUS_OPTIONS` (client-safe constants, same reasoning as `CONTRACT_ISSUE_CATEGORIES` in CM-30)
+- `apps/web/src/app/(protected)/contracts/_lib/contract-claim-csv.ts` (new) + `.test.ts` (new, 4 tests) — reuses `csvField` from `contract-payment-csv.ts`
+- `apps/web/src/app/(protected)/contracts/claims/page.tsx` — rewritten from placeholder to full register (title "Claim Log", 6 summary cards, filter bar, table, pagination)
+- `apps/web/src/app/(protected)/contracts/claims/_components/*` (new) — summary cards, status/type badges, filter bar, register table (`fixedContractId`/`compact` props for tab reuse, Settle + Close as two distinct actions), Add/Edit modal, actions bar
+- `apps/web/src/app/(protected)/contracts/claims/export/route.ts` (new) — filtered CSV download, mirrors `issues/export/route.ts`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/claims/page.tsx` — rewritten to show real per-contract data via the same endpoint with `contractId` filter
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 139/139 tests (+4 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 925/925 tests (+57 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/claims`, `/contracts/claims/export`, `/contracts/[id]/claims` built cleanly |
+| `pnpm db:migrate:status` | ✓ 23 migrations, up to date |
+| Live scenarios A–J | ✓ 40/40 — all passed on the first run |
+| Rendered HTML: module page, per-contract tab, dept-scoped user, export CSV content match | ✓ all confirmed via direct fetch |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone after adding the new service/controller routes/module wiring — web dev server unaffected.
+- Applied the CM-30 client/server-boundary lesson proactively this time: `CONTRACT_CLAIM_TYPE_OPTIONS`/`CONTRACT_CLAIM_STATUS_OPTIONS` were placed directly in `contract-ui-helpers.ts` from the start rather than in `contracts-api.ts`, avoiding the Turbopack build failure entirely instead of discovering and fixing it after the fact.
+- Same visual/interactive-modal caveat as CM-28/29/30: no browser automation tool available, so the Add/Edit/Close/Settle modal was verified via the underlying REST endpoints directly (live script, 40/40 passing) plus rendered-HTML fetches of both the module page and the per-contract tab.
+
+## CM-30 — Contract Issue Log Backend + Filter/Print/Export (Completed 2026-08-23)
+
+### Summary
+
+Converted the module-level `/contracts/issues` placeholder into a real Issue Register spanning all contracts (distinct from the per-contract `/contracts/[id]/issues` workspace tab, which now reads the same backend filtered to one contract) — same architecture as CM-28 (Payments) and CM-29 (Workflow). New additive `ContractIssue` model with `ContractIssuePriority` (LOW/MEDIUM/HIGH/CRITICAL) and `ContractIssueStatus` (OPEN/IN_PROGRESS/WAITING_RESPONSE/RESOLVED/CLOSED/CANCELLED) enums; `category` is a plain string validated against a controlled 9-item list rather than a DB enum, for flexibility. No hard delete — closing goes through `status = CLOSED` (dedicated `PATCH /issues/:issueId/close` action, or via the general update endpoint). `overdueDays`/`isOverdue` are never stored — always computed fresh in the service from `dueDate` vs. today, only when status isn't CLOSED/RESOLVED/CANCELLED. Summary totals (Total/Open/In Progress/High+Critical/Overdue/Closed) are computed over the full filtered result set, not just the current page — same dual paginated+summary query pattern as CM-28/29. Reuses `contracts.read`/`contracts.update` — no new RBAC permissions. Department scope enforced identically to CM-28/29 (AND-combined scope filter + explicit filter, verified live in both directions). Two real backend bugs were found and fixed during live verification before this report: (1) `create()` originally defaulted `raisedDate` to today when omitted, which made it impossible to log an issue with only a past `dueDate` (exactly what Scenario A requires) — fixed by leaving `raisedDate` unset unless the caller provides it; (2) `create()` never validated `responsibleUserId` against a real user (unlike `update()`, which already did), letting a bad UUID crash through to the database's foreign-key constraint as a raw 500 — fixed by copying the same validation block into `create()`.
+
+### Changes
+
+- **Migration** `20260824000000_add_contract_issues` — 2 new enums + `contract_issues` table (FKs to `contracts` and `users`, `UNIQUE(contract_id, issue_no)` allowing multiple NULLs, 3 indexes). Zero impact on existing contracts/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new model/enums + exports
+- `apps/api/src/contracts/dto/{create,update}-contract-issue.dto.ts`, `contract-issue-list-query.dto.ts` (new)
+- `apps/api/src/contracts/contract-issues.service.ts` (new) + `.test.ts` (new, 49 tests) — list/create/update/close, derived overdue fields, summary computation
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/issues` (declared before `:id`), `POST /contracts/:id/issues`, `PATCH /contracts/issues/:issueId`, `PATCH /contracts/issues/:issueId/close`
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractIssuesService`
+- `apps/web/src/lib/contracts-api.ts` — issue types + `listIssues()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `createIssueAction`, `updateIssueAction`, `closeIssueAction`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — `CONTRACT_ISSUE_CATEGORIES` (client-safe constant; see Key Implementation Notes for why it lives here and not in `contracts-api.ts`)
+- `apps/web/src/app/(protected)/contracts/_lib/contract-issue-csv.ts` (new) + `.test.ts` (new, 4 tests) — reuses `csvField` from `contract-payment-csv.ts` rather than duplicating it
+- `apps/web/src/app/(protected)/contracts/issues/page.tsx` — rewritten from placeholder to full register (title "Contract Issue Log", 6 summary cards, filter bar, table, pagination)
+- `apps/web/src/app/(protected)/contracts/issues/_components/*` (new) — summary cards, status/priority badges, filter bar, register table (`fixedContractId`/`compact` props for tab reuse), Add/Edit modal, actions bar
+- `apps/web/src/app/(protected)/contracts/issues/export/route.ts` (new) — filtered CSV download, mirrors `payments/export/route.ts`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/issues/page.tsx` — rewritten to show real per-contract data via the same endpoint with `contractId` filter
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 135/135 tests (+4 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 868/868 tests (+47 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/issues`, `/contracts/issues/export`, `/contracts/[id]/issues` built cleanly |
+| `pnpm db:migrate:status` | ✓ 22 migrations, up to date |
+| Live scenarios A–J | ✓ 35/36 (one "failure" was a stale test-script assertion for the old, intentionally-removed `raisedDate` auto-default behavior, not a product bug) |
+| Rendered HTML: module page, per-contract tab, dept-scoped user | ✓ all confirmed via direct fetch — correct title/subtitle/summary/data, and other-department issue correctly absent from the dept-scoped user's page |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone twice in this unit (once for initial routes, once after the two bugfixes) — web dev server unaffected both times.
+- Reconfirmed a Turbopack client/server-boundary gotcha first seen conceptually in earlier units: `contracts-api.ts` imports `next/headers` at module scope, so any *runtime value* (not type) exported from it and imported into a `'use client'` component pulls the whole server-tainted module into the client bundle and fails the build. `CONTRACT_ISSUE_CATEGORIES` had to live in the dependency-free `contract-ui-helpers.ts` instead, even though `contracts-api.ts` is otherwise the natural home for API-shaped constants. Type-only imports are unaffected.
+- Same visual/interactive-modal caveat as CM-28/29: no browser automation tool available, so the Add/Edit/Close modal was verified via the underlying REST endpoints directly (live script, 35/36 passing) plus rendered-HTML fetches of both the module page and the per-contract tab, not a live click-through.
+
+## CM-29 — Workflow & Team Tasks Register + Real-Time Task Updates (Completed 2026-08-23)
+
+### Summary
+
+Converted the static "Not started" Workflow & Team Tasks tab into a real backend-driven system, plus a new module-level `/contracts/workflow` register (same pattern as CM-28's Payments register). New additive `ContractWorkflowTask` model with `ContractWorkflowTeam` (TECHNICAL/PRODUCTION/ERECTION/QS_COMMERCIAL) and `ContractWorkflowTaskStatus` (8 states) enums. Tasks are never pre-populated by the migration — they're lazily generated the first time a contract's workflow is viewed (`GET /contracts/:id/workflow`), from pure, fully-unit-tested scope-decision rules in `contract-workflow-templates.ts` (Technical needs Shop Drawing or Production Drawings; Production needs Production; Erection needs Delivery or Erection but never when Ex-Factory is set; QS/Commercial needs payment terms or a contract value, unless Not Applicable is set) — idempotent via a `(contractId, taskKey)` unique constraint, so re-viewing never duplicates. No dates or responsible persons are ever invented. A conservative additive-only `POST /contracts/:id/workflow/regenerate` endpoint can add newly-applicable default tasks (e.g. after a scope change) but structurally cannot overwrite or remove anything that already exists. Reuses `contracts.read`/`contracts.update` — no new RBAC permissions. Department scope enforced identically to CM-28 (AND-combined scope + explicit filter, verified live both for a list-visibility case and a direct-access-blocked case). "Real-time" for this unit means immediate save via server action + `router.refresh()` — no WebSocket/SSE (none exists in this project); true live push is a future enhancement.
+
+### Changes
+
+- **Migration** `20260823000000_add_contract_workflow_tasks` — 2 new enums + `contract_workflow_tasks` table (FKs to `contracts` and `users`, `UNIQUE(contract_id, task_key)`, 3 indexes). Zero impact on existing contracts/rows.
+- `packages/database/prisma/schema.prisma`, `packages/database/src/index.ts` — new model/enums + exports
+- `apps/api/src/contracts/dto/update-contract-workflow-task.dto.ts`, `contract-workflow-list-query.dto.ts` (new)
+- `apps/api/src/contracts/contract-workflow-templates.ts` (new) + `.test.ts` (new, 22 tests) — pure scope-decision logic
+- `apps/api/src/contracts/contract-workflow.service.ts` (new) + `.test.ts` (new, 35 tests) — list/get-or-init/regenerate/update
+- `apps/api/src/contracts/contracts.controller.ts` — `GET /contracts/workflow` (declared before `:id`), `GET /contracts/:id/workflow`, `POST /contracts/:id/workflow/regenerate`, `PATCH /contracts/workflow/tasks/:taskId`
+- `apps/api/src/contracts/contracts.module.ts` — registers `ContractWorkflowService`
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — "Workflow & Team Tasks" added between Schedule and Payments (`/contracts/workflow`)
+- `apps/web/src/lib/contracts-api.ts` — workflow types + `listWorkflow()`/`getWorkflow()`
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `updateWorkflowTaskAction`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` — new `formatScopeSummary()` helper (+4 tests)
+- `apps/web/src/app/(protected)/contracts/workflow/page.tsx` (new) — module-level register: summary cards, filters, contract table, selected-contract header, team task board
+- `apps/web/src/app/(protected)/contracts/workflow/_components/*` (new) — summary cards, filter bar, contract table, contract header, board, task/contract status badges, update-task modal
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/workflow/page.tsx` — rewritten to use the same backend/board, no more static lanes
+
+### Verification Results (2026-08-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 131/131 tests (+4 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 821/821 tests (+57 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/workflow` built cleanly |
+| `pnpm db:migrate:status` | ✓ 21 migrations, up to date |
+| Live scenarios A–G | ✓ 36/36 (one initial "failure" was a test-script artifact — a null-department contract is intentionally visible to everyone under the existing, already-audited `DepartmentAccessService` rules; re-verified Scenario F correctly blocks access to a contract with an explicit *different* department) |
+
+### Key Implementation Notes
+
+- API dev server restarted standalone after adding the new service/controller routes/module wiring — web dev server unaffected.
+- Same visual/interactive-modal caveat as CM-28: no browser automation tool available, so the Update Task modal was verified via the underlying REST endpoints directly plus careful code review of the `useActionState` + `form="workflow-task-form"` wiring, not a live click-through.
 
 ## CM-28 — Contract Payments Register Backend + Filter/Print/Export (Completed 2026-08-20)
 

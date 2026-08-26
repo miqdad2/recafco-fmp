@@ -228,6 +228,20 @@ model User {
   contractComments     ContractComment[] @relation("ContractCommentAuthor")
   contractPaymentsCreated ContractPayment[] @relation("ContractPaymentCreatedBy")
   contractPaymentsUpdated ContractPayment[] @relation("ContractPaymentUpdatedBy")
+  contractWorkflowTasksResponsible ContractWorkflowTask[] @relation("ContractWorkflowTaskResponsible")
+  contractWorkflowTasksCreated     ContractWorkflowTask[] @relation("ContractWorkflowTaskCreatedBy")
+  contractWorkflowTasksUpdated     ContractWorkflowTask[] @relation("ContractWorkflowTaskUpdatedBy")
+  contractWorkflowTaskAttachmentsUploaded ContractWorkflowTaskAttachment[] @relation("ContractWorkflowTaskAttachmentUploadedBy")
+  contractWorkflowTaskCommentsCreated     ContractWorkflowTaskComment[]    @relation("ContractWorkflowTaskCommentCreatedBy")
+  contractIssuesResponsible ContractIssue[] @relation("ContractIssueResponsible")
+  contractIssuesCreated     ContractIssue[] @relation("ContractIssueCreatedBy")
+  contractIssuesUpdated     ContractIssue[] @relation("ContractIssueUpdatedBy")
+  contractClaimsResponsible ContractClaim[] @relation("ContractClaimResponsible")
+  contractClaimsCreated     ContractClaim[] @relation("ContractClaimCreatedBy")
+  contractClaimsUpdated     ContractClaim[] @relation("ContractClaimUpdatedBy")
+  contractCloseoutRequestsRequested ContractCloseoutRequest[] @relation("ContractCloseoutRequestRequestedBy")
+  contractCloseoutRequestsReviewed  ContractCloseoutRequest[] @relation("ContractCloseoutRequestReviewedBy")
+  contractCloseoutAttachmentsUploaded ContractCloseoutAttachment[] @relation("ContractCloseoutAttachmentUploadedBy")
 
   productionOrdersCreated   ProductionOrder[] @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[] @relation("ProdOrderSupervisor")
@@ -1057,10 +1071,14 @@ model Contract {
   plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
   location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  comments   ContractComment[]
-  activities ContractActivity[]
-  boqItems   ContractBoqItem[]
-  payments   ContractPayment[]
+  comments      ContractComment[]
+  activities    ContractActivity[]
+  boqItems      ContractBoqItem[]
+  payments      ContractPayment[]
+  workflowTasks ContractWorkflowTask[]
+  issues        ContractIssue[]
+  claims        ContractClaim[]
+  closeoutRequests ContractCloseoutRequest[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1166,6 +1184,319 @@ model ContractPayment {
   @@index([status])
   @@index([dueDate, status])
   @@map("contract_payments")
+}
+
+enum ContractWorkflowTeam {
+  TECHNICAL
+  PRODUCTION
+  ERECTION
+  QS_COMMERCIAL
+
+  @@map("contract_workflow_team")
+}
+
+enum ContractWorkflowTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  COMPLETED
+  ON_HOLD
+
+  @@map("contract_workflow_task_status")
+}
+
+enum ContractWorkflowTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("contract_workflow_task_priority")
+}
+
+// Module-level workflow register (CM-29) — one row per team task per contract.
+// taskKey is a stable per-template identifier (e.g. "technical_drawing_received")
+// so lazy generation from scopeOfWork is idempotent: generation only inserts
+// taskKeys that don't already exist for the contract, never overwrites.
+model ContractWorkflowTask {
+  id                 String                     @id @default(uuid()) @db.Uuid
+  contractId         String                     @map("contract_id") @db.Uuid
+  team               ContractWorkflowTeam
+  taskKey            String                     @map("task_key") @db.VarChar(100)
+  taskName           String                     @map("task_name") @db.VarChar(200)
+  sortOrder          Int                        @map("sort_order")
+  status             ContractWorkflowTaskStatus @default(NOT_STARTED)
+  priority           ContractWorkflowTaskPriority @default(MEDIUM)
+  delayReason        String?                    @map("delay_reason") @db.Text
+  responsibleUserId  String?                    @map("responsible_user_id") @db.Uuid
+  startDate          DateTime?                  @map("start_date") @db.Date
+  dueDate            DateTime?                  @map("due_date") @db.Date
+  completedDate      DateTime?                  @map("completed_date") @db.Date
+  remarks            String?                    @db.Text
+  // CM-46B — optional Contract Staff task-intake fields (Receipt Details /
+  // Drawing-Task Information / Follow-up notes), never core workflow state.
+  // See contract-workflow.service.ts's sanitizeWorkflowTaskFormData().
+  formData           Json?                      @map("form_data") @db.JsonB
+  lastActivityAt     DateTime                   @default(now()) @map("last_activity_at") @db.Timestamptz(3)
+  createdByUserId    String                     @map("created_by_user_id") @db.Uuid
+  updatedByUserId    String?                    @map("updated_by_user_id") @db.Uuid
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  responsibleUser User?    @relation("ContractWorkflowTaskResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("ContractWorkflowTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?    @relation("ContractWorkflowTaskUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments     ContractWorkflowTaskAttachment[]
+  comments        ContractWorkflowTaskComment[]
+
+  @@unique([contractId, taskKey])
+  @@index([contractId, sortOrder])
+  @@index([status])
+  @@index([dueDate, status])
+  @@map("contract_workflow_tasks")
+}
+
+// CM-32 — file attachments for a workflow task. Binary data is never stored
+// in the database, only metadata + a storage-relative path resolved by
+// WorkflowAttachmentStorageService. No hard delete in this unit (see
+// contract-workflow.service.ts header comment for the deferred-delete note).
+model ContractWorkflowTaskAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  taskId           String   @map("task_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task           ContractWorkflowTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  uploadedByUser User                 @relation("ContractWorkflowTaskAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt(sort: Desc)])
+  @@map("contract_workflow_task_attachments")
+}
+
+// CM-32 — free-text progress comments/activity log for a workflow task.
+model ContractWorkflowTaskComment {
+  id              String   @id @default(uuid()) @db.Uuid
+  taskId          String   @map("task_id") @db.Uuid
+  comment         String   @db.Text
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  task          ContractWorkflowTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  createdByUser User                 @relation("ContractWorkflowTaskCommentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt(sort: Desc)])
+  @@map("contract_workflow_task_comments")
+}
+
+enum ContractIssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("contract_issue_priority")
+}
+
+enum ContractIssueStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_RESPONSE
+  RESOLVED
+  CLOSED
+  CANCELLED
+
+  @@map("contract_issue_status")
+}
+
+// Module-level issue register (CM-30) — tracks issues across ALL contracts,
+// distinct from any single contract's own workspace view. issueNo is optional
+// but unique per contract when provided (same pattern as ContractPayment.paymentNo).
+// category is a plain string (not an enum) for flexibility, validated at the
+// API layer against a controlled list rather than a DB constraint.
+// No hard delete: closing goes through status = CLOSED via update.
+model ContractIssue {
+  id                String                @id @default(uuid()) @db.Uuid
+  contractId        String                @map("contract_id") @db.Uuid
+  issueNo           String?               @map("issue_no") @db.VarChar(50)
+  title             String                @db.VarChar(300)
+  description       String?               @db.Text
+  category          String?               @db.VarChar(50)
+  priority          ContractIssuePriority @default(MEDIUM)
+  status            ContractIssueStatus   @default(OPEN)
+  responsibleUserId String?               @map("responsible_user_id") @db.Uuid
+  raisedDate        DateTime?             @map("raised_date") @db.Date
+  dueDate           DateTime?             @map("due_date") @db.Date
+  closedDate        DateTime?             @map("closed_date") @db.Date
+  resolution        String?               @db.Text
+  remarks           String?               @db.Text
+  createdByUserId   String                @map("created_by_user_id") @db.Uuid
+  updatedByUserId   String?               @map("updated_by_user_id") @db.Uuid
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  responsibleUser User?    @relation("ContractIssueResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("ContractIssueCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?    @relation("ContractIssueUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, issueNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([dueDate, status])
+  @@map("contract_issues")
+}
+
+enum ContractClaimType {
+  VARIATION
+  EXTENSION_OF_TIME
+  DELAY
+  PAYMENT
+  DAMAGE
+  SCOPE_CHANGE
+  OTHER
+
+  @@map("contract_claim_type")
+}
+
+enum ContractClaimStatus {
+  DRAFT
+  UNDER_REVIEW
+  SUBMITTED
+  UNDER_NEGOTIATION
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  SETTLED
+  CLOSED
+  CANCELLED
+
+  @@map("contract_claim_status")
+}
+
+// Module-level claim register (CM-31) — tracks claims across ALL contracts,
+// distinct from any single contract's own workspace view. claimNo is optional
+// but unique per contract when provided (same pattern as ContractPayment.paymentNo
+// and ContractIssue.issueNo). outstandingValue is never stored — always
+// computed in the service as submittedValue - approvedValue. No hard delete:
+// closing/settling goes through status = CLOSED/SETTLED via update.
+model ContractClaim {
+  id                String              @id @default(uuid()) @db.Uuid
+  contractId        String              @map("contract_id") @db.Uuid
+  claimNo           String?             @map("claim_no") @db.VarChar(50)
+  claimTitle        String              @map("claim_title") @db.VarChar(300)
+  claimType         ContractClaimType   @default(OTHER) @map("claim_type")
+  eventDate         DateTime?           @map("event_date") @db.Date
+  claimDate         DateTime?           @map("claim_date") @db.Date
+  status            ContractClaimStatus @default(DRAFT)
+  submittedValue    Decimal?            @map("submitted_value") @db.Decimal(18, 3)
+  approvedValue     Decimal?            @map("approved_value") @db.Decimal(18, 3)
+  eotClaimedDays    Int?                @map("eot_claimed_days")
+  eotApprovedDays   Int?                @map("eot_approved_days")
+  responsibleUserId String?             @map("responsible_user_id") @db.Uuid
+  nextAction        String?             @map("next_action") @db.VarChar(500)
+  dueDate           DateTime?           @map("due_date") @db.Date
+  closedDate        DateTime?           @map("closed_date") @db.Date
+  remarks           String?             @db.Text
+  createdByUserId   String              @map("created_by_user_id") @db.Uuid
+  updatedByUserId   String?             @map("updated_by_user_id") @db.Uuid
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  responsibleUser User?    @relation("ContractClaimResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("ContractClaimCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?    @relation("ContractClaimUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, claimNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([dueDate, status])
+  @@map("contract_claims")
+}
+
+enum ContractCloseoutRequestStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CLOSED
+  CANCELLED
+
+  @@map("contract_closeout_request_status")
+}
+
+// Module-level closeout approval flow (CM-33) — a contract can only be
+// finally CLOSED through an APPROVED request here; the pre-existing direct
+// "Close Contract" action (ContractsService.close) now requires one to exist
+// before it will proceed. requestNo is auto-generated (never user-supplied)
+// as "<contract reference number>-CLO-<02d sequence>". riskSnapshot is a
+// point-in-time JSONB copy of the closeout readiness checks, captured at
+// submission and refreshed at review — never recomputed retroactively, so a
+// historical request always shows exactly what conditions looked like when
+// it was actioned. No hard delete: rejection/cancellation are status values,
+// not row removal.
+model ContractCloseoutRequest {
+  id                String                         @id @default(uuid()) @db.Uuid
+  contractId        String                         @map("contract_id") @db.Uuid
+  requestNo         String                         @unique @map("request_no") @db.VarChar(60)
+  status            ContractCloseoutRequestStatus  @default(SUBMITTED)
+  requestedByUserId String                         @map("requested_by_user_id") @db.Uuid
+  requestedAt       DateTime                       @default(now()) @map("requested_at") @db.Timestamptz(3)
+  reviewedByUserId  String?                        @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt        DateTime?                      @map("reviewed_at") @db.Timestamptz(3)
+  approvedAt        DateTime?                      @map("approved_at") @db.Timestamptz(3)
+  rejectedAt        DateTime?                      @map("rejected_at") @db.Timestamptz(3)
+  closedAt          DateTime?                      @map("closed_at") @db.Timestamptz(3)
+  closeoutSummary   String?                        @map("closeout_summary") @db.Text
+  requestedRemarks  String?                        @map("requested_remarks") @db.Text
+  reviewRemarks     String?                        @map("review_remarks") @db.Text
+  rejectionReason   String?                        @map("rejection_reason") @db.Text
+  riskSnapshot      Json?                          @map("risk_snapshot") @db.JsonB
+  createdAt         DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  requestedByUser User     @relation("ContractCloseoutRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedByUser  User?    @relation("ContractCloseoutRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  attachments     ContractCloseoutAttachment[]
+
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("contract_closeout_requests")
+}
+
+// File attachments for a closeout request. Binary data is never stored in
+// the database — only metadata + a storage-relative path, same pattern as
+// ContractWorkflowTaskAttachment (CM-32); validation constants (allowed
+// types, 10MB limit) are imported and reused directly from
+// workflow-attachment-storage.service.ts rather than redefined.
+model ContractCloseoutAttachment {
+  id                String   @id @default(uuid()) @db.Uuid
+  closeoutRequestId String   @map("closeout_request_id") @db.Uuid
+  fileName          String   @map("file_name") @db.VarChar(255)
+  originalFileName  String   @map("original_file_name") @db.VarChar(255)
+  mimeType          String   @map("mime_type") @db.VarChar(150)
+  fileSize          Int      @map("file_size")
+  storagePath       String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId  String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  closeoutRequest ContractCloseoutRequest @relation(fields: [closeoutRequestId], references: [id], onDelete: Restrict)
+  uploadedByUser  User                    @relation("ContractCloseoutAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([closeoutRequestId, createdAt(sort: Desc)])
+  @@map("contract_closeout_attachments")
 }
 
 // ---------------------------------------------------------------------------

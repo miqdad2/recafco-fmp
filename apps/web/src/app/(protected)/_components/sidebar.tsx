@@ -17,16 +17,18 @@ import {
   Building2,
   MapPin,
   Calendar,
+  Workflow,
   Wallet,
   AlertCircle,
   Receipt,
+  ClipboardCheck,
   ChevronDown,
   ChevronRight,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
-import { canSeeModule, isContractManagementOnlyAccess } from '../_lib/module-visibility';
+import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess } from '../_lib/module-visibility';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -38,6 +40,8 @@ interface NavItem {
   module?: ModuleCode;
   /** Gates visibility by an exact permission code — used where a module has several screens, each needing its own specific permission (e.g. Administration's individual items). */
   permission?: string;
+  /** Gates visibility by ANY of several permission codes (OR) — used where more than one role/permission tier should see an item (e.g. Closeout Requests: Contract Manager via contracts.update, or a contracts.close-only actor). Mirrors the backend's @AnyPermission decorator. */
+  anyPermission?: string[];
   /** Gated behind the same visibility as the Administration section (no dedicated permission exists yet). */
   adminGated?: boolean;
 }
@@ -46,6 +50,7 @@ interface NavItem {
 function isNavItemVisible(item: NavItem, permissions: string[], hasAnyAdminPermission: boolean): boolean {
   if (item.module && !canSeeModule(permissions, item.module)) return false;
   if (item.permission && !permissions.includes(item.permission)) return false;
+  if (item.anyPermission && !item.anyPermission.some((p) => permissions.includes(p))) return false;
   if (item.adminGated && !hasAnyAdminPermission) return false;
   return true;
 }
@@ -84,13 +89,38 @@ const CONTRACT_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Contract List', href: '/contracts', icon: FileText, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Schedule', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Workflow & Team Tasks', href: '/contracts/workflow', icon: Workflow, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Payments', href: '/contracts/payments', icon: Wallet, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Issue Log', href: '/contracts/issues', icon: AlertCircle, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Claim Log', href: '/contracts/claims', icon: Receipt, module: 'CONTRACTS_MANAGEMENT' },
+  {
+    label: 'Closeout Requests',
+    href: '/contracts/closeouts',
+    icon: ClipboardCheck,
+    module: 'CONTRACTS_MANAGEMENT',
+    // Contract Manager/Admin/Super Admin/legacy Contract Management User all carry
+    // contracts.update; a contracts.close-only actor (should one ever exist) is also
+    // covered. Contract Staff (contracts.workflow_update only, no contracts.update/close)
+    // does not see this item — the module-level closeout register is a manager tool.
+    anyPermission: ['contracts.update', 'contracts.close'],
+  },
+];
+
+/**
+ * CM-41 — Contract Staff (contracts.workflow_update, no contracts.update/close —
+ * see isContractStaffOnlyAccess) get this short list instead of CONTRACT_ITEMS:
+ * they only ever work assigned workflow tasks, never the manager-tier register/
+ * payments/issue/claim/closeout tools. "My Schedule" was considered but deferred
+ * (see progress-tracker.md CM-41 entry) — ShellUser doesn't carry the actor's
+ * own id today, so a properly self-filtered schedule link isn't a trivial add.
+ */
+const CONTRACT_STAFF_ITEMS: NavItem[] = [
+  { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks', icon: Workflow, module: 'CONTRACTS_MANAGEMENT' },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
-const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'payments', 'issues', 'claims'];
+const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts'];
 
 const ADMIN_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/administration/dashboard', icon: Settings },
@@ -105,7 +135,9 @@ const ADMIN_ITEMS: NavItem[] = [
  * Contract List is active for /contracts itself and any sub-route that isn't one of the
  * other fixed module-level pages (Dashboard, Schedule, Payments, Issue Log, Claim Log) —
  * this covers /contracts/new and individual /contracts/{id}/... detail pages. Every other
- * item matches on its own exact path (or a sub-route of it).
+ * item matches on its own exact path (or a sub-route of it) — the query string, if any
+ * (e.g. Contract Staff's "My Tasks" → /contracts/workflow?mode=my-tasks), is stripped
+ * first since `pathname` never includes one.
  */
 function isContractItemActive(href: string, pathname: string): boolean {
   if (href === '/contracts') {
@@ -114,7 +146,8 @@ function isContractItemActive(href: string, pathname: string): boolean {
     const firstSegment = pathname.slice('/contracts/'.length).split('/')[0];
     return !CONTRACT_TOP_LEVEL_SLUGS.includes(firstSegment ?? '');
   }
-  return pathname === href || pathname.startsWith(href + '/');
+  const hrefPath = href.split('?')[0]!;
+  return pathname === hrefPath || pathname.startsWith(hrefPath + '/');
 }
 
 interface SidebarProps {
@@ -134,16 +167,10 @@ function isActive(href: string, pathname: string): boolean {
 }
 
 export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): React.JSX.Element {
-  const isInAdmin = pathname.startsWith('/administration');
-  const [adminExpanded, setAdminExpanded] = useState(isInAdmin);
-
   const isInContracts = pathname.startsWith('/contracts');
   const [contractsExpanded, setContractsExpanded] = useState(isInContracts);
 
-  // Re-expand when navigating into admin or contracts
-  useEffect(() => {
-    if (isInAdmin) setAdminExpanded(true);
-  }, [isInAdmin]);
+  // Re-expand when navigating into contracts
   useEffect(() => {
     if (isInContracts) setContractsExpanded(true);
   }, [isInContracts]);
@@ -158,7 +185,13 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
 
   const hasAnyContractPermission = canSeeModule(user.permissions, 'CONTRACTS_MANAGEMENT');
 
-  const visibleContractItems = CONTRACT_ITEMS.filter(
+  // CM-41 — Contract Staff get the short Dashboard/My Tasks list; everyone else
+  // with Contract Management access (Manager, legacy CONTRACT_MANAGEMENT_USER,
+  // Admin/Super Admin) keeps the full CONTRACT_ITEMS set, unchanged.
+  const contractStaffOnly = isContractStaffOnlyAccess(user.permissions);
+  const contractItemsSource = contractStaffOnly ? CONTRACT_STAFF_ITEMS : CONTRACT_ITEMS;
+
+  const visibleContractItems = contractItemsSource.filter(
     (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
   );
 
@@ -335,60 +368,37 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           </div>
         )}
 
-        {/* Administration — expandable, permission-aware */}
+        {/* Administration — always expanded, permission-aware (no dropdown toggle) */}
         {hasAnyAdminPermission && (
           <div className="mb-1">
-            <p className="px-4 mb-1 mt-3 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
+            <p className="px-4 mb-2 mt-3 text-sm font-bold uppercase tracking-wide text-text-inverse">
               Administration
             </p>
-            <button
-              type="button"
-              onClick={() => setAdminExpanded((v) => !v)}
-              aria-expanded={adminExpanded}
-              aria-controls="admin-nav-items"
-              className={[
-                'w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-                isInAdmin
-                  ? 'text-text-inverse font-medium'
-                  : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
-              ].join(' ')}
-            >
-              <Settings className="size-4 shrink-0" aria-hidden="true" />
-              <span className="flex-1 text-left">Administration</span>
-              {adminExpanded ? (
-                <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
-              ) : (
-                <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
-              )}
-            </button>
-
-            {adminExpanded && (
-              <div id="admin-nav-items" className="ml-3 border-l border-nav-hover">
-                {visibleAdminItems.map((item) => {
-                  if (!item.href) return null;
-                  const active = item.href === '/administration/dashboard'
-                    ? (pathname === '/administration/dashboard' || pathname === '/administration')
-                    : isActive(item.href, pathname);
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      onClick={onClose}
-                      aria-current={active ? 'page' : undefined}
-                      className={[
-                        'flex items-center gap-2.5 pl-5 pr-4 py-1.5 text-sm transition-colors',
-                        active
-                          ? 'bg-nav-active text-text-inverse font-medium'
-                          : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
-                      ].join(' ')}
-                    >
-                      <item.icon className="size-3.5 shrink-0" aria-hidden="true" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
+            <div>
+              {visibleAdminItems.map((item) => {
+                if (!item.href) return null;
+                const active = item.href === '/administration/dashboard'
+                  ? (pathname === '/administration/dashboard' || pathname === '/administration')
+                  : isActive(item.href, pathname);
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    onClick={onClose}
+                    aria-current={active ? 'page' : undefined}
+                    className={[
+                      'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
+                      active
+                        ? 'bg-nav-active text-text-inverse font-medium'
+                        : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                    ].join(' ')}
+                  >
+                    <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         )}
       </nav>

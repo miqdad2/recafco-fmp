@@ -1,10 +1,14 @@
 import Link from 'next/link';
-import { CalendarDays, List } from 'lucide-react';
+import { CalendarDays, List, Workflow } from 'lucide-react';
 import { DashboardScopeBadge } from '../../../_components/dashboard-scope-badge';
-import type { DashboardScopeType } from '@/lib/contracts-api';
+import { ManagerTopActions } from './manager-top-actions';
+import type { ContractDashboardType, DashboardScopeType } from '@/lib/contracts-api';
 
 interface Props {
   scope: { type: DashboardScopeType; departmentNames: string[] } | undefined;
+  dashboardType: ContractDashboardType | undefined;
+  canCreate: boolean;
+  canClose: boolean;
 }
 
 function formatAsOfDate(): string {
@@ -13,7 +17,7 @@ function formatAsOfDate(): string {
   });
 }
 
-export function DashboardToolbar({ scope }: Props): React.JSX.Element {
+export function DashboardToolbar({ scope, dashboardType, canCreate, canClose }: Props): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-surface text-xs text-text-secondary">
@@ -24,13 +28,25 @@ export function DashboardToolbar({ scope }: Props): React.JSX.Element {
       <DashboardScopeBadge scope={scope} />
 
       <div className="ml-auto flex items-center gap-2">
-        <Link
-          href="/contracts"
-          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
-        >
-          <List className="size-3.5 shrink-0" aria-hidden="true" />
-          View Contract List
-        </Link>
+        {dashboardType === 'MANAGER' && <ManagerTopActions canCreate={canCreate} canClose={canClose} />}
+        {dashboardType === 'STAFF' && (
+          <Link
+            href="/contracts/workflow?mode=my-tasks"
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <Workflow className="size-3.5 shrink-0" aria-hidden="true" />
+            View My Tasks
+          </Link>
+        )}
+        {dashboardType === undefined && (
+          <Link
+            href="/contracts"
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <List className="size-3.5 shrink-0" aria-hidden="true" />
+            View Contract List
+          </Link>
+        )}
       </div>
     </div>
   );

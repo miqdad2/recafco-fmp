@@ -13,6 +13,10 @@ export interface RoleSummary {
   updatedAt: string;
 }
 
+export interface RoleListItem extends RoleSummary {
+  permissionCount: number;
+}
+
 export interface PermissionSummary {
   id: string;
   code: string;
@@ -43,7 +47,7 @@ async function apiFetch<T>(
 
 export const rolesApi = {
   list: (accessToken: string) =>
-    apiFetch<RoleSummary[]>('/administration/roles', accessToken),
+    apiFetch<RoleListItem[]>('/administration/roles', accessToken),
 
   get: (accessToken: string, id: string) =>
     apiFetch<RoleSummary & { permissions: PermissionSummary[] }>(`/administration/roles/${id}`, accessToken),

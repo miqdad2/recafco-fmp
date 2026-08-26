@@ -894,6 +894,23 @@ export class ContractsService {
       });
     }
 
+    // CM-33: a contract may only be closed once its closeout request has been
+    // APPROVED — this protects the pre-existing direct close action from
+    // bypassing the review flow. The normal path is now
+    // ContractCloseoutService.closeContract(), which closes the contract and
+    // the approved request together in one transaction; this endpoint stays
+    // as a defensive backstop against any other caller.
+    const approvedRequest = await this.db.getClient().contractCloseoutRequest.findFirst({
+      where: { contractId: id, status: 'APPROVED' },
+      select: { id: true },
+    });
+    if (!approvedRequest) {
+      throw new UnprocessableEntityException({
+        code: 'CONTRACT_CLOSEOUT_APPROVAL_REQUIRED',
+        message: 'Closure approval is required before closing this contract.',
+      });
+    }
+
     const now = new Date();
 
     const updated = await this.db.getClient().$transaction(async (tx) => {

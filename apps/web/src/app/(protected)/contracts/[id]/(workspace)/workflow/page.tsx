@@ -1,119 +1,109 @@
+import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { ListTodo } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
+import { contractsApi } from '../../../../../../lib/contracts-api';
+import { getCurrentUserContext } from '../../../_lib/get-user-permissions';
+import { WorkflowBoard } from '../../../workflow/_components/workflow-board';
+import { WorkflowStatusBadge } from '../../../workflow/_components/workflow-status-badge';
+import { WorkflowPollingRefresher } from '../../../workflow/_components/workflow-polling-refresher';
 
 export const metadata: Metadata = { title: 'Workflow & Team Tasks — Contract Management — RECAFCO FMP' };
+export const dynamic = 'force-dynamic';
 
-const WORKFLOW_STATUS_ROWS = ['Current Stage', 'Current Team', 'Next Action', 'Overall Status'];
+interface PageProps {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
 
-const TEAM_LANES: { team: string; steps: string[] }[] = [
-  {
-    team: 'Technical Team',
-    steps: ['Drawing Received', 'SD & Calculation Submission', 'Getting Approval', 'FD Issuance'],
-  },
-  {
-    team: 'Production Team',
-    steps: [
-      'Submission of Mix Design', 'Mix Design Approval', 'Mould Preparation',
-      'Issue Production Schedule', 'Production Start',
-    ],
-  },
-  {
-    team: 'Erection Team',
-    steps: [
-      'Issued of Erection Method Statement', 'Erection Statement Approval', 'Issued Erection Schedule',
-      'Delivery Start', 'Erection Start', 'Issue Checklist',
-    ],
-  },
-  {
-    team: 'QS / Commercial Team',
-    steps: ['Payment Issued'],
-  },
-];
+export default async function ContractWorkflowTab({ params, searchParams }: PageProps): Promise<React.JSX.Element> {
+  const { id } = await params;
+  const search = await searchParams;
+  const myTasksOnly = search['myTasksOnly'] === 'true';
 
-const TASK_REGISTER_COLUMNS = ['Team', 'Task / Step Name', 'Status', 'Responsible', 'Due Date', 'Action'];
+  const [{ id: currentUserId, permissions }, workflow, people] = await Promise.all([
+    getCurrentUserContext(),
+    contractsApi.getWorkflow(id, { myTasksOnly }).catch(() => null),
+    contractsApi.people().catch(() => []),
+  ]);
+  if (!workflow) notFound();
 
-export default function ContractWorkflowTab(): React.JSX.Element {
+  const canManage = permissions.includes('contracts.update');
+  const canUpdateAssigned = permissions.includes('contracts.workflow_update');
+  const { tasks, progress, contract } = workflow;
+  const generatedAt = new Date().toLocaleTimeString('en-GB');
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-base font-semibold text-text-primary">Workflow & Team Tasks</h1>
-        <p className="text-xs text-text-secondary mt-0.5">Track contract workflow progress, team responsibilities and pending tasks.</p>
+      <WorkflowPollingRefresher />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-base font-semibold text-text-primary">Workflow &amp; Team Tasks</h1>
+          <p className="text-xs text-text-secondary mt-0.5">Track contract workflow progress, team responsibilities and pending tasks.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-text-muted">Last updated {generatedAt}</span>
+          <Link
+            href={`/contracts/workflow?contractId=${id}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Open in Workflow Register
+            <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
+          </Link>
+        </div>
       </div>
 
       {/* Workflow Status */}
       <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Workflow Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          {WORKFLOW_STATUS_ROWS.map((label) => (
-            <div key={label}>
-              <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
-            </div>
-          ))}
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Workflow Status</h2>
+          <a
+            href={`?myTasksOnly=${myTasksOnly ? 'false' : 'true'}`}
+            className={`text-[11px] rounded-full px-2.5 py-1 font-medium border ${myTasksOnly ? 'bg-accent text-white border-accent' : 'border-border text-text-secondary hover:border-border-strong'}`}
+          >
+            My Tasks only
+          </a>
+        </div>
+        <dl className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
+          <div>
+            <dt className="text-xs text-text-muted">Overall Status</dt>
+            <dd className="mt-0.5"><WorkflowStatusBadge status={progress.workflowStatus} /></dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">Total Tasks</dt>
+            <dd className="font-medium text-text-primary mt-0.5">{progress.total}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">Completed</dt>
+            <dd className="font-medium text-text-primary mt-0.5">{progress.completed}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">In Progress</dt>
+            <dd className="font-medium text-text-primary mt-0.5">{progress.inProgress}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">Overdue</dt>
+            <dd className="font-medium text-text-primary mt-0.5">
+              {progress.overdue > 0 ? <span className="text-danger">{progress.overdue}</span> : 0}
+            </dd>
+          </div>
         </dl>
       </section>
 
       {/* Workflow Progress Board */}
       <section>
         <h2 className="text-sm font-semibold text-text-primary mb-3">Workflow Progress Board</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-          {TEAM_LANES.map((lane) => (
-            <div key={lane.team} className="rounded-lg border border-border bg-surface p-3">
-              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2 px-1">{lane.team}</h3>
-              <div className="space-y-1.5">
-                {lane.steps.map((step) => (
-                  <div
-                    key={step}
-                    className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-secondary/40 px-2.5 py-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <ListTodo className="size-3.5 shrink-0 text-text-muted" aria-hidden="true" />
-                      <span className="text-xs font-medium text-text-primary truncate">{step}</span>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-text-muted border border-border">
-                      Not started
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Team Task Register */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Team Task Register</h2>
-          <button
-            type="button"
-            disabled
-            title="Workflow backend is not implemented yet."
-            className="rounded-md border border-border bg-surface-secondary px-3 py-1.5 text-xs font-medium text-text-muted cursor-not-allowed"
-          >
-            Update Task Status
-          </button>
-        </div>
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead>
-              <tr className="bg-surface-secondary">
-                {TASK_REGISTER_COLUMNS.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-surface">
-              <tr>
-                <td colSpan={TASK_REGISTER_COLUMNS.length} className="px-3 py-8 text-center text-text-muted">
-                  No workflow tasks tracked yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <WorkflowBoard
+          contractId={id}
+          tasks={tasks}
+          people={people}
+          canManage={canManage}
+          canUpdateAssigned={canUpdateAssigned}
+          currentUserId={currentUserId}
+          contractReference={contract.referenceNumber}
+          contractTitle={contract.title}
+          {...(myTasksOnly ? { emptyMessage: 'No tasks assigned to you on this contract.' } : {})}
+        />
       </section>
     </div>
   );

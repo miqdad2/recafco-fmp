@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess } from './module-visibility';
+import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess, isContractStaffOnlyAccess } from './module-visibility';
 
 describe('canSeeModule', () => {
   it('grants each operational module only when its read permission is present', () => {
@@ -68,5 +68,37 @@ describe('isContractManagementOnlyAccess', () => {
 
   it('is false for a Super Admin-equivalent permission set', () => {
     expect(isContractManagementOnlyAccess(['contracts.read', 'tasks.read', 'users.read'])).toBe(false);
+  });
+});
+
+describe('isContractStaffOnlyAccess', () => {
+  it('is true for CM-35 Contract Staff (workflow_update, no update/close)', () => {
+    expect(isContractStaffOnlyAccess(['contracts.read', 'contracts.comment', 'contracts.workflow_update'])).toBe(true);
+  });
+
+  it('is false for Contract Manager (has both workflow_update and update)', () => {
+    expect(isContractStaffOnlyAccess([
+      'contracts.read', 'contracts.create', 'contracts.update', 'contracts.activate',
+      'contracts.terminate', 'contracts.close', 'contracts.comment', 'contracts.workflow_update',
+    ])).toBe(false);
+  });
+
+  it('is false for the legacy CONTRACT_MANAGEMENT_USER role (has update/close, no workflow_update)', () => {
+    expect(isContractStaffOnlyAccess([
+      'contracts.read', 'contracts.create', 'contracts.update',
+      'contracts.activate', 'contracts.terminate', 'contracts.close', 'contracts.comment',
+    ])).toBe(false);
+  });
+
+  it('is false when workflow_update is absent entirely', () => {
+    expect(isContractStaffOnlyAccess(['contracts.read', 'contracts.comment'])).toBe(false);
+  });
+
+  it('is false for a user with contracts.close but not contracts.update (edge case, still manager-tier)', () => {
+    expect(isContractStaffOnlyAccess(['contracts.read', 'contracts.workflow_update', 'contracts.close'])).toBe(false);
+  });
+
+  it('is false for an empty permission set', () => {
+    expect(isContractStaffOnlyAccess([])).toBe(false);
   });
 });

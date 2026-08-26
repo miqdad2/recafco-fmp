@@ -1,5 +1,5 @@
-import { activateContractAction, terminateContractAction, closeContractAction } from '../actions';
-import { getVisibleContractTransitions, hasAnyVisibleTransition } from '../_lib/contract-ui-helpers';
+import { activateContractAction, terminateContractAction } from '../actions';
+import { getVisibleContractTransitions } from '../_lib/contract-ui-helpers';
 
 interface Props {
   contractId: string;
@@ -8,17 +8,18 @@ interface Props {
   permissions: string[];
 }
 
+/**
+ * Activate/Terminate only — the direct "Close Contract" action was removed
+ * from here in CM-33; closing now requires an approved closeout request (see
+ * ContractClosureAction, rendered alongside this component).
+ */
 export function ContractTransitions({ contractId, status, version, permissions }: Props): React.JSX.Element | null {
   const visible = getVisibleContractTransitions(status, permissions);
-  if (!hasAnyVisibleTransition(visible)) return null;
+  if (!visible.activate && !visible.terminate) return null;
 
   async function handleActivate(): Promise<void> {
     'use server';
     await activateContractAction(contractId, version);
-  }
-  async function handleClose(): Promise<void> {
-    'use server';
-    await closeContractAction(contractId, version);
   }
   async function handleTerminate(formData: FormData): Promise<void> {
     'use server';
@@ -26,7 +27,7 @@ export function ContractTransitions({ contractId, status, version, permissions }
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
+    <>
       {visible.activate && (
         <form action={handleActivate}>
           <input type="hidden" name="version" value={version} />
@@ -35,18 +36,6 @@ export function ContractTransitions({ contractId, status, version, permissions }
             className="rounded-md bg-success px-3 py-1.5 text-xs font-medium text-white hover:bg-success/90 focus:outline-none focus:ring-2 focus:ring-focus"
           >
             Activate Contract
-          </button>
-        </form>
-      )}
-
-      {visible.close && (
-        <form action={handleClose}>
-          <input type="hidden" name="version" value={version} />
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
-          >
-            Close Contract
           </button>
         </form>
       )}
@@ -84,6 +73,6 @@ export function ContractTransitions({ contractId, status, version, permissions }
           </form>
         </details>
       )}
-    </div>
+    </>
   );
 }

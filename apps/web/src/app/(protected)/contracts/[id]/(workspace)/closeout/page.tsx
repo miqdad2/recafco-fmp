@@ -1,93 +1,98 @@
+import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
+import { contractsApi } from '../../../../../../lib/contracts-api';
+import { getUserPermissions } from '../../../_lib/get-user-permissions';
+import { computeCloseoutWarnings } from '../../../_lib/contract-ui-helpers';
+import { CloseoutReadinessCards } from './_components/closeout-readiness-cards';
+import { CloseoutWarningsPanel } from './_components/closeout-warnings-panel';
+import { CloseoutRequestForm } from './_components/closeout-request-form';
+import { CloseoutReviewerPanel } from './_components/closeout-reviewer-panel';
+import { CloseoutAttachmentsPanel } from './_components/closeout-attachments-panel';
 
 export const metadata: Metadata = { title: 'Contract Closeout — Contract Management — RECAFCO FMP' };
+export const dynamic = 'force-dynamic';
 
-const CLOSEOUT_STATUS_ROWS = ['Closeout Readiness', 'Overall Completion', 'Payment Completion', 'Pending Documents', 'Open Issues'];
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
 
-const CHECKLIST_COLUMNS = ['Checklist Item', 'Status', 'Responsible', 'Completed Date', 'Action'];
+const ACTIVE_REQUEST_STATUSES = new Set(['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED']);
 
-const CHECKLIST_ITEMS = [
-  'All workflow steps completed',
-  'Production workflow completed',
-  'Delivery completed',
-  'Erection completed',
-  'Final inspection completed',
-  'All required documents submitted',
-  'Final payment received / confirmed',
-  'Client acceptance received',
-];
+export default async function ContractCloseoutTab({ params }: PageProps): Promise<React.JSX.Element> {
+  const { id } = await params;
 
-const APPROVAL_ROWS = [
-  'Prepared By', 'Prepared Date', 'Reviewed By', 'Reviewed Date',
-  'Approved By', 'Approved Date', 'Closure Date', 'Final Status',
-];
+  const [permissions, contract, checks, requests] = await Promise.all([
+    getUserPermissions(),
+    contractsApi.get(id).catch(() => null),
+    contractsApi.getCloseoutChecks(id).catch(() => null),
+    contractsApi.listCloseoutRequests(id).catch(() => null),
+  ]);
+  if (!contract || !requests) notFound();
 
-export default function ContractCloseoutTab(): React.JSX.Element {
+  const canUpdate = permissions.includes('contracts.update');
+  const canReview = permissions.includes('contracts.close');
+
+  const latestRequest = requests[0] ?? null;
+  const hasActiveRequest = latestRequest ? ACTIVE_REQUEST_STATUSES.has(latestRequest.status) : false;
+  const showRequestForm = contract.status !== 'CLOSED' && !hasActiveRequest && (!latestRequest || latestRequest.status !== 'CLOSED');
+
+  const [attachments] = await Promise.all([
+    latestRequest ? contractsApi.listCloseoutAttachments(latestRequest.id).catch(() => []) : Promise.resolve([]),
+  ]);
+
+  const warnings = checks ? computeCloseoutWarnings(checks) : [];
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-base font-semibold text-text-primary">Contract Closeout</h1>
-        <p className="text-xs text-text-secondary mt-0.5">Final verification before closing and archiving the contract.</p>
+        <p className="text-xs text-text-secondary mt-0.5">Final verification and approval before closing and archiving the contract.</p>
       </div>
 
-      {/* Closeout Status */}
+      {/* Closeout Readiness */}
       <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Closeout Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
-          {CLOSEOUT_STATUS_ROWS.map((label) => (
-            <div key={label}>
-              <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
-            </div>
-          ))}
-        </dl>
+        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Closeout Readiness</h2>
+        <CloseoutReadinessCards checks={checks} />
       </section>
 
-      <p className="text-xs text-text-muted">
-        Closeout validation will be enabled after the Closeout backend unit.
-      </p>
+      {/* Warnings */}
+      <CloseoutWarningsPanel warnings={warnings} />
 
-      {/* Closeout Checklist */}
+      {/* Closeout Request */}
       <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Closeout Checklist</h2>
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead>
-              <tr className="bg-surface-secondary">
-                {CHECKLIST_COLUMNS.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-surface">
-              {CHECKLIST_ITEMS.map((item) => (
-                <tr key={item}>
-                  <td className="px-3 py-2 text-text-primary">{item}</td>
-                  <td className="px-3 py-2 text-text-muted">Not started</td>
-                  <td className="px-3 py-2 text-text-muted">—</td>
-                  <td className="px-3 py-2 text-text-muted">—</td>
-                  <td className="px-3 py-2 text-text-muted">—</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Closeout Request</h2>
+
+        {contract.status === 'CLOSED' && latestRequest?.status === 'CLOSED' ? (
+          <CloseoutReviewerPanel contractId={id} request={latestRequest} canReview={false} />
+        ) : showRequestForm ? (
+          canUpdate ? (
+            <CloseoutRequestForm contractId={id} />
+          ) : (
+            <p className="text-sm text-text-muted">
+              {latestRequest?.status === 'REJECTED'
+                ? 'The previous closeout request was rejected. A user with contract update access can submit a new one.'
+                : 'No closeout request has been submitted for this contract yet.'}
+            </p>
+          )
+        ) : latestRequest ? (
+          <CloseoutReviewerPanel contractId={id} request={latestRequest} canReview={canReview} />
+        ) : (
+          <p className="text-sm text-text-muted">No closeout request has been submitted for this contract yet.</p>
+        )}
       </section>
 
-      {/* Final Approval */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Final Approval</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          {APPROVAL_ROWS.map((label) => (
-            <div key={label}>
-              <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      {/* Closeout Documents */}
+      {latestRequest && (
+        <section className="rounded-lg border border-border bg-surface p-4">
+          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Closeout Documents</h2>
+          <CloseoutAttachmentsPanel
+            contractId={id}
+            requestId={latestRequest.id}
+            attachments={attachments}
+            canUpload={canUpdate && hasActiveRequest}
+          />
+        </section>
+      )}
     </div>
   );
 }

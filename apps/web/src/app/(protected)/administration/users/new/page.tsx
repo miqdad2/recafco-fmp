@@ -5,14 +5,26 @@ import { rolesApi } from '@/lib/roles-api';
 import { authApi } from '@/lib/auth-api';
 import { Breadcrumbs } from '../../../_components/breadcrumbs';
 import { PageHeader } from '../../_components/page-header';
-import { NewUserForm } from '../_components/new-user-form';
+import { NewUserWizard } from '../_components/new-user-wizard';
 import { createUserWithAccessAction } from '../actions';
 import { resolvePermissions } from '../_components/permissions-utils';
+import { moduleBySlug } from '../_components/module-catalog';
 
 export const metadata: Metadata = { title: 'New User — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
-export default async function NewUserPage(): Promise<React.JSX.Element> {
+interface PageProps {
+  searchParams: Promise<{ module?: string }>;
+}
+
+export default async function NewUserPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
+  // CM-42 — ?module=<slug> from the Users page's module cards preselects the
+  // wizard's Module field (see NewUserWizard's preselectedModule prop).
+  // Direct /administration/users/new with no query param behaves exactly as
+  // before: moduleBySlug(undefined) is undefined, so the prop is omitted.
+  const { module: moduleSlug } = await searchParams;
+  const preselectedModule = moduleBySlug(moduleSlug)?.code;
+
   const store = await cookies();
   const accessToken = store.get('recafco_access')?.value ?? '';
 
@@ -66,7 +78,7 @@ export default async function NewUserPage(): Promise<React.JSX.Element> {
           description="A temporary password will be generated and shown once after creation."
         />
 
-        <NewUserForm
+        <NewUserWizard
           action={createUserWithAccessAction}
           roles={rolesWithPerms}
           departments={deptItems}
@@ -76,6 +88,7 @@ export default async function NewUserPage(): Promise<React.JSX.Element> {
           deptApiError={deptApiError}
           plantApiError={plantApiError}
           locApiError={locApiError}
+          {...(preselectedModule ? { preselectedModule } : {})}
         />
       </div>
     </div>

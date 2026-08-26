@@ -22,7 +22,6 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const params = await searchParams;
   const permissions = await getUserPermissions();
   const canCreate = permissions.includes('contracts.create');
-  const canUpdate = permissions.includes('contracts.update');
 
   const lifecycleFilter = typeof params['lifecycleStatus'] === 'string' ? params['lifecycleStatus'] : undefined;
   const departmentFilter = typeof params['departmentId'] === 'string' ? params['departmentId'] : undefined;
@@ -32,7 +31,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
   const hasActiveFilters = Boolean(lifecycleFilter ?? departmentFilter ?? ownerFilter ?? search);
 
-  const [listRes, summaryRes, dashboardRes, deptsRes, peopleRes, plantsRes, locationsRes] = await Promise.allSettled([
+  const [listRes, summaryRes, dashboardRes, deptsRes, peopleRes, plantsRes, locationsRes, closeoutsRes] = await Promise.allSettled([
     contractsApi.list({
       page,
       pageSize: 25,
@@ -47,6 +46,10 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
     contractsApi.people(),
     contractsApi.plants(),
     contractsApi.locations(),
+    // CM-43 — reuses the existing CM-38 closeout register (pendingOnly) purely
+    // to know which contracts have a request awaiting review, so the row's
+    // primary action can become "Review Closeout" — no new backend endpoint.
+    contractsApi.listCloseouts({ pendingOnly: true, pageSize: 100 }),
   ]);
 
   let error: string | null = null;
@@ -64,6 +67,9 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const contracts = result?.items ?? [];
   const total = result?.total ?? 0;
   const totalPages = result?.totalPages ?? 1;
+  const pendingCloseoutContractIds = new Set(
+    closeoutsRes.status === 'fulfilled' ? closeoutsRes.value.items.map((c) => c.contractId) : [],
+  );
 
   function buildHref(overrides: Record<string, string | undefined>): string {
     const q = new URLSearchParams();
@@ -149,7 +155,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
         </div>
       ) : (
         <>
-          <ContractListTable contracts={contracts} canUpdate={canUpdate} />
+          <ContractListTable contracts={contracts} permissions={permissions} pendingCloseoutContractIds={pendingCloseoutContractIds} />
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between text-sm text-text-secondary">

@@ -10,7 +10,7 @@
  * - Location selector shows "Select a plant" prompt before plant is chosen
  * - Location selector shows "No active locations" when plant has no locations
  * - Plant onChange updates state used to filter locations
- * - Both new-user-form and edit-user-tabs implement the same filter logic
+ * - Both new-user-wizard and edit-user-tabs implement the same filter logic
  * - Inactive plant/location values are NOT displayed (isActive filter on server)
  */
 
@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const ROOT = path.join(__dirname, '..');
-const NEW_FORM = path.join(ROOT, '_components', 'new-user-form.tsx');
+const NEW_FORM = path.join(ROOT, '_components', 'new-user-wizard.tsx');
 const EDIT_TABS = path.join(ROOT, '_components', 'edit-user-tabs.tsx');
 const NEW_PAGE = path.join(ROOT, 'new', 'page.tsx');
 const EDIT_PAGE = path.join(ROOT, '[id]', 'edit', 'page.tsx');
@@ -29,13 +29,13 @@ const EDIT_PAGE = path.join(ROOT, '[id]', 'edit', 'page.tsx');
 // ---------------------------------------------------------------------------
 
 describe('C — Location filter includes locations without a plant (plantId null)', () => {
-  it('T34: new-user-form uses !l.plantId in the location filter', () => {
+  it('T34: new-user-wizard uses !l.plantId in the location filter', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     // The filter must pass through locations that have no plant assigned
     expect(src).toContain('!l.plantId');
   });
 
-  it('T35: new-user-form filters locations to match the selected plant', () => {
+  it('T35: new-user-wizard filters locations to match the selected plant', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     expect(src).toContain('l.plantId === selectedPlantId');
   });
@@ -52,12 +52,12 @@ describe('C — Location filter includes locations without a plant (plantId null
 });
 
 describe('C — Location selector shows correct prompt based on plant selection state', () => {
-  it('T38: new-user-form shows "Select a plant" when no plant is selected', () => {
+  it('T38: new-user-wizard shows "Select a plant" when no plant is selected', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     expect(src).toContain('Select a plant before assigning a location');
   });
 
-  it('T39: new-user-form shows "No active locations" when plant selected but no locations', () => {
+  it('T39: new-user-wizard shows "No active locations" when plant selected but no locations', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     expect(src).toContain('No active locations found for this plant');
   });
@@ -74,7 +74,7 @@ describe('C — Location selector shows correct prompt based on plant selection 
 });
 
 describe('C — Plant onChange drives location filtering', () => {
-  it('T42: new-user-form onChange for plant selector updates selectedPlantId state', () => {
+  it('T42: new-user-wizard onChange for plant selector updates selectedPlantId state', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     // The plant select has an onChange that sets state
     expect(src).toContain('setSelectedPlantId');
@@ -113,7 +113,7 @@ describe('C — Server pages request only active plants and locations', () => {
 });
 
 describe('C — Plant selector shows "No active plants" empty state', () => {
-  it('T48: new-user-form renders empty state when plants array is empty', () => {
+  it('T48: new-user-wizard renders empty state when plants array is empty', () => {
     const src = fs.readFileSync(NEW_FORM, 'utf-8');
     expect(src).toContain('No active plants found');
   });

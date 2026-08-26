@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { ContractTransitions } from '../../_components/contract-transitions';
+import { ContractClosureAction } from '../../_components/contract-closure-action';
 import { ContractInfoCard } from '../../_components/contract-info-card';
 import { ContractRegisterDetailsCard } from '../../_components/contract-register-details-card';
 import { ContractBadgeGroupCard } from '../../_components/contract-badge-group-card';
@@ -10,7 +11,7 @@ import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
 import {
   getVisibleContractTransitions,
-  hasAnyVisibleTransition,
+  getClosureAction,
   SCOPE_OF_WORK_OPTIONS,
   PAYMENT_TERM_OPTIONS,
 } from '../../_lib/contract-ui-helpers';
@@ -33,10 +34,11 @@ function formatDateTime(iso: string): string {
 export default async function ContractOverviewTab({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
-  const [permissionsRes, contractRes, activitiesRes] = await Promise.allSettled([
+  const [permissionsRes, contractRes, activitiesRes, closeoutRequestsRes] = await Promise.allSettled([
     getUserPermissions(),
     contractsApi.get(id),
     contractsApi.listActivities(id),
+    contractsApi.listCloseoutRequests(id),
   ]);
 
   if (contractRes.status === 'rejected') notFound();
@@ -44,8 +46,13 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
   const contract = (contractRes as PromiseFulfilledResult<Awaited<ReturnType<typeof contractsApi.get>>>).value;
   const permissions = permissionsRes.status === 'fulfilled' ? permissionsRes.value : [];
   const activities = activitiesRes.status === 'fulfilled' ? activitiesRes.value : [];
+  const closeoutRequests = closeoutRequestsRes.status === 'fulfilled' ? closeoutRequestsRes.value : [];
+  const latestCloseoutRequest = closeoutRequests[0] ?? null;
 
-  const hasActions = hasAnyVisibleTransition(getVisibleContractTransitions(contract.status, permissions));
+  const visibleTransitions = getVisibleContractTransitions(contract.status, permissions);
+  const closureAction = getClosureAction(contract.status, permissions, latestCloseoutRequest?.status ?? null);
+  const hasActions = visibleTransitions.activate || visibleTransitions.terminate
+    || closureAction.showRequestCloseout || closureAction.pendingStatus !== null || closureAction.showCloseContract;
   const erectionSelected = contract.scopeOfWork?.['erection'] === true;
 
   const latestActivity = [...activities]
@@ -72,12 +79,21 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
       {hasActions && (
         <section>
           <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">Available Actions</h2>
-          <ContractTransitions
-            contractId={contract.id}
-            status={contract.status}
-            version={contract.version}
-            permissions={permissions}
-          />
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
+            <ContractTransitions
+              contractId={contract.id}
+              status={contract.status}
+              version={contract.version}
+              permissions={permissions}
+            />
+            <ContractClosureAction
+              contractId={contract.id}
+              contractStatus={contract.status}
+              permissions={permissions}
+              latestRequestStatus={latestCloseoutRequest?.status ?? null}
+              latestRequestId={latestCloseoutRequest?.id ?? null}
+            />
+          </div>
         </section>
       )}
 

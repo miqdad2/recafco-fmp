@@ -3,12 +3,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ContractLifecycleBadge } from './contract-lifecycle-badge';
+import { ContractRowActions } from './contract-row-actions';
 import { formatContractValue } from '../_lib/contract-ui-helpers';
 import type { Contract } from '@/lib/contracts-api';
 
 interface Props {
   contracts: Contract[];
-  canUpdate: boolean;
+  permissions: string[];
+  /** Contract ids with a closeout request currently SUBMITTED/UNDER_REVIEW (CM-38's existing register, pendingOnly filter) — drives the "Review Closeout" primary action. */
+  pendingCloseoutContractIds: Set<string>;
 }
 
 type ViewMode = 'simple' | 'full';
@@ -41,7 +44,7 @@ function NotTracked(): React.JSX.Element {
   return <span className="text-xs text-text-muted italic">Not tracked yet</span>;
 }
 
-export function ContractListTable({ contracts, canUpdate }: Props): React.JSX.Element {
+export function ContractListTable({ contracts, permissions, pendingCloseoutContractIds }: Props): React.JSX.Element {
   const [view, setView] = useState<ViewMode>('simple');
   const full = view === 'full';
 
@@ -95,7 +98,6 @@ export function ContractListTable({ contracts, canUpdate }: Props): React.JSX.El
           </thead>
           <tbody className="divide-y divide-border">
             {contracts.map((contract) => {
-              const canEditRow = canUpdate && contract.status === 'DRAFT';
               return (
                 <tr key={contract.id} className="hover:bg-surface-secondary/50 transition-colors">
                   <td className="px-4 py-3">
@@ -189,16 +191,13 @@ export function ContractListTable({ contracts, canUpdate }: Props): React.JSX.El
                     <ContractLifecycleBadge status={contract.lifecycleStatus} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3 text-xs font-medium">
-                      <Link href={`/contracts/${contract.id}`} className="text-accent hover:underline">
-                        Open Contract
-                      </Link>
-                      {canEditRow && (
-                        <Link href={`/contracts/${contract.id}/edit`} className="text-text-muted hover:text-text-secondary hover:underline">
-                          Edit
-                        </Link>
-                      )}
-                    </div>
+                    <ContractRowActions
+                      contractId={contract.id}
+                      status={contract.status}
+                      version={contract.version}
+                      permissions={permissions}
+                      hasPendingCloseout={pendingCloseoutContractIds.has(contract.id)}
+                    />
                   </td>
                 </tr>
               );

@@ -21,7 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
 import type { ApiSuccessResponse } from '@recafco/shared';
 import type { AuthUser } from '../common/types/auth-user';
-import type { RoleSummary, RoleDetail } from './roles.service';
+import type { RoleSummary, RoleListItem, RoleDetail } from './roles.service';
 
 function meta(): { requestId?: string } {
   const id = getRequestId();
@@ -35,7 +35,7 @@ export class RolesController {
 
   @Get()
   @Permissions('roles.read')
-  async list(): Promise<ApiSuccessResponse<RoleSummary[]>> {
+  async list(): Promise<ApiSuccessResponse<RoleListItem[]>> {
     const roles = await this.rolesService.findAll();
     return { data: roles, meta: meta(), error: null };
   }

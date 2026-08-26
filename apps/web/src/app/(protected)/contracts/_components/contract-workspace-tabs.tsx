@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutGrid, Wallet, Factory, FileText, Paperclip, CheckCircle2, History } from 'lucide-react';
+import { LayoutGrid, Wallet, Factory, FileText, Paperclip, CheckCircle2, History, CalendarDays } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 interface WorkspaceTab {
@@ -16,6 +16,7 @@ interface WorkspaceTab {
 const OVERVIEW_TAB: WorkspaceTab = { key: 'overview', label: 'Overview', segment: null, icon: LayoutGrid };
 
 const SCROLLABLE_TABS: WorkspaceTab[] = [
+  { key: 'schedule', label: 'Schedule', segment: 'schedule', icon: CalendarDays },
   { key: 'payments', label: 'Payments', segment: 'payments', icon: Wallet },
   { key: 'production', label: 'Production Status', segment: 'production', icon: Factory },
   { key: 'variations', label: 'Variations', segment: 'variations' },

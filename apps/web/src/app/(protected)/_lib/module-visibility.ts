@@ -12,8 +12,10 @@ export type ModuleCode =
   | 'PRODUCTION_DASHBOARD'
   | 'ADMINISTRATION';
 
-/** Single read permission that gates each operational module. */
-const MODULE_READ_PERMISSION: Record<Exclude<ModuleCode, 'ADMINISTRATION'>, string> = {
+/** Single read permission that gates each operational module. Exported (CM-42) so
+ * Administration → Users can bucket existing users by module without a new backend
+ * field — never duplicate this map elsewhere. */
+export const MODULE_READ_PERMISSION: Record<Exclude<ModuleCode, 'ADMINISTRATION'>, string> = {
   FACTORY_TASKS: 'tasks.read',
   INCIDENT_REPORT: 'incidents.read',
   MAINTENANCE_REQUESTS: 'maintenance.read',
@@ -63,4 +65,22 @@ export function getVisibleModules(permissions: string[]): ModuleCode[] {
 export function isContractManagementOnlyAccess(permissions: string[]): boolean {
   const visible = getVisibleModules(permissions);
   return visible.length === 1 && visible[0] === 'CONTRACTS_MANAGEMENT';
+}
+
+/**
+ * CM-41 — true only for Contract Staff (CM-35's contracts.workflow_update,
+ * without contracts.update or contracts.close): they may update workflow
+ * tasks assigned to them, but hold no manager-tier permission at all.
+ * Drives the simplified Contract Management sidebar (Dashboard + My Tasks
+ * only) and hides the "All Workflows" mode tab. Contract Manager, the legacy
+ * CONTRACT_MANAGEMENT_USER role, and Admin/Super Admin all carry
+ * contracts.update (CONTRACT_MANAGEMENT_USER also carries contracts.close),
+ * so this is false for every one of them — never derived from a role code.
+ */
+export function isContractStaffOnlyAccess(permissions: string[]): boolean {
+  return (
+    permissions.includes('contracts.workflow_update') &&
+    !permissions.includes('contracts.update') &&
+    !permissions.includes('contracts.close')
+  );
 }
