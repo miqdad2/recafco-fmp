@@ -868,6 +868,68 @@ describe('ContractWorkflowService.getWorkflowForContract', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CM-57 — ContractWorkflowService.getWorkflowSummaryForContract
+// ---------------------------------------------------------------------------
+
+describe('ContractWorkflowService.getWorkflowSummaryForContract', () => {
+  it('rejects actors without contracts.read', async () => {
+    const noReadActor: AuthUser = { ...ACTOR_READ_ONLY, permissions: [] };
+    await expect(service.getWorkflowSummaryForContract('contract-1', noReadActor)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects when the contract does not exist', async () => {
+    mockContractFindUnique.mockResolvedValue(null);
+    await expect(service.getWorkflowSummaryForContract('missing', ACTOR_READ_ONLY)).rejects.toThrow(NotFoundException);
+  });
+
+  it('asserts department access using the contract department', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: 'dept-1' });
+    mockTaskFindMany.mockResolvedValue([]);
+
+    await service.getWorkflowSummaryForContract('contract-1', ACTOR_READ_ONLY);
+
+    expect(mockAssertCanAccessDepartment).toHaveBeenCalledWith(ACTOR_READ_ONLY, expect.anything(), 'dept-1');
+  });
+
+  it('never creates tasks, even when none exist yet (no lazy-generation side effect)', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: 'dept-1' });
+    mockTaskFindMany.mockResolvedValue([]);
+
+    const result = await service.getWorkflowSummaryForContract('contract-1', ACTOR_READ_ONLY);
+
+    expect(mockTaskCreateMany).not.toHaveBeenCalled();
+    expect(result.tasks).toHaveLength(0);
+  });
+
+  it('returns team/status/isOverdue/attachmentsCount for each existing task, without regenerating', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: 'dept-1' });
+    mockTaskFindMany.mockResolvedValue([
+      { id: 'task-1', taskName: 'Delivery Note', team: 'PRODUCTION', status: 'COMPLETED', priority: 'NORMAL', dueDate: new Date('2020-01-01T00:00:00Z'), _count: { attachments: 2 } },
+      { id: 'task-2', taskName: 'Site Handover', team: 'PRODUCTION', status: 'NOT_STARTED', priority: 'URGENT', dueDate: new Date('2020-01-01T00:00:00Z'), _count: { attachments: 0 } },
+    ]);
+
+    const result = await service.getWorkflowSummaryForContract('contract-1', ACTOR_READ_ONLY);
+
+    expect(mockTaskCreateMany).not.toHaveBeenCalled();
+    expect(result.tasks).toEqual([
+      { id: 'task-1', taskName: 'Delivery Note', team: 'PRODUCTION', status: 'COMPLETED', priority: 'NORMAL', dueDate: '2020-01-01T00:00:00.000Z', isOverdue: false, attachmentsCount: 2 },
+      { id: 'task-2', taskName: 'Site Handover', team: 'PRODUCTION', status: 'NOT_STARTED', priority: 'URGENT', dueDate: '2020-01-01T00:00:00.000Z', isOverdue: true, attachmentsCount: 0 },
+    ]);
+  });
+
+  it('returns a null dueDate when the task has none stored', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: 'dept-1' });
+    mockTaskFindMany.mockResolvedValue([
+      { id: 'task-3', taskName: 'Final Sign-off', team: 'TECHNICAL', status: 'IN_PROGRESS', priority: 'NORMAL', dueDate: null, _count: { attachments: 0 } },
+    ]);
+
+    const result = await service.getWorkflowSummaryForContract('contract-1', ACTOR_READ_ONLY);
+
+    expect(result.tasks[0]?.dueDate).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ContractWorkflowService.regenerate
 // ---------------------------------------------------------------------------
 

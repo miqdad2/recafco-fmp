@@ -1,38 +1,33 @@
 import Link from 'next/link';
-import type { OrgRef, ContractPerson } from '@/lib/contracts-api';
+import type { ContractPerson } from '@/lib/contracts-api';
+import { SCHEDULE_STATUS_OPTIONS, DAYS_REMAINING_FILTER_OPTIONS, SCOPE_OF_WORK_OPTIONS, LIFECYCLE_STATUS_FILTER_OPTIONS } from '../_lib/contract-ui-helpers';
 
 interface Props {
   search: string | undefined;
-  lifecycleStatus: string | undefined;
-  departmentId: string | undefined;
+  scheduleStatus: string | undefined;
+  contractType: string | undefined;
   ownerUserId: string | undefined;
-  departments: OrgRef[];
+  daysRemaining: string | undefined;
+  /** CM-69C — the real lifecycle status (DRAFT/ACTIVE/.../CANCELLED), not the "Contract Status" schedule dropdown below. Blank = normal working view (excludes Cancelled); 'ALL' shows everything for audit. */
+  lifecycleStatus: string | undefined;
   people: ContractPerson[];
   hasActiveFilters: boolean;
 }
 
-const LIFECYCLE_OPTIONS: { value: string; label: string }[] = [
-  { value: '', label: 'All statuses' },
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'EXPIRING', label: 'Expiring Soon' },
-  { value: 'EXPIRED', label: 'Expired' },
-  { value: 'TERMINATED', label: 'Terminated' },
-  { value: 'CLOSED', label: 'Closed' },
-];
-
+// CM-55 — approved-design filter row: Search / Contract Status
+// (manager-facing schedule status, NOT lifecycle status) / Contract Type
+// (real scopeOfWork flags — no dedicated "type" field exists) / Contract
+// Manager / Days Remaining / Reset. The Risk Rating filter from the
+// approved screenshot is removed entirely per the change request; the old
+// Department filter is dropped from this row too — not part of the
+// approved design's required filter list, and department scope is already
+// enforced server-side regardless of this UI.
 export function ContractFilterBar({
-  search,
-  lifecycleStatus,
-  departmentId,
-  ownerUserId,
-  departments,
-  people,
-  hasActiveFilters,
+  search, scheduleStatus, contractType, ownerUserId, daysRemaining, lifecycleStatus, people, hasActiveFilters,
 }: Props): React.JSX.Element {
   return (
     <form method="GET" action="/contracts" className="rounded-lg border border-border bg-surface p-4 mb-6 space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
         <div>
           <label htmlFor="search" className="block text-xs font-medium text-text-secondary mb-1">
             Search
@@ -42,14 +37,14 @@ export function ContractFilterBar({
             name="search"
             type="search"
             defaultValue={search}
-            placeholder="Contract reference or contract name…"
+            placeholder="Contract No, Name, Client, Package…"
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         <div>
           <label htmlFor="lifecycleStatus" className="block text-xs font-medium text-text-secondary mb-1">
-            Contract Status
+            Lifecycle Status
           </label>
           <select
             id="lifecycleStatus"
@@ -57,25 +52,43 @@ export function ContractFilterBar({
             defaultValue={lifecycleStatus ?? ''}
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
-            {LIFECYCLE_OPTIONS.map((o) => (
+            <option value="">Default View (No Cancelled)</option>
+            {LIFECYCLE_STATUS_FILTER_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="scheduleStatus" className="block text-xs font-medium text-text-secondary mb-1">
+            Contract Status
+          </label>
+          <select
+            id="scheduleStatus"
+            name="scheduleStatus"
+            defaultValue={scheduleStatus ?? ''}
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            <option value="">All Status</option>
+            {SCHEDULE_STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </div>
 
         <div>
-          <label htmlFor="departmentId" className="block text-xs font-medium text-text-secondary mb-1">
-            Department
+          <label htmlFor="contractType" className="block text-xs font-medium text-text-secondary mb-1">
+            Contract Type
           </label>
           <select
-            id="departmentId"
-            name="departmentId"
-            defaultValue={departmentId ?? ''}
+            id="contractType"
+            name="contractType"
+            defaultValue={contractType ?? ''}
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
-            <option value="">All departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+            <option value="">All Types</option>
+            {SCOPE_OF_WORK_OPTIONS.filter((o) => o.key !== 'notApplicable').map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
             ))}
           </select>
         </div>
@@ -90,9 +103,26 @@ export function ContractFilterBar({
             defaultValue={ownerUserId ?? ''}
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
-            <option value="">All managers</option>
+            <option value="">All Managers</option>
             {people.map((p) => (
               <option key={p.id} value={p.id}>{p.displayName}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="daysRemaining" className="block text-xs font-medium text-text-secondary mb-1">
+            Days Remaining
+          </label>
+          <select
+            id="daysRemaining"
+            name="daysRemaining"
+            defaultValue={daysRemaining ?? ''}
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            <option value="">All</option>
+            {DAYS_REMAINING_FILTER_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
             ))}
           </select>
         </div>

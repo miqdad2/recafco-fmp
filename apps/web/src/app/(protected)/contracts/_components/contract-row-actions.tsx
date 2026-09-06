@@ -20,18 +20,22 @@ type DialogState =
   | { type: 'confirmActivate' }
   | { type: 'error'; message: string };
 
-const PRIMARY_BUTTON_CLS =
-  'inline-flex items-center h-7 px-2.5 rounded-md border border-accent text-accent text-xs font-medium hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50 whitespace-nowrap';
-
 /**
- * CM-43 — manager-friendly Contract List row actions: Open (always), one
- * status-driven primary quick action, and a More actions menu — replaces the
- * old Open/Edit-only column. Same dropdown/confirm-dialog architecture as
+ * CM-43 — manager-friendly Contract List row actions: Open (always) plus a
+ * More actions menu, replacing the old Open/Edit-only column. Same
+ * dropdown/confirm-dialog architecture as
  * administration/users/_components/user-lifecycle-actions.tsx (useTransition
  * + router.refresh(), a small local dialog state machine for confirm/error),
  * not a new pattern. Activate reuses the existing activateContractAction
  * (already used by ContractTransitions on the detail page) — no new backend
  * call, no new mutation.
+ * CM-55D — the status-driven "primary" action (Activate/Assign Tasks/Review
+ * Closeout) used to render as a third always-visible button next to Open;
+ * it's now the first item inside the More menu instead (highlighted in
+ * accent color so it's still easy to spot), leaving only Open + the "···"
+ * trigger visible in the row — a cleaner, narrower Action column. The
+ * confirm-dialog flow for Activate is unchanged, just triggered from the
+ * menu item instead of the old inline button.
  */
 export function ContractRowActions({ contractId, status, version, permissions, hasPendingCloseout }: Props): React.JSX.Element {
   const router = useRouter();
@@ -40,6 +44,8 @@ export function ContractRowActions({ contractId, status, version, permissions, h
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
 
   const plan = computeContractRowActionPlan({ id: contractId, status }, permissions, hasPendingCloseout);
+  const primaryIsMenuItem = plan.primary.type !== 'open';
+  const hasMenu = primaryIsMenuItem || plan.moreActions.length > 0;
 
   function closeAll(): void {
     setMenuOpen(false);
@@ -59,33 +65,17 @@ export function ContractRowActions({ contractId, status, version, permissions, h
   }
 
   return (
-    <div className="relative inline-flex items-center gap-3 text-xs font-medium">
+    <div className="relative inline-flex items-center gap-2 text-xs font-medium">
       <Link href={`/contracts/${contractId}`} className="text-accent hover:underline">
         Open
       </Link>
 
-      {plan.primary.type === 'activate' && (
-        <button
-          type="button"
-          onClick={() => setDialog({ type: 'confirmActivate' })}
-          disabled={isPending}
-          className={PRIMARY_BUTTON_CLS}
-        >
-          Activate
-        </button>
-      )}
-      {plan.primary.type !== 'activate' && plan.primary.type !== 'open' && plan.primary.href && (
-        <Link href={plan.primary.href} className={PRIMARY_BUTTON_CLS}>
-          {plan.primary.label}
-        </Link>
-      )}
-
-      {plan.moreActions.length > 0 && (
+      {hasMenu && (
         <div className="relative">
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
-            className="text-text-muted hover:text-text-secondary focus:outline-none disabled:opacity-50"
+            className="inline-flex items-center justify-center size-6 rounded-md text-text-muted hover:text-text-secondary hover:bg-surface-secondary focus:outline-none disabled:opacity-50"
             aria-label="More actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -97,6 +87,27 @@ export function ContractRowActions({ contractId, status, version, permissions, h
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden="true" />
               <div role="menu" className="absolute right-0 z-20 mt-1 w-44 rounded-md shadow-md bg-surface border border-border py-1 text-sm">
+                {plan.primary.type === 'activate' && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setMenuOpen(false); setDialog({ type: 'confirmActivate' }); }}
+                    disabled={isPending}
+                    className="block w-full text-left px-4 py-2 hover:bg-surface-hover text-accent font-medium disabled:opacity-50"
+                  >
+                    Activate
+                  </button>
+                )}
+                {plan.primary.type !== 'activate' && plan.primary.type !== 'open' && plan.primary.href && (
+                  <Link
+                    href={plan.primary.href}
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 hover:bg-surface-hover text-accent font-medium"
+                  >
+                    {plan.primary.label}
+                  </Link>
+                )}
                 {plan.moreActions.map((action) => (
                   <Link
                     key={action.key}
@@ -146,7 +157,7 @@ export function ContractRowActions({ contractId, status, version, permissions, h
 
             {dialog.type === 'error' && (
               <>
-                <h2 className="text-base font-semibold text-danger mb-2">Action failed</h2>
+                <h2 className="text-base font-semibold text-error mb-2">Action failed</h2>
                 <p className="text-sm font-normal text-text-secondary mb-4">{dialog.message}</p>
                 <div className="flex justify-end">
                   <button

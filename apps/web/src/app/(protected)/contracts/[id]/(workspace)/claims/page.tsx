@@ -1,74 +1,61 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
 import { contractsApi } from '../../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../../_lib/get-user-permissions';
-import { ClaimRegisterTable } from '../../../claims/_components/claim-register-table';
-import { formatContractValue } from '../../../_lib/contract-ui-helpers';
+import { ContractClaimKpiStrip } from './_components/contract-claim-kpi-strip';
+import { ContractClaimPanel } from './_components/contract-claim-panel';
 
-export const metadata: Metadata = { title: 'Claims Registry — Contract Management — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Claims — Contract Management — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+/**
+ * CM-61 — Contract Detail Claims tab, approved-design build. Named "Claims"
+ * only (tab label, section heading, table heading, Add button) — never
+ * "Claims / Change Orders" or "Change Order" as a page/table title, per this
+ * unit's explicit naming decision: Variations / Change Orders already owns
+ * that framing; Claims separately tracks formal claims, disputes, EOT,
+ * delays, payment issues, damage, extra cost, or contractual issues.
+ *
+ * Reuses the real ContractClaimsService/ClaimFormModal/closeClaimAction from
+ * CM-31 (module-level Claim Log) completely unmodified — same Add/Edit
+ * fields, same server actions, same contracts.update gate, same
+ * contractsApi.listClaims()/export route. Only the display layer (KPI
+ * strip, filter labels, claim-type wording, table column set) is
+ * contract-scoped-specific — see ui-registry.md's "Contract-scoped page
+ * reuses shared components" pattern (established CM-58).
+ */
 export default async function ContractClaimsTab({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
-  const [permissions, claimsRes, people] = await Promise.all([
+  const [permissions, claimsRes, people, contract] = await Promise.all([
     getUserPermissions(),
-    contractsApi.listClaims({ contractId: id, pageSize: 100 }).catch(() => null),
+    contractsApi.listClaims({ contractId: id, pageSize: 200 }).catch(() => null),
     contractsApi.people().catch(() => []),
+    // CM-70C — readable contract identity for the Add Claim modal (never
+    // derivable from `claims` alone when the contract has no claims yet).
+    contractsApi.get(id).catch(() => null),
   ]);
-  if (!claimsRes) notFound();
+  if (!permissions.includes('contracts.read') || !claimsRes) notFound();
 
   const canUpdate = permissions.includes('contracts.update');
-  const { items: claims, summary } = claimsRes;
-
-  const statusRows: { label: string; value: string }[] = [
-    { label: 'Open Claims', value: String(summary.openClaims) },
-    { label: 'Submitted Value', value: formatContractValue(summary.totalSubmittedValue, 'KWD') },
-    { label: 'Approved Value', value: formatContractValue(summary.totalApprovedValue, 'KWD') },
-    { label: 'Outstanding Value', value: formatContractValue(summary.totalOutstandingValue, 'KWD') },
-    { label: 'Overdue Claims', value: String(summary.overdueClaims) },
-  ];
+  const { items: claims, summary, total } = claimsRes;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-text-primary">Claims Registry</h1>
-          <p className="text-xs text-text-secondary mt-0.5">Track contract claims, values and next actions.</p>
-        </div>
-        <Link
-          href={`/contracts/claims?contractId=${id}`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
-        >
-          Open in Claim Register
-          <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
-        </Link>
-      </div>
+      <h2 className="text-sm font-semibold text-text-primary">Claims Summary</h2>
+      <ContractClaimKpiStrip summary={summary} totalClaims={total} />
 
-      {/* Claim Status */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Claim Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
-          {statusRows.map((row) => (
-            <div key={row.label}>
-              <dt className="text-xs text-text-muted">{row.label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      {/* Claims Registry */}
-      <section>
-        <h2 className="text-sm font-semibold text-text-primary mb-3">Claims Registry</h2>
-        <ClaimRegisterTable claims={claims} contracts={[]} people={people} canUpdate={canUpdate} fixedContractId={id} />
-      </section>
+      <ContractClaimPanel
+        contractId={id}
+        claims={claims}
+        people={people}
+        canUpdate={canUpdate}
+        {...(contract ? { contract: { referenceNumber: contract.referenceNumber, title: contract.title, counterpartyName: contract.counterpartyName } } : {})}
+      />
     </div>
   );
 }

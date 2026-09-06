@@ -50,6 +50,12 @@ Use semantic tokens throughout. Never hardcode colors in feature components and 
   --color-team-production: #4f46e5;
   --color-team-production-light: #eef2ff;
 
+  /* CM-54C — Contract Manager Dashboard KPI polish. Distinguishes the
+     "Submitted Invoices" payment-flow card from the general "info" blue
+     used for contract-level cards; no existing token covers teal. */
+  --color-teal: #0f766e;
+  --color-teal-light: #ecfdfa;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;

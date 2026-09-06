@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** CM-53 — Manager Workflow Task Review Drawer Upgrade (2026-08-26)
+- **Last completed:** CM-70G — Fix Documents & Obligations Nested Form Upload Bug (2026-09-06)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -1847,6 +1847,3504 @@ Pure frontend UI/UX unit — no backend, DTO, service, or schema changes. Simpli
 - "Needs Action" is computed client-side from `data.manager.attentionItems.length` — the same array already returned by the (untouched) API, capped at 30 server-side since CM-37. On the rare contract portfolio with more than 30 simultaneous attention items, this undercounts; adding an uncapped total would need a one-line backend addition, deliberately skipped per this unit's "prefer no backend change unless absolutely needed" instruction. Documented here for future reference.
 - The tabs are a Server-Components-as-props-into-a-Client-Component pattern: `page.tsx` (a Server Component) renders all three panels' JSX and passes them to `ManagerSecondaryTabs` (`'use client'`), which only toggles which one is visible via `useState` — no additional client-side data fetching, no new API calls, keeping the "prefer no backend change" and performance characteristics identical to CM-37.
 - No live API scripting was needed/run since the backend response shape is provably unchanged (not touched) — verification relied on rendered SSR HTML plus the full existing automated test suites (both unchanged in count, confirming no regressions).
+
+## CM-70G — Fix Documents & Obligations Nested Form Upload Bug (Completed 2026-09-06)
+
+### Summary
+
+Confirmed via code inspection the exact bug the browser console warning pointed to: `AttachmentsSection`'s own upload `<form action={uploadFormAction}>` was rendered nested inside the outer `<form id="document-form">` — invalid HTML that React's own `validateDOMNesting` warns about, and that prevented the Upload button's click from reliably reaching its own action. Fixed with the task's own preferred, smaller/safer approach: converted the inner upload `<form>` to a plain `<div>`, changed the Upload button to `type="button"`, and now call the exact same `uploadFormAction` dispatcher directly with a manually-built `FormData` from a click handler — no native form submission involved for Upload at all. The outer document-edit `<form>` (Save Changes) is completely unchanged and remains the modal's only real `<form>`.
+
+### Files Audited
+
+`contract-document-form-modal.tsx` (full re-read — confirmed the exact nested-form structure: `AttachmentsSection`'s own `<form>` at the time nested inside the outer `<form id="document-form">`, both button types, both submit handlers), `actions.ts`'s `uploadDocumentObligationAttachmentAction` (confirmed unchanged, correct, no backend bug), the document-obligation upload controller route and `DocumentObligationAttachmentStorageService` (confirmed unchanged, correct — no backend change needed or made). Also checked for the same pattern elsewhere in the app: confirmed `contract-variation-form-modal.tsx`'s `SupportingDocumentsSection` has the **identical** nested-form structure (its own upload `<form>` nested inside the outer `<form id="variation-form">`), and `workflow-task-drawer.tsx` has multiple `<form>` elements whose nesting relationship was not fully traced — both flagged as out-of-scope findings for this Documents-only unit, not fixed here.
+
+### Root Cause
+
+A genuine, confirmed frontend HTML-structure bug: `AttachmentsSection`'s own upload `<form>` (added in CM-63) was rendered as a child of the outer Document edit `<form>` (also from CM-63) inside `ContractDocumentFormModal`'s JSX tree. Nested `<form>` elements are invalid per the HTML spec; React's development-mode DOM validation surfaces exactly the console warning quoted in this task. A `<button type="submit">` inside an invalidly-nested inner form does not reliably resolve to its own nearest form for submission purposes, which is why clicking Upload appeared to do nothing.
+
+### Files Changed
+
+`contract-document-form-modal.tsx` only — `AttachmentsSection`'s upload `<form>` converted to a `<div>`; its `handleUploadSubmit(e)` (a form `onSubmit` handler) replaced with `handleUploadClick()` (a plain button `onClick` handler) that reads the selected file directly from the `fileInputRef`, shows the exact same "Please choose a file before uploading." error if none is selected, and otherwise builds a `FormData` manually and calls `uploadFormAction(formData)` directly — the same `useActionState` dispatcher as before, just invoked without a surrounding `<form>`. The Upload button is now `type="button"`.
+
+### Backend Changed — No
+
+Zero backend files touched. The upload endpoint, storage service, and department-scope checks were all already correct — confirmed by audit, not modified.
+
+### Migration Added — None
+
+Not needed and not added; this is a pure JSX-structure fix. `pnpm db:migrate:status` still reports 38 migrations, unchanged.
+
+### Nested Form Fix
+
+The inner upload `<form>` no longer exists — `AttachmentsSection` now renders a plain `<div>` around the file input and Upload button. There is exactly one real `<form>` in this modal (`id="document-form"`, used only by Save Changes/Add Document).
+
+### Upload Button Behavior
+
+`type="button"`, `onClick={handleUploadClick}` — calls the upload dispatcher directly, never triggers the outer document form's submit. Disabled only while the upload is actually in flight (`disabled={isUploading}`), matching the established "never disable for any other reason" pattern.
+
+### Save Button Behavior
+
+Unchanged — `type="submit"` with `form="document-form"`, still exclusively updates document fields (`itemNo`/`category`/`title`/`responsibleParty`/`status`/`requiredDate`/`submissionDate`/`expiryDate`/`remarks`) via `readDocumentObligationFields()`'s existing whitelist, which was never sent an actual file even before this fix (the whitelist simply never reads a `file` key). Save was never able to trigger Upload, and now that Upload has no `<form>` of its own, Upload can never trigger Save either — the two are now genuinely, structurally independent. The task's own "Save document changes before uploading" helper was evaluated and confirmed NOT technically required — uploading targets a fixed, already-saved `itemId` independent of any pending, unsaved edits in the other fields — so it was not added, consistent with the task's own "only if technically required" hedge.
+
+### No-File Validation Behavior
+
+Clicking Upload with no file selected shows "Please choose a file before uploading." immediately, client-side, with zero network round trip — reusing the exact wording already established in CM-70F for the (still-present, still-correct) server-side fallback check.
+
+### Upload Success Behavior
+
+Unchanged from CM-70F's own fix: on a real successful upload, the file input clears, the attachment list re-fetches and shows the new file immediately within the same open modal, and a real "Uploaded successfully." line appears — all driven by genuine confirmed state, never fabricated.
+
+### Console Warning Confirmation
+
+The nested-form structure that caused the "<form> cannot be nested inside another <form>" warning no longer exists in this component — `AttachmentsSection` contains no `<form>` element at all. Live browser confirmation of the console being clean was not possible under the carried-over credential blocker; confirmed instead via direct source-code inspection of the fixed JSX tree (zero `<form>` tags remain inside `AttachmentsSection`).
+
+### Attachments Library Impact
+
+None — `DocumentObligationAttachmentStorageService`, the attachment Prisma model, and the download route are all untouched. Attachments continue to appear in this modal's own list, the Attachments / Document Library aggregation (CM-64), and Closeout Required Documents, all reading the same real, unchanged attachment records.
+
+### Closeout Readiness Impact
+
+None — Closeout Required Documents reads the same real document/attachment records via the same unchanged backend; nothing in this unit touches that data path.
+
+### Regression Results
+
+Web: 669/669 (unchanged — this is a JSX-structure/event-wiring fix with no new pure logic to test). API: 1446/1446 (unchanged — zero backend touched).
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1446/1446 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 38 migrations, unchanged |
+| Live smoke check | ✓ Documents, Closeout, Dashboard, Contract List, and every sibling per-contract tab (Overview/Activity/Attachments/Schedule/Workflow/Payments/Production/Variations/Claims/Risks/Issues) all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through (Verification A–H) | **Not run** — same carried-over credential blocker as every unit since CM-62; the nested-form structure itself was confirmed removed via direct source inspection, and the fix follows the task's own literal prescribed approach exactly |
+
+### Unsupported/Deferred Items
+
+Live authenticated confirmation of Verification A–H (actually watching the console, clicking Upload, seeing the file appear) — credential blocker, carried over. The **identical** nested-form bug was confirmed (by code inspection, not fixed) in `contract-variation-form-modal.tsx`'s `SupportingDocumentsSection`; `workflow-task-drawer.tsx`'s multiple `<form>` elements were flagged but their nesting was not fully traced. Both are strong candidates for the exact same fix pattern in a follow-up unit.
+
+### Next Recommended Unit
+
+A dedicated "Nested Form Upload Fix — Variations / Workflow" unit applying the exact same `<form>`→`<div>` + direct-dispatcher-call pattern proven here to `SupportingDocumentsSection` (Variations) and to `workflow-task-drawer.tsx`'s attachment upload, if its own form nesting turns out to have the same defect once traced.
+
+## CM-70F — Fix Document Edit Save and Attachment Upload Not Working (Completed 2026-09-06)
+
+### Summary
+
+Audited the reported "Save Changes and Upload don't work, dates appear empty" bug and found and fixed a real, confirmed, backend root cause: Prisma returns a real JS `Date` object (UTC midnight) for every `@db.Date` column, and the default Express/NestJS JSON response serializes a `Date` via `.toISOString()` — producing a full datetime string like `"2026-09-06T00:00:00.000Z"` instead of the plain `"2026-09-06"` the frontend's own type declares and a native `<input type="date">` requires. A browser silently renders such a field as EMPTY (an invalid `value`/`defaultValue`), which is exactly the reported symptom and — since the save itself was actually succeeding — the most likely full explanation for "Save Changes doesn't work" too (the data persisted correctly; only its round-trip display was broken, making a successful save look like a silent failure). Verified this empirically with a real read-only Prisma query against the live dev database before writing any fix. Separately audited the Upload flow line-by-line and found no functional defect in the actual action/endpoint plumbing — only a feedback gap (no client-side no-file check, no success acknowledgment, and the no-file error's wording didn't exactly match this task's required text), which was polished.
+
+### Files Audited
+
+`contract-document-form-modal.tsx` (full re-read post-CM-70E — confirmed `handleSubmit`'s failure handling, `useEffect`'s success-only-close logic, and the outer/`AttachmentsSection` structure were all already correct), `contract-document-obligations.service.ts` (`withDerivedFields`, `DOCUMENT_OBLIGATION_SELECT`, `create`/`update` — confirmed no reformatting of Date-typed columns existed anywhere before returning to the controller), `contracts.controller.ts`'s document-obligation routes (confirmed `{ data, meta, error }` is returned raw, no serialization interceptor registered anywhere in `main.ts`), `actions.ts`'s `readDocumentObligationFields`/`createDocumentObligationAction`/`updateDocumentObligationAction`/`uploadDocumentObligationAttachmentAction`/`actionFetchMultipart` (confirmed all correct — right HTTP method, right URL matching the controller's real route, correct auth header, correct error propagation), `contracts-api.ts`'s `apiFetch` (confirmed a plain `res.json()`, no date reformatting on the client either — confirming the bug must be fixed server-side, at the one place the response is actually built). Confirmed via a real, read-only Prisma query against the live dev database (an existing contract's own `startDate`) that `JSON.stringify` of a Prisma `@db.Date` value is genuinely `"…T00:00:00.000Z"`, reproducing the bug outside of any test mock.
+
+### Root Cause
+
+A genuine backend serialization bug, not a save/upload plumbing failure: `contract-document-obligations.service.ts` returned raw Prisma `Date` objects for `requiredDate`/`submissionOrExpiryDate`/`submissionDate`/`expiryDate`, which serialize to a full ISO datetime string by default — a value a native `<input type="date">` treats as invalid and renders blank. Save and Upload themselves were not actually broken; the date bug made a genuinely successful save look like nothing had happened, since the very fields the user had just filled in vanished the moment the modal reopened. This same unconverted-Date-object pattern was confirmed to exist in several sibling services (Claims/Risks/Issues/Payments/Variations) — out of scope for this Documents-only bug-fix unit, flagged as a follow-up.
+
+### Files Changed
+
+`contract-document-obligations.service.ts` (`withDerivedFields` now reformats all 4 date-only columns to `"YYYY-MM-DD"` strings via a new `toDateOnlyString()` helper, applied in `findAllForContract`/`create`/`update`). `contract-document-obligations.service.test.ts` (+4 new tests proving the exact date-string format, both for reads and for create/update responses). `actions.ts` (`uploadDocumentObligationAttachmentAction`'s no-file error message corrected to the exact required wording: "Please choose a file before uploading."). `contract-document-form-modal.tsx` (`AttachmentsSection` gained an immediate client-side no-file check with the same exact wording, plus a real "Uploaded successfully." acknowledgment shown only once a new attachment is actually confirmed present).
+
+### Backend Changed — Yes (bug fix only, no schema/migration change)
+
+`contract-document-obligations.service.ts` changed to correctly format its own response — no DTO, controller route, or Prisma schema change. Every existing test continued to pass unchanged; 4 new tests added.
+
+### Migration Added — None
+
+Not needed and not added. This unit is a response-serialization bug fix, not a schema change — CM-70E's migration already provided the correct columns; this unit only fixed how their values are formatted on the way out. `pnpm db:migrate:status` still reports 38 migrations, unchanged.
+
+### Date Loading Behavior
+
+Required Date, Submission Date, and Expiry Date now all load correctly in Edit mode for any item that has them saved — confirmed via new backend tests asserting the exact `"2026-09-06"`-shaped string is returned (never a full ISO datetime, never fabricated for an unset field).
+
+### Date Saving Behavior
+
+Unchanged and confirmed already correct — `create`/`update` already persisted `requiredDate`/`submissionDate`/`expiryDate` independently (added in CM-70E), never mixing Submission and Expiry Date. The bug was entirely on the read/round-trip side.
+
+### Save Changes Behavior
+
+Confirmed already correct by careful re-audit: calls the real `updateDocumentObligationAction`/`createDocumentObligationAction`, shows a visible error banner and keeps the modal open on failure (`state.error` truthy blocks the success-only `useEffect`), and only closes + `router.refresh()`s on genuine success. No silent failure path was found. The "doesn't work" perception is fully explained by the date-display bug above.
+
+### Upload Behavior
+
+Confirmed the secure upload endpoint, department-scope checks, and MIME/size validation were all already correct and unaffected by this fix. Added a client-side pre-check so choosing no file shows the required message immediately, without waiting on a network round trip; the existing server-side check (same wording) remains as the real safety net. A new upload triggers an immediate re-fetch of the attachment list within the same open modal (unchanged, already correct) plus a new, real "Uploaded successfully." line once that re-fetch confirms the attachment is present.
+
+### No-File-Selected Behavior
+
+Clicking Upload with no file chosen now shows "Please choose a file before uploading." instantly (client-side), matching the exact required wording; the pre-existing server-side check (previously worded "Please choose a file to upload.") was also corrected to match exactly, so the same message appears even if the client-side check is ever bypassed.
+
+### Attachment Library Impact
+
+None — no change to `DocumentObligationAttachmentStorageService`, the attachment Prisma model, or the download route. Attachments continue to appear in this modal's own list, the Attachments / Document Library aggregation (CM-64, confirmed unrelated to this fix), and Closeout Required Documents, all reading the same real attachment records.
+
+### Closeout Document Readiness Impact
+
+None negative — Closeout Required Documents reads the same real document/obligation records and the same real attachment metadata; its own Submission Date/Expiry Date columns (split in CM-70E) now display correctly too, as a direct consequence of the same backend fix, since they read the identical service response.
+
+### Error Handling Behavior
+
+Save failure: visible banner, modal stays open (already correct, reconfirmed). Upload failure: visible message (already correct, reconfirmed). No file selected: visible message, now shown instantly client-side with exact required wording, and also fixed server-side to match. Validation error (Expiry before Submission, empty title): visible banner, submission blocked (already correct from CM-70E, reconfirmed still correct once real dates round-trip properly).
+
+### Regression Results
+
+Web: 669/669 (no new web-side pure-logic tests needed beyond the existing CM-70E coverage — the fix and its UI polish are either backend-only or simple UI-state wiring with no new pure function to test). API: 1446/1446 (4 new). No existing test changed behavior.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1446/1446 (4 new, proving the exact date-string fix) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 38 migrations, unchanged (no migration this unit) |
+| Live smoke check | ✓ Documents, Closeout, Dashboard, Contract List, and every sibling per-contract tab (Overview/Activity/Attachments/Schedule/Workflow/Payments/Production/Variations/Claims/Risks/Issues) all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through (Verification A–F) | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via a real read-only Prisma query proving the exact bug, plus new unit tests proving the exact fix |
+
+### Unsupported/Deferred Items
+
+Live authenticated confirmation of Verification scenarios A–F (opening DOC-GRM-001, saving, uploading a real PDF, and watching it appear in Closeout) — credential blocker, carried over. The SAME unconverted-Date-object bug was confirmed to exist in Claims/Risks/Issues/Payments/Variations (and likely Contract Edit's own startDate/endDate) — flagged as the single highest-value follow-up unit now that it has a proven root cause and a proven fix pattern to replicate.
+
+### Next Recommended Unit
+
+A dedicated "Date Serialization Fix — Claims/Risks/Issues/Payments/Variations/Contract" unit, applying the exact same `toDateOnlyString()` pattern proven here to every other service returning a raw Prisma `@db.Date`/`@db.Timestamp` value as a date-only field — this is very likely a silent, systemic bug across most of Contract Management's Edit modals, never caught because no unit in this entire session has had live authenticated browser access to actually see a date field render.
+
+## CM-70E — Documents & Obligations Modal Date Field UX Fix (Completed 2026-09-06)
+
+### Summary
+
+Audited the Add/Edit Document modal's confusing single "Submission / Expiry Date" field and confirmed the confusion has a REAL schema root cause, not just a labeling one: `ContractDocumentObligation` had exactly one combined nullable column (`submission_or_expiry_date`) backing that one field — there was no way to record both a submission date and an expiry date on the same item. Since the task's own test-data scenario (Insurance Certificate) explicitly requires Required + Submission + Expiry simultaneously, this could not be solved frontend-only. Added an additive migration (two new nullable columns, `submission_date`/`expiry_date`), kept the old combined column and any of its data completely untouched (never dropped, never backfilled/guessed), updated the backend to prefer the real Expiry Date for all day-count/derived-status math (falling back to the legacy column only for pre-existing records), and rebuilt the modal with three clear, separately-helped date fields. Verified the live dev database currently has zero rows in this table, so no real historical data was at risk, but the migration and fallback logic were still built as if it did.
+
+### Files Audited
+
+`contract-document-form-modal.tsx` (the Add/Edit modal — read in full; confirmed the single combined date field, no client-side validation, 2 `danger`-token bugs), `schema.prisma`'s `ContractDocumentObligation` model (confirmed exactly one combined `submissionOrExpiryDate` column, no separate submission/expiry columns — the real root cause), `create-contract-document-obligation.dto.ts` / `update-contract-document-obligation.dto.ts` (confirmed both only accept the one combined field), `contract-document-obligations.service.ts`'s `computeDocumentObligationDaysRemaining`/`IsExpiredOverdue`/`IsExpiringSoon`/`computeDocumentObligationSummary` (confirmed all derive from the one combined date), `contract-closeout-required-documents-panel.tsx` and the Closeout blocking-items mapper (`closeout/page.tsx` + `contract-closeout-detail-helpers.ts`) — confirmed both read `submissionOrExpiryDate` for display only, no calculation logic of their own, `contract-document-panel.tsx` and `contract-document-obligation-csv.ts` (confirmed both display/export the one combined field as a single column), Attachments library (CM-64) — confirmed it references documents by ID/attachment metadata only, never this date field, unaffected. Confirmed via a direct read-only Prisma query against the live dev database that `contract_document_obligations` currently has 0 rows.
+
+### Root Cause
+
+A genuine schema limitation, not merely a UI/labeling issue: one combined `submissionOrExpiryDate` column cannot represent "submitted on X AND expires on Y" for the same item, which the task's own Insurance Certificate scenario requires. The confusing single form field was an honest reflection of the underlying single column.
+
+### Files Changed
+
+`schema.prisma` (+2 nullable columns: `submissionDate`, `expiryDate`; `submissionOrExpiryDate` kept, marked legacy in a doc comment). New migration `20260906000000_add_contract_document_obligation_dates` (additive only, applied via `prisma migrate deploy` — 38 migrations now). `create-contract-document-obligation.dto.ts` / `update-contract-document-obligation.dto.ts` (+`submissionDate?`/`expiryDate?`, legacy field kept accepted). `contract-document-obligations.service.ts` (`DateFields`/`DocumentObligationSummaryRow` gain optional `expiryDate`; new `effectiveExpiryDate()` helper preferring it over the legacy column; both selects and both create/update handlers updated). `contract-document-obligations.service.test.ts` (+4 new tests). `contracts-api.ts` (`ContractDocumentObligation` gains `submissionDate?`/`expiryDate?`). `actions.ts` (`readDocumentObligationFields()` passes both new fields through). `contract-document-obligation-helpers.ts` (+`validateDocumentObligationFormValues`). `contract-document-obligation-helpers.test.ts` (+10 new tests, including all 5 of this unit's own test-data scenarios). `contract-document-form-modal.tsx` (3 date fields with helpers, status-aware Submission Date recommendation note, legacy-date InfoBox for any old record, updated attachment/Responsible Party wording, 2 `danger`→`error` fixes). `contract-document-panel.tsx`, `contract-closeout-required-documents-panel.tsx`, `contract-document-obligation-csv.ts` (+its test) — all split their one "Submission / Expiry Date" column into two. `closeout/page.tsx` (blocking-items mapper now prefers `expiryDate` for the displayed action-due-date).
+
+### Backend Changed — Yes (additive only)
+
+DTOs, service (selects + create/update + derived-date calc), and the Prisma schema were all changed — but every change is additive: two new nullable columns, two new optional DTO fields, one new fallback-preference helper function. No existing column, field, or calculation was removed or altered in a breaking way; the legacy combined field and its (currently zero) data are fully preserved and still readable.
+
+### Migration Added — Yes
+
+`20260906000000_add_contract_document_obligation_dates`: `ALTER TABLE contract_document_obligations ADD COLUMN submission_date DATE, ADD COLUMN expiry_date DATE;` — additive, nullable, no data loss, no column drops. Applied via `prisma migrate deploy` (never `migrate dev`/reset). `pnpm db:migrate:status` now reports 38 migrations, up to date.
+
+### Date Field Behavior
+
+The modal now shows three fields side by side: Required Date, Submission Date, Expiry Date — each with its own helper text exactly as specified. A record with an old legacy combined date (none currently exist) shows a one-time InfoBox pointing to it without hiding or migrating it automatically.
+
+### Helper Text Behavior
+
+Required Date: "Date by which this document is required." Submission Date: "Date the document was submitted or received." (or a soft "Recommended once a document is Submitted, though not required." note when status is Submitted and no submission date is set yet). Expiry Date: "Date this document expires, if applicable." Responsible Party placeholder updated to "e.g. Finance Team, Technical Team, Client, Contract Manager." Attachment instruction updated to the exact required wording: "After saving, open Edit Document to upload supporting files."
+
+### Validation Behavior
+
+`validateDocumentObligationFormValues()`: Document / Obligation title is required; Expiry Date cannot be before Submission Date when both are entered. Per this unit's own hedge, Submission Date is deliberately never checked against Required Date — a document can be submitted early, and no existing backend rule says otherwise. Status remains a free manual choice; a Submitted item with no Submission Date is never blocked, only gently recommended via helper text. Any violation blocks submission (`e.preventDefault()`) and shows every failing rule in the same banner already used for server errors.
+
+### Status/Days Remaining Behavior
+
+Status is still always a plain manual selection, never auto-changed. Days Remaining and the Expiring Soon / Expired & Overdue counts now derive from the real Expiry Date (`effectiveExpiryDate()` = `expiryDate ?? submissionOrExpiryDate`) instead of the old combined field — new records use Expiry Date exclusively; any pre-existing record (none currently exist) that only has the legacy field keeps working exactly as before via the fallback.
+
+### Closeout Impact
+
+None negative — Required Documents for Closeout still reads the same real document records; its own "Submission / Expiry Date" column was split into two (Submission Date, Expiry Date) reading the new fields directly. The Closeout blocking-items list's displayed action-due-date now prefers the real Expiry Date over the legacy field, matching the backend's own preference, with zero change to the blocking-item interface/type signature (only the mapped value changed).
+
+### Attachment Behavior
+
+Unchanged — upload/list/download logic in `AttachmentsSection` was not touched; only its instructional copy in Add mode was reworded per the task's exact required wording.
+
+### Regression Results
+
+Web: 669/669 (10 new tests). API: 1442/1442 (4 new tests). No existing test needed a behavioral change beyond the CSV fixture's column split (mechanical, not a behavior change — the "blank Attachment field" comma-adjacency assertion was unaffected since Attachment/Remarks/Last Update stay adjacent regardless of the two new mid-row columns).
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 (10 new, including all 5 of this unit's own test-data scenarios) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1442/1442 (4 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 38 migrations, up to date |
+| Live smoke check | ✓ Documents, Closeout, Dashboard, Contract List, and every sibling per-contract tab (Overview/Activity/Attachments/Schedule/Workflow/Payments/Production/Variations/Claims/Risks/Issues) all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via the new unit tests exercising the exact pure validation/calculation logic |
+
+### Unsupported/Deferred Items
+
+Live authenticated visual confirmation of the rebuilt modal and the 5 test-data scenarios actually persisting correctly through a real save — credential blocker, carried over. The legacy `submissionOrExpiryDate` column has zero current rows to migrate, so no cleanup/backfill unit is needed unless a future environment turns out to have real historical data in it.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm this modal's 3-field split and the exact 5 test-data scenarios (Signed Contract Agreement, Performance Bond, Insurance Certificate, Final Invoice, Warranty Document) save and display correctly end-to-end.
+
+## CM-70D — Issue Log Modal UX and Validation Polish (Completed 2026-09-06)
+
+### Summary
+
+Audited the Add/Edit Issue modal against the reported raw-UUID contract display and unclear field meanings/validation. Confirmed the same raw-UUID bug pattern as CM-70C's Claim modal: the per-contract Issue Log tab's Add flow (`ContractIssuePanel`) calls `IssueFormModal` with `fixedContractId` but never a `contracts` array, so the display fell back to the bare UUID. Confirmed the backend's `computeIssueSummary()` already reproduces this unit's own verification numbers (Open = 2, In Progress = 1, Resolved = 1) with zero calculation change needed, and confirmed both issue DTOs have no cross-field validation today. Reorganized the modal into 4 labeled sections, relabeled Due Date/Raised Date per the task's exact wording (display only — backend field names unchanged), added all requested field helpers, and added a full frontend-only validation pass. No `danger`-token bug existed in this file already using `error` in two spots and `danger` in others — fixed the confirmed occurrences.
+
+### Files Audited
+
+`issue-form-modal.tsx` (the shared Add/Edit Issue modal, used by both the module-level Issue Register and the per-contract Issue Log tab — read in full; confirmed no client-side validation existed, confirmed the raw-UUID fallback, found `danger`-token bugs in the error banner and both required-field asterisks), `create-contract-issue.dto.ts` / `update-contract-issue.dto.ts` (confirmed `category` is genuinely `@IsOptional` — not required by the backend, so no hard requirement added per the task's own "if backend requires it" hedge; confirmed the real 9-value `CONTRACT_ISSUE_CATEGORIES` list — Commercial, Technical, Production, Delivery, Erection, Client, Document, Payment, Other — does not match the task's suggested 10-value list (Finance/Site/Quality/Safety aren't real values); per "do not add enum values unless backend already supports them," no new categories were added), `contract-issues.service.ts`'s `computeIssueSummary()` (confirmed it counts OPEN/IN_PROGRESS/RESOLVED/CLOSED/WAITING_RESPONSE independently by status and already reproduces this unit's own test numbers with no change), `contract-issue-detail-helpers.ts` (confirmed its own pre-existing `ISSUE_CATEGORY_LABELS` relabeling map is contract-tab-specific — used by the table/badges, not the shared modal — and that the module-level register shows raw category values directly with no relabeling at all; kept both as-is rather than introducing a THIRD, modal-specific labeling scheme), `contract-issue-panel.tsx` / `issue-register-table.tsx` / `issues/page.tsx` (confirmed exactly where `contracts`/`fixedContract` context is and isn't passed — only the per-contract panel's Add flow was missing it), `ContractIssue`/`contractsApi.get()` (confirmed `issue.contract` already embeds `referenceNumber`/`title`/`counterpartyName`, reusing the same per-tab re-fetch pattern established in CM-70C), Overview/Dashboard/Closeout consumers of `ContractIssueSummary` (confirmed all read the same real, backend-computed, untouched summary object).
+
+### Files Changed
+
+`issue-form-modal.tsx` (4 labeled sections, controlled Status, readable contract display, relabeled Action Due Date/Issue Raised Date, field helpers, client-side validation banner, `danger`→`error` token fixes, Add-mode Issue Raised Date defaults to today). `contract-issue-detail-helpers.ts` (+6 new pure exports: `formatIssueContractContext`, `isResponsiblePersonRequired`, `isActionDueDateRequired`, `isResolutionRequired`, `validateIssueFormValues`). `contract-issue-detail-helpers.test.ts` (+22 new tests, including the exact ISS-GRM-001..004 verification scenario). `contract-issue-panel.tsx` (+`contract` prop, threaded to the modal as `fixedContract`). `issues/page.tsx` (the per-contract Issue Log tab — added a `contractsApi.get(id)` fetch, matching the CM-70C/`payments/page.tsx` per-tab re-fetch pattern).
+
+### Backend Changed — No
+
+Zero backend files touched. `computeIssueSummary()` and both issue DTOs are unchanged — all new rules are frontend-only, per this unit's own "prefer frontend/UI-validation only" instruction.
+
+### Migration — None
+
+Confirmed unnecessary during audit and not added. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Readable Contract Display Behavior
+
+The Add-mode-with-selectable-contracts dropdown and Edit mode already showed `referenceNumber`/`title` (never a UUID); the one real bug was the per-contract tab's Add flow, which had no `contracts` array to look up at all and fell back to the bare `fixedContractId` UUID — exactly the same bug shape found and fixed for Claims in CM-70C. Fixed by fetching the contract's own identity in `issues/page.tsx` (`contractsApi.get(id)`) and threading it through as `fixedContract`; the modal now shows `formatIssueContractContext()`'s "CONTRACT-2026-000009 · GRM Boundary Wall & Yard Upgrade · Gulf Ready Mix Co." format everywhere a contract is displayed, only omitting the client segment when genuinely unavailable — never a UUID.
+
+### Modal Section Layout Behavior
+
+Reorganized into 4 labeled sections exactly as requested: Issue Identity (Contract, Issue Title, Issue No., Category), Priority & Responsibility (Priority, Status, Responsible Person), Dates (Issue Raised Date, Action Due Date, Closed Date conditional), Details & Remarks (Description, Resolution conditional, Remarks). No field was removed or hidden — same total field count as before. A top-of-modal helper note ("Record issues that need follow-up until they are resolved.") was added per the task's own wording.
+
+### Field Label/Helper Behavior
+
+"Due Date" relabeled to "Action Due Date" and "Raised Date" to "Issue Raised Date" — display labels only, the underlying `dueDate`/`raisedDate` field names and form field `name` attributes are completely unchanged. Every field now has the exact requested helper text (Issue No., Category, Action Due Date, Issue Raised Date, Responsible Person).
+
+### Status/Category Label Behavior
+
+Status labels were already user-friendly (Open/In Progress/Waiting Response/Resolved/Closed/Cancelled, unchanged). Category options remain the real, unchanged 9-value backend list — already plain human-readable words (Commercial/Technical/Production/Delivery/Erection/Client/Document/Payment/Other), so no relabeling was applied; the task's suggested Finance/Site/Quality/Safety values do not exist in the real enum and were deliberately not added (would require a migration, out of scope for a frontend-only unit, and risks inventing a workflow the business never asked for).
+
+### Responsible Person Validation Behavior
+
+`validateIssueFormValues()` requires Responsible Person only when status is Open or In Progress (`isResponsiblePersonRequired()`) — Waiting Response/Resolved/Closed/Cancelled issues can legitimately have no one currently assigned. The dropdown still lists only real `/contracts/people` users (no fake users); an explicit "No eligible users found. Create a Contract Staff user first." message now shows when the list is genuinely empty, exactly matching the task's required wording.
+
+### Date Validation Behavior
+
+Action Due Date is required only when status is Open or In Progress (same status set as Responsible Person); Action Due Date cannot be before Issue Raised Date; a Resolved/Closed issue requires a Resolution note or Remarks (whichever is filled satisfies the rule). Issue Raised Date now defaults to today's date in Add mode only (a new, safe pattern introduced this unit — no existing precedent for date-defaulting was found anywhere else in this codebase during audit, so this is documented rather than claimed as reused); an existing issue's own stored Raised Date in Edit mode is never overwritten. Any violation blocks submission (`e.preventDefault()`) and shows every failing rule in the same banner already used for server errors — never a silent disable.
+
+### Error Style Behavior
+
+Fixed the confirmed `bg-danger`/`text-danger`/`border-danger` (CM-69G-discovered, invalid-token) occurrences in this file's error banner and required-field asterisks — the only `danger` usages found within the Issue modal's own scope. No global sweep was performed, per this unit's own "do not do global danger-token cleanup in this unit" instruction; `issue-register-table.tsx`'s own overdue-days styling (outside this unit's scope) was left untouched.
+
+### Issue Summary Regression
+
+None — `computeIssueSummary()` on the backend is untouched; this unit added client-side validation and wording only, verified against the exact ISS-GRM-001 (Open) / ISS-GRM-002 (In Progress) / ISS-GRM-003 (Open) / ISS-GRM-004 (Resolved) scenario: Open Issues = 2, In Progress = 1, Resolved = 1.
+
+### Overview/Dashboard/Closeout Impact
+
+None — all three read the same real, backend-computed `ContractIssueSummary` this unit never touched.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 659/659 (22 new, including the exact ISS-GRM-001..004 verification scenario) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1438/1438 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Issue Log (register + per-contract tab), Dashboard, Contract List, and every sibling per-contract tab (Overview/Closeout/Activity/Attachments/Schedule/Workflow/Payments/Production/Variations/Claims/Risks) all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via the new unit tests exercising the exact pure validation logic the modal calls |
+
+### Unsupported/Deferred Items
+
+Live authenticated visual confirmation of the rebuilt modal — credential blocker, carried over. CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch remains the highest-value outstanding cleanup item in this codebase — this unit deliberately did not perform a global sweep, per its own explicit scope instruction.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm this modal's new sections, relabeled dates, and validation in a real browser session. Separately, a dedicated unit to sweep the remaining `danger`-token files (issue/claim register tables among them) would close out CM-69G's largest deferred finding.
+
+## CM-70C — Claim Modal UX and Validation Polish (Completed 2026-09-06)
+
+### Summary
+
+Audited the Add/Edit Claim modal against the reported raw-UUID contract display, unclear field meanings, and unclear status/date/value validation. Confirmed the backend's `computeClaimSummary()` already exactly reproduces this unit's own verification numbers (Open Claims = 1, Approved Claim Value = KWD 400.000, EOT Claimed = 2, EOT Approved = 0) with zero calculation change needed, and confirmed both claim DTOs have no cross-field validation today (a real, confirmed gap). Found and fixed the actual raw-UUID bug: the per-contract Claims tab's Add flow (`ContractClaimPanel`) calls `ClaimFormModal` with `fixedContractId` but never a `contracts` array, so the display fell back to `?? fixedContractId` — a bare UUID. Reorganized the modal into 4 labeled sections, added all requested field helpers, claim-type guidance, and a full frontend-only validation pass, and fixed the 2 `bg-danger`/`text-danger` (CM-69G-discovered, invalid-token) occurrences in this file's error banner.
+
+### Files Audited
+
+`claim-form-modal.tsx` (the shared Add/Edit Claim modal, used by both the module-level Claim Log and the per-contract Claims tab — read in full; confirmed no client-side validation existed, confirmed the raw-UUID fallback, found the CM-69G-class `danger`-token bug in the error banner), `create-contract-claim.dto.ts` / `update-contract-claim.dto.ts` (confirmed each field validates independently — `claimTitle` required, `submittedValue`/`approvedValue` `@Min(0)`, `eotClaimedDays`/`eotApprovedDays` `@Min(0)` integers, `claimNo` genuinely optional — zero cross-field rules exist; confirmed there is no separate "approved date" field in this schema at all, only `claimDate`/`eventDate`/`dueDate`/`closedDate`), `contract-claims.service.ts`'s `computeClaimSummary()` (confirmed `FINAL_STATUSES` includes `APPROVED` — an Approved claim is never counted as "open" — and confirmed the function already reproduces this unit's own test numbers with no change), `contract-claim-detail-helpers.ts` (existing `CLAIM_TYPE_FILTER_OPTIONS`/`CLAIM_STATUS_FILTER_OPTIONS`/`formatDaysToDeadline` — reused as-is), `contract-claim-panel.tsx` / `claim-register-table.tsx` / `claims/page.tsx` (confirmed exactly where `contracts`/`fixedContract` context is and isn't passed today — the register table always receives a full `contracts` array; only the per-contract panel's Add flow was missing it), `ContractClaim`/`contractsApi.get()` (confirmed `claim.contract` already embeds `referenceNumber`/`title`/`counterpartyName`, and `contractsApi.get(id)` returns the same fields for the zero-claims case — an established per-tab re-fetch pattern already used by `payments/page.tsx`), Overview/Dashboard/Closeout consumers of `ContractClaimSummary` (confirmed all read the same real, backend-computed, untouched summary object).
+
+### Files Changed
+
+`claim-form-modal.tsx` (4 labeled sections, controlled Claim Type/Status, readable contract display, field helpers, client-side validation banner, 2 `danger`→`error` token fixes). `contract-claim-detail-helpers.ts` (+4 new pure exports: `formatClaimContractContext`, `getClaimTypeGuidance`, `CLAIM_TYPE_GUIDANCE_TEXT`, `validateClaimFormValues`). `contract-claim-detail-helpers.test.ts` (+23 new tests, including the exact CLM-GRM-001/002 verification scenario). `contract-claim-panel.tsx` (+`contract` prop, threaded to the modal as `fixedContract`). `claims/page.tsx` (the per-contract Claims tab — added a `contractsApi.get(id)` fetch, matching the same per-tab re-fetch pattern `payments/page.tsx` already uses).
+
+### Backend Changed — No
+
+Zero backend files touched. `computeClaimSummary()` and both claim DTOs are unchanged — all new rules are frontend-only, per this unit's own "prefer frontend/UI-validation only" instruction.
+
+### Migration — None
+
+Confirmed unnecessary during audit and not added. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Readable Contract Display Behavior
+
+The Add-mode-with-selectable-contracts dropdown and Edit mode already showed `referenceNumber`/`title` (never a UUID); the one real bug was the per-contract tab's Add flow, which had no `contracts` array to look up at all and fell back to the bare `fixedContractId` UUID. Fixed by fetching the contract's own identity in `claims/page.tsx` (`contractsApi.get(id)`) and threading it through as `fixedContract`; the modal now shows `formatClaimContractContext()`'s "CONTRACT-2026-000009 · GRM Boundary Wall & Yard Upgrade · Gulf Ready Mix Co." format everywhere a contract is displayed, only omitting the client segment when genuinely unavailable — never a UUID.
+
+### Modal Section Layout Behavior
+
+Reorganized into 4 labeled sections exactly as requested: Claim Identity (Contract, Claim Title, Claim No., Claim Type, Status), Financial / EOT Claim (Submitted Value, Approved Value, EOT Claimed, EOT Approved, plus a claim-type guidance note), Dates & Responsibility (Event Date, Claim Date, Due Date, Responsible Person), Next Action & Remarks. No field was removed or hidden — same total field count as before.
+
+### Field Helper Behavior
+
+Every field now has the exact requested helper text (Submitted/Approved Value, EOT Claimed/Approved, Event/Claim/Due Date) plus a status helper ("Use Submitted when claim has been submitted to client. Use Approved only when client approval is confirmed.") and a Claim No. note ("Recommended — helps track this claim in reports and correspondence.") reflecting that the backend genuinely allows it empty.
+
+### Validation Behavior
+
+`validateClaimFormValues()` enforces: Claim Title required; Submitted/Approved Value and EOT Claimed/Approved cannot be negative; Approved Value cannot exceed Submitted Value; EOT Approved cannot exceed EOT Claimed; an Approved-status claim needs a positive Approved Value OR a positive EOT Approved (the "unless claim type/business rule allows zero" hedge is naturally satisfied by the OR — an EOT-only or cost-only Approved claim still passes through whichever measure is positive); an Approved-status claim requires Claim Date (there is no separate "approved date" field in this schema to require — confirmed during audit); Due Date and Claim Date cannot be before Event Date when both are entered. Any violation blocks submission (`e.preventDefault()`) and shows every failing rule in the same banner already used for server errors — never a silent disable.
+
+### Claim Type Behavior
+
+`getClaimTypeGuidance()` shows one contextual note above the Financial/EOT section: Extension of Time → EOT fields emphasized, Submitted/Approved Value may stay 0; every other real claim type (Variation, Delay, Payment, Damage, Scope Change) → cost-like guidance per this unit's own "Cost" example (there is no separate `COST` enum value in the real backend schema — adding one would need a migration, out of scope here); Other → neutral guidance covering both. No field is ever hidden for any type, per the task's own "do not hide fields unless safe and simple" instruction.
+
+### Responsible User Behavior
+
+Unchanged — `people` is still the real `/contracts/people` endpoint's real user list, no fake users introduced. Added an explicit "No eligible users found." message shown only when the list is genuinely empty.
+
+### Claim Summary Regression
+
+None — `computeClaimSummary()` on the backend is untouched; this unit added client-side validation and wording only, verified against the exact CLM-GRM-001 (EOT, Submitted, EOT Claimed 2, EOT Approved 0) / CLM-GRM-002 (Cost/Payment, Approved, Submitted 600, Approved 400) scenario: Open Claims = 1 (Approved is a `FINAL_STATUSES` status, so GRM-002 is not counted open), Approved Claim Value = KWD 400.000, EOT Claimed = 2 days, EOT Approved = 0 days.
+
+### Overview/Dashboard/Closeout Impact
+
+None — all three read the same real, backend-computed `ContractClaimSummary` this unit never touched.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 638/638 (23 new, including the exact CLM-GRM-001/002 verification scenario) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1438/1438 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Claims (register + per-contract tab), Dashboard, Contract List, and per-contract Overview/Closeout/Activity/Attachments routes all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via the new unit tests exercising the exact pure validation logic the modal calls |
+
+### Unsupported/Deferred Items
+
+Live authenticated visual confirmation of the rebuilt modal — credential blocker, carried over. CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch (one more instance of which was just found and fixed in this exact modal) remains the highest-value outstanding cleanup item in this codebase — `claim-register-table.tsx`'s own overdue-days badge (`text-danger`, line ~120) still carries it but was left untouched since this unit's scope is the Add/Edit modal, not the register table.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm this modal's new sections, guidance, and validation in a real browser session. Separately, a dedicated unit to sweep the remaining ~93 files still carrying the invalid `danger` token would close out CM-69G's largest deferred finding.
+
+## CM-70C — Variation Modal UX and Validation Polish (Completed 2026-09-06)
+
+### Summary
+
+Audited the Add/Edit Variation modal against the reported confusion around Amount sign, Status/date rules, Affects Contract Value visibility, Reference fields, and the Attachment instruction. Confirmed the backend's `computeVariationSummary()` already exactly reproduces this unit's own verification numbers (Approved = 6,500 + −700 = 5,800.000; Pending = 2,250.000) with zero calculation change needed, and confirmed the create/update variation DTOs have no cross-field validation today (a real, confirmed gap). Added a full frontend-only validation pass plus the 9 requested UX/wording improvements, and fixed the same `bg-danger`/`text-danger`/`border-danger` (CM-69G-discovered, invalid-token) bug in this file's 4 occurrences.
+
+### Files Audited
+
+`contract-variation-form-modal.tsx` (the Add/Edit Variation modal — read in full; confirmed no client-side validation existed and found the CM-69G-class `danger`-token bug in the error banner, Description's asterisk, and Amount's asterisk), `create-contract-variation.dto.ts` / `update-contract-variation.dto.ts` (confirmed each field validates independently — `description` required/maxlength 500, `amount` required `@IsNumber({maxDecimalPlaces:3})` with no `@Min` so negative deductions are allowed, `affectsContractValue`/`status`/`submittedDate`/`approvedDate` all optional — zero cross-field rules exist), `contract-variations.service.ts`'s `computeVariationSummary()` (confirmed it already skips any item with `affectsContractValue=false`, sums by status into `approvedValue`/`pendingValue`/`rejectedCancelledValue`, all `round3()`'d — reproduces this unit's own test numbers with no change), `contract-variation-helpers.ts` (existing `VARIATION_STATUS_LABELS`/`VARIATION_STATUS_OPTIONS`/`matchesSubmittedDateFilter` — reused as-is), `contract-variation-formula-strip.tsx` (the Variations tab's "Original + Approved = Current Contract Value" strip — confirmed it only reads server-computed `approvedValue`/`computedCurrentValue` props, no calculation logic of its own to regress).
+
+### Files Changed
+
+`contract-variation-form-modal.tsx` (controlled Status + Approved Date, client-side validation banner, all 9 required UX/wording changes, 4 `danger`→`error` token fixes). `contract-variation-helpers.ts` (+3 new pure exports: `isSubmittedDateRequired`, `isApprovedDateRequired`, `validateVariationFormValues`). `contract-variation-helpers.test.ts` (+29 new tests, including the exact VO-GRM-001/002/003 verification scenario).
+
+### Backend Changed — No
+
+Zero backend files touched. `computeVariationSummary()` and both variation DTOs are unchanged — all new rules are frontend-only, per this unit's own "prefer frontend/UI-validation only" instruction.
+
+### Migration — None
+
+Confirmed unnecessary during audit and not added. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Amount Helper Behavior
+
+Label renamed to "Variation Amount (KWD)"; helper text added beneath it: "Use a positive amount for additions and a negative amount for deductions/omissions." The native `required` attribute was removed in favor of the same client-side validation pass used for every other rule (consistent with the CM-69F/CM-70A/CM-70B precedent of never relying on native HTML validity alone); a negative amount (a real deduction) is never rejected.
+
+### Affects Contract Value Behavior
+
+The checkbox is now wrapped in a bordered, hoverable card with its own bold label and helper text ("Only approved variations marked as affecting contract value will update the current contract value.") instead of a plain small inline checkbox — visually much harder to miss.
+
+### Status/Date Validation Behavior
+
+`validateVariationFormValues()` enforces: Description and Variation Amount required; Submitted Date required once status leaves Draft (Submitted, Pending Approval, Approved, Rejected, or Cancelled); Approved Date required only when status is Approved; Approved Date cannot be before Submitted Date; an Approved variation marked Affects Contract Value cannot have an amount of 0. Approved Date is never hard-`disabled` — only softly de-emphasized (muted styling, no red asterisk, a small "only needed once Approved" note) for Draft/Submitted/Pending Approval, so a manager can still set it early if a real case requires it, and an existing record's historical Approved Date is never hidden or force-cleared. Any violation blocks submission (`e.preventDefault()`) and shows every failing rule in the same banner already used for server errors.
+
+### Reference Field Behavior
+
+Relabeled "Reference Name (optional)" → "Reference Document Name" and "Reference Link (optional)" → "Reference Link / Location"; helper text updated to the exact required wording: "Use this only when the document is stored outside this variation record."
+
+### Attachment Instruction Behavior
+
+Add-mode's instruction now reads exactly: "Save the variation first. Then open Edit Variation to upload supporting documents." Edit-mode's real upload/list/download flow (`SupportingDocumentsSection`) is unchanged.
+
+### Variation Calculation Regression
+
+None — `computeVariationSummary()` on the backend is untouched; this unit added client-side validation and wording only, verified against the exact VO-GRM-001 (Approved +6500) / VO-GRM-002 (Pending Approval +2250) / VO-GRM-003 (Approved −700) scenario: Approved Variations = KWD 5,800.000, Pending Variations = KWD 2,250.000, Current Contract Value increases by KWD 5,800.000 only.
+
+### Overview/Dashboard/Closeout Impact
+
+None — all three read the same real, backend-computed `computeVariationSummary()` output this unit never touched; the Variations tab's own formula strip (`contract-variation-formula-strip.tsx`) likewise only displays server-provided values with no calculation logic of its own to regress.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 615/615 (29 new, including the exact VO-GRM-001/002/003 verification scenario) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1438/1438 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List, Dashboard, Schedule, Payments, Closeouts, Workflow, and per-contract Variations/Overview/Closeout/Payments/Schedule/Workflow routes all responded cleanly (307 redirects, no crash) on the restarted dev server |
+| Live authenticated click-through | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via the new unit tests exercising the exact pure validation logic the modal calls |
+
+### Unsupported/Deferred Items
+
+Live authenticated visual confirmation of the rebuilt modal — credential blocker, carried over. CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch (one more instance of which was just found and fixed in this exact modal, its 4th confirmed file) remains the highest-value outstanding cleanup item in this codebase.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm this modal's new validation, status/date rules, and wording in a real browser session. Separately, a dedicated unit to sweep the remaining ~94 files still carrying the invalid `danger` token would close out CM-69G's largest deferred finding.
+
+## CM-70B — Production Status Modal Validation and UX Polish (Completed 2026-09-06)
+
+### Summary
+
+Audited the Add/Update Production modal for the reported "Delivered field shows red/confusing when empty" issue and found no literal CSS/validity bug in the current code — the backend already returns a real, honest `0` (never `undefined`/`NaN`) for both Casted/Produced and Delivered on a never-touched item, and neither field carried a `required` attribute or any border-color-driven validity logic. What genuinely needed fixing: no field-level guidance that 0 is the correct, expected Delivered value for a freshly-started item, and no pre-submit validation beyond the backend's own (already correct, unchanged) cross-field checks. Added explicit helper text, a live status auto-suggestion (same pattern as CM-70A's Payment modal), and a full client-side validation pass with visible error messages — plus fixed the same `bg-danger`/`text-danger` (CM-69G-discovered, invalid-token) bug in this exact file's error banner.
+
+### Files Audited
+
+`contract-production-form-modal.tsx` (the Add/Update Production modal — found no `required` attribute or conditional red-border styling tied to Delivered's value; found the CM-69G-class `border-danger`/`bg-danger-light`/`text-danger` invalid-token bug in its own server-error banner), `update-contract-boq-item-production.dto.ts` (confirmed both `producedQty`/`deliveredQty` are `@IsOptional @Min(0)` — the backend deliberately allows either to be omitted; this unit only adds a stricter client-side "always required" rule, not a backend change), `contract-boq-production.service.ts`'s `assertProductionAmountsValid()` (confirmed the backend ALREADY rejects `delivered > produced` and `produced > totalQty` on every save — the real, unchanged safety net this unit's frontend checks duplicate for faster feedback) and its list-derivation code (`producedQty = round3(toNum(item.productionStatus?.producedQty) ?? 0)` — confirmed a never-touched BOQ item's production fields are real backend-computed zeros, never `undefined`/`NaN`, closing the audit question of "why would Delivered ever look invalid"), `contract-production-helpers.ts` (existing `computeStockNotDelivered`/`computeRemainingToCast`/`computePercentOfTotal` — confirmed these already exactly mirror the backend's own formulas, reused as-is for the new status-suggestion/validation logic), `contract-boq-production.service.ts`'s summary/Schedule/Closeout consumers (`computeProductionSummary`, the Schedule detail service's Casting/Production actual-quantity derivation from CM-68A, Closeout's production-readiness checks — confirmed all read the same real, backend-computed, unchanged fields).
+
+### Root Cause
+
+Not a literal rendering bug — audited and confirmed the reported "red/confusing Delivered field" traces to a UX gap (no reassurance that 0 is correct/expected), not a data or validity defect. The one adjacent, real bug found and fixed while auditing this file was the same invalid `danger`-token issue CM-69G discovered elsewhere in this app.
+
+### Files Changed
+
+`contract-production-form-modal.tsx` (controlled Status field + auto-suggestion, client-side validation banner, helper text, `danger`→`error` token fix, safe `toInputValue()` initial-value formatting). `contract-production-helpers.ts` (+2 new pure exports: `suggestProductionStatus`, `validateProductionFormValues`). `contract-production-helpers.test.ts` (+23 new tests, including the exact Precast Boundary Wall Panel Type A / Total Qty 400 / Produced 120 / Delivered 40 scenario from this unit's own task).
+
+### Backend Changed — No
+
+Zero backend files touched. No DTO, service, or controller change. `assertProductionAmountsValid()` remains the real, unchanged safety net; this unit only added a faster, friendlier frontend duplicate of the same two rules plus new required-field checks the backend deliberately leaves optional.
+
+### Migration — None
+
+Confirmed unnecessary during audit and not added. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Default Value Behavior
+
+Casted/Produced and Delivered both initialize from the item's real, already-backend-computed values (0 for a never-touched item) via a new `toInputValue()` helper that rounds to at most 3 decimals — guards against ever seeding a controlled number input with floating-point noise that could trip its own `step="0.001"` validity check, closing the one concrete (if unconfirmed) technical explanation for a "red-looking" numeric field found during audit.
+
+### Validation Behavior
+
+A single client-side `validateProductionFormValues()` pass, run on submit before the server action fires: Casted/Produced required and ≥ 0 and ≤ Total Qty; Delivered required (0 is a fully valid, non-missing value — never flagged) and ≥ 0; Delivered cannot exceed Casted/Produced, shown with the exact required message "Delivered quantity cannot be more than casted/produced quantity." Any violation blocks submission (`e.preventDefault()`) and shows every failing rule in the same banner already used for server errors — never a silent disable.
+
+### Calculation Behavior
+
+Stock/Not Delivered, Remaining to Cast, and Progress all update live as the user types, using the exact same formulas as before (unchanged) — verified against this unit's own test data: Total Qty 400, Produced 120, Delivered 40 → Stock 80, Remaining 280, Progress 30%.
+
+### Status Suggestion Behavior
+
+Added `suggestProductionStatus()`: Produced = 0 → Not Started; 0 < Produced < Total → In Production; Produced = Total and Delivered < Total → Partially Delivered; Delivered = Total → Completed. Never suggests Delayed (a real, manager-judged, non-amount-derivable condition — stays manual-only, survives until the next quantity edit, same precedent as CM-70A's Payment modal leaving Submitted/Certified/Overdue/Cancelled manual-only).
+
+### Field Error Behavior
+
+Errors now render as visible, specific text in the modal's existing banner (now correctly styled via the real `error` token, not the invalid `danger` one) — never only a border color, and the Save Changes button is disabled only while the request is actually in flight (`disabled={isPending}`), never because a field merely hasn't been filled in yet.
+
+### Production Summary Regression
+
+None — `computeProductionSummary`/the Production Status tab's own summary cards read the same real, backend-computed fields this unit never touched.
+
+### Schedule/Closeout Impact
+
+None — CM-68A's Casting/Production actual-quantity derivation (Schedule detail tab) and Closeout's production-readiness checks both read the same real, unchanged `contract-boq-production.service.ts` fields; this unit made no backend change for either to react to.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 595/595 (23 new, including the exact 400/120/40 → 80/280/30% test-data scenario) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1438/1438 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Production tab, Dashboard, Schedule, Contract List, and a Closeout route all responded cleanly (redirects/401s, no crash) on the restarted dev server |
+| Live authenticated click-through (Precast Boundary Wall Panel Type A scenario) | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via the new unit tests exercising the exact pure logic the modal calls |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual confirmation of the rebuilt modal, including whatever the actual screenshot's red styling turns out to be in a real browser — credential blocker, carried over. If a genuine CSS bug still reproduces after this fix, it likely lives outside this component (e.g. a global `:invalid` style rule) and would need a live session to pin down.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm both this modal's fix and CM-69's whole cancel-contract chain in a real browser session. Separately, CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch (one more instance of which was just found and fixed in this exact modal) remains the highest-value outstanding cleanup item in this codebase.
+
+## CM-69I — Contract List KPI Cards Must Match Default Visible Contract Scope (Completed 2026-09-06)
+
+### Summary
+
+Completed out of numeric order, after CM-70A, but logically belongs alongside the CM-69 cancel-contract chain. The Contract List's 4 KPI cards (Total Contracts, Active Contracts, Total Contract Value, Open Claims) came from a completely separate, filter-blind endpoint (`GET /contracts/summary` → `ContractsService.getSummary(actor)`) that only ever applied department scope — never the table's own `lifecycleStatus`/`status`/`search`/`scheduleStatus`/`contractType`/`ownerUserId`/`daysRemaining` filters, and never CM-69C's default-excludes-CANCELLED rule. So after cancelling the demo contracts, the table correctly hid them (CM-69C) while the KPI cards kept counting them — exactly the reported bug. Fixed by making `getSummary()` accept the identical `ContractListQueryDto` the table's `findAll()` takes and resolve it through the exact same `buildListWhere()`, so the two can never disagree again.
+
+### Files Audited
+
+`contracts/page.tsx` (found `contractsApi.summary()` was called with ZERO arguments, completely independent of the `list()` call's filter params two lines above it), `contractsApi.summary()`/`ContractSummary` type (confirmed no params accepted), `contracts.controller.ts`'s `summary` route (confirmed no `@Query()` at all), `ContractsService.getSummary()` (found it built its own `deptWhere`-only where-clause from scratch — 7 separate hardcoded per-status counts, never touching `buildListWhere()`), `buildListWhere()` (confirmed it already correctly encodes CM-69C's default-excludes-CANCELLED / explicit lifecycleStatus / explicit 'ALL' bypass — reusable as-is, no changes needed to this function itself), `findAll()` (confirmed the exact `{ ...buildListWhere(query) }` + conditional `departmentId` overwrite combining pattern used for the table — reused verbatim for consistency), `contract-summary-cards.tsx` (found its own separate manual "Total Contracts" sum formula, now unnecessary), `contract-dashboard.service.ts`/`contract-schedule-overview.service.ts`/`contract-schedule.service.ts` (confirmed these are completely separate code paths, untouched by this fix — CM-69H's dashboard exclusion and CM-69A/CM-68B's schedule exclusion both still stand independently).
+
+### Root Cause
+
+Two independent, disconnected data sources feeding one page: the table used `findAll(query)` (filtered, CANCELLED-excluding-by-default per CM-69C), the KPI cards used `getSummary(actor)` with no query parameter at all (department-scope only). Nothing kept them in sync because nothing tied them together.
+
+### Files Changed
+
+Backend: `contracts.service.ts` (`getSummary()` fully rewritten), `contracts.controller.ts` (`summary` route now accepts `@Query() query: ContractListQueryDto`), `contracts.service.test.ts` (rewrote the `getSummary` describe block: was 5 tests around 7 hardcoded status counts, now 8 tests around the new filter-scoped/AND-combined shape). Frontend: `contracts-api.ts` (`ContractSummary` type simplified to `{ totalContracts, activeContracts, totalContractValue, totalOpenClaims }`; `summary()` now accepts the same `ContractListQuery` params as `list()`), `contracts/page.tsx` (extracted one shared `filterParams` object passed to both `list()` and `summary()`), `contract-summary-cards.tsx` (dropped its own manual per-status sum — reads `summary.totalContracts`/`summary.activeContracts` directly; "Total Contracts" subtext changed to "Matching current filters" per this unit's own explicit recommendation).
+
+### Backend Changed — Yes (query-shape/filter-reuse only)
+
+`getSummary(actor, query)` now resolves `{ ...buildListWhere(query) }` plus the same department-scope combining pattern `findAll()` already uses, instead of a from-scratch `deptWhere`-only object. "Active Contracts" is computed as `contract.count({ where: { AND: [where, { status: ACTIVE }] } })` — a real Prisma `AND`, never an object-spread `{...where, status: ACTIVE}` (which would have silently overwritten an explicit `lifecycleStatus=DRAFT`/`CLOSED`/etc. filter's own `status` condition instead of correctly returning 0 for it).
+
+### Migration — None
+
+Confirmed unnecessary and not added — purely a query-construction/reuse change. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Table vs KPI Filter Consistency
+
+`contracts/page.tsx` now builds ONE `filterParams` object (lifecycleStatus/scheduleStatus/contractType/daysRemaining/ownerUserId/search) and passes it to BOTH `contractsApi.list({ page, pageSize, ...filterParams })` and `contractsApi.summary(filterParams)` — the two requests are now structurally guaranteed to resolve to the same `buildListWhere()` output server-side, so they can never disagree again by construction, not just by convention.
+
+### Default Contract List KPI Behavior
+
+No `lifecycleStatus`/`status` param at all → `buildListWhere()`'s own default branch (`{ status: { not: CANCELLED } }`) applies to Total Contracts, Total Contract Value, and Open Claims identically to the table; Active Contracts additionally requires `status: ACTIVE` within that same scope.
+
+### Cancelled Filter KPI Behavior
+
+`lifecycleStatus=CANCELLED` → `buildListWhere()` resolves `where.status = CANCELLED`; Total Contracts/Value/Open Claims reflect the cancelled-only scope (a real, honest audit total, matching what the table shows); Active Contracts is always 0 in this scope (`AND [{status: CANCELLED}, {status: ACTIVE}]` is never satisfiable).
+
+### All Statuses KPI Behavior
+
+`lifecycleStatus=ALL` (or `status=ALL`) → `buildListWhere()` returns no status filter at all (its explicit-bypass branch, unchanged from CM-69C); Total Contracts/Value/Open Claims reflect every real status including Cancelled, matching the table's own all-statuses view exactly.
+
+### Total Contract Value Behavior
+
+Unchanged formula (`contract.aggregate({ where, _sum: { contractValue: true } })`, real stored current value, no invented figure) — now computed over the identical filtered `where` as Total Contracts/Active Contracts, so it can never include a contract the table itself is hiding.
+
+### Revalidation/Cache Behavior
+
+Confirmed already correct, no change needed: `contracts/page.tsx` fetches `list()` and `summary()` together in one `Promise.allSettled` on every render of this one page, and every contract-mutating server action (`cancelContractAction`, `createContractAction`, `activateContractAction`, etc.) already calls `revalidatePath('/contracts')` — so a fresh visit after any mutation re-fetches both the table and the KPI cards together, from the same real database state, with no separate cache to fall out of sync.
+
+### Dashboard Regression
+
+None — `contract-dashboard.service.ts`'s `getDashboard()` (CM-69H's own cancelled-exclusion fix) is a completely separate method/endpoint, never touched by this unit.
+
+### Schedule Regression
+
+None — `contract-schedule-overview.service.ts`/`contract-schedule.service.ts` (CM-69A/CM-68B's cancelled-exclusion fixes) are completely separate methods/endpoints, never touched by this unit.
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no schema change. Cancelled contracts remain fully in the database, fully visible via the Lifecycle Status = Cancelled / All Statuses filters — only counted differently by the (now consistent) KPI cards.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 577/577 (unchanged — no web pure-logic file touched, only types/components/page wiring) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1438/1438 (net +3 — old 5-test block around 7 hardcoded counts replaced with a new 8-test block around the filter-scoped/AND-combined shape) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List (default, `?lifecycleStatus=CANCELLED`, `?lifecycleStatus=ALL`, `?search=test`), Dashboard, Schedule, and the API's `/contracts/summary` (bare and `?search=test`) all responded cleanly (redirects/401s, no crash) on the restarted dev server |
+| Live authenticated visual confirmation (scenarios A–H) | **Not run** — same carried-over credential blocker as every unit since CM-62; every rule was instead verified via the new/updated unit tests exercising the exact backend logic the page calls |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual confirmation that Total Contracts/Active Contracts/Total Contract Value/Open Claims now read 1/1/KWD 38.67K/0 after cancelling the two demo contracts — credential blocker, carried over.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm the Contract List's KPI cards and table agree in a real browser session, closing out the CM-69A→I chain end-to-end. Separately, CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch remains the highest-value outstanding cleanup item in this codebase.
+
+## CM-70A — Add Payment Modal UX and Validation Fix (Completed 2026-09-06)
+
+### Summary
+
+Rebuilt the Add/Edit Payment modal's UX without touching the backend: a real Payment Term dropdown (with an "Other" free-text fallback so no existing/legacy text value is ever lost), a live-calculated Remaining Amount preview, status auto-suggested from Invoice/Received Amount, clearer required-field markers, better placeholders, and a full client-side validation pass covering every rule this unit's task specified — reusing the backend's own already-existing `assertPaymentAmountsValid` safety net underneath, not duplicating or weakening it.
+
+### Files Audited
+
+`payment-form-modal.tsx` (the one shared Add/Edit modal for both the module-level Payments register and the Contract Detail Payments tab — confirmed both variants share this exact component, so any UX/validation fix here reaches both, matching this unit's own "Apply same UX to edit payment if Add and Edit share component" requirement), `create-contract-payment.dto.ts`/`update-contract-payment.dto.ts` (confirmed `paymentTerm` is plain optional free text — `@IsString @MaxLength(100)`, no enum — so a frontend-only dropdown-with-"Other" is sufficient, no schema/DTO change needed), `contract-payments.service.ts` (found `assertPaymentAmountsValid()` — the backend ALREADY rejects `paidAmount > (certifiedAmount ?? submittedAmount)` on both create and update, called at lines 351/428 — this unit's overpayment rule was already backend-enforced; the new frontend check is a faster, friendlier duplicate of the same rule, not a new safety net), `computeOutstandingAmount`/`computePaymentSummary` (confirmed these already compute Remaining Amount / totals server-side from real stored values — the modal's new live preview is a UI-only estimate, never submitted, never persisted, and never contradicts the backend's own authoritative number), `contract-payment-detail-helpers.ts` (`PAYMENT_STATUS_LABELS` — confirmed DRAFT/PARTIALLY_PAID/PAID already map to "Pending"/"Partially Received"/"Received", reused as-is rather than inventing new labels like "Fully Paid"), the Contract Detail Payments tab's own table (`contract-payment-tracker-table.tsx` — confirmed its column headers already read "Invoice Amount"/"Payment Due Date"/"Received On"/"Received Amount"/"Remaining Amount", already matching this task's requested wording exactly — no label change was needed, only the interactive behavior), `contract-dashboard.service.ts`/`contract-closeout.service.ts` (confirmed both already read real, backend-computed payment fields — untouched, unaffected by a frontend-only change).
+
+### Files Changed
+
+`payments/_components/payment-form-modal.tsx` (full rewrite of the interactive parts — Payment Term dropdown + "Other", controlled Invoice/Received Amount with live Remaining Amount + auto-status, section headings, placeholders, client-side validation banner). `_lib/contract-payment-detail-helpers.ts` (+7 new pure exports: `PAYMENT_TERM_OPTIONS`, `PAYMENT_TERM_OTHER`, `resolvePaymentTermSelection`, `resolvePaymentTermValue`, `computeRemainingAmount`, `suggestPaymentStatus`, `validatePaymentFormValues`). `_lib/contract-payment-detail-helpers.test.ts` (+32 new tests).
+
+### Backend Changed — No
+
+Zero backend files touched. No DTO, service, or controller change. The backend's existing `assertPaymentAmountsValid()` (paid ≤ certified-or-submitted) remains the real, unchanged safety net; this unit only added a faster, more specific frontend check on top of it.
+
+### Migration — None
+
+Confirmed unnecessary during audit (`paymentTerm` was already free text) and not added. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Payment Term Dropdown Behavior
+
+Fixed options: Advance Payment, Production Interim Payment, Delivery Payment, Erection Payment, Final Payment, Retention Release, Other. Selecting a fixed option submits that exact string as `paymentTerm` (unchanged backend column, unchanged shape); selecting "Other" reveals a free-text "Other payment term" input whose value is what actually gets submitted. Editing an existing payment whose real, stored `paymentTerm` doesn't match any fixed option (e.g. legacy "Net 30") preselects "Other" with that exact text preserved in the free-text field — never silently discarded or blanked.
+
+### Auto Status Behavior
+
+Whenever Invoice Amount or Received Amount changes, the Status dropdown is auto-set to Pending (Received = 0), Partially Received (0 < Received < Invoice), or Received (Received = Invoice) — reusing the app's own already-established manager-friendly labels, not new ones. A manually-picked non-amount-derived status (Submitted, Certified, Overdue, Cancelled) survives until the next amount edit, matching this unit's own "auto-set, but allow manual override where existing business logic requires it."
+
+### Remaining Amount Behavior
+
+A live, read-only calculated field (Invoice Amount − Received Amount, using the same established "read-only calculated cell" styling as the BOQ register) updates as the user types either amount — verified against every example in the task: 8500/8500→0, 34000/10000→24000, 25500/0→25500. Never submitted as its own form field — the backend keeps computing its own real `outstandingAmount` from stored values, exactly as before.
+
+### Validation Behavior
+
+A single client-side `validatePaymentFormValues()` pass, run on submit before the server action ever fires, checks: Invoice Number/Invoice Date/Payment Due Date required; Invoice Amount required and > 0; Received Amount required and ≥ 0; Received Amount cannot exceed Invoice Amount; Received On required once Received Amount > 0 or status is Partially Paid/Fully Paid; status/amount consistency (Fully Paid ⇒ Received = Invoice; Pending ⇒ Received = 0; Partially Paid ⇒ 0 < Received < Invoice). Any violation blocks the actual form submission (`e.preventDefault()`) and shows every failing rule in the same red banner already used for server errors — never a silent disable, matching the CM-69F/G-established "visible validation, not a silently dimmed control" convention.
+
+### Add Payment Verification (from the task's own scenarios, verified via the new unit tests)
+
+A (8500/8500, Fully Paid): valid, Remaining = 0. B (34000/10000, Partially Paid): valid, Remaining = 24000. C (25500/0, Pending, no Received On): valid, Remaining = 25500. D (8500 invoice / 9000 received): blocked — "Received Amount cannot exceed Invoice Amount." E (status Fully Paid with Received < Invoice): blocked — "Status is Fully Paid but Received Amount does not equal Invoice Amount."
+
+### Edit Payment Regression
+
+Same shared component, same fields/`name` attributes, same create/update server actions — editing an existing payment now additionally preselects the correct Payment Term dropdown state (never losing legacy free text) and shows the live Remaining Amount/suggested status for the payment's own stored amounts; saving an edit with unchanged, already-valid data passes validation and submits exactly as before.
+
+### Dashboard/Overview/Closeout Payment Impact
+
+None — confirmed by audit, not by re-deriving anything: all three read the backend's own real, unchanged `computePaymentSummary`/`computeOutstandingAmount` output; this unit made no backend change, so their totals/outstanding/closeout-readiness figures are untouched.
+
+### Data Honesty Confirmation
+
+No payment numbers invented (Payment No. stays a plain optional free-text field, unchanged). No invoices auto-created. A payment is never marked Received unless Received Amount genuinely equals Invoice Amount (enforced by validation, not assumed). No existing saved payment record is altered by this unit — purely new modal UX/validation on top of the same create/update payload shape.
+
+### Verification Results (2026-09-06)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 577/577 (39 new: 32 in contract-payment-detail-helpers.test.ts + 7 pre-existing suite growth) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1435/1435 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Payments register, a contract detail payments route, Dashboard, Schedule, Contract List, and the API's payments endpoint all responded cleanly (redirects/401s, no crash) on the restarted dev server |
+| Live authenticated click-through (scenarios A–G) | **Not run** — same carried-over credential blocker as every unit since CM-62; every rule was instead verified via the new, real unit tests exercising the exact pure logic the modal calls |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual/click-through confirmation of the rebuilt modal — credential blocker, carried over.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally click through Add Payment end-to-end in a real browser session; separately, CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch remains the highest-value outstanding cleanup item in this codebase.
+
+## CM-69H — Dashboard Exclude Cancelled Contracts from Working KPIs (Completed 2026-09-05)
+
+### Summary
+
+After CM-69A–G let managers actually cancel demo/test contracts, the Contract Management Dashboard still counted them as active working data — Total Contracts, Contract Value, Progress, Submitted/Received Payments, Open Claims, Critical/Overdue/Closing-soon alerts, and the "Contracts by Status" donut all still reflected cancelled rows. Root cause: `contract-dashboard.service.ts`'s `getDashboard()` fetched ALL contracts (every status, no filter) as the single source feeding every downstream manager computation. Fixed at the source with one query-level exclusion, plus two presentation-layer fixes for the "Total Contracts" KPI label/definition and the status donut.
+
+### Files Audited
+
+`contract-dashboard.service.ts` (`getDashboard()`'s contract fetch — confirmed no status filter at all; `buildManagerAttentionItems()`'s items #2–7 — confirmed none check `contract.status`, only that the contract exists in the fetched set, meaning excluding cancelled contracts at the SOURCE query is the one fix that correctly cascades to all of them; `computeManagerSummary`/`computeManagerFinancials`/`buildTopValueContracts`/`buildTopDelayedContracts`/`countContractsClosingSoon`/`buildWorkflowOverview` — confirmed all operate purely on the `contracts`/`contractIds` pair passed in, so no per-function change was needed once the source query was fixed), `contracts.service.ts`'s `getDashboard()`/`getSummary()` (confirmed `totalActive`/`totalDraft`/etc. already correctly whitelist their own real status — never affected by cancelled contracts; `totalCancelled` is an intentional, correct, separate count), `dashboard-insights-helpers.ts` (`totalContractsFromMetrics`, `buildContractsByStatusSegments` — both previously included Cancelled), `manager-kpi-grid.tsx`/`contract-kpi-grid.tsx` (the two "Total Contracts" KPI cards), `contracts/dashboard/page.tsx` (the "Contracts by Status" `DonutChart` wiring), `donut-chart.tsx` (confirmed it already has generic `total === 0` empty-state handling — no component change needed there, just the right `emptyMessage` prop and pre-filtered segments), `contract-schedule-overview.service.ts`/`contract-schedule.service.ts` (confirmed already excluding CANCELLED since CM-69A — untouched, still correct), `contracts.service.ts`'s `buildListWhere()` (confirmed CM-69C's default-excludes-CANCELLED Contract List behavior untouched), `apps/web/src/app/(protected)/contracts/actions.ts`'s `cancelContractAction` (confirmed it only revalidated `/contracts`, not the dashboard or schedule routes).
+
+### Root Cause
+
+A single unconditional `contract.findMany({ where: deptOnly })` in `contract-dashboard.service.ts`'s `getDashboard()` — every manager-dashboard number (financials, progress, alerts, top contracts, workflow overview) is derived from this one array plus the child records fetched via `contractId: { in: contractIds }`. Cancelled contracts had no reason to be excluded until CM-69A introduced the status, and no later unit had revisited this specific query.
+
+### Files Changed
+
+Backend: `contract-dashboard.service.ts` (one `where`-clause change), `contract-dashboard.service.test.ts` (updated + 1 new test). Frontend: `dashboard-insights-helpers.ts` (`totalContractsFromMetrics`, `buildContractsByStatusSegments`), `dashboard-insights-helpers.test.ts` (updated + 3 new tests), `contract-kpi-grid.tsx`, `manager-kpi-grid.tsx` (label/subtext + reused the shared helper instead of a duplicated manual sum), `contracts/dashboard/page.tsx` (donut `emptyMessage` + optional small Cancelled audit note), `actions.ts`'s `cancelContractAction` (added 3 more `revalidatePath` calls).
+
+### Backend Changed — Yes (query-filter only)
+
+`contract-dashboard.service.ts`'s `getDashboard()`: `where = { status: { not: ContractStatus.CANCELLED }, ...(deptFilter ? { departmentId: deptFilter } : {}) }`. This one change is what makes financials, progress, alerts, top-contracts, and workflow overview all correctly exclude cancelled contracts — none of those functions needed their own individual fix, since they all consume the same filtered `contracts`/`contractIds`.
+
+### Migration — None
+
+Confirmed unnecessary and not added: purely a query-`where`-clause change, no schema touched. `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Dashboard Default Scope Behavior
+
+Every manager-dashboard section (Contract Summary KPIs, Progress by Discipline, Financial Performance, Contracts by Status, Management Attention Required, Top 5 Delayed/By Value, Claims Status Overview, Upcoming Schedule) now derives from a contract set that already excludes CANCELLED — no per-widget special-casing needed.
+
+### Working KPI Behavior
+
+"Total Contracts" relabeled "Total Working Contracts" on both dashboard KPI grids (`ManagerKpiGrid`'s 11-card grid and the fallback `ContractKpiGrid`'s 5-card grid), now computed as Draft + Active only (via the shared `totalContractsFromMetrics`, no longer duplicated inline in `ContractKpiGrid`) — per this unit's own explicit "working statuses: DRAFT, ACTIVE only" business rule, Terminated/Closed no longer count toward this specific total either (they remain fully visible as their own real, separate figures — e.g. `ContractKpiGrid`'s own "Closed Contracts" card, Contract List's Lifecycle Status filter). Both cards now carry an explicit helper: "Cancelled contracts are excluded from working dashboard totals." / "Active working view — cancelled contracts excluded."
+
+### Financial Totals Behavior
+
+Contract Value, Progress, Submitted Invoices, Received Payments, Outstanding Payment — all computed by `computeManagerFinancials`/`computeManagerSummary` purely from the (now cancelled-excluding) `contracts`/`payments`/`claims` arrays fetched in `getDashboard()`. No separate fix needed once the source query was corrected.
+
+### Status Chart Behavior
+
+`buildContractsByStatusSegments` no longer returns a Cancelled segment at all (Draft/Active/Expiring/Expired/Terminated/Closed only — Terminated/Closed remain, since they're real portfolio-composition context a manager legitimately wants, unlike Cancelled which is a void/audit record). The "Contracts by Status" `DonutChart` now receives `emptyMessage="No active working contracts found."`, so when every remaining segment is zero (e.g. after cancelling the only real contracts) it shows that message via the chart's own pre-existing `total === 0` empty-state handling, instead of rendering a 100%-Cancelled-looking chart (which no longer includes Cancelled as a possible arc at all). A small, optional, plain-text audit note ("Cancelled Contracts: N — excluded from working totals — view via Contract List, Lifecycle Status = Cancelled") appears next to the chart only when `totalCancelled > 0`, kept intentionally simple (not a new card) per this unit's own caution.
+
+### Alert/Overdue Behavior
+
+Critical Project Contracts, Overdue Workflow Tasks, Contracts Closing Soon, Open Claims — all computed inside `buildManagerAttentionItems`/`computeManagerInsights` from the same corrected `contracts`/`contractIds`-derived data; a cancelled contract's leftover tasks/claims/payments/issues (if any existed) are never even fetched now, since `contractIds` no longer includes cancelled contracts at all.
+
+### Revalidation/Cache Behavior
+
+`cancelContractAction` now revalidates `/contracts`, `/contracts/dashboard`, `/contracts/schedule`, and the cancelled contract's own detail path (`/contracts/:id`) — previously only `/contracts`. Both `/contracts/dashboard` and `/contracts/schedule` already declare `export const dynamic = 'force-dynamic'`; `/contracts` is dynamic-by-default (reads `searchParams`) — so no additional caching layer needed fixing beyond ensuring the right paths are told to revalidate. No websocket/real-time mechanism added, per this unit's own explicit instruction not to.
+
+### Cancelled Audit Visibility Confirmation
+
+Cancelled contracts remain fully visible for audit: Contract List's Lifecycle Status = Cancelled filter (CM-69C, untouched) still shows them; the dashboard's new small audit note still surfaces the real count; Activity/Audit History on the contract's own detail page is completely unaffected (a separate, untouched data path); direct navigation to a cancelled contract's detail page still works if permitted (`contracts.read`, department scope), showing its real CANCELLED lifecycle badge.
+
+### Department Scope Confirmation
+
+The new `status: { not: CANCELLED }` condition is combined with the existing `departmentId` condition via the same object spread pattern already used everywhere else in this session (CM-69A's schedule-overview/schedule-service fixes) — department scope enforcement (`deptAccess.buildDeptFilter`) is completely unchanged, just one more condition ANDed alongside it. No cross-department leakage introduced.
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no schema/migration change. Purely a query-filter, a shared-helper definition, and two presentation-layer (label/chart) fixes.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 546/546 (3 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1435/1435 (1 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List, Dashboard, Schedule, a contract detail route, and the API's dashboard/schedule-overview endpoints all responded cleanly (redirects/401s, no crash) on the restarted dev server |
+| Live authenticated visual confirmation (scenarios A–G) | **Not run** — same carried-over credential blocker as every unit since CM-62 |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual confirmation that the dashboard now shows zero/correct values after cancelling the two demo contracts — credential blocker, carried over.
+- Real-time/websocket dashboard updates — explicitly out of scope per this unit's own instruction; revalidation-on-redirect/refresh remains the mechanism, as instructed.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally confirm the dashboard reads 0/— across every working KPI once both demo contracts are cancelled, closing out the full CM-69A→H chain end-to-end. Separately, CM-69G's discovered ~98-file `danger`-vs-`error` token mismatch remains the highest-value outstanding cleanup item in this codebase.
+
+## CM-69G — Actually Fix Missing Remove Draft / Cancel Contract Submit Button (Completed 2026-09-05)
+
+### Summary
+
+CM-69F's fix (narrowing the submit button's `disabled` condition) was real and necessary, but not sufficient — the user's fresh screenshot proved the submit button was still invisible. Re-audited the ACTUAL rendered JSX (not assumed from prior reports) and found the true, final root cause: every "danger" button/text in this component used the Tailwind classes `bg-danger`/`text-danger`/`border-danger`/`bg-danger-light` — but this app's real Tailwind v4 theme (`apps/web/src/app/globals.css`'s `@theme` block) defines `--color-error`, never `--color-danger`. `danger` was never a real design token. Those classes silently generated **zero CSS** (Tailwind v4 only emits a utility for a `--color-*` variable that actually exists), so the submit button rendered as white text (`text-white`, a real Tailwind color, correctly applied) on a completely unstyled, transparent background — invisible white-on-white text sitting on the modal's white surface. Confirmed with hard, objective proof: fetched the actual compiled CSS from the running dev server and grepped it — `.bg-error`/`.text-error` rules exist; `.bg-danger`/`.text-danger` do not exist anywhere in the compiled output, zero matches.
+
+### Actual Root Cause (from current code, not assumption)
+
+`contract-cancel-action.tsx`'s submit button className included `bg-danger ... hover:bg-danger/90` — an invalid token. Every prior CM-69 unit's report describing this button as "present but dimmed" (CM-69F) was correct about the DOM structure but had not yet traced the color-token layer; CM-69G is the unit that actually found and fixed the true final cause.
+
+### Files Changed
+
+Four files, all in the same contract-lifecycle-actions family, every `danger`→`error` swap purely a Tailwind class-name correction (zero logic, zero markup-structure change):
+- `contract-cancel-action.tsx` — trigger button, error banner, Reason asterisk, submit button (4 occurrences).
+- `contract-detail-actions-menu.tsx` — Cancel + Terminate menu-item text color, Termination-reason asterisk, Terminate's submit button, the shared "Action failed" dialog heading (5 occurrences).
+- `contract-transitions.tsx` — Terminate's `<summary>` trigger, Termination-reason asterisk, "Confirm Termination" submit button (3 occurrences) — this is the Overview page's OWN, original Terminate control, which had the identical invisible-button defect this whole time, discovered as a direct consequence of this unit's investigation.
+- `contract-row-actions.tsx` — the Contract List row menu's shared "Action failed" dialog heading (1 occurrence).
+
+### Backend Changed — No
+
+Zero backend files touched. No migration. This was purely a frontend CSS class-name bug.
+
+### Exact Modal Footer JSX Behavior (manual verification note, per this unit's own requirement 7)
+
+The footer (`contract-cancel-action.tsx`, inside `{isOpen && (...)}`) is, verbatim, as currently committed:
+```
+<div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
+  <button type="button" onClick={closeModal} disabled={isPending}
+    className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-surface-secondary disabled:opacity-50">
+    Cancel
+  </button>
+  <button type="button" onClick={handleConfirm} disabled={isPending}
+    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md bg-error text-white hover:bg-error/90 disabled:opacity-60">
+    {isPending && <Loader2 .../>}
+    {isPending ? pendingLabel : label}
+  </button>
+</div>
+```
+Both buttons are unconditional siblings in the same flex row — no conditional rendering hides either one. The submit button now uses the real `bg-error`/`hover:bg-error/90` token, confirmed present in the compiled CSS (`.bg-error { ... }`, non-empty rule, via a direct `curl` of the running dev server's actual compiled stylesheet).
+
+### DRAFT Button Visibility
+
+Modal title "Remove Draft"; submit button text "Remove Draft" (from `label`), now rendered with a real red (`--color-error: #b42318`) background and white text — genuinely visible, not white-on-transparent.
+
+### ACTIVE Button Visibility
+
+Modal title "Cancel Contract"; submit button text "Cancel Contract" — same real `bg-error` styling.
+
+### Empty Reason Validation
+
+Unchanged from CM-69F: clicking submit with an empty reason sets `error = 'Reason is required.'`, rendered in the (now also correctly `border-error`/`bg-error-light`/`text-error` styled, genuinely visible) error banner above the Reason field. Modal stays open.
+
+### Submit Behavior
+
+Unchanged: `cancelContractAction(contractId, version, reason)`, `contractId`/`version` traced correct since CM-69E, reason required.
+
+### Success Redirect Behavior
+
+Unchanged: `router.push('/contracts')` on success (CM-69E).
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no schema change. Purely a Tailwind class-name correction across 4 files.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 543/543 (unchanged — pure CSS class-name fix) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1434/1434 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| **Objective compiled-CSS proof** | ✓ Fetched the running dev server's actual compiled stylesheet (`/_next/static/chunks/apps_web_src_app_globals_*.css`) and grepped it: `.bg-error`/`.text-error` rules exist (non-zero matches); `.bg-danger`/`.text-danger` do not exist anywhere in the compiled output (zero matches, both before understanding the bug and structurally guaranteed after the fix, since the source no longer references `danger` at all in these 4 files) |
+| Live smoke check | ✓ Contract List, a contract detail route, Dashboard, Schedule all responded cleanly on the restarted dev server |
+| Live authenticated visual confirmation (scenarios A–F) | **Not run** — same carried-over credential blocker as every unit since CM-62; this unit substituted the strongest verification available without one — direct compiled-CSS inspection, which is the exact layer the bug lived in |
+
+### Major Discovered Finding — NOT Fixed This Unit (Scope Discipline)
+
+Searched the whole web app: **98 files** use `bg-danger`/`text-danger`/`border-danger` (a token that has never existed in this app's theme); only 61 files correctly use the real `error` token. This is a large, pre-existing, silent visual defect spanning nearly every module (Contract Management's Claims/Issues/Payments/Workflow/Closeouts/Documents/Risks/Variations pages, Factory Tasks, Incidents, Maintenance, Production, Safety & Compliance) — likely many other "invisible red button/text" instances exist across the app that have simply never been reported as clearly as this one was. Deliberately **not** touched beyond the 4 files above (all directly in the contract-lifecycle-actions family this CM-69 chain has been fixing) to keep this urgent hotfix properly scoped and low-blast-radius, per this unit's own safety framing. Recommending a dedicated future unit (a project-wide `danger`→`error` audit-and-fix pass, or adding a `--color-danger` alias to the theme pointing at the same value as `--color-error` for a lower-risk one-line fix) to close the remaining 94 files.
+
+### Next Recommended Unit
+
+A dedicated app-wide `danger`-token remediation unit (see finding above) — likely the single highest-value remaining fix in this whole session, given its file count and the fact it silently degrades destructive-action buttons across nearly every module. Separately, the carried-over credential blocker (open since CM-62) still prevents any live authenticated visual confirmation.
+
+## CM-69F — Fix Missing Submit Button in Remove Draft / Cancel Contract Modal (Completed 2026-09-05)
+
+### Summary
+
+After CM-69E fixed the modal not opening at all, the modal now opened but appeared to show only a "Cancel" button, no submit control. Root cause: the submit button was always in the DOM, but was disabled purely because the Reason field starts empty, and a dimmed/disabled button next to a crisp, always-enabled "Cancel" button reads at a glance as if it doesn't exist. Fixed by keeping the submit button fully visible and enabled at all times except while the request is genuinely in flight, and validating the empty-reason case with a real, visible error message instead.
+
+### Root Cause
+
+`disabled={isPending || !reason.trim()}` on the submit button meant it was disabled (and rendered at 60% opacity) every time the modal first opened, since `reason` starts as `''`. There was no separate "missing button" bug in the JSX structure — both buttons were always siblings in the same always-rendered footer — but a permanently-dimmed button with no visible reason WHY it's disabled (no error message shown) is easy to miss entirely, especially in a screenshot, next to a fully-opaque secondary "Cancel" button beside it. Its label ("Confirm Cancellation") also never matched the modal's own title ("Remove Draft"/"Cancel Contract"), compounding the impression that the "real" submit control was missing.
+
+### Files Changed
+
+`contract-cancel-action.tsx` only: submit button's `disabled` condition narrowed to `isPending` alone (no longer disabled just because Reason is empty); `handleConfirm()` now checks `!reason.trim()` first and sets a real, visible `error` message ("Reason is required.") instead of silently relying on a disabled button; submit button label now reads `label` ("Remove Draft"/"Cancel Contract") instead of the generic "Confirm Cancellation", with pending text "Removing…"/"Cancelling…" (derived from `label`) instead of a single hardcoded "Cancelling…".
+
+### Backend Changed — No
+
+Zero backend files touched. No migration. `cancelContractAction`, `POST :id/cancel`, and `CancelContractDto` are unchanged from CM-69A — this was purely a frontend visibility/validation-UX bug.
+
+### Submit Button Fix
+
+The footer now always shows two clearly distinct buttons: a secondary "Cancel" (dismiss, border style, always enabled unless a request is in flight) and a primary danger-styled submit button (always visible and enabled except while the request is actually pending) — never a state where the submit button is present-but-invisible-looking with no explanation.
+
+### DRAFT Modal Behavior
+
+Title "Remove Draft"; submit button reads "Remove Draft" (was "Confirm Cancellation"); pending state reads "Removing…".
+
+### ACTIVE Modal Behavior
+
+Title "Cancel Contract"; submit button reads "Cancel Contract"; pending state reads "Cancelling…". Both labels come from the exact same `label` prop already correctly computed by `getVisibleContractTransitions().cancelLabel` (CM-69A/CM-69D, unchanged).
+
+### Submit Behavior
+
+Still a controlled-click pattern (`onClick`, not a native `<form>` submit) — matching every other confirm modal already built in this codebase this session (CM-68A's schedule-plan editor, CM-69D's Activate/Terminate/Close dialogs); no `<form>`/`form=` attribute was introduced, since none of those existing modals use one either and doing so here alone would be an inconsistent, unrequested pattern change. Clicking submit still calls the exact same `cancelContractAction(contractId, version, reason)`; `contractId`/`version` are unchanged, already-correct values traced through from the loaded contract in CM-69E.
+
+### Success Redirect Behavior
+
+Unchanged from CM-69E: `router.push('/contracts')` on success.
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no schema change. This unit only fixed a client-side visibility/validation bug in an existing, already-safe (CM-69A) status-transition modal.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 543/543 (unchanged — pure component/UX change, no new pure-logic function; same disclosed test-infrastructure limitation as CM-69E, see that unit's tracker entry) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1434/1434 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List + a contract detail route + Dashboard + Schedule all responded cleanly on the restarted dev server |
+| Live authenticated click-through (scenarios A–F) | **Not run** — same carried-over credential blocker as every unit since CM-62 |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual confirmation that the submit button is now clearly visible/clickable — credential blocker, carried over.
+- Automated component-level interaction tests remain out of scope for the same reason disclosed in CM-69E's tracker entry (no component-testing infrastructure in this repo's web vitest config).
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally click Remove Draft → type a reason → submit → confirm the redirect and disappearance from the Contract List, closing out this whole CM-69A→F chain end-to-end.
+
+## CM-69E — Fix Remove Draft / Cancel Contract Action Not Working (Completed 2026-09-05)
+
+### Summary
+
+CM-69D's new "Remove Draft"/"Cancel Contract" dropdown menu item was visible but clicking it did nothing. Root cause: a React unmount-before-render race, not a backend or permission bug. Fixed by lifting the cancel modal's open/close state up into the parent dropdown component and rendering the modal as an always-mounted sibling instead of a child of the menu that closes itself on the same click.
+
+### Files Audited
+
+`contract-detail-actions-menu.tsx` (found the bug: the Cancel menu item's `onClick` called `closeMenu()` — which sets `menuOpen = false` — and `ContractCancelAction`'s own `open()` in the same handler; `<ContractCancelAction>` was rendered *inside* `{menuOpen && (...)}`, so the very re-render that should have shown the modal instead unmounted the component holding that modal's state), `contract-cancel-action.tsx` (confirmed its `open` state was purely internal/uncontrolled — no way for a parent to keep it alive across the parent's own re-render), `cancelContractAction` server action (confirmed unchanged/correct — takes `(id, version, reason)`, already used correctly), `contracts-api.ts` (no `cancel` client method exists directly — `cancelContractAction` calls `actionFetch('/contracts/:id/cancel', 'POST', {...})` directly, confirmed unchanged and correct), backend `POST /contracts/:id/cancel` and `CancelContractDto` (`reason`/`version` validation — confirmed unchanged, correct, and never the problem; this was purely a frontend component-lifecycle bug), `contract-transitions.tsx` (confirmed its own, unrelated `ContractCancelAction` usage on the Overview page was never broken — it doesn't sit inside any conditionally-unmounted parent, which is exactly why only the NEW dropdown surface exhibited the bug).
+
+### Root Cause
+
+`ContractCancelAction` managed its cancel-modal's open/closed state internally (`useState`) and was designed to be a single, self-contained trigger+modal unit. CM-69D reused it correctly on the Overview page (unaffected) but, for the new dropdown, rendered the `<ContractCancelAction>` instance as a JSX child *inside* `{menuOpen && (...)}` and told it to open itself (`open()`) from a click handler that ALSO closed the menu (`closeMenu()`) in the same event. React processes both state updates before the next render; on that render, `menuOpen` is now `false`, so the entire block containing `<ContractCancelAction>` — the component instance that had just been told to open its modal — gets unmounted, destroying its internal `open` state before it could ever paint the modal. Nothing was wrong with the server action, the DTO, the backend endpoint, or version handling — the request never even left the browser.
+
+### Files Changed
+
+`contract-cancel-action.tsx`: added optional controlled-mode props `open`/`onOpenChange` (when both supplied, the modal's visibility is driven by the parent instead of internal state — every other call site, unchanged, keeps working exactly as before); modal title now reads the real `label` prop (was hardcoded "Cancel Contract" even for a DRAFT "Remove Draft" flow); on success now redirects to `/contracts` (`router.push`) instead of only `router.refresh()`, per this unit's explicit "preferred success behavior". `contract-detail-actions-menu.tsx`: added `isCancelOpen` state owned by the menu component itself; the Cancel menu item is now a plain button that sets `isCancelOpen = true` directly (no longer routes through `ContractCancelAction`'s own trigger); the real `<ContractCancelAction>` instance is now rendered once, as a sibling of the menu (always mounted, `open={isCancelOpen}`/`onOpenChange={setIsCancelOpen}`, `renderTrigger={() => null}` to suppress its own default button). `contract-ui-helpers.test.ts`: +1 test confirming `getVisibleContractTransitions('CANCELLED', ...)` still correctly returns `cancel: false` (closing a real, if narrow, coverage gap — this status wasn't explicitly tested before, only inferred).
+
+### Backend Changed — No
+
+Zero backend files touched. No migration — none was needed or added. `POST /contracts/:id/cancel`, `CancelContractDto`, and `ContractsService.cancel()` are byte-for-byte unchanged from CM-69A.
+
+### Dropdown Click Fix
+
+Clicking "Remove Draft"/"Cancel Contract" now correctly opens the real modal every time, regardless of the menu closing in the same click — verified by tracing the exact render sequence (menu-close and modal-open state updates now live in two independent pieces of state, one of which — `isCancelOpen` — is never itself inside a block that unmounts on the very update that's supposed to show it).
+
+### Cancel Modal Behavior
+
+Title now correctly shows "Remove Draft" for a DRAFT contract and "Cancel Contract" for ACTIVE (was always "Cancel Contract" before this fix). Reason remains required (`disabled={isPending || !reason.trim()}` on the confirm button, unchanged); placeholder already read "e.g. Created for UAT testing" from CM-69A, confirmed still correct.
+
+### Version Handling
+
+Confirmed already correct, no bug found: `version` flows from the real, loaded `contract.version` (`contractsApi.get(id)` in `layout.tsx`) → `ContractDetailActionsMenu` prop → `ContractCancelAction` prop → `cancelContractAction(contractId, version, reason)`. Never undefined/null in the real flow (only a hardcoded literal in a test could produce that).
+
+### Error Handling
+
+Unchanged and already correct: on a failed cancel, `result.error` is set into local `error` state and rendered inside the still-open modal (`{error && <div className="...text-danger">{error}</div>}`) — the modal never closes on failure, matching this unit's explicit requirement. No change was needed here since this path was never affected by the unmount bug (the request never even fired before the fix, so there was nothing to show an error for).
+
+### Success Redirect/Refresh Behavior
+
+Changed from `router.refresh()` (stay on the now-cancelled contract's own detail page) to `router.push('/contracts')` — the explicitly preferred behavior, since the whole point of this action is to remove a wrongly-created contract from the active list; the user now lands back on the Contract List, which (per CM-69C) already excludes CANCELLED contracts by default, so the just-cancelled contract is immediately confirmed gone from view.
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no schema change. This unit only fixed a React state-lifecycle bug in an existing, already-safe (CM-69A) status-transition flow — nothing about hard deletion was touched or introduced.
+
+### DRAFT "Remove Draft" Verification
+
+Code-path traced end-to-end: `getVisibleContractTransitions('DRAFT', permissions).cancelLabel === 'Remove Draft'` (existing, tested CM-69A logic, unchanged) → dropdown shows "Remove Draft" → click now correctly opens the modal titled "Remove Draft" → submit calls `cancelContractAction(id, version, reason)` → `POST :id/cancel` → `DRAFT → CANCELLED`.
+
+### ACTIVE "Cancel Contract" Verification
+
+Same code path, `cancelLabel === 'Cancel Contract'` for ACTIVE — modal now correctly titled "Cancel Contract", same fix applies identically since both labels flow through the same `label` prop.
+
+### CANCELLED Regression
+
+`getVisibleContractTransitions('CANCELLED', ...)` still returns `cancel: false, cancelLabel: null` (existing CM-69A behavior, now with an explicit test added) — the Cancel menu item does not render at all for an already-cancelled contract; the whole dropdown is disabled if that was the only available action.
+
+### Other Lifecycle Action Regression
+
+Activate, Terminate, and Request Closeout/Close Contract in this same dropdown were never affected by the bug (their dialogs are siblings of the menu, not nested inside it) — confirmed unchanged in this unit's diff; `ContractTransitions`' own Activate/Terminate on the Overview page and `ContractClosureAction`'s own Close flow are completely untouched files.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 543/543 (1 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1434/1434 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List/Dashboard/Schedule/Payments/Workflow/Closeouts + a contract detail route + the cancel endpoint all responded cleanly (redirects/401s, no crash) on the restarted dev server |
+| Live authenticated click-through (scenarios A–F) | **Not run** — same carried-over credential blocker as every unit since CM-62 |
+
+### Unsupported/Deferred Items
+
+- Automated component/interaction tests for "clicking Remove Draft opens the modal", "successful cancel redirects", "failed cancel shows error", etc. were **not added**: audited first and confirmed this repo's web test setup (`vitest.config.ts`: `include: ['src/**/*.test.ts']`, `environment: 'node'`, no `@testing-library/react`, no jsdom/happy-dom dependency) supports pure-function `.test.ts` files only — there are zero `.test.tsx` component tests anywhere in this codebase today, and `.tsx` files aren't even picked up by the configured test glob. Building a first-ever component-testing stack (installing testing-library, adding a jsdom environment, writing the first `.test.tsx` in the repo) is real new test infrastructure, not a "add/adjust tests" fix, and was judged disproportionate scope for this hotfix — flagged here rather than silently skipped or fabricated. What COULD be honestly covered without that infrastructure was added (the missing `CANCELLED → cancel:false` pure-function case). The actual bug fix itself was verified by exact code-path/render-sequence tracing, not by a passing automated test.
+- Live authenticated visual click-through of the fixed dropdown — same carried-over credential blocker as every unit since CM-62.
+
+### Next Recommended Unit
+
+If reliable component-level interaction testing for this contract-actions surface becomes a priority, a dedicated unit to introduce `@testing-library/react` + jsdom/happy-dom into `apps/web`'s vitest config would need to precede it (real new infrastructure, its own review). Otherwise: resolve the carried-over credential blocker so a live authenticated pass can finally click through Remove Draft/Cancel Contract end-to-end.
+
+## CM-69D — Enable Contract Detail Actions Dropdown for Available Lifecycle Actions (Completed 2026-09-05)
+
+### Summary
+
+The Contract Detail workspace's top-right "Actions ▾" button (rendered in `[id]/(workspace)/layout.tsx`, above every tab) was never actually implemented — it was a permanently `disabled` static stub since it was first added, with the title "Additional actions are planned for a future unit". Replaced it with a real, working dropdown menu (`ContractDetailActionsMenu`) that's enabled whenever the current actor has at least one real, permission-and-status-gated lifecycle action available, reusing the exact same pure decision functions (`getVisibleContractTransitions`, `getClosureAction`) and server actions the Overview page's Contract Summary card and the Contract List row menu already use — no new backend logic, no new permission check invented.
+
+### Files Audited
+
+`[id]/(workspace)/layout.tsx` (found the disabled stub — confirmed it was NEVER wired to any real logic, not a computed-disabled-state bug), `contract-transitions.tsx` (Activate/Terminate — confirmed unchanged, still renders on the Overview page's Contract Summary card exactly as before), `contract-cancel-action.tsx` (CM-69A's Cancel modal — confirmed self-contained with its own trigger button, needed a small opt-in refactor to be reusable from a second trigger surface), `contract-closure-action.tsx`/`getClosureAction` (Request Closeout / Close Contract — confirmed this data, unlike status/permissions, was NOT already available at the layout level; only the Overview page's `page.tsx` fetches `listCloseoutRequests`), `contract-row-actions.tsx` (Contract List's own "···" menu — reused its exact "Activate Contract?" confirm-dialog copy and menu/overlay markup pattern for consistency), `contract-ui-helpers.ts` (`getVisibleContractTransitions`/`getClosureAction` — confirmed both already correctly return "no action" for CANCELLED and "nothing more" for CLOSED, and correctly still allow a Close-related action for TERMINATED when a closeout request is in flight — none of this needed changing).
+
+### Files Changed
+
+New `_components/contract-detail-actions-menu.tsx` (the real dropdown). `_components/contract-cancel-action.tsx` — added an optional `renderTrigger` prop so the exact same CM-69A modal can be opened from a second surface (the new dropdown) without a second modal implementation; every existing call site (`contract-transitions.tsx`, unchanged) omits it and renders identically to before. `[id]/(workspace)/layout.tsx` — added `contractsApi.listCloseoutRequests(id)` to its existing `Promise.allSettled` fetch, computed `latestCloseoutRequest`, and swapped the disabled stub button for `<ContractDetailActionsMenu>`.
+
+### Backend Changed — No
+
+Zero backend files touched. No migration. Every server action called (`activateContractAction`, `terminateContractAction`, `cancelContractAction` via `ContractCancelAction`, `closeContractFromCloseoutAction`) is reused completely unchanged.
+
+### Why Actions Was Disabled
+
+Not a logic bug — it was simply never built. The button had `disabled` hardcoded and a title reading "Additional actions are planned for a future unit," with no menu, no state, no data behind it at all.
+
+### Enabled Dropdown Behavior
+
+`hasAnyAction = visible.activate || visible.cancel || visible.terminate || closure.showRequestCloseout || closure.showCloseContract` (all four computed from the same real, unchanged pure functions). True → real, clickable "Actions ▾" trigger opening a menu. False → the trigger stays disabled, now with an accurate title ("No lifecycle actions are currently available for this contract") instead of the old placeholder copy.
+
+### Draft Contract Actions
+
+DRAFT (with `contracts.activate` + `contracts.update`/`contracts.manage`): menu shows "Activate Contract" (opens the same confirm-dialog copy as the List row's Activate) and "Cancel Contract" → label per `getVisibleContractTransitions().cancelLabel` (which reads "Remove Draft" for DRAFT — see below) — opens the real CM-69A reason-required modal via `ContractCancelAction`'s new `renderTrigger`.
+
+### Active Contract Actions
+
+ACTIVE: menu shows "Cancel Contract" (own reason modal, reusing the same component) and, only when the actor holds `contracts.terminate`, "Terminate Contract" (a new lightweight reason modal that calls the existing, unchanged `terminateContractAction` via a synthesized `FormData` — the action itself, its DTO, and its backend are all untouched). "Request Closeout" (a plain navigation link, non-destructive, matches `ContractClosureAction`'s own existing Link-only behavior) and "Close Contract" (only once a request is APPROVED — reuses `closeContractFromCloseoutAction` unchanged, now behind a confirm dialog since firing it directly from a menu click would violate this unit's own "no destructive action fires immediately from a menu click" rule; the existing Overview-card button still fires it directly, unchanged, since that surface isn't in this unit's scope).
+
+### Cancel Modal Behavior
+
+Identical modal, identical copy, identical validation (`reason` required, `maxLength={1000}`), identical backend call (`cancelContractAction` → `POST :id/cancel`) — reached from either the Overview page's Contract Summary card (`ContractTransitions`, unchanged) or the new top-right dropdown (`ContractDetailActionsMenu`), both rendering the SAME `ContractCancelAction` component instance logic via its `renderTrigger` prop. No hard delete, no related-record deletion — unchanged from CM-69A.
+
+### Permission/Status Behavior
+
+Nothing bypassed: `getVisibleContractTransitions`/`getClosureAction` are the exact same pure, permission-and-status-driven functions already covering the List row menu and the Overview card — a staff/no-permission actor sees `hasAnyAction === false` (disabled dropdown) exactly as before, and the backend independently re-checks every permission/department-scope condition regardless of what the menu renders (`@AnyPermission`/`@Permissions` decorators + `assertCanAccessDepartment`, all untouched). CANCELLED contracts: every one of activate/cancel/terminate/showRequestCloseout/showCloseContract is false → dropdown disabled, matching the task's own required behavior with zero new code (this fell out for free from CM-69A's existing status-gating). CLOSED: same, disabled. TERMINATED: activate/cancel/terminate correctly stay false, but Request Closeout/Close Contract can still be true if a real closeout request is in flight — existing, unchanged `getClosureAction` behavior, correctly surfaced now that the layout has the data to show it.
+
+### No-Delete Confirmation
+
+No delete button, no delete script added. This unit only adds a new UI trigger surface for existing, already-safe lifecycle transitions (activate/cancel/terminate/close) — none of which delete a contract or any related record.
+
+### Regression Results
+
+API: 1434/1434 (unchanged — zero backend files touched). Web: 542/542 (unchanged — no pure-logic file touched, only components/props). `pnpm lint` and both typechecks clean. `pnpm build` 8/8 tasks. `pnpm db:migrate:status` 37 migrations, unchanged. Dev server restarted (only the two identified API/web PIDs stopped); Contract List, Dashboard, Schedule, Payments, Workflow, Closeouts, and a contract detail route all returned clean redirects/401s with no crash.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 542/542 |
+| `pnpm --filter @recafco/api test --run` | ✓ 1434/1434 |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ Contract List/Dashboard/Schedule/Payments/Workflow/Closeouts + a contract detail route all returned clean redirects/401s on the restarted dev server |
+| Live authenticated visual verification of the dropdown (scenarios A–F) | **Not run** — same carried-over credential blocker as every unit since CM-62; the code paths were verified by direct audit of `getVisibleContractTransitions`/`getClosureAction`'s existing, already-tested behavior for every status this unit covers |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual verification of the new dropdown across DRAFT/ACTIVE/CANCELLED/CLOSED/TERMINATED — credential blocker, carried over.
+- The layout now fetches `listCloseoutRequests` on every workspace tab (previously only the Overview tab did) — a deliberate, disclosed small cost addition required to correctly show Request Closeout/Close Contract from any tab, not just Overview.
+
+### Next Recommended Unit
+
+Resolve the carried-over credential blocker so a live authenticated pass can finally visually confirm this dropdown (and the backlog of prior "not run" items) across every real contract status in a real browser session.
+
+## CM-69C — Hide Cancelled/Test Contracts from Contract List by Default (Completed 2026-09-05)
+
+### Summary
+
+After CM-69A added the safe Cancel Contract flow, CANCELLED contracts still appeared in the default Contract List (there was no default status filter at all, and no lifecycle-status dropdown existed in the UI to explicitly filter them out or in). Fixed with a backend query-default change plus a new "Lifecycle Status" filter dropdown, so a fresh page load excludes CANCELLED while explicit "Cancelled" or "All Statuses" selections still surface them for audit. No migration — confirmed unnecessary during audit, since the existing `lifecycleStatus`/`status` query params were already fully plumbed end-to-end from CM-69A, just never exposed as a user-facing dropdown and never defaulted to excluding CANCELLED.
+
+### Files Audited
+
+`contracts.service.ts` (`buildListWhere()`, confirmed the true default — neither `status` nor `lifecycleStatus` supplied — set no status filter at all, meaning CANCELLED rows returned unconditionally), `dto/contract-list-query.dto.ts` (`STORED_STATUSES`/`DERIVED_STATUSES` `IsIn` arrays), `contracts/page.tsx` (confirmed `lifecycleFilter` was already read and passed to `contractsApi.list()`/`buildHref()` for the Dashboard's existing deep-links, e.g. `/contracts?lifecycleStatus=ACTIVE`, but never exposed as a dropdown of its own), `contract-filter-bar.tsx` (confirmed its one visible "Contract Status" dropdown is actually the manager-facing **schedule** status — `scheduleStatus` — completely unrelated to lifecycle/CANCELLED; there was genuinely no lifecycle-status filter UI anywhere on this page before this unit), `contract-schedule-overview.service.ts`/`contract-schedule.service.ts` (confirmed both already exclude CANCELLED from CM-69B... i.e. CM-69A — verified still correct, untouched), `contracts.service.ts`'s `getSummary()`/`getDashboard()` (confirmed `totalActive` already strictly whitelists `ACTIVE`, unaffected by this unit).
+
+### Files Changed
+
+Backend: `contracts.service.ts` (`buildListWhere()` — new default-excludes-CANCELLED branch + explicit `'ALL'` bypass), `dto/contract-list-query.dto.ts` (`'ALL'` added to both `IsIn` arrays), `contracts.service.test.ts` (+7 new/updated tests). Frontend: `contract-ui-helpers.ts` (new `LIFECYCLE_STATUS_FILTER_OPTIONS`), `contract-filter-bar.tsx` (new "Lifecycle Status" dropdown, distinct from the existing "Contract Status" schedule-status dropdown), `contracts/page.tsx` (wires `lifecycleFilter` into the new dropdown prop — it was already being read/sent to the API for deep-links).
+
+### Backend Changed — Yes (query-default only, no schema/migration)
+
+`buildListWhere()`: when neither `status` nor `lifecycleStatus` is supplied at all (a fresh page load), the where clause now defaults to `{ status: { not: 'CANCELLED' } }` instead of no status filter. An explicit `lifecycleStatus=ALL` or `status=ALL` bypasses this (and every other status branch) entirely, returning every real status including CANCELLED. Every previously-tested explicit value (`ACTIVE`/`DRAFT`/`EXPIRING`/`EXPIRED`/`TERMINATED`/`CLOSED`/`CANCELLED`) is unchanged.
+
+### Migration — None
+
+Confirmed unnecessary during audit: no schema change, purely a query-construction default plus one new accepted DTO value (`'ALL'`). `pnpm db:migrate:status` still reports 37 migrations, unchanged.
+
+### Default List Behavior
+
+A fresh `/contracts` load (or any request with no `status`/`lifecycleStatus` param) now excludes CANCELLED contracts automatically — DRAFT/ACTIVE/TERMINATED/CLOSED all still show exactly as before this unit. No demo/test contract that gets cancelled through the app will appear in the normal working view again.
+
+### Cancelled Filter Behavior
+
+New "Lifecycle Status" dropdown on the Contract List filter bar (distinct label from the pre-existing "Contract Status" schedule-status dropdown, to avoid confusing the two): blank default = the new normal working view (CANCELLED hidden); "Cancelled" = only CANCELLED contracts, for audit; "All Statuses (Include Cancelled)" = every real status, CANCELLED included; Active/Draft/Expiring/Expired/Terminated/Closed all behave exactly as their pre-existing `lifecycleStatus` values already did (unchanged, since CM-55's original Dashboard deep-links use these same values).
+
+### Search Behavior
+
+Unaffected/unchanged mechanism — `search` combines into `where['AND']`, completely independent of `where['status']`, so the new default exclusion applies identically whether or not a search term is present: searching for a cancelled test contract's name/reference will not surface it unless the Lifecycle Status filter is explicitly set to "Cancelled" or "All Statuses".
+
+### Dashboard/Schedule Impact — Confirmed Unchanged
+
+`getDashboard()`/`getSummary()`'s `totalActive` already strictly whitelists `status === ACTIVE` (untouched, no change needed). The global Schedule Overview and the old per-item Schedule register already exclude CANCELLED contracts entirely from their own contract fetch (CM-69A) — confirmed still correct, not touched by this unit.
+
+### No-Delete Confirmation
+
+No delete button, no delete script, no `DELETE`/`.delete()` call added anywhere. CONTRACT-2026-000008 and CONTRACT-2026-000001 were **not** hard-deleted, truncated, or reset by this unit — they remain in the database with full history; per the user's own choice, they will be cancelled through the real app's Cancel Contract flow (CM-69A) rather than by the agent, since this dev environment's working login credentials belong to the user's own real accounts (no synthetic UAT test-user credentials exist here to safely use instead).
+
+### Regression Results
+
+API: 1434/1434 (7 new/updated). Web: 542/542 (unchanged — new dropdown wiring is prop-plumbing only, no new pure-function logic to test beyond the DTO/service-level `buildListWhere` coverage). `pnpm lint` and both typechecks clean. `pnpm build` 8/8 tasks. `pnpm db:migrate:status` 37 migrations, unchanged. Dev server restarted (only the two identified API/web PIDs stopped); `/contracts` (plus `?lifecycleStatus=ALL`/`CANCELLED` variants) and 5 sibling pages all returned clean 307s; the API's `/contracts` (default, `ALL`, `CANCELLED`) and `/contracts/schedule/overview` all returned clean 401s, confirming no crash from the new branch.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 542/542 |
+| `pnpm --filter @recafco/api test --run` | ✓ 1434/1434 (7 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ web + API routes (default/ALL/CANCELLED variants) all returned clean redirects/401s on the restarted dev server |
+| Live cancellation of CONTRACT-2026-000008 / CONTRACT-2026-000001 | **Deferred to the user** — no working dev-environment login credentials available to the agent (only the user's own real accounts exist); the user chose to perform this themselves via the app's Cancel Contract flow rather than share credentials or have the agent bypass the app with a direct DB update |
+
+### Unsupported/Deferred Items
+
+- The actual cancellation of CONTRACT-2026-000008 and CONTRACT-2026-000001 — by the user's own explicit choice this unit, not an agent oversight.
+- Live authenticated UAT walkthrough of the resulting filtered list — same carried-over credential blocker as every unit since CM-62, compounded this unit by the dev DB having been reset to the user's own real accounts (noted earlier in this same tracker) rather than the synthetic UAT seed users.
+
+### Next Recommended Unit
+
+Once the user cancels the two named test contracts through the app, a quick visual confirmation (screenshot or the user's own report) that they've vanished from the default `/contracts` view would close this unit's loop; beyond that, resolving the credential blocker remains the standing recommendation.
+
+## CM-69B — Contract List Full View Table Action Column Polish (Completed 2026-09-05)
+
+### Summary
+
+Pure CSS/layout fix for the Contract List table's Action column, which was too narrow and cramped Open/More-menu together in Full View. Audited the row-action logic first and confirmed it was already correct (CM-55D had already moved Activate into the "More" menu, and CM-69A's cancellable-status fallback already keeps CANCELLED rows Activate-free) — this unit changed only Tailwind classes in `contract-list-table.tsx`, nothing else.
+
+### Files Audited
+
+`contracts/page.tsx` (confirmed no page-level vertical-scroll wrapper around the table — page-level scroll was already the real behavior), `contract-list-table.tsx` (Full/Simple View toggle, sticky-column constants, all column cell classes), `contract-row-actions.tsx` (Open + More menu — confirmed Activate is already menu-only, not an inline button, since CM-55D), `computeContractRowActionPlan` (confirmed CANCELLED already falls into the same never-shows-Activate fallback branch as TERMINATED, from CM-69A), `contract-schedule-status-select.tsx` (confirmed the table's "Status" column is the manager-facing schedule-status dropdown, unrelated to lifecycle CANCELLED — no lifecycle badge is rendered in this table at all, so there was nothing to fix there).
+
+### Files Changed
+
+`apps/web/src/app/(protected)/contracts/_components/contract-list-table.tsx` only — `STICKY_RIGHT_CLS`/`STICKY_RIGHT_HEADER_CLS` widened to `min-w-[200px]` (within the requested 180-220px band) with a left-edge shadow added to the body cell, plus explicit `whitespace-nowrap` added to the Progress %/Payment Progress % cells (Contract No./Value/Status/Action already had it).
+
+### Backend Changed — No
+
+Zero backend files touched. No migration.
+
+### Action Column Fix
+
+Both the Action `<th>` and `<td>` now reserve `min-w-[200px]`, matching the same "reserved so it never gets squeezed" precedent CM-55D already established for the Contract ID column (`min-w-40`). Open + the "···" trigger now always have enough room regardless of what other columns are showing/hiding across Full/Simple View or viewport width.
+
+### Sticky Column Behavior
+
+Unchanged mechanism (`sticky right-0 z-10`, opaque `bg-surface`/`bg-nav`, `border-l border-border`) — widened, plus a subtle left-edge box-shadow (`shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]`) added to the body cell only (the header's already-opaque dark `bg-nav` doesn't need it) so scrolled content reads as clearly passing beneath a fixed column, not just bordered.
+
+### Action Menu Behavior — Unchanged
+
+Deliberately did not add Cancel/Terminate/Close into the row-level "More" menu, despite the task's own "Recommended final action behavior" describing them there: those three all require a reason (and Cancel/Terminate also a confirmation dialog) via mechanisms that currently live only on the Contract Detail page (`ContractCancelAction`, `ContractTransitions`) — building an equivalent mini-modal into a table row's dropdown would be a real new feature, not a placement change, and would conflict with this unit's own explicit "do not change activate/cancel/terminate/open actions" and "do not invent actions" safety rules. Row-level More menu still shows exactly what it did before: Activate (when applicable, via its existing confirm dialog) plus real navigational shortcuts (Workflow/Payments/Issues/Claims/Schedule/Closeout).
+
+### Scrollbar Behavior
+
+No nested vertical-scroll container exists in this table today (confirmed via audit) — page-level scroll was already the real behavior, nothing to remove. Horizontal scroll (`overflow-x-auto` on the table wrapper) is unchanged and remains acceptable per the task's own rule; the widened, shadowed sticky Action column is the fix for "actions becoming unreadable" while that horizontal scroll happens.
+
+### Full View Behavior
+
+Action column now reads cleanly at every viewport width tested via build/typecheck; Progress %/Payment Progress % cells no longer risk wrapping.
+
+### Simple View Regression
+
+None — Simple View shares the exact same Action/Status/Contract ID columns and sticky-class constants (they render outside the `full &&` conditionals), so it gets the same width fix "for free" with zero change to which columns show or the toggle's own logic.
+
+### Action Regression
+
+None — no action/permission/status logic touched. Open still navigates via the same `<Link>`; Activate still calls the same `activateContractAction` through the same confirm dialog; department scope/permissions checks in `computeContractRowActionPlan` are byte-for-byte unchanged.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 542/542 (unchanged — pure CSS, no logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1429/1429 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks (only `@recafco/web` rebuilt) |
+| `pnpm db:migrate:status` | ✓ 37 migrations, unchanged |
+| Live smoke check | ✓ `/contracts` + 6 sibling routes all returned clean 307 redirects on the already-running dev server (hot-reloaded) |
+
+### Unsupported/Deferred Items
+
+- Live authenticated visual verification of the actual cramped-column screenshot fix — same carried-over credential blocker as every unit since CM-62.
+- Cancel/Terminate/Close were not added to the row-level More menu — see "Action Menu Behavior" above for the deliberate reasoning; a future unit could build a proper reason-collecting row-level action if that's genuinely wanted, but that is a new capability, not this unit's "placement only" scope.
+
+### Next Recommended Unit
+
+Resolve the carried-over UAT test-user credential blocker so a live authenticated pass can finally visually confirm this fix (and the growing backlog of prior "not run" items) in a real browser session.
+
+## CM-69A — Safe Remove / Cancel Test Contract Flow (Completed 2026-09-05)
+
+### Summary
+
+Added a safe Cancel/Void flow so a manager/admin can remove a wrongly created draft or mistakenly activated test contract from active views — without ever hard-deleting a contract or any related record. Audited first and confirmed the safest design was a NEW `CANCELLED` status (not a reuse of the existing `TERMINATED` status, which already carries real closeout-eligibility semantics a voided test contract must never inherit) plus a `cancel()` service method mirroring the existing, already-tested `terminate()` pattern almost exactly.
+
+### Files Audited
+
+`packages/database/prisma/schema.prisma` (`ContractStatus` enum, `Contract` model's terminate/close audit fields), `contracts.service.ts` (`terminate()`, `close()`, `getSummary()`, `getDashboard()`, `buildListWhere()`, `findOneOrThrow()`), `contracts.controller.ts` (route decorators/ordering, `@AnyPermission`), `contract-schedule-overview.service.ts` and `contract-schedule.service.ts` (both fetch ALL contracts with no status filter — confirmed a cancelled contract would otherwise still appear as a schedule row), `contract-dashboard.service.ts` (confirmed its manager-insights queries have no contract-status filter of their own — a pre-existing characteristic already equally true for TERMINATED/CLOSED contracts today, left as-is rather than fixed as an out-of-scope side quest), `contract-transitions.tsx`/`contract-ui-helpers.ts` (the real "Available Actions" area — there is no literal dropdown component on the contract detail page; Activate/Terminate/Close render inline in the Contract Summary header, and Cancel/Remove Draft was added there), `computeContractRowActionPlan` (Contract List row's real More-actions menu), `contract-lifecycle-badge.tsx`, dashboard KPI/segment helpers (`dashboard-insights-helpers.ts`, `contract-kpi-grid.tsx`, `contract-summary-cards.tsx`), every `IsIn`-validated contract-status DTO array.
+
+### Files Changed
+
+Schema/migration: `schema.prisma`, new migration `20260905000000_add_contract_cancelled_status`. Backend: `contracts.service.ts` (new `cancel()` method + `getDerivedLifecycleStatus`/`getSummary`/`getDashboard`/`buildListWhere`/`CONTRACT_SELECT` updates), new `dto/cancel-contract.dto.ts`, `contracts.controller.ts` (new `POST :id/cancel` route), `contract-schedule-overview.service.ts` and `contract-schedule.service.ts` (exclude CANCELLED from their all-contracts fetch), `dto/contract-list-query.dto.ts`, `dto/contract-workflow-list-query.dto.ts`, `dto/contract-workflow-assignment-queue-query.dto.ts` (CANCELLED added to `IsIn` arrays). Tests: `contracts.service.test.ts` (+14 cancel tests, updated getSummary/getDashboard count expectations), `contract-schedule.service.test.ts` (updated 2 `buildScheduleContractWhere` expectations), `contract-dashboard.service.test.ts` (mock fixture field). Frontend: `contracts-api.ts` (types + `cancelContract`-shaped fields), `actions.ts` (new `cancelContractAction`), new `_components/contract-cancel-action.tsx` (client modal), `contract-transitions.tsx` (wires it in), `contract-ui-helpers.ts` (+`cancel`/`cancelLabel` on `getVisibleContractTransitions`, updated `hasAnyVisibleTransition`, updated fallback-branch comment), `contract-lifecycle-badge.tsx`, `dashboard-insights-helpers.ts`, `contract-kpi-grid.tsx`, `contract-summary-cards.tsx` (all `totalCancelled` plumbing). Tests: `contract-ui-helpers.test.ts` (+7 cases), `dashboard-insights-helpers.test.ts` (fixture field).
+
+### Backend Changed — Yes
+
+New `ContractsService.cancel()`, new `POST /contracts/:id/cancel` (`@AnyPermission('contracts.update', 'contracts.manage')`), explicit `assertCanAccessDepartment` check (unlike `activate()`/`terminate()`, which rely on permission alone — added here deliberately since Cancel is meant to be reachable by ordinary department-scoped managers). Real DRAFT|ACTIVE → CANCELLED transition only; TERMINATED/CLOSED/already-CANCELLED are rejected with `CONTRACT_NOT_CANCELLABLE` (409).
+
+### Migration — Additive only
+
+`20260905000000_add_contract_cancelled_status`: `ALTER TYPE "contract_status" ADD VALUE 'CANCELLED'` + 3 new nullable `contracts` columns (`cancellation_reason`, `cancelled_at`, `cancelled_by_user_id`) + 1 FK (`ON DELETE SET NULL`). No table drops, no data migration, no column removal. Applied cleanly via `prisma migrate deploy` (37 migrations total, confirmed up to date).
+
+### Cancellation Behavior
+
+DRAFT or ACTIVE only. Requires a real `reason` (max 1000 chars) and the current `version` (optimistic concurrency, same 409 conflict handling as `terminate()`). On success: `status → CANCELLED`, `cancelledAt`/`cancelledByUserId`/`cancellationReason` set, a `contractActivity` row (`event: 'cancelled'`) and a `securityAuditEvent` (`CONTRACT_CANCELLED`) are written — same dual-audit pattern as terminate. No related record (BOQ, workflow tasks, payments, documents, issues, claims, risks, schedule items, closeout requests, attachments) is ever touched — every one of those relations already carries `onDelete: Restrict`, so a real hard delete would be rejected by Postgres itself even if ever attempted; this unit never attempts it.
+
+### Draft Remove Behavior
+
+Implemented as the exact same `cancel()` transition (DRAFT → CANCELLED), not a separate hard-delete code path — a deliberate, disclosed scope-safety decision: the business rule ("contracts should not be hard-deleted once created") is satisfied by never building a delete path at all, rather than building one only for a "provably empty" draft and risking scope creep into cascade-safety edge cases. The button label reads "Remove Draft" for a DRAFT contract and "Cancel Contract" for ACTIVE (`getVisibleContractTransitions().cancelLabel`); the confirmation modal title matches the same dynamic label rather than always reading "Cancel Contract" verbatim, which would read oddly for a draft.
+
+### Activity/Audit Behavior
+
+Every cancellation is fully traceable: `ContractActivity` (contract-scoped audit trail, same table Activity History already reads) records actor/timestamp/previousStatus/newStatus/reason; `SecurityAuditEvent` records the same for security auditing. Nothing is ever deleted from either log, and cancelling a contract does not delete or alter any of its own prior activity history.
+
+### Active List/Dashboard/Schedule Impact
+
+Dashboard "Active Contracts"/`totalActive` and the global Schedule Overview's "Total Active Contracts" KPI already strictly whitelist `status === ACTIVE`, so CANCELLED contracts were never counted there without any change needed. Added `totalCancelled` end-to-end (service → API types → `totalContractsFromMetrics` → "Contracts by Status" donut → both "Total Contracts" KPI cards) so cancelled contracts remain honestly visible in totals/breakdowns rather than silently vanishing. The global Schedule Overview and the old per-item Schedule register (root dashboard's "Upcoming Schedule" widget) both now explicitly exclude CANCELLED contracts from their contract fetch — a cancelled contract is never shown as a scheduling concern anywhere. Contract List: CANCELLED is a normal, filterable status (`status`/`lifecycleStatus=CANCELLED`), shown in the unfiltered list exactly like DRAFT/TERMINATED/CLOSED already are, with its own muted-neutral `ContractLifecycleBadge`.
+
+### Permission/Scope Behavior
+
+`@AnyPermission('contracts.update', 'contracts.manage')` at the route, re-checked in the service; explicit `assertCanAccessDepartment` enforces the actor's real department scope before any transition. A staff/no-permission actor sees no Cancel/Remove Draft button at all (`getVisibleContractTransitions().cancel` is permission-gated) and the backend independently rejects the request regardless of what the UI shows.
+
+### Data Safety Confirmation
+
+No related record was ever deleted, truncated, or reset. No production database reset/reseed/drop occurred. No migration edits existing data or drops a column. Every child relation's `onDelete: Restrict` remains the real, unconditional backstop against accidental cascade loss, unchanged.
+
+### Regression Results
+
+API: 1429/1429 (14 new). Web: 542/542 (7 new). `pnpm lint` and both typechecks clean. `pnpm build` 8/8 tasks, all routes present including the new `POST :id/cancel` (verified via a live 401 on the unauthenticated endpoint, not a 500). `pnpm db:migrate:status` 37 migrations, up to date. Dev server restarted (only the two identified API/web PIDs stopped); `/contracts`, `/contracts/schedule`, `/contracts/dashboard`, `/contracts/payments`, `/contracts/workflow`, `/contracts/closeouts` all returned clean 307 redirects; `/contracts/schedule/overview` and the old `/contracts/schedule` backend route both returned clean 401s post-change.
+
+### Unsupported/Deferred Items
+
+- Live authenticated UAT walkthrough of the actual cancel flow — same carried-over credential blocker as every unit since CM-62.
+- The pre-existing characteristic that `contract-dashboard.service.ts`'s manager-insights panels (Management Attention Required, Top Delayed Contracts) have no contract-status filter at all (already true for TERMINATED/CLOSED contracts today) was audited and deliberately left unchanged — fixing it would be a different unit's scope, not specific to CANCELLED.
+- No dedicated "Cancelled" KPI card was added to the 11-card Manager KPI grid or the 5-card Contract List KPI row (only the existing "Contracts by Status" donut and Total Contracts sums were extended) — keeps both KPI grids' card counts unchanged, per this unit's own "prefer minimal, non-disruptive" safety framing.
+
+### Next Recommended Unit
+
+Resolve the carried-over UAT test-user credential blocker (open since CM-62) so a live authenticated walkthrough can finally verify Cancel/Remove Draft end-to-end in a real browser session, closing out the growing backlog of "not run" verification items.
+
+## CM-68C — Schedule Empty State and UX Explanation Polish (Completed 2026-09-05)
+
+### Summary
+
+Pure frontend/UI-copy polish across both Schedule pages, clarifying the relationship between them: the global/sidebar page (all-contract overview) and the per-contract Schedule tab (Planned vs Actual, where planning actually happens). No backend, calculation, actual-source-mapping, or migration change of any kind — audited first and confirmed unnecessary before touching anything.
+
+### Files Audited
+
+`global-schedule-panel.tsx` (global empty state), `contracts/schedule/page.tsx` (global title/subtitle), `[id]/(workspace)/schedule/page.tsx` (per-contract empty state + title), `contract-schedule-edit-drawer.tsx` (Create/Edit Planned Schedule modal helper text + confirmed actual fields have no inputs anywhere in it), `contract-schedule-kpi-strip.tsx` (confirmed untouched, no copy change needed there). Grepped every old empty-state/helper string across the test suites first — none were asserted on, so no test needed updating.
+
+### Files Changed
+
+`apps/web/src/app/(protected)/contracts/schedule/page.tsx`, `apps/web/src/app/(protected)/contracts/schedule/_components/global-schedule-panel.tsx`, `apps/web/src/app/(protected)/contracts/[id]/(workspace)/schedule/page.tsx`, `apps/web/src/app/(protected)/contracts/[id]/(workspace)/schedule/_components/contract-schedule-edit-drawer.tsx`. Copy/JSX only — no props, no logic, no new files.
+
+### Backend Changed — No
+
+No service, controller, DTO, or migration touched. `computeActualStages()`/`computeStageStatus()`/`computeDelayDays()`/`computeScheduleSummary()`/`ContractScheduleOverviewService.getOverview()` all untouched.
+
+### Global Empty State Behavior
+
+When contracts exist but every one is genuinely `scheduleStatus === 'Not Planned'` (and no filters are active): title "No contract schedules created yet", description explaining schedules are created inside each contract and what the page will show once planned dates exist, a secondary helper line ("Open a contract, go to Schedule, then create the planned timeline."), and a real "Open Contract List" link to `/contracts` — no global schedule editor, no fake rows. The zero-contracts state ("No active contracts found.") and the filtered-no-match state are unchanged.
+
+### Contract Schedule Empty State Behavior
+
+When a contract has no planned schedule: title "No planned schedule has been added yet", description listing the real fixed 8-stage list (Contract Sign, Advance Payment, Drawing Approval, Estimation Sheet, Casting / Production, Delivery, Erection, Final Closeout — the same literal list CM-68A already builds from, not a new invented list), a helper line naming the real actual-data sources (workflow tasks, payments, production status, closeout), and the existing "Create Planned Schedule" button/action unchanged.
+
+### Planned vs Actual Explanation Behavior
+
+A compact one-line note — "Planned = entered by manager. Actual = generated from system activity." — added under the title on both pages (global and per-contract), reusing existing muted-text styling; no new component, no extra vertical space beyond one small line.
+
+### Create Modal/Helper Behavior
+
+Modal top helper text replaced with the exact required copy explaining planned vs actual and naming the real update sources (workflow, payments, production, delivery/erection, closeout). Confirmed unchanged: the modal has no actual-value inputs anywhere — only planned fields (Responsible Team, Planned Start/End, Planned Qty/Molds for Casting/Production, Remarks) were ever editable, so "actual remains read-only" required no code change, only the copy now says so explicitly.
+
+### Data Unchanged Confirmation
+
+No planned dates, actual dates, stages, statuses, teams, or delay values were faked, added, or altered — every table/KPI value is exactly the same real data as CM-68A/CM-68B produced; only the empty-state and helper text around that data changed.
+
+### Schedule Logic Unchanged Confirmation
+
+`contract-schedule-plan.service.ts`, `contract-schedule-overview.service.ts`, both controllers' routes, and the `ContractScheduleItem` schema/migration are byte-for-byte unchanged from CM-68A/CM-68B.
+
+### Regression Results
+
+`pnpm --filter @recafco/web test --run` 536/536 (unchanged — no pure-logic file touched, no test asserted the old copy). `pnpm --filter @recafco/api test --run` 1415/1415 (unchanged). `pnpm build` 8/8 tasks (only `@recafco/web` rebuilt; all other packages cache-hit). `pnpm db:migrate:status` 36 migrations, unchanged. Contract List, Dashboard, Workflow, Payments, Production, Closeout, Documents, Claims, Risks, Issues, Attachments, Activity, and Staff pages — no files under any of those routes were touched this unit.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 536/536 |
+| `pnpm --filter @recafco/api test --run` | ✓ 1415/1415 |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 36 migrations, unchanged, up to date |
+
+### Unsupported/Deferred Items
+
+None — this unit's full scope (empty-state copy + modal helper + compact info note) was completed as specified.
+
+### Next Recommended Unit
+
+Resolve the carried-over UAT test-user credential blocker (still open since CM-62) so a live authenticated walkthrough can finally verify the Schedule pages' new copy, and the growing backlog of prior "not run" verification items, in a real browser session.
+
+## CM-68B — Global Contract Schedule Overview (Completed 2026-09-05)
+
+### Summary
+
+Rebuilt the main/sidebar Schedule page (`/contracts/schedule`) as an all-contract manager overview reusing CM-68A's real per-stage Planned vs Actual derivation logic, without duplicating CM-68A's full per-contract timeline. Each row summarizes one contract's schedule health (status, current blocking stage/team, next milestone, delay) and links to that contract's own detail Schedule tab for the full timeline. The old CM-34 due-date register that previously lived at this URL (`ScheduleItem`/`findAll()`, still a real dependency of the root dashboard's "Upcoming Schedule" widget) was left completely untouched — this unit is backed by a new, separate `GET /contracts/schedule/overview` endpoint.
+
+### Backend Changed — Yes
+
+- New service `contract-schedule-overview.service.ts` (`ContractScheduleOverviewService.getOverview()`), reusing CM-68A's exported `computeActualStages()`/`computeStageStatus()`/`computeDelayDays()`/`computeScheduleSummary()` per contract via a batched bulk-fetch-then-group-in-memory pattern (no N+1 queries), plus new pure functions `computeCurrentStage()`, `computeBlockingTeam()`, `computeNextMilestone()`, `computeGlobalScheduleStatus()`, `computeOverviewRow()`, `computeOverviewSummary()` (+23 tests).
+- New `GET /contracts/schedule/overview` endpoint (`contracts.read`), declared before the existing `@Get('schedule')` route per this controller's established static-route-before-`:id`-ordering convention. Registered in `contracts.module.ts`.
+- `ContractScheduleService.findAll()` / the old `GET /contracts/schedule` (`ScheduleItem[]`) endpoint — **untouched**, confirmed still the sole real dependency of the dashboard's `upcomingSchedule` widget.
+
+### Migration — None (additive-free unit)
+
+No schema change. `pnpm db:migrate:status` confirms 36 migrations, unchanged, up to date.
+
+### Global Schedule Status Logic (5 buckets, real data only)
+
+Delayed (any planned stage genuinely overdue/completed late) → Completed (contract status CLOSED/COMPLETED) → Not Planned (no planned schedule rows at all) → Attention (a real next-milestone date is due within 7 real days, not otherwise Delayed/Completed/Not Planned — a deliberately narrow, defensible reading of the task's own underspecified "blockers exist but not necessarily delayed" definition, chosen to tie directly to the required Due This Week KPI without duplicating Closeout's heavier cross-module Blocking Items aggregation) → On Track.
+
+### Current Stage / Blocking Team / Next Milestone Logic
+
+Current Stage: first planned-not-completed stage; else "Final Closeout / Completed" once all planned stages are done; else "Not planned" — never guessed from `createdAt`. Blocking Team: the real `responsibleTeam` on the blocking stage; safe stage-name inference only for Drawing Approval→Technical, Casting/Production→Production, Delivery/Erection→Delivery / Erection; otherwise "—". Next Milestone: nearest upcoming incomplete planned stage date, "—" if none. `openBlockerCount` is scoped narrowly to "stages with real DELAYED status" (data already computed in this same service) — a deliberate, disclosed scope decision, not a reimplementation of Closeout's Blocking Items.
+
+### KPI / Filter / Export Behavior
+
+6 KPI cards (Total Active Contracts, On Track, Delayed, Not Planned, Due This Week, Completed This Month) computed over the full unfiltered row set (portfolio-wide meaning), reusing `MetricCard`. Search/Status/Team/Due filters are client-side (`filterOverviewRows`, +11 tests) over the full bounded row list (capped at 1000 contracts, same cap precedent as the old CM-34 register) — the same established client-side-filtered bounded-list pattern used by Risk Assessment/Production Status/Claims, chosen over a new server-side query-param filtering layer since this page is explicitly an overview, not a detailed editor. Export reuses the app-wide server-export-route convention (`/contracts/schedule/export`, its own CSV builder `contract-schedule-overview-csv.ts` +4 tests) rather than a client Blob download, re-running the identical `filterOverviewRows` against the same query params so exported rows always match what's on screen.
+
+### Action/Link Behavior
+
+Each row's "Open Schedule" action links to `/contracts/${contractId}/schedule` (CM-68A's per-contract detail page) — no edit affordance exists anywhere on this page; editing planned schedules remains exclusively inside the per-contract Schedule tab.
+
+### Permission/Scope Behavior
+
+View: `contracts.read` (existing pattern). Department scope enforced identically to every other contract-scoped service (`DepartmentAccessService`, same as CM-68A/Contract List).
+
+### Data Honesty Confirmation
+
+No fake schedule data, dates, stages, teams, statuses, or delay days anywhere — every field is either a real value from CM-68A's per-stage derivation/summary functions or an honest "—"/"Not planned"/"Not linked yet"/"No blocker".
+
+### Contract Detail Schedule Regression
+
+`/contracts/[id]/schedule` (CM-68A) untouched — no files under its `_components`/`_lib` were modified this unit; `contract-schedule-plan.service.ts` was imported from (read-only reuse), never edited.
+
+### Other Page Regression
+
+Root dashboard's "Upcoming Schedule" widget (`upcoming-schedule-list.tsx`) and its backing `schedule-item-type-badge.tsx` left untouched (confirmed via grep before deleting anything else in the old `schedule/_components/` directory). Payments/Workflow/Closeouts/Dashboard/Contract List sibling pages smoke-checked post-rebuild — all still return clean redirects, no crashes.
+
+### Verification Results (2026-09-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 536/536 (26 new: 11 filter-helper + 4 CSV + previously-written 23 API-side are counted in the API total below) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1415/1415 (23 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/schedule`, `/contracts/schedule/export`, and `/contracts/[id]/schedule` all present |
+| `pnpm db:migrate:status` | ✓ 36 migrations, unchanged, up to date |
+| Dev server restart | ✓ `.next` cleared, both web (3000) and API (4000) processes identified by command line before stopping, restarted; both health checks pass; new `/contracts/schedule/overview` endpoint returns 401 (guard intact, no crash); 5 sibling pages return clean 307 redirects |
+| Live authenticated UAT walkthrough | **Not run** — `test.manager`/`UATpass2026!` login attempt returned `INVALID_CREDENTIALS`; same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live authenticated UAT (credential blocker, carried over).
+- Global edit modal, bulk schedule editor, drag/drop, Gantt chart, fake AI forecast, calendar integration, notifications, SAP integration — explicitly out of scope per this unit's own instructions; none built.
+
+### Next Recommended Unit
+
+Resolve the carried-over UAT test-user credential blocker (re-run `uat-seed.ts` or confirm current dev-DB seed state) so a live authenticated walkthrough can finally close out the growing backlog of "not run" verification items across CM-62 through CM-68B.
+
+## CM-68A — Contract Schedule Detail Page: Planned vs Actual (Completed 2026-09-04)
+
+### Summary
+
+Rebuilt the Contract Detail Schedule tab as a real Planned vs Actual milestone timeline for 8 fixed business stages (Contract Sign, Advance Payment Received, Drawing Approval, Estimation Sheet, Casting / Production, Delivery, Erection, Final Closeout), replacing the old CM-34 due-date aggregation view. Planned dates are a manager's own real input, stored in a new additive `ContractScheduleItem` table. Actual dates/quantities are never stored — always derived live from real workflow task completions, payment records, production status aggregates, and closeout/contract fields, with an honest "—" / "Not available" / "Not linked yet" whenever no real source is safely identifiable. Per-stage delay/status (Not Planned/Not Started/On Track/In Progress/Completed/Delayed/Ahead) and schedule-level KPIs are computed server-side from real data only.
+
+### Backend Changed — Yes
+
+- New Prisma model `ContractScheduleItem` (planned entries only) + `ContractScheduleStageKey` enum — see Migration below.
+- New service `contract-schedule-plan.service.ts` (`ContractSchedulePlanService`) with `getScheduleDetail()` and `updatePlan()`, plus pure exported functions `computeActualStages()`, `computeStageStatus()`, `computeDelayDays()`, `computeScheduleSummary()` (+34 tests).
+- `GET :id/schedule` repurposed to call the new service instead of the old `ContractScheduleService.findAllForContract()` — audited and confirmed this was that method's ONLY consumer, so the old method + its 4 tests were removed as dead code (`ContractScheduleService.findAll()`, the module-level register backing `/contracts/schedule`, and its own `buildItemsForContracts()`/pure item-mapping functions are completely untouched — confirmed via a second audit pass before deleting anything).
+- New `PATCH :id/schedule/planned` endpoint (`contracts.update` permission) for saving the planned stage list, wired through a new `UpdateContractSchedulePlanDto`/`UpdateContractScheduleStageDto`.
+
+### Migration — Additive, hand-written via the established shadow-DB workaround
+
+`20260903000000_add_contract_schedule_items` — `CREATE TYPE contract_schedule_stage_key` + `CREATE TABLE contract_schedule_items` (contractId, stageKey, stageName, responsibleTeam, plannedStartDate, plannedEndDate, plannedQuantity, plannedMolds, remarks, sortOrder, isRequired, createdByUserId, updatedByUserId, timestamps; unique on `[contractId, stageKey]`) + 3 foreign keys. Generated via `prisma migrate diff --from-config-datasource --to-schema` (the shadow database still fails `migrate dev` in this environment), trimmed to only the new-table/enum/FK statements (the raw diff also contained large unrelated `production_*`/legacy drift from earlier Prisma version upgrades, deliberately excluded). Applied via `prisma migrate deploy`. `pnpm db:migrate:status` confirms 36 migrations, up to date.
+
+### Planned Schedule Data Model
+
+`ContractScheduleItem` — one row per real stage a manager has actually planned (never all 8 auto-created; unplanned stages simply have no row and show "Not Planned"/"—" everywhere). `responsibleTeam` is deliberately a free-text field, not the real `ContractWorkflowTeam` enum, since 4 of the 8 stages (Contract Sign, Advance Payment, Estimation Sheet, Final Closeout) don't map onto any real workflow team.
+
+### Actual Source Mapping (audited, real sources only)
+
+| Stage | Real source | Fallback when not identifiable |
+|---|---|---|
+| Contract Sign | `contract.contractDate`, else `contract.activatedAt` | "Not available" |
+| Advance Payment Received | first real PAID payment by `paidDate` (no real "advance" payment-type field exists — task's own explicit fallback used, labeled "Payments (first received)", never claimed to be specifically the advance) | "Not available" |
+| Drawing Approval | real TECHNICAL task `technical_getting_approval` ("Getting Approval") | "Not linked yet" |
+| Estimation Sheet | **no real workflow task safely matches "estimation" anywhere in the fixed template list** — always "Not linked yet", never fuzzy-guessed |
+| Casting / Production | real PRODUCTION task `production_start` for actual start; real BOQ production-status aggregation for produced quantity; actual end only appears once every real BOQ item is genuinely COMPLETED, using the latest real `updatedAt` among them as a disclosed "last production update" fallback | "Not available" |
+| Delivery | real ERECTION task `erection_delivery_start` ("Delivery Start") | "Not linked yet" |
+| Erection | real ERECTION tasks `erection_start` (start) + `erection_issue_checklist` (end, the last task in the real erection sequence) | "Not linked yet" |
+| Final Closeout | real `contract.closedAt`, only once `contract.status === 'CLOSED'` (never an approved-but-not-yet-closed date) | "Not available" |
+
+Molds Produced always shows "—" — no real per-mold count field exists anywhere in this app (confirmed via audit of `ContractBoqItemProductionStatus`).
+
+### Delay/Status Calculation
+
+`computeStageStatus()`: NOT_PLANNED (no planned dates) → DELAYED (today past planned end and not completed, or completed after planned end) → COMPLETED/AHEAD (completed on/before planned end) → IN_PROGRESS (real actual start, no actual end) → ON_TRACK/NOT_STARTED. `computeDelayDays()`: signed real day count (positive=late, negative=early, 0=on time), `null` (shown as "—") when there's no planned end or nothing real to compare yet. Both fully unit tested (18 cases).
+
+### Schedule Page UI Behavior
+
+Title "Schedule", subtitle exactly as specified. 6 KPI cards (Schedule Status, Planned Completion, Forecast/Actual Completion, Delay Days, Completed Stages, Pending Stages) — all real, from `computeScheduleSummary()`. Planned vs Actual Timeline table: Stage, Responsible Team, Planned Start/End, Actual Start/End, Delay, Status, Source, Action (links to the real workspace tab each stage's actual data is sourced from). Casting / Production shows planned/produced quantity + molds as compact subtext under the stage name (no extra column, per this unit's own "compact subtext" allowance).
+
+### Edit Planned Schedule Behavior
+
+"Edit Planned Schedule" (or "Create Planned Schedule" when none exists yet) opens a modal with all 8 fixed stages, each editable (Responsible Team, Planned Start/End, Remarks; Planned Qty/Molds only for Casting / Production). Saves via a new `updateContractSchedulePlanAction` → `PATCH :id/schedule/planned`. Actual values are never editable from this page — no inputs exist for them anywhere in the UI.
+
+### Empty State Behavior
+
+Exact required copy: "No planned schedule has been added yet." / "Create the planned contract schedule to compare future actual progress." with a "Create Planned Schedule" button (manager only) — no automatic/fake dates are ever pre-filled.
+
+### Permission/Scope Behavior
+
+View: `contracts.read` (existing pattern). Edit planned schedule: `contracts.update` (existing pattern, same as Documents & Obligations/Risks/Variations). Actual data has no edit path anywhere. Department scope enforced identically to every other contract-scoped service (`assertCanAccessDepartment`).
+
+### Data Honesty Confirmation
+
+No fake planned dates (a manager must enter them), no fake actual dates (every actual field traces to a real, cited source or shows "—"), no fake production quantities (real BOQ aggregation only), no fake delay/status (pure functions computed from real real dates only), no fake team names (planned `responsibleTeam` is manager-entered free text, actual has no team-name field at all).
+
+### Verification Results (2026-09-04)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors (1 `exactOptionalPropertyTypes` fix applied) |
+| `pnpm --filter @recafco/web test --run` | ✓ 525/525 (10 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1392/1392 (34 new, 4 removed with the deleted dead method) |
+| `pnpm build` | ✓ 8/8 tasks; both `/contracts/[id]/schedule` and `/contracts/schedule` present |
+| `pnpm db:migrate:status` | ✓ 36 migrations, up to date |
+| Dev server restart | ✓ `.next` cleared, both web and API restarted (backend changed); both health checks pass; Schedule tab (contract-detail + untouched module register) + 9 sibling routes all returned clean 307 redirects |
+| Live UAT scenarios A–G | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT (credential blocker, carried over).
+- Global/sidebar all-contract schedule overview — explicitly deferred to CM-68B per this unit's own scope boundary; the module-level register at `/contracts/schedule` was audited and left completely untouched.
+- Complex Gantt chart, drag/drop scheduling, notification engine, forecast AI, SAP integration — explicitly out of scope per this unit's own instructions; none built.
+- Estimation Sheet's actual source remains genuinely unlinked — no real workflow task exists anywhere in the fixed template list that safely represents it; would need either a new real task added to the workflow template (a different unit's decision) or continued honest "Not linked yet".
+
+### Next Recommended Unit
+
+CM-68B — the global/sidebar all-contract Schedule overview (across every contract, Planned vs Actual summary rows), reusing this unit's real per-stage derivation logic where possible.
+
+## CM-67E — Closeout Required Documents Readiness Correction (Completed 2026-09-03)
+
+### Summary
+
+Corrected a business-meaning confusion on the Closeout tab: the old "Final Documents / Attachments" card (which showed only closeout-request attachments plus an upload form, with an empty state reading "No closeout documents uploaded yet.") made Closeout feel like a document-upload page. Replaced it with "Required Documents for Closeout" — a read-only readiness summary over the real, already-existing Documents & Obligations records for this contract. The real closeout-request attachment upload (a genuinely different thing — supporting files for the closeout REQUEST itself) was not deleted; it was relocated, unmodified, into the Final Approval & Closeout section, where it conceptually belongs.
+
+### Backend Changed — No / Migration — None
+
+Zero backend files touched, zero new endpoints. `pnpm db:migrate:status` confirmed 35 migrations, unchanged. The new "Required Documents for Closeout" card uses `documents` (`contractsApi.getContractDocumentObligations(id)`), a fetch `page.tsx` already made in CM-67 for the KPI strip and checklist — no new request added.
+
+### Audit Findings (per this unit's own instruction #7/#8 — report, don't silently change)
+
+- **Checklist "Required documents submitted" item**: already correctly based on Documents & Obligations pending/expired counts (`documentObligationsTotal`/`documentObligationsPendingOrExpired`, wired since CM-67) — NOT closeout attachments. No change needed.
+- **Blocking Items**: already includes a real row per pending/expired document-obligation record (`BLOCKING_DOCUMENT_STATUSES = ['PENDING', 'EXPIRED_OVERDUE']`, wired since CM-67). No change needed.
+- **A pre-existing color bug found (not fixed, out of scope)**: the Documents & Obligations tab's own shared `DOCUMENT_OBLIGATION_STATUS_BADGE_CLASSES` colors `EXPIRING_SOON` with `accent` (this theme's brand red) despite its own code comment saying "Expiring Soon purple" — a real mismatch, and the exact class of issue CM-64C already flagged and partially fixed elsewhere. This unit's own new Closeout-local badge uses `team-production` (real indigo, the app's established purple substitute) instead, matching this task's explicit "Expiring Soon = purple/orange" spec — but the shared Documents & Obligations badge itself was left untouched (out of scope for a Closeout-only unit). Reported here as a good candidate for a future CM-63-line polish unit.
+
+### Changes
+
+- `contract-closeout-required-documents-panel.tsx` (new) — "Required Documents for Closeout" read-only table (Document/Obligation, Category, Status, Submission/Expiry Date, Attachment, Action), fed by `documents.items` (real, already-fetched). Attachment column shows the first real file name + "+N more" or "—"; Action shows a real secure download link when a file exists, else "Go to Documents" linking to `/contracts/${id}/documents`. Empty state uses this unit's exact required wording plus a "Go to Documents & Obligations" link.
+- `contract-closeout-document-status-badge.tsx` (new) — Closeout-local status badge with the task's exact color spec (Submitted green, Pending amber, Expiring Soon purple/team-production, Expired/Overdue red, Not Required/Cancelled gray).
+- `contract-closeout-request-attachments.tsx` (new) — the real closeout-request attachment upload/list, extracted unmodified from the deleted `contract-closeout-documents-panel.tsx` (same `uploadCloseoutAttachmentAction`, same `ContractCloseoutAttachment` model), relocated into the Final Approval & Closeout section (rendered whenever `latestRequest` exists, in both the review-in-progress and closed/historical branches; upload form only shown when `canUpload` is true, matching the exact same condition as before — `canUpdate && hasActiveRequest`). Upload button relabeled "Attach File" (was "Upload Document") to read as attaching a file to a specific request, not a generic upload.
+- Deleted `contract-closeout-documents-panel.tsx` (superseded — confirmed no other references before deletion).
+- `page.tsx` — rewired the Documents/Financial grid row and the Final Approval & Closeout section per the above; doc comment extended.
+
+### Section Rename / Data Source / Attachment / Empty State / Go-to-Documents Behavior
+
+All exactly per this unit's spec — see Changes above. Documents & Obligations records are the real data source (no new fetch); attachments come from `item.attachments` (already included in the API response); the secure download route (`/contracts/${id}/documents/${itemId}/attachments/${attachmentId}/download`) is reused unmodified — no raw storage path exposed.
+
+### Closeout Approval Rule Confirmation
+
+Unchanged. `getClosureAction`/`computeClosureStatus`/the real backend `review()`/`approve()`/`reject()`/`closeContract()` methods were not touched. Close Contract still only ever renders/works when the real backend status is APPROVED.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 515/515 (unchanged — display/component reorganization, no new pure-logic function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1362/1362 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; Closeout + Documents & Obligations + Attachments + 8 other routes all returned clean 307 redirects |
+| Live UAT (visual/functional check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT (credential blocker, carried over).
+- The Documents & Obligations tab's own shared badge's `EXPIRING_SOON: accent` color mismatch (see Audit Findings above) — a good candidate for a focused follow-up if raised, out of scope for this Closeout-only unit.
+
+## CM-67D — Closeout Final Readability Polish (Completed 2026-09-03)
+
+### Summary
+
+Small, final readability-only pass over the Closeout tab — no data, backend, permission, or action-logic change. Converted the Blocking Items table's raw SNAKE_CASE status text into humanized, color-coded badges; made the blocker-count warning above the closeout request form more prominent and reworded it to match this unit's exact phrasing; tightened the Blocking Items table's columns further; and bumped the Status badge / Progress numbers up one size for easier scanning.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` (1362/1362) and `pnpm db:migrate:status` (35 migrations) both unchanged.
+
+### Enum Label Polish
+
+New pure `humanizeStatus(status)` in `contract-closeout-detail-helpers.ts` generically converts any real stored SNAKE_CASE status value into Title Case ("NOT_STARTED" → "Not Started", "EXPIRED_OVERDUE" → "Expired Overdue", etc.) — a pure reformat of the real value, not a lookup table, so it correctly covers every real status across all 6 Blocking Items sources (workflow/payments/claims/risks/issues/documents), not just the 7 examples the task listed. Paired with a new `blockingStatusTone(status)` that buckets the humanized label into neutral/warning/error coloring based only on the real word's own meaning (OVERDUE/REJECTED/EXPIRED → error; NOT_STARTED/DRAFT/PENDING → neutral; everything else → warning) — both used together as a colored `StatusBadge` in the Blocking Items table (was raw unlabeled plain text). +21 new tests.
+
+### Warning Polish
+
+The blocker-count note shown above `ContractCloseoutRequestForm` (when `blockingItems.length > 0`, real data already computed on the page) is now an icon-led, bold, thicker-bordered warning block instead of plain small text, reworded to: "This contract has X blocking items. Resolve them before submitting for closeout review." (singular-aware). Still advisory, not a hard gate — the real backend doesn't require zero blockers to submit a request, only to close.
+
+### Blocking Table Readability
+
+Column padding tightened (`px-3`→`px-2`, table `min-w-200`→`min-w-180`); "Item"/"Action Required" column max-widths trimmed slightly; header "Action Due Date" shortened to "Due Date"; the Status column is now a readable colored badge instead of raw text; the Action link gained a background fill (`bg-surface-secondary`) so it reads more clearly as a button. Same 5-item default cap and priority sort from CM-67C — unchanged.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 515/515 (21 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1362/1362 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; Closeout tab + 9 sibling routes returned clean 307 redirects |
+| Live UAT (visual readability check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the actual readability polish at real viewport widths — blocked by the same credential constraint carried since CM-62; typecheck/build/307-checks confirm no render error, the true visual result is unverified live.
+
+## CM-67C — Closeout Final UI Polish (Completed 2026-09-03)
+
+### Summary
+
+Final visual-only polish pass over CM-67B's Closeout layout — no data, backend, permission, or action-logic change. Strengthened per-status treatment on the Status card, colorized the Progress/Checklist count recaps as chips, dropped Blocking Items' default cap from 6 to 5 with tightened rows and concise action text, grouped Financial Summary into 3 labeled sub-sections with Current Contract Value/Outstanding Payment highlighted, and made Final Approval & Closeout feel like the decision area (bold header + icon, larger primary Close Contract button, a real-data blocker-count helper note before submission). Also fixed a pre-existing double-nested `<section>` around the approval area (the component rendered its own card frame identical to the page's already-wrapping one) — now a single card.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` (1362/1362) and `pnpm db:migrate:status` (35 migrations) both unchanged.
+
+### Status/Progress Polish Behavior
+
+`ContractCloseoutHeaderCards` now maps each of the 9 real `ClosureStatus` values to its own icon + color (was a blunt `isReady` binary lumping SUBMITTED/UNDER_REVIEW/REJECTED all into one "not ready" warning treatment) — Rejected now shows a distinct error/X icon, Submitted/Under Review show a distinct info/clock treatment, matching `CLOSURE_STATUS_BADGE_CLASSES`'s own color family exactly. The 4 Progress counts (Completed/Pending/Not Required/Blocked) render as colored chip boxes instead of plain numbers — same real `ChecklistProgress` values, no new computation.
+
+### Blocking Items Polish Behavior
+
+Default visible cap dropped from 6 to 5 (`VISIBLE_LIMIT`). Action text tightened in `computeBlockingItems()` (e.g. "Complete overdue task" → "Complete task", "Clear outstanding payment" → "Clear payment", "Mitigate or close risk" → "Mitigate risk") — the Status column already shows the real status value, so the action text no longer repeats it. "View all N blocking items" now uses `text-info` (calm blue, the app's real link color) instead of `text-accent` (this theme's brand red, reserved for primary actions/urgent states per the CM-64C finding) — a plain expand-in-place link isn't urgent. Row padding tightened (`py-1.5` → `py-1`).
+
+### Checklist Polish Behavior
+
+Status-count recap now renders as colored pill chips (matching the header Progress card's own treatment) instead of plain inline text. Row padding tightened to match Blocking Items. Sticky header confirmed still working (re-verified, unchanged from CM-67B).
+
+### Financial Summary Polish Behavior
+
+Grouped into 3 labeled sub-sections ("Contract Value", "Payments", "Retention & Status") via a small uppercase `GroupLabel` row. Current Contract Value and Outstanding Payment now render as highlighted boxes (colored border/background, larger bold value) — Outstanding Payment's highlight tone switches to warning only when a real non-zero outstanding amount exists, otherwise stays the calm info tone. Same real values throughout; Retention Amount/Released still honestly "—".
+
+### Final Approval/Action Polish Behavior
+
+- `ContractCloseoutApprovalPanel`'s header is now `text-base font-bold` with a Gavel icon (was `text-sm font-semibold`, no icon); the 3 inline page.tsx branches (request form / rejected-message / no-request-message) got the identical header treatment for consistency across every real state.
+- Close Contract button enlarged to `px-6 py-3 text-base font-bold` with a CheckCircle2 icon and a "Closeout has been approved — this contract is ready to close." confirmation line above it, inside a success-tinted box — makes the single most consequential action visually unmistakable. Approve Closeout bumped from `text-xs`/`px-3 py-1.5` to `text-sm font-semibold`/`px-4 py-2`.
+- When a manager is about to submit a NEW closeout request and real blocking items exist (`blockingItems.length > 0`, already computed in `page.tsx`), a warning-toned helper line now shows: "This contract has N blocking item(s) — resolve these first for a smoother closeout review." — real count, not a hard gate (the real backend doesn't require zero blockers to submit a request, only to CLOSE), so this is advisory text, not a new restriction.
+- Fixed a pre-existing double-nested-card bug: `ContractCloseoutApprovalPanel` used to render its own `<section className="rounded-lg border ... p-4">` INSIDE the page's already-identical wrapping `<section>` — a redundant doubled border/padding since CM-67. Changed the component's root to a Fragment; the page's own section now provides the single card frame, matching every other panel on the page.
+
+### Removed Widgets/Buttons Confirmation
+
+Re-confirmed absent: Contract Summary card, Recent Activity card, Back to Contract, Archive Contract, Request Missing Items, More Actions. None reintroduced.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 494/494 (unchanged — pure visual/wording pass, no new branching logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1362/1362 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; Closeout tab + 9 sibling routes returned clean 307 redirects |
+| Live UAT (visual polish check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the actual polish (icon colors, chip rendering, button prominence) at real viewport widths and with a real signed-in manager — blocked by the same credential constraint carried since CM-62. Typecheck/build/307-checks confirm no render error; the true visual result is unverified live.
+
+## CM-67B — Closeout Page Layout Polish to Match Approved Design (Completed 2026-09-03)
+
+### Summary
+
+Layout-only compaction pass over CM-67's Closeout tab — no data, backend, permission, or action-logic change. Reorganized into a responsive 2-column grid (stacks to 1 column on mobile/tablet): Row 1 Status+Progress (unchanged), Row 2 KPI strip (unchanged, full width), Row 3 Checklist | Blocking Items, Row 4 Documents | Financial Summary (moved up from the bottom), Row 5 Claims/Risks/Issues Summary | Final Approval & Closeout (moved up from the bottom). Blocking Items now caps to the top 6 real highest-priority rows with an in-card "View all N blocking items" expand; the checklist gained a compact scroll region (`max-h-80`) and a status-count recap using the same `checklistProgress` already computed — no new calculation.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` (1362/1362) and `pnpm db:migrate:status` (35 migrations) both unchanged.
+
+### Layout Polish Behavior
+
+`page.tsx`'s section order changed from one long vertical stack to 3 `grid grid-cols-1 lg:grid-cols-2 gap-4 items-start` rows (`items-start` so a tall left card never stretches a shorter right card). Financial Closeout Summary and Final Approval & Closeout are now visible roughly halfway down the page instead of at the very bottom. Two panels' internal grids were narrowed since Tailwind's `lg:` breakpoints are viewport-based, not container-based — `ContractCloseoutFinancialPanel` (`lg:grid-cols-5` → `sm:grid-cols-3`, capped) and `ContractCloseoutModuleSummaryPanel` (`lg:grid-cols-8` → `sm:grid-cols-4`, capped) — both now wrap cleanly inside a half-width column instead of straining too many columns into it.
+
+### Blocking Items / Checklist Compact Behavior
+
+- `contract-closeout-blocking-panel.tsx` is now a client component: a new pure `sortBlockingItemsByPriority()` (CRITICAL > HIGH > MEDIUM > LOW > no-real-priority, +3 tests) orders the real list, the top 6 render by default, and a "View all N blocking items" button expands the full real list in place — no fake hidden count, no invented "view all" page (blockers span too many different modules for one real destination to exist).
+- `contract-closeout-checklist-panel.tsx` gained a `progress` prop (the exact same `ChecklistProgress` already passed to the header cards) rendered as a small Completed/Pending/Not Required/Blocked recap in the card's own header, plus a `max-h-80 overflow-auto` scroll region with a sticky `thead` — the fixed 10-item checklist doesn't strictly need scrolling today, but the mechanism is in place per this unit's own "cap or scroll" instruction and won't silently grow the page if a future unit adds more checklist categories.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 494/494 (3 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1362/1362 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; Closeout tab + 9 sibling routes returned clean 307 redirects |
+| Live UAT (visual grid/compaction check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the actual grid layout/scroll behavior at real viewport widths (credential blocker) — typecheck/build/307-smoke-check confirm no render error, but the real visual compaction is unverified live.
+
+## CM-67 — Contract Closeout Approved Design Build, Simplified (Completed 2026-09-03)
+
+### Summary
+
+Rebuilt the Contract Detail Closeout tab to the approved design, simplified: Closeout Status + Progress row, Readiness KPI strip, Blocking Items, Final Completion Checklist, Final Documents/Attachments, Financial Closeout Summary, Claims/Risks/Issues Summary, and Final Approval & Closeout. Reuses the complete real CM-33 closeout backend (checks, requests, review/approve/reject, close, attachments) entirely unmodified — same permissions, same approval gate, same server actions. Removed: Contract Summary card, Recent Activity card, Back to Contract button, Archive Contract button (no real archive workflow exists), Request Missing Items button (no real task/notification-creation flow exists for it), More Actions button (no additional real actions exist).
+
+### Backend Changed — Yes, one additive read-only widening, no migration
+
+`GET :id/workflow-summary` (`contract-workflow.service.ts`'s `getWorkflowSummaryForContract`) previously returned only `{team, status, isOverdue, attachmentsCount}` per task — too thin to show real per-task Blocking Items rows. Widened its existing `select` to also include `id, taskName, priority, dueDate` — the same DB columns, same read-only query shape, same explicit "must never trigger the lazy first-view task generation" guarantee (`getWorkflowForContract` is the ONLY method that generates tasks; this summary method still never does). Every existing consumer (Overview) only reads the fields it already used, so this is purely additive. +2 new tests; existing test updated for the wider shape.
+
+### Migration — None
+
+`pnpm db:migrate:status` confirmed 35 migrations, unchanged.
+
+### Real-Data Audit Findings
+
+- `ContractCloseoutChecks` (existing) has NO risk bucket — Risk Assessment data for the KPI strip/checklist/blocking items/summary comes from the real, already-existing `GET :id/risks` (`ContractRiskDetail`), reusing its `summary.openRisks` directly for the KPI and computing `mitigated`/`closedOrCancelled` counts from its real unpaginated `items` array (`countRisksByBucket()`, mirroring `contract-risks.service.ts`'s own `RESOLVED_STATUSES` definition exactly).
+- Financial Closeout Summary's Original/Current Contract Value and Approved Variations map directly onto the real, already-existing `GET :id/variations` response (`originalContractValue`/`computedCurrentValue`/`summary.approvedValue`) — no new computation needed.
+- Retention Amount / Retention Released: grepped the schema and every payment/contract DTO — no real stored retention AMOUNT field exists anywhere (only a plain `paymentTerms.retention` boolean meaning "retention applies", never a value). Both fields honestly show "—", exactly as this unit's spec requires when unsupported.
+- "Blocking Items" and "Final Completion Checklist" row-level open/final status sets are copied VERBATIM from the real backend classifications already used by `computeCloseoutChecks()` (`OPEN_ISSUE_STATUSES`, `OPEN_CLAIM_STATUSES`, `CLOSEOUT_READY_WORKFLOW_STATUSES`, `FINAL_PAYMENT_STATUSES`) and `contract-risks.service.ts`'s `RESOLVED_STATUSES` / `contract-document-obligations.service.ts`'s `PENDING`/`EXPIRED_OVERDUE` — never a newly-invented classification, so row-level counts always agree with the aggregate KPI/checklist numbers.
+
+### Changes
+
+- `apps/api/src/contracts/contract-workflow.service.ts` (+test) — `getWorkflowSummaryForContract` widened.
+- `apps/web/src/lib/contracts-api.ts` — `ContractWorkflowSummaryData` widened to match.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-closeout-detail-helpers.ts` (new, +29 tests) — `computeClosureStatus`, `computeChecklist`/`computeChecklistProgress`, `computeBlockingItems`, `countRisksByBucket`, `countVariationsByBucket`, `computeFinalPaymentStatus`. All pure, dependency-free.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-ui-helpers.ts` (+test) — removed the now-superseded `computeCloseoutWarnings`/`CloseoutChecksLike` (fully replaced by `computeBlockingItems`, confirmed unused elsewhere before deletion).
+- `[id]/(workspace)/closeout/_components/` — 10 new components (`contract-closeout-status-badge`, `contract-closeout-checklist-status-badge`, `contract-closeout-header-cards`, `contract-closeout-kpi-strip`, `contract-closeout-blocking-panel`, `contract-closeout-checklist-panel`, `contract-closeout-documents-panel`, `contract-closeout-financial-panel`, `contract-closeout-module-summary-panel`, `contract-closeout-request-form`, `contract-closeout-approval-panel`) — the latter two restyled from the old `closeout-request-form.tsx`/`closeout-reviewer-panel.tsx` with their write logic (server actions, useActionState) completely unchanged.
+- Deleted the 6 old closeout components (`closeout-readiness-cards.tsx`, `closeout-warnings-panel.tsx`, `closeout-request-form.tsx`, `closeout-request-status-badge.tsx`, `closeout-reviewer-panel.tsx`, `closeout-attachments-panel.tsx`) — confirmed unused elsewhere via grep before deletion.
+- `[id]/(workspace)/closeout/page.tsx` — fully rewritten; fetches 10 real data sources via `Promise.allSettled` (permissions, contract, closeout checks, closeout requests, workflow summary, risks, issues, claims, document obligations, payments, variations), each independently gracefully degrading to "—"/empty on failure.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors (2 rounds of `exactOptionalPropertyTypes` fixes applied to the new helper's row-level interfaces) |
+| `pnpm --filter @recafco/web test --run` | ✓ 491/491 (29 new, 3 removed with the superseded helper) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1362/1362 (2 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, both web and API restarted (backend service changed); both health checks pass; Closeout tab + 11 sibling contract routes + 6 module pages all returned clean 307 redirects |
+| Live UAT scenarios A–H | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT (credential blocker, carried over).
+- Retention Amount / Retention Released — no real stored field exists anywhere in this app; both show "—" (see Real-Data Audit Findings above). A dedicated retention-tracking feature would need its own unit if the business wants this captured.
+- Archive Contract / Request Missing Items / More Actions buttons — deliberately not added, no real backend workflow exists for any of them.
+- "Save Draft" — not added; the real backend always creates a closeout request directly as SUBMITTED (its own comment: "DRAFT flow intentionally skipped"), so there is nothing real for a Save Draft action to call.
+
+## CM-66F — Move Workflow & Team Tasks Breadcrumb to Header (Completed 2026-09-03)
+
+### Summary
+
+User caught that `/contracts/workflow` ("Workflow & Team Tasks" in the sidebar, screenshot showed "Contract Work Progress" still in-body) was skipped by CM-66E's scope-boundary decision. Rather than leaving it out, solved the actual problem: `TopHeader` now also reads `useSearchParams()` and reuses `isContractStaffOnlyAccess(user.permissions)` (already available on the `ShellUser` it already receives) to resolve all 3 of this page's real breadcrumb variants correctly, via a new `contractWorkflowBreadcrumbItems()` function that mirrors the page's own mode-resolution rules exactly (same `mode`/`assignmentOnly`/`overdueOnly`/`myTasksOnly` params, same precedence order) — a single source of truth, not a duplicated copy, since both the page's redirect logic and the header's breadcrumb resolution read the same URL the browser is actually on. Frontend/UI-only, no route/backend/permission change.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` and `pnpm db:migrate:status` both unchanged (1361/1361 tests, 35 migrations).
+
+### Why This Is Safe Despite 3 Variants (resolves CM-66E's stated concern)
+
+- A staff-only user can never actually land on `?mode=assignment` — the page itself redirects them to `?mode=my-tasks` server-side before any render happens, so by the time the client header reads the URL, it already reflects the real, final destination. No permission check is needed for the Assign Work branch.
+- `isStaffOnly` (needed to correctly choose between the plain "Contract Work Progress" breadcrumb and the "My Tasks"/"Overdue Tasks" one for the SAME `?mode=my-tasks`/`?mode=overdue` URL) is derived via the same already-tested `isContractStaffOnlyAccess()` used everywhere else in the app, fed from `ShellUser.permissions` already passed into `TopHeader` — no new data fetch.
+- `useSearchParams()` was already used unguarded (no `<Suspense>` wrapper) in 5 existing client components in this app (`*-actions-bar.tsx` files across Schedule/Payments/Issues/Claims/Closeouts) — followed the same established pattern rather than introducing a new one. Build output confirmed no Suspense-boundary warnings.
+
+### Changes
+
+- `_lib/contract-workspace-breadcrumb.ts` — added `contractWorkflowBreadcrumbItems(pathname, searchParams, isStaffOnly)`. +11 new tests covering all 3 variants, both param-name and alias-name (`assignmentOnly`/`overdueOnly`/`myTasksOnly`) forms, and precedence when multiple mode signals are present.
+- `_components/top-header.tsx` — added `useSearchParams()`, `isContractStaffOnlyAccess` import, and `contractWorkflowBreadcrumbItems` to the resolution chain (checked after the static module map, before the workspace-detail fallback).
+- `contracts/workflow/page.tsx`, `contracts/workflow/_components/assignment-queue-view.tsx`, `contracts/workflow/_components/staff-my-tasks-view.tsx` — all 3 in-body `<Breadcrumbs .../>` call sites removed + unused imports cleaned up.
+
+### Side Effect Noted (an improvement, not a regression)
+
+`staff-my-tasks-view.tsx` has a 4th sub-state (a specific task selected, `selectedTask` truthy) that previously showed NO breadcrumb at all (that branch returns before its own `<Breadcrumbs>` render). Since the header now shows "Contract Management > My Tasks"/"Overdue Tasks" for ANY `?mode=my-tasks`/`?mode=overdue` URL regardless of `taskId`, that sub-state now also gets a breadcrumb it didn't have before — consistent with every other page in the app, and not a regression of anything that used to work.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 465/465 (11 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; no `useSearchParams`/Suspense warnings in build output |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; `/contracts/workflow` plus all 4 query-param variants (`?mode=assignment`, `?mode=my-tasks`, `?mode=overdue`, `?assignmentOnly=true`) returned clean 307 redirects |
+| Live UAT (visual header check across all 3 variants as a signed-in manager/staff) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of all 3 breadcrumb variants (credential blocker) — the resolver logic itself is fully unit-tested (11 cases matching every real mode/alias combination and precedence rule).
+- The other 7 app modules remain out of scope, same boundary stated in CM-66E.
+
+## CM-66E — Extend Header Breadcrumb to Other Contract Management Module Pages (Completed 2026-09-03)
+
+### Summary
+
+Follow-up requested directly by the user after CM-66D (not a formally numbered task spec — scope determined by the agent, documented explicitly here): extended the header-level breadcrumb from CM-66D beyond just the Contract Detail workspace to the rest of the Contract Management module's static list/register pages — Dashboard, Contract List, New Contract Register, Schedule, Payments, Issue Log, Claim Log, Closeout Requests. Each of these pages' in-body `<Breadcrumbs .../>` call was removed; the exact same breadcrumb content now renders at header level instead. Frontend/UI-only, no route/backend/permission change.
+
+### Scope Boundary Decision (deliberate, not an oversight)
+
+Two Contract Management pages were audited and deliberately EXCLUDED, keeping their in-body breadcrumb unchanged:
+- **`/contracts/[id]/edit`** — excluded already in CM-66D; its breadcrumb contains the real `contract.referenceNumber`, not derivable from the pathname alone.
+- **`/contracts/workflow`** — audited and found to render 3 DIFFERENT breadcrumbs depending on query params, each handled inside a different component: the plain page ("...> Contract Work Progress"), `AssignmentQueueView` under `?mode=assignment` ("...> Contract Work Progress > Assign Work"), and `StaffMyTasksView` under `?mode=my-tasks`/`?mode=overdue` ("...> My Tasks"/"...> Overdue Tasks"). Since `usePathname()` alone can't distinguish these, moving this one to the header would require mirroring that page's mode-parsing logic in a second file — a real duplication/drift risk. Left untouched.
+
+This session's other 8 modules (Production, Safety & Compliance, Maintenance, Incidents, Factory Tasks, Administration, root Dashboard) were NOT touched — "other pages too" was interpreted as the rest of the Contract Management module (the module this whole CM-numbered session line has been building), not an app-wide sweep across unrelated modules built in earlier sessions.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` and `pnpm db:migrate:status` both unchanged (1361/1361 tests, 35 migrations).
+
+### Changes
+
+- `apps/web/src/app/(protected)/_lib/contract-workspace-breadcrumb.ts` — added `contractModuleBreadcrumbItems(pathname)`, a `Record<string, BreadcrumbItem[]>` lookup keyed by exact pathname (these are single fixed routes, not a dynamic-segment family like the workspace tabs) for the 8 static module pages. +12 new tests.
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — now resolves `contractModuleBreadcrumbItems(pathname) ?? (isContractWorkspaceDetailPath(pathname) ? WORKSPACE_DETAIL_BREADCRUMB : undefined)`.
+- `contracts/dashboard/page.tsx` + `contracts/dashboard/_components/staff-dashboard-view.tsx` (both render the SAME "Contract Management > Dashboard" breadcrumb at the same pathname — audited and confirmed identical before removing both), `contracts/page.tsx`, `contracts/new/page.tsx`, `contracts/schedule/page.tsx`, `contracts/payments/page.tsx`, `contracts/issues/page.tsx`, `contracts/claims/page.tsx`, `contracts/closeouts/page.tsx` — removed each page's in-body `<Breadcrumbs .../>` call + now-unused import.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 454/454 (12 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; 14 routes (8 module pages + Overview + edit + 3 workspace tabs) all returned clean 307 redirects |
+| Live UAT (visual header placement as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- `/contracts/workflow`'s 3 breadcrumb variants remain in-body (see Scope Boundary Decision) — a future unit could move these too by teaching the header to also read `useSearchParams()` and mirror the exact mode logic, but that was judged higher-risk than this unit's scope justified.
+- Live visual UAT of the header placement across these 8 pages (credential blocker).
+- Other modules (Production, Safety, Maintenance, Incidents, Factory Tasks, Administration) were not touched — out of this unit's interpreted scope; a candidate for a future task if the user wants the pattern extended app-wide.
+
+## CM-66D — Move Contract Workspace Breadcrumb to Top Header (Completed 2026-09-03)
+
+### Summary
+
+Moved the Contract Detail workspace breadcrumb ("Contract Management > Contract List > Contract Detail") out of the page body and into the global top header, at the same vertical level as the Manager name / Sign out controls — filling what was previously an empty `hidden md:block` spacer div. Applies ONLY to the 13 Contract Detail workspace pages (Overview + its 12 tabs); every other protected page (module list/register pages, `/contracts/[id]/edit`, dashboards, etc.) is unaffected — the header slot stays empty for them, exactly as before. Frontend/UI-only — no route, backend, or permission change.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` and `pnpm db:migrate:status` both unchanged (1361/1361 tests, 35 migrations).
+
+### Breadcrumb Move / Duplicate Removal
+
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — now a client component (`usePathname()`), renders the same fixed 3-item breadcrumb (`Contract Management` → `/contracts/dashboard`, `Contract List` → `/contracts`, `Contract Detail` non-clickable) inline, left-of-center, only when `isContractWorkspaceDetailPath(pathname)` is true.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/layout.tsx` — the old in-body `<Breadcrumbs .../>` call and its now-unused import were removed. Page body now starts directly with the title/status row, exactly as required.
+- `apps/web/src/app/(protected)/_components/breadcrumbs.tsx` — added an optional `className` prop, defaulting to the original `'mb-4'` so all ~60 existing callers render byte-identical to before; the new header call site passes `className="mb-0"` since it sits inline with Manager / Sign out rather than stacked above page content.
+
+### Route-Shape Detection (not a hardcoded id/URL guess)
+
+New pure helper `apps/web/src/app/(protected)/_lib/contract-workspace-breadcrumb.ts` — `isContractWorkspaceDetailPath(pathname)` distinguishes `/contracts/[id](/<tab>)?` from every other `/contracts/*` route using the REAL file-system routing shape (not a UUID regex guess): a `CONTRACT_MODULE_SEGMENTS` set of the real literal top-level folders (`dashboard`, `new`, `workflow`, `schedule`, `payments`, `issues`, `claims`, `closeouts`, `closeout`) that sit as siblings of `[id]/`, and a `WORKSPACE_TAB_SEGMENTS` set of the real folder names inside `contracts/[id]/(workspace)/`. `/contracts/[id]/edit` is deliberately excluded (audit confirmed it lives OUTSIDE the `(workspace)` route group, has its own distinct 4-item breadcrumb with the real contract reference number, and does not render the tab bar) — matching the task's own "if it uses the same workspace layout" condition, which it doesn't. +25 tests covering every module page, every workspace tab, the edit page, and unrelated routes.
+
+### Top Header / Body Spacing Behavior
+
+Header: `hidden md:block min-w-0 flex-1` slot (was a bare empty `hidden md:block` div) — holds the breadcrumb only on workspace pages, empty otherwise; `flex-wrap` (inherited from `Breadcrumbs`) lets it wrap rather than overflow on a narrower desktop width, and the right-side user-info/Sign out block got an explicit `shrink-0` so it's never compressed by a long breadcrumb. Body: removing the in-body breadcrumb (plus its `mb-4`) moves the contract title/status row visibly closer to the top on every workspace tab.
+
+### Tab Wrap / Route / Staff Regression
+
+- CM-66C's full flat 13-tab row (no More dropdown, full names, flex-wrap) is untouched — `contract-workspace-tabs.tsx` was not modified this unit.
+- All 13 workspace tab URLs, `/contracts/[id]/edit`, and all 8 module-level pages (`/contracts`, `/contracts/dashboard`, `/contracts/new`, `/contracts/workflow`, `/contracts/payments`, `/contracts/issues`, `/contracts/claims`, `/contracts/closeouts`) verified with clean 307s.
+- `isContractStaffOnlyAccess`/the workspace layout's staff redirect were not touched — staff-only-access users still never reach this layout at all, so the header breadcrumb change has zero effect on them.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 442/442 (25 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both health checks pass; 22 routes (13 workspace tabs + edit + 8 module pages) all returned clean 307 redirects |
+| Live UAT (visual header/body placement as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the header breadcrumb placement/wrap at real viewport widths (credential blocker).
+- No automated component-render test added for `top-header.tsx`/`AppShell`, consistent with this codebase's 100%-`.test.ts` convention — the new route-shape logic itself IS fully unit-tested (25 tests) since that's the actual decision logic; only the surrounding JSX render was left unverified live.
+
+## CM-66C — Contract Workspace Full Tab Row Wrap Fix (Completed 2026-09-03)
+
+### Summary
+
+Reverted CM-66B's "primary row + More dropdown" grouping per explicit instruction: hiding 5 tabs (Variations, Claims, Risk Assessment, Attachments, Activity) behind a dropdown made them harder to find, not easier. `ContractWorkspaceTabs` now shows all 13 tabs directly with their full names, laid out with `flex flex-wrap` instead of a horizontal-scroll strip or a dropdown — the row wraps onto a second line when the viewport is too narrow to fit all 13, instead of clipping text or scrolling. Frontend/UI-only — no route, page, backend, or permission change.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` and `pnpm db:migrate:status` both unchanged (1361/1361 tests, 35 migrations).
+
+### Full Tab Restoration
+
+All 13 tabs render as direct links with their full names again: Overview, Schedule, Payments, Production Status, Variations / Change Orders, Claims, Risk Assessment, Documents & Obligations, Workflow & Team Tasks, Issue Log, Attachments, Activity / Audit History, Closeout. The More dropdown, its state, its click-outside/Escape handling, and the scroll-fade/auto-scroll machinery from CM-66B were all removed — the component is now a single flat `WORKSPACE_TABS` array rendered in one `<nav>` with no scroll container.
+
+### Two-Row Wrap Behavior
+
+The tab `<nav>` uses `flex flex-wrap items-center gap-1` (was `overflow-x-auto` in CM-66B, was a fixed non-wrapping row before CM-66B). Each tab link keeps `whitespace-nowrap` so an individual label is never clipped mid-word — only the BREAK between tabs wraps, never inside one. The soft `bg-surface-secondary` background and `p-1` padding wrap around however many rows render, so a two-row bar still reads as one cohesive tab bar, not two separate ones.
+
+### Activity Tab Visibility
+
+"Activity / Audit History" is a direct tab in the flat list (position 12 of 13, immediately before Closeout) — no longer nested inside any dropdown.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 417/417 (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; all 13 workspace sub-routes present, unchanged |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both `localhost:3000/` and `localhost:4000/health` responding; all 13 direct tab URLs + Contract List/Dashboard/New Register returned clean 307 redirects (no 500s) |
+| Live UAT (visual wrap/active-pill check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the wrap behavior at real viewport widths (credential blocker) — the 307 smoke-check and build/typecheck confirm the component renders without error, but the actual line-wrap point at a manager's real screen width is unverified this unit.
+- No automated component-render test added, consistent with CM-66B's reasoning — this codebase's web suite is 100% pure-function `.test.ts` files, 0 `.test.tsx`.
+
+## CM-66B — Contract Workspace Tab Navigation UX Fix (Completed 2026-09-03)
+
+### Summary
+
+Fixed the overcrowded Contract Detail workspace tab row (13 tabs — including the new CM-66 Activity tab — squeezed into one horizontal scroll strip, causing clipped labels like "dule" and an effectively-hidden Activity tab). Rebuilt `ContractWorkspaceTabs` into a grouped nav: 8 primary tabs (Overview, Schedule, Payments, Production, Workflow, Issues, Documents, Closeout) always visible in one row, plus a pinned "More" dropdown (Variations, Claims, Risk Assessment, Attachments, Activity) that is never scrolled out of view. Frontend/UI-only — no route, page, backend, or permission change.
+
+### Backend Changed — No
+
+Zero backend files touched. `pnpm --filter @recafco/api test --run` and `pnpm db:migrate:status` are both unchanged (1361/1361 tests, 35 migrations) — proving no backend/schema impact.
+
+### Route Preservation
+
+All 13 workspace sub-routes (`schedule`, `payments`, `production`, `variations`, `claims`, `risks`, `documents`, `workflow`, `issues`, `attachments`, `activity`, `closeout`, plus the root Overview page) are unchanged — confirmed present in `pnpm build` output before and after. Only the tab component's DISPLAY grouping changed; every `href` still points to the exact same segment as before.
+
+### Active State / More Behavior
+
+- Primary tab active: same red accent pill style as before (`bg-accent text-white`), driven by `pathname === href`.
+- A More-dropdown page active: the More button itself takes the pill style and its label becomes `More: <label>` (e.g. "More: Activity"), with the section's own icon replacing the chevron — satisfying the task's preferred behavior (not just the "highlighted only" fallback).
+- Inside the open dropdown, the current item gets a highlighted row (`bg-surface-secondary font-semibold` + a small accent-colored check icon) rather than a full accent-red block — avoids the CM-64C "accent reads as an error/danger" issue for a plain list row while still clearly marking the current page.
+- Dropdown closes on: item click, click-outside (fixed-overlay pattern reused from `contract-row-actions.tsx`), Escape key, and any pathname change (covers browser back/forward).
+
+### Staff/Access Behavior
+
+Audited `isContractStaffOnlyAccess` — Contract Staff (`contracts.workflow_update` only, no `update`/`close`) are redirected away from the ENTIRE workspace layout (`layout.tsx`, before `ContractWorkspaceTabs` ever renders) to `/contracts/workflow?mode=my-tasks`, unchanged. No tiered/partial-access role exists that reaches this tab bar with a reduced tab set — confirmed there was no such filtering before this unit either, so nothing was removed or weakened.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 417/417 (unchanged — no test file touches this component, consistent with this codebase's zero-`.test.tsx` convention) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (unchanged — confirms zero backend impact) |
+| `pnpm build` | ✓ 8/8 tasks; all 13 workspace sub-routes present, unchanged |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged |
+| Dev server restart | ✓ `.next` cleared, restarted; both `localhost:3000/` and `localhost:4000/health` responding; all 13 direct tab URLs + Contract List/Dashboard/New Register returned clean 307 redirects (no 500s) |
+| Live UAT (visual pill/dropdown check as a signed-in manager) | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live visual UAT of the new pill/dropdown rendering (credential blocker).
+- No automated component-render test was added for `ContractWorkspaceTabs` — this codebase's web test suite is 100% pure-function `.test.ts` helpers (0 `.test.tsx` files anywhere), so adding a React-render test here would introduce a new testing pattern outside this unit's UI-only scope; regression coverage instead relies on typecheck + build route-manifest confirmation + the 307 smoke-check above.
+
+## CM-66 — Contract Activity / Audit History Page Build, Simplified (Completed 2026-09-03)
+
+### Summary
+
+Built the Contract Detail Activity / Audit History tab as a clean, contract-scoped audit trail: page title, subtitle, Export button, 5 Summary KPI cards, search/filter row, activity table — following the approved design simplified per this unit's own explicit instruction: no Contract Summary card, no "Activity by Type" donut chart, no "Top Users by Activity" card, no Quick Links card, no Back to Contract/Go to Closeout buttons, no IP Address column (no field for it is stored anywhere in the write paths this unit touches). Activity / Audit History shows real, already-stored history of important actions taken inside this contract — never a fabrication derived from existing records.
+
+Audit found a real `ContractActivity` table already existed (`contract_activities`), already written to by `contracts.service.ts` (created/updated/schedule_status_updated/activated/terminated/closed/comment_added) and `contract-closeout.service.ts` (closeout_requested/review_started/approved/rejected/attachment_uploaded), and already read via a working `GET /contracts/:id/activities` endpoint. Reused this table entirely instead of the task's own suggested fallback `ContractActivityLog` model — **zero migration, zero new Prisma model.**
+
+### Backend Changed — Yes, additive, no migration
+
+1. `listActivities()`'s `orderBy` changed from ascending to descending (`createdAt: 'desc'`) — the table needs newest-first, and this endpoint's only real consumer is this new tab, so the change is safe. A pre-existing test asserting `'asc'` was caught by audit and fixed proactively.
+2. Added a new plain (non-injectable) helper, `contract-activity-log.ts`'s `logContractActivity(db, contractId, actor, event, metadata?)`, deliberately a function rather than a NestJS service so it can be called from 6 existing services without adding a constructor dependency to any of them (which would have forced touching every affected test file's service-instantiation call). It wraps the write in try/catch and never throws — a logging failure must never break the real operation it records.
+3. Wired `logContractActivity` into 6 services that previously logged nothing: Payments (`payment_created`/`payment_updated`), Documents & Obligations (`document_obligation_created`/`_updated`/`_attachment_uploaded`), Variations (`variation_created`/`_updated`/`_attachment_uploaded`), Claims (`claim_created`/`_updated` only — not `close()`, a deliberate scope-bounding decision), Risks (`risk_created`/`_updated`), Issues (`issue_created`/`_updated` only — not `close()`, same reasoning as Claims).
+
+### Event → Type/Source/Details Mapping (a genuine, documented finding)
+
+`_lib/contract-activity-helpers.ts` maps all 26 real event strings to the task's preferred `ActivityType`/`ActivitySource` enums and produces manager-friendly action labels/details sentences. Key honesty decision: `document_obligation_created`/`_updated` (record-level, no file) map to `OTHER`, never `DOCUMENT_UPLOADED` — that type is reserved strictly for the 3 real `*_attachment_uploaded` events, since no file was actually uploaded for a plain record edit. Old/New Value reads the real `previousStatus`/`newStatus` DB columns first (set only by `activated`/`terminated`/`closed`), falls back to the real `previousScheduleStatus`/`newScheduleStatus` metadata pair (`schedule_status_updated`), else shows "—" — never fabricated.
+
+"Review/Approval Actions" KPI (the task's preferred option, not its "Workflow Actions" fallback) is real and non-zero: `closeout_review_started`/`closeout_approved`/`closeout_rejected` are genuinely identifiable review/approval events.
+
+### Changes
+
+- `apps/api/src/contracts/contract-activity-log.ts` (new, +test) — shared logging helper.
+- `apps/api/src/contracts/contracts.service.ts` (+test) — `listActivities()` orderBy → desc.
+- `apps/api/src/contracts/contract-payments.service.ts`, `contract-document-obligations.service.ts`, `contract-variations.service.ts`, `contract-claims.service.ts`, `contract-risks.service.ts`, `contract-issues.service.ts` (all +tests) — activity logging wired into create/update (and attachment-upload where applicable).
+- `apps/web/.../contracts/_lib/contract-activity-helpers.ts` (new, +test) — type/source/label/details/old-new-value mapping, `computeActivitySummary()`.
+- `apps/web/.../contracts/_lib/contract-activity-csv.ts` (new, +test) — CSV export builder, no raw metadata JSON, no internal IDs.
+- `[id]/(workspace)/activity/_components/` — `contract-activity-source-badge.tsx`, `contract-activity-action-badge.tsx` (neutral icon+label, not a status badge), `contract-activity-kpi-strip.tsx` (5 cards: Total Activities=blue/info, Updates This Month=teal, Documents Uploaded=indigo/team-production, Status Changes=amber/warning, Review/Approval Actions=green/success), `contract-activity-panel.tsx` (bounded, client-side-filtered; sticky Date&Time/Action columns; search + Activity Type/User/Source/Date Range filters; "Action" column links to the real workspace tab the event happened in).
+- `[id]/(workspace)/activity/page.tsx` (rewritten) — removed the old stub "Activity Summary" dl block; new heading + Export Excel link, KPI strip, panel.
+- `[id]/(workspace)/activity/export/route.ts` (new) — mirrors `documents/export/route.ts`, reuses `contractsApi.listActivities()`, no new backend endpoint.
+- Deleted `apps/web/.../contracts/_components/contract-activity-table.tsx` (old unused shared table, confirmed via grep to have no other callers).
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` / `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 417/417 (27 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1361/1361 (9 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/[id]/activity` and `/contracts/[id]/activity/export` both present |
+| `pnpm db:migrate:status` | ✓ 35 migrations, unchanged — confirms no migration was added |
+| Dev server restart | ✓ `.next` cleared, both web and API restarted (backend service changed); `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the new Activity routes plus 10 sibling contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT (blocked on credentials).
+- Workflow task update/comment/attachment actions are not logged — judged too large/risky to add in this unit; a good candidate for a focused follow-up if raised.
+- Claims'/Issues' `close()`/settle actions are not logged (only `create`/`update`) — deliberate scope-bounding, consistent between the two.
+- No IP Address column/field anywhere — not captured reliably by any write path in this app.
+- Historical limitation: the 6 newly-logging services only have activity history from this unit's ship date forward; Overview/Closeout have deeper history from an earlier unit.
+
+## CM-65 — Contract Issue Log Approved Design Build, Simplified (Completed 2026-09-03)
+
+### Summary
+
+Rebuilt the Contract Detail Issue Log tab to match the approved design, simplified per this unit's own explicit instruction: no Contract Summary card, no "Issues by Category" donut chart, no "Recent Issue Activity" card, no bottom KPI strip, no Back to Contract/Dashboard Overview buttons — none of those are backed by real reliable data (no category-trend tracking, no per-issue activity feed anywhere in this app), and the user is already inside the contract workspace with the layout's own header providing contract context. Issue Log tracks a problem that has ALREADY happened and needs follow-up until resolved (final payment not received, document missing, delivery delay, client approval pending, site access issue, quality/test report pending, variation cost disagreement) — explicitly never confused with Risk Assessment (future/potential risk).
+
+Unlike most CM-6x contract-detail tabs (which started as static stubs), Issue Log — like Claims (CM-61) — already had a fully working backend, Add/Edit modal, and module-level register from CM-30. This unit reused everything write-related unmodified (`IssueFormModal`, `createIssueAction`/`updateIssueAction`/`closeIssueAction`, the module-level CSV export) and only built a new *display* layer for this one tab — same "contract-scoped page reuses shared write actions, builds its own display layer" pattern established for Payments/Claims/Risk/Documents & Obligations.
+
+### Backend Changed — Yes, minimal and additive (no migration)
+
+Audit found `ContractIssueSummary`/`computeIssueSummary()` (existing, from CM-30) was missing two counters this unit's approved KPI row needs: "Waiting" (status === WAITING_RESPONSE) and "Resolved" (status === RESOLVED, distinct from CLOSED). Added `waitingResponseIssues`/`resolvedIssues` to both the `IssueSummary` interface and `computeIssueSummary()` — pure counter additions to an already-selected `status` field, no new Prisma query, no schema change, no migration. `contract-issues.service.test.ts` updated (both new counters asserted); `contracts-api.ts`'s `ContractIssueSummary` interface updated to match.
+
+### Category Label Mapping (a genuine, documented finding)
+
+The task's "preferred display labels" (Payment, Document, Delivery, Technical, Site / Erection, Client Approval, Variation, Quality, Other — 9 labels) do not literally match the real backend category list (`Commercial, Technical, Production, Delivery, Erection, Client, Document, Payment, Other` — 9 values, plain-string-validated per CM-30, not a DB enum). Resolved as a pure display relabeling (`_lib/contract-issue-detail-helpers.ts`'s `ISSUE_CATEGORY_LABELS`), never touching the stored value or the backend's validation list: `Commercial` → "Variation" (a variation cost disagreement is inherently a commercial dispute — matches this unit's own example), `Production` → "Quality" (a quality/test-report issue is tracked under Production in this factory-manufacturing context), `Erection` → "Site / Erection", `Client` → "Client Approval"; the remaining 5 are unchanged. All 9 real values map to exactly one preferred label — none invented, none dropped.
+
+### Changes
+
+- `apps/api/src/contracts/contract-issues.service.ts`, `contract-issues.service.test.ts` — `waitingResponseIssues`/`resolvedIssues` added to `IssueSummary`/`computeIssueSummary()`.
+- `apps/web/src/lib/contracts-api.ts` — `ContractIssueSummary` extended to match.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-issue-detail-helpers.ts` (new, +test) — category/priority/status label + badge-class maps, filter option lists, `computeIssueDaysRemaining()`/`computeIssueIsDueSoon()`/`formatIssueDaysRemaining()` (pure, client-side — the backend's own `overdueDays`/`isOverdue` only cover the "already overdue" case, not a future "days remaining" count needed for the amber "due soon" state).
+- `[id]/(workspace)/issues/_components/` — `contract-issue-category-badge.tsx`, `contract-issue-priority-badge.tsx` (gray→amber→red→solid-red escalation, matching Risk Assessment's pattern), `contract-issue-status-badge.tsx` (Waiting Response uses real indigo `team-production`, never this theme's red `accent` token — see CM-64C), `contract-issue-kpi-strip.tsx` (6 cards, `valueClassName` color-coded from the first build per the KPI-strip color hierarchy already established across recent tabs), `contract-issue-panel.tsx` (bounded, client-side-filtered table; sticky Issue ID/Action columns, matching Claims/Risk/Attachments — the task explicitly asked for sticky in THIS unit's first build, not deferred to a polish pass).
+- `[id]/(workspace)/issues/page.tsx` — rewritten from the previous "Issue Status" stub-style summary + "Open in Issue Register" link into the full simplified approved-design tab.
+
+### Wording Decisions Applied
+
+- Table column and filter/KPI wording use "Action Due Date" throughout (never bare "Due Date") — same underlying `dueDate` field, display wording only. The reused `IssueFormModal`'s own internal field label is deliberately left as "Due Date" (unmodified — it's shared with the module-level Issue Register, and this unit's own instruction was to reuse the existing modal/action, not edit it).
+- "Raised By" column = the issue's real `createdByUser.displayName` (set from the actual authenticated actor on create, per CM-30) — never fabricated, matches this unit's own "use current user if existing action already does" instruction.
+- Export reuses the module-level `/contracts/issues/export?contractId=` route completely unmodified (same pattern as Claims' own reused export) — its CSV columns are the pre-existing module-level set (includes Contract ID/Name/Client, redundant-but-harmless for a single-contract export; still says "Due Date" not "Action Due Date"; has no "Raised By" column) — a deliberate reuse decision, not fixed, to avoid touching a shared component beyond this unit's scope.
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` / `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 390/390 (17 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (assertions extended in `contract-issues.service.test.ts`, same file/test count) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/[id]/issues` present alongside the unchanged `/contracts/issues`/`/contracts/issues/export` |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, both web and API restarted (backend service changed); `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the Issues routes plus 6 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–G | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–G (blocked on credentials).
+- CSV export column drift from the new table (see "Wording Decisions Applied" above) — deliberately not fixed to avoid touching the shared module-level export beyond this unit's scope; a good candidate for a focused CM-65B polish pass if raised.
+- KPI value color-coding was applied directly in this first build (via `valueClassName`) rather than deferred to a polish unit — following the KPI-strip convention already in place on every tab built since CM-62B, not the older CM-58→58B first-build/polish split.
+
+## CM-64D — Remove Attachments Contract Summary Card (Completed 2026-09-03)
+
+### Summary
+
+Removed the Contract Summary card added in CM-64/64B/64C from the Attachments / Document Library tab — the user is already inside the contract workspace, and the layout's own header (`[id]/(workspace)/layout.tsx`: contract name, status, reference number, department, dates) already provides that context on every tab. The Attachments page now goes straight from the page title/subtitle into the KPI strip, keeping the page focused on finding/filtering/exporting/downloading files as this task's own stated goal.
+
+### Backend Changed — No
+
+Confirmed frontend-only. `contractsApi.getContractAttachments()` (the aggregation the KPI strip and table both depend on) is completely unaffected — this unit only stopped fetching the separate `contractsApi.get(id)` call the now-deleted summary card needed, which was never used by the KPI strip, filters, or table.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/attachments/page.tsx` — `ContractAttachmentSummaryCard` removed from the render; the `contractsApi.get(id)` fetch (only ever used by that card) removed from the `Promise.all`, along with its `contract` gating check.
+- `attachments/_components/contract-attachment-summary-card.tsx` — deleted (no longer referenced anywhere).
+
+### Verification Results (2026-09-03)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 373/373 (unchanged) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks, same route list |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the Attachments routes plus 4 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–D | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–D (blocked on credentials).
+
+## CM-64C — Attachments Final UI Polish (Completed 2026-09-02)
+
+### Summary
+
+Pure frontend polish pass on the Attachments / Document Library page — no data, filter, download, or export logic changed. The audit surfaced a real, non-cosmetic-only finding: this theme's `accent` token (`context/ui-tokens.md`: `--color-accent: #c62828`) is RECAFCO's brand red, described in that same file as "for branding and primary actions" — not a neutral color. The File Name download link and the Variation source badge were both using `text-accent`/`bg-accent-light text-accent`, which made a routine file link and a routine source badge visually read as an error/danger state. This had been carried through CM-64/64B without being flagged. Fixed by switching to `text-info` (real blue, #175cd3 — the same family already used for "informational" elsewhere in this app) for the file link, and `team-production` (real indigo, #4f46e5) for the Variation badge — both genuine existing tokens, not new ones.
+
+### Backend Changed — No
+
+Confirmed zero backend files touched this unit.
+
+### Corrections Applied
+
+- **File Name link** — `text-accent` → `text-info`. Reads as a normal hyperlink now, not an error state.
+- **Variation source badge** — `bg-accent-light text-accent` → `bg-team-production-light text-team-production`. Workflow blue / Variation indigo / Documents & Obligations teal / Closeout green — 4 calm, distinct colors, none alarming.
+- **Category badge** — lightened from `font-semibold text-text-secondary` to `font-medium text-text-muted`, so it reads as a quieter secondary label next to the more prominent Source badge rather than a second "selected" chip.
+- **Status "Uploaded" badge** — already `bg-success-light text-success` (subtle green) from CM-64B; confirmed correct, left unchanged.
+- **Contract Summary card** — trimmed vertical padding/gaps (`p-5`→`p-4`, header `mb-4`→`mb-3`, field `gap-y-3`→`gap-y-2.5`, divider padding `py-4`→`py-3`, field labels `text-xs`→`text-[11px]`) for a more compact card — same 10 real fields, no field added or removed.
+- **KPI strip** — audited, confirmed already correct (5 cards, correct labels/counts, consistent spacing with sibling tabs) — left unchanged, no adjustment needed.
+- **Filter row** — audited, confirmed already correct and consistent with the established Claims/Risk/Documents & Obligations filter-row pattern — left unchanged.
+- **Row hover, sticky columns, Download button** — audited, confirmed already correct — left unchanged.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-attachment-helpers.ts` — `ATTACHMENT_SOURCE_BADGE_CLASSES.VARIATION` recolored.
+- `attachments/_components/contract-attachment-panel.tsx` — File Name link recolored.
+- `attachments/_components/contract-attachment-category-badge.tsx` — text weight/color softened.
+- `attachments/_components/contract-attachment-summary-card.tsx` — padding/gaps trimmed.
+- `attachments/page.tsx` — doc-comment updated.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 373/373 (unchanged — pure visual polish, no new/changed pure-function logic) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks, same route list as CM-64B |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the Attachments routes plus 5 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–D | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–D (blocked on credentials).
+- The `accent` = brand-red-reads-as-danger finding likely also affects other contract-detail tabs that use `text-accent`/`bg-accent-light` for plain links or non-alarming badges (e.g. Claims/Variations upload-section download links, Documents & Obligations' Insurance category badge) — out of scope for this unit (Attachments-only), but worth a dedicated audit-and-fix pass across the Contract Management module if the same "looks like an error" complaint comes up elsewhere.
+
+## CM-64B — Attachments Page Approved Table/KPI Alignment (Completed 2026-09-02)
+
+### Summary
+
+Corrected the Attachments / Document Library page after CM-64 to more closely match the approved table/KPI structure, while keeping every CM-64 simplification decision in place (still no Storage Summary/Document Status Overview/Quick Links/Supported Formats sidebar, still no fake approval workflow). KPI labels were reworded to a document-library tone (Workflow Documents/Variation Documents/Documents & Obligations/Closeout Documents, not "...Files"). The table gained two columns the approved design has that CM-64 omitted: **Category** and **Status**, and "Related Item" was renamed "Related To". Category is derived honestly — real Documents & Obligations category (Performance Bond, Insurance, etc.) when the backend provides one, otherwise a safe generic label per source (Workflow Document/Variation Document/Contract Document/Closeout Document); Status is always the single honest value "Uploaded" — never a fabricated Approved/Pending Review.
+
+### Backend Changed — Yes, minimal and additive (no migration)
+
+Audit proved the existing `ContractAttachmentsService` aggregation was genuinely missing one real field needed for an honest Category column: a Documents & Obligations attachment's own real `category` (already stored on `ContractDocumentObligation`, already used elsewhere — see CM-63/63B) wasn't being selected or returned. Added `category: true` to that one Prisma `select`, and a new `documentObligationCategory: string | null` field to `AggregatedAttachment` — `null` for the other 3 sources (which genuinely have no category field), the real enum value for Documents & Obligations. No schema change, no migration — purely a `select` addition to an already-existing read-only service. `contract-attachments.service.test.ts` updated (added `category` to its Documents & Obligations fixture, added `documentObligationCategory` assertions for all 4 sources) — 7/7 still passing.
+
+### Corrections Applied
+
+- **KPI labels** — "Workflow Files" → "Workflow Documents", "Variation Files" → "Variation Documents", "Documents & Obligations Files" → "Documents & Obligations", "Closeout Files" → "Closeout Documents"; subtexts matched to the approved copy exactly ("Required documents" for Documents & Obligations). Each card's value text also color-coded via `valueClassName` (same accent as its icon) for a stronger look — `DashboardKpiCard`'s own shared icon/value sizing was left untouched since it's used by many other pages.
+- **Table** — added Category (`ContractAttachmentCategoryBadge`, neutral gray) and Status (`ContractAttachmentStatusBadge`, "Uploaded" always, green) columns; "Related Item" → "Related To"; search now also matches the derived category; File Name/Action stay sticky.
+- **Contract Summary** — regrouped from a flat 5-column grid into 3 visually distinct column groups (identity / management / value) with dividers between them, closer to the approved grouped layout — same 10 real fields, no new data.
+- **Export CSV** — columns now match the table exactly (File Name, Category, Source, Related To, Uploaded By, Uploaded Date, Status, Type, Size) — still never includes `downloadPath`/storage path.
+- **No Category filter added** — reported as intentional per the task's own "optional, only if it doesn't crowd the row" instruction; Category is already reachable via the main search box.
+- **No Upload File button** — unchanged decision from CM-64, re-confirmed: no general contract-level attachment model exists.
+
+### Changes
+
+- `apps/api/src/contracts/contract-attachments.service.ts`, `contract-attachments.service.test.ts`
+- `apps/web/src/lib/contracts-api.ts` — `ContractAttachment.documentObligationCategory`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-attachment-helpers.ts` (+test) — `deriveAttachmentCategory()`, `ATTACHMENT_STATUS_LABEL`
+- `_lib/contract-attachment-csv.ts` (+test) — columns updated
+- `attachments/_components/contract-attachment-category-badge.tsx` (new), `contract-attachment-status-badge.tsx` (new), `contract-attachment-kpi-strip.tsx`, `contract-attachment-panel.tsx`, `contract-attachment-summary-card.tsx`
+- `attachments/page.tsx` — doc-comment updated
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` / `pnpm --filter @recafco/web typecheck` | ✓ 0 errors (no `@recafco/database` rebuild needed — `select`-only addition, no schema/migration change) |
+| `pnpm --filter @recafco/web test --run` | ✓ 373/373 (7 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (`contract-attachments.service.test.ts`'s 7 tests updated, still 7 — assertions extended, no new test count) |
+| `pnpm build` | ✓ 8/8 tasks, same route list as CM-64 |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, both web and API restarted (backend service changed); `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the Attachments routes plus 7 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–F | **Not run by the agent this unit** — same credential blocker carried over from CM-62 onward |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–F (blocked on credentials).
+- Category filter — deliberately not added (see "No Category filter added" above).
+
+## CM-64 — Attachments / Document Library Approved Design Simplified Build (Completed 2026-09-02)
+
+### Summary
+
+Rebuilt the Contract Detail Attachments tab to match the approved design, but deliberately SIMPLIFIED per the task's own explicit instruction: the approved screenshot's right sidebar (Storage Summary donut, Document Status Overview, Quick Links, Supported Formats) and its Pending Review / Approved Documents / Expiring Documents / Missing Required KPI cards were all removed rather than rebuilt, because none of them are backed by real data anywhere in this app — there is no storage-quota tracking, no generic attachment approval/review workflow, and no "required document" checklist concept. Building any of those would have meant fabricating numbers. This is a continuation of the same decision CM-60C already made for the old "File Status" stub section.
+
+Confirmed via audit (per the task's own question) that this entire unit was achievable as **frontend-only** — `ContractAttachmentsService`'s existing aggregation (4 real sources: Workflow, Variations, Documents & Obligations, Closeout) already returns everything the approved table/KPI/filter/export needs (`relatedItemTitle` added in CM-63 already covers the "Related Item" column); no backend endpoint, DTO, or migration was touched.
+
+### Backend Changed — No
+
+Confirmed zero backend files touched. `ContractAttachmentsService.listAllForContract()`, all 4 download proxy routes (workflow task/variation/closeout/document-obligation), and every source's own real upload path are all byte-for-byte unchanged.
+
+### Approved Design Simplification Applied
+
+- **Removed entirely** (per explicit instruction): Expiring Documents KPI card, Storage Summary, Document Status Overview, Quick Links, Supported Formats. No right sidebar at all — single-column central-library layout.
+- **KPI cards** — 5 real per-source file counts only (Total Files, Workflow Files, Variation Files, Documents & Obligations Files, Closeout Files), computed by a new pure function `computeAttachmentSourceCounts()`. No Pending Review/Approved/Missing Required.
+- **No Upload File action** — confirmed and reported per the task's own instruction: no general contract-level attachment model exists (only 4 separate per-source attachment tables), so a 5th "Upload File" button here would either duplicate an existing upload path or silently go nowhere. Upload stays in each source's own tab; this page is read-only.
+- **Contract Summary card** — added, using only real `Contract` fields already established by the existing `ContractInfoCard` convention (Contract ID = `referenceNumber`, Contract Manager = `ownerUser.displayName`, etc.): Contract ID, Job Order, Contract Name, Client / Employer, Contract Manager, Contract Status, Start Date, Forecast Completion, Current Contract Value, Currency. "Main Contractor" and "Actual Completion" from the screenshot were deliberately NOT added — no such field exists on the real `Contract` model.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-attachment-helpers.ts` (new) — `ATTACHMENT_SOURCE_BADGE_CLASSES`, `ATTACHMENT_SOURCE_FILTER_OPTIONS`, `deriveAttachmentType()` (real MIME type first, file extension fallback, never a guessed type), `formatAttachmentSize()`, `computeAttachmentSourceCounts()`. Plus its test file.
+- `_lib/contract-attachment-csv.ts` (new) + `attachments/export/route.ts` (new) — per-contract CSV export using the same real aggregation already backing the table; never includes `downloadPath`/storage path. Plus its test file.
+- `attachments/_components/contract-attachment-source-badge.tsx`, `contract-attachment-kpi-strip.tsx`, `contract-attachment-summary-card.tsx`, `contract-attachment-panel.tsx` (all new).
+- `attachments/page.tsx` — rewritten; now also fetches `contractsApi.get(id)` (same established pattern as `payments`/`closeout` tabs) to power the new Contract Summary card.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 366/366 (16 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/[id]/attachments` and `/contracts/[id]/attachments/export` both present |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the new Attachments routes plus 7 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–F | **Not run by the agent this unit** — same credential blocker carried over from CM-62/62B/63/63B |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–F (blocked on credentials, see CM-62's own note for detail).
+- No general contract-level attachment/upload model — reported per the task's own instruction, not silently worked around.
+
+## CM-63B — Documents & Obligations Final UI Polish (Completed 2026-09-02)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-63 — no data, calculation, permission, backend, upload/download, or export change. KPI values are now color-coded (not just their icon circles) via `DashboardKpiCard`'s `valueClassName` prop: Total Items blue, Submitted green, Pending amber, Expiring Soon purple, Expired / Overdue red — the icon accents already matched this hierarchy from CM-63, only the value text itself was unstyled before. Item ID (first) and Action (last) columns are now pinned via sticky positioning across the table's 11 columns, reusing Claims'/Risk Assessment's own established sticky-column pattern (itself reused from Contract List).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/documents/_components/contract-document-kpi-strip.tsx` — `valueClassName` per card.
+- `.../documents/_components/contract-document-panel.tsx` — sticky Item ID/Action columns (new `STICKY_LEFT_CLS`/`STICKY_RIGHT_CLS`/header variants, applied to the first/last `<th>`/`<td>`).
+
+No backend files touched — confirmed during audit this was achievable as pure frontend polish. Info note wording, empty-state copy, filter/action row layout, Days Remaining coloring, status/category badge styling, and the attachment column's file-name/"+N more"/"—" display were all already correct from CM-63 and needed no change — left unchanged rather than perturbing something that already matched the approved design and its sibling pages. `contract-document-obligations.service.ts`, DTOs, migrations, `contractsApi.getContractDocumentObligations()`/`listDocumentObligationAttachments()`, `createDocumentObligationAction`/`updateDocumentObligationAction`/`uploadDocumentObligationAttachmentAction`, the export route, and the Attachments-tab aggregation are all byte-for-byte unchanged.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 350/350 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks, same route list as CM-63 |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of `/contracts/[id]/documents`, `/documents/export`, `/attachments`, and 4 other contract pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–E | **Not run by the agent this unit** — same credential blocker carried over from CM-62/62B/63 (see those units' own notes) |
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–E (blocked on credentials).
+- No other polish items were identified as needed beyond the two applied — the rest of the page already matched the CM-62B/61B polish template's expectations (correct wording, correct empty state, correct Days Remaining coloring, correct badge colors) from its first build.
+
+## CM-63 — Documents & Obligations Approved Design Build with Attachments (Completed 2026-09-02)
+
+### Summary
+
+Built the Contract Detail Documents & Obligations tab from a fully disabled stub ("Document and obligation tracking will be enabled after the Documents backend unit.") to a complete feature with real manual document/obligation tracking AND real attachment upload/view/download — the first contract-detail tab this session to combine both a brand-new CRUD model and a brand-new file-upload path in one unit. Tracks required contract documents, certificates, submissions, guarantees, and approvals (Performance Bond, Insurance, Advance Payment Guarantee, Tax Clearance Certificate, Method Statement, Shop Drawings Approval, Environmental Approval, Safety Plan, etc.) alongside their obligation deadlines.
+
+Key behavior preserved from the task's own "safe behavior" instruction: `status` is always a plain manual dropdown selection, exactly like Risk Assessment's `riskEvaluation`/`residualRisk` — it is **never** silently overwritten by date math. The "Expiring Soon"/"Expired / Overdue" KPI counts and each row's "Days Remaining" are **derived at read time** from `status` + `submissionOrExpiryDate` (excluding SUBMITTED/CANCELLED/NOT_REQUIRED items) without ever mutating the stored `status` column — an item can honestly appear in both a raw status count (e.g. "Pending") and a derived count (e.g. "Expired / Overdue") at once; this is a real, honest fact about the item, not a bug.
+
+### Backend Changed — Yes (new migration, additive only)
+
+- New enums `ContractDocumentObligationCategory` (8 manager-friendly categories) and `ContractDocumentObligationStatus` (PENDING/SUBMITTED/EXPIRING_SOON/EXPIRED_OVERDUE/NOT_REQUIRED/CANCELLED).
+- New model `ContractDocumentObligation` (`contract_document_obligations`) — `itemNo` optional with `@@unique([contractId, itemNo])`; `category`/`status` have DB defaults (OTHER/PENDING) so the API's response type is never nullable even though the create DTO allows omitting them. `responsibleParty` is a **plain free-text field**, deliberately NOT a User FK (unlike `ContractRisk.responsibleUserId`/`ContractClaim.responsibleUserId`) — the approved design's Responsible Party column shows organizational roles ("Contractor"/"Client"), not a specific system user, and the task's own field spec gives it as `responsibleParty string nullable`.
+- New model `ContractDocumentObligationAttachment` (`contract_document_obligation_attachments`) — structure mirrors `ContractVariationAttachment` exactly (random UUID stored filename, cascade delete with its parent item).
+- Migration `20260902030000_add_contract_document_obligations` — hand-written via the established shadow-DB workaround (the raw `prisma migrate diff` output included unrelated `production_*` drift from earlier Prisma upgrades; only the new-table/enum statements were hand-extracted). Applied via `prisma migrate deploy`; `prisma migrate status` confirms 35 migrations, up to date.
+- `packages/config/src/env/api.ts` — new `DOCUMENT_OBLIGATION_ATTACHMENTS_DIR` env var (default `./storage/document-obligation-attachments`), following the exact `WORKFLOW_ATTACHMENTS_DIR`/`VARIATION_ATTACHMENTS_DIR` pattern.
+- `document-obligation-attachment-storage.service.ts` — local-disk storage service, reusing `WORKFLOW_ATTACHMENT_MAX_BYTES`/`WORKFLOW_ATTACHMENT_ALLOWED_MIME_TYPES` (10MB; PDF/PNG/JPEG/XLSX/DOCX) directly rather than redefining them, matching `VariationAttachmentStorageService`'s own established pattern exactly (random stored filename, path-traversal-safe `resolveAbsolutePath()`).
+- `contract-document-obligations.service.ts` — `computeDocumentObligationDaysRemaining()`/`computeDocumentObligationIsExpiredOverdue()`/`computeDocumentObligationIsExpiringSoon()` (pure, unit-tested), `computeDocumentObligationSummary()` (Total/Submitted/Pending/ExpiringSoon/ExpiredOverdue), `findAllForContract()`/`create()`/`update()`/`listAttachments()`/`createAttachment()`/`getAttachmentForDownload()` — permission + department-scope checks on every method, `itemNo` uniqueness enforced with `ConflictException`, every attachment method verifies the item actually belongs to the given contractId (never trusts `itemId` alone). 49 new unit/service tests.
+- `contracts.controller.ts` — `GET/POST /contracts/:id/document-obligations`, `PATCH /contracts/document-obligations/:itemId`, `GET/POST /contracts/:id/document-obligations/:itemId/attachments`, `GET /contracts/:id/document-obligations/:itemId/attachments/:attachmentId/download` — all behind `contracts.read`/`contracts.update`.
+- `contract-attachments.service.ts` (existing CM-60C aggregation service) — added a 4th source, `DOCUMENT_OBLIGATION`, to the Attachments tab's cross-tab file list; also added a new `relatedItemTitle` field (task name / variation description / document-obligation title / "Closeout Request \<no\>") to ALL 4 sources so a file in that list can be traced back to what it actually belongs to. Existing `contract-attachments.service.test.ts` updated (4th mock added, `relatedItemTitle` assertions added) — re-verified all 3 pre-existing sources still work correctly.
+
+### Frontend Changes
+
+- `apps/web/src/lib/contracts-api.ts` — Document Obligation types/interfaces, `contractsApi.getContractDocumentObligations()`/`listDocumentObligationAttachments()`; `ContractAttachment` gained `relatedItemTitle`, `ContractAttachmentSource` gained `'DOCUMENT_OBLIGATION'`.
+- `_lib/contract-document-obligation-helpers.ts` — label/badge-class maps (8 categories, 6 statuses) and filter option lists.
+- `_lib/contract-document-obligation-csv.ts` + `documents/export/route.ts` — new per-contract CSV export; Attachment column lists real uploaded file names joined by "; ", never a raw storage path.
+- `documents/_components/` — `contract-document-category-badge.tsx`, `contract-document-status-badge.tsx`, `contract-document-kpi-strip.tsx` (5 cards, divide-by-zero-safe percentages), `contract-document-panel.tsx` (bounded, client-side-filtered table; Responsible Party filter options derived from the real distinct values already in this contract's own items, never a fabricated fixed list), `contract-document-form-modal.tsx` (Add/Edit, real attachment upload/list/download section shown only in Edit mode — Add mode shows the honest "Save the document first, then upload attachments from its Edit screen." note).
+- `documents/page.tsx` — rewritten from the disabled stub to the real tab.
+- `documents/[itemId]/attachments/route.ts` + `documents/[itemId]/attachments/[attachmentId]/download/route.ts` — same-origin JSON list proxy + secure streaming download proxy, mirroring the Variations attachment proxy routes exactly (department access re-verified by the API on every request; the proxy adds no authorization logic of its own).
+- `attachments/page.tsx` — added a new "Related Item" column; updated its own intro/empty-state copy to mention Documents & Obligations as a 4th real upload source.
+- `actions.ts` — `createDocumentObligationAction`/`updateDocumentObligationAction`/`uploadDocumentObligationAttachmentAction`/`readDocumentObligationFields()`, mirroring `createVariationAction`'s pattern.
+
+### Changes
+
+- `packages/database/prisma/schema.prisma`, `packages/database/prisma/migrations/20260902030000_add_contract_document_obligations/migration.sql`, `packages/database/src/index.ts`
+- `packages/config/src/env/api.ts`
+- `apps/api/src/contracts/dto/create-contract-document-obligation.dto.ts`, `update-contract-document-obligation.dto.ts`, `document-obligation-attachment-storage.service.ts`, `contract-document-obligations.service.ts`, `contract-document-obligations.service.test.ts`, `contracts.controller.ts`, `contracts.module.ts`, `contract-attachments.service.ts`, `contract-attachments.service.test.ts`
+- `apps/web/src/lib/contracts-api.ts`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-document-obligation-helpers.ts`, `contract-document-obligation-helpers.test.ts`, `contract-document-obligation-csv.ts`, `contract-document-obligation-csv.test.ts`
+- `apps/web/src/app/(protected)/contracts/actions.ts`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/documents/page.tsx`, `export/route.ts`, `[itemId]/attachments/route.ts`, `[itemId]/attachments/[attachmentId]/download/route.ts`, `_components/contract-document-category-badge.tsx`, `contract-document-status-badge.tsx`, `contract-document-kpi-strip.tsx`, `contract-document-panel.tsx`, `contract-document-form-modal.tsx`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/attachments/page.tsx`
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` / `pnpm --filter @recafco/web typecheck` | ✓ 0 errors (both required a `@recafco/database`/`@recafco/config` package rebuild first, so the API's generated Prisma client and env schema picked up the new model/enum/env var) |
+| `pnpm --filter @recafco/web test --run` | ✓ 350/350 (15 new — helpers + CSV) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1352/1352 (49 new service tests; 4 tests in the pre-existing `contract-attachments.service.test.ts` updated for the new 4th source + `relatedItemTitle` field, all still passing) |
+| `pnpm build` | ✓ 8/8 tasks, all new routes present (`/contracts/[id]/documents`, `/documents/export`, `/documents/[itemId]/attachments`, `/documents/[itemId]/attachments/[attachmentId]/download`) |
+| `pnpm db:migrate:status` | ✓ up to date, 35 migrations |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of the new Documents routes plus 10 other contract-detail/module pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–I | **Not run by the agent this unit** — see note below |
+
+**Live verification note:** same credential blocker carried over from CM-62/CM-62B — the dev database only holds real-looking accounts (`superadmin`/`managercontract`/`usercontract`/`user1contract`) with no working credentials known to this session. No password was reset. All automated verification passed; the dev server is up and ready for the user to run scenarios A–I (including the real file-upload/download path) directly.
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–I (blocked on credentials, see note above) — this is the highest-priority item to close out before this unit can be considered fully verified, since it's the first unit this session with a genuinely new upload path (not just new CRUD).
+- No module-level "Documents & Obligations" register exists (unlike Claims/Payments/Issues) — this unit only builds the contract-scoped tab, per the approved scope.
+- KPI value color-coding (`valueClassName`) and sticky first/last table columns — deliberately deferred to a hypothetical CM-63B polish unit, matching the CM-59→59B/60→60B/61→61B/62→62B first-build/polish-unit precedent.
+
+## CM-62B — Risk Assessment Final UI Polish (Completed 2026-09-02)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-62 — no data, calculation, permission, backend, or API change. KPI values are now color-coded (not just their icon circles) via `DashboardKpiCard`'s `valueClassName` prop: Total Risks blue, High/Critical Risks red, Open Risks amber, Mitigated Risks green, Average Residual Risk purple, Risks Due Soon teal — the icon accents already matched this hierarchy from CM-62, only the value text itself was unstyled before. The info note was shortened from a long risk-category list to a single plain sentence, with no ISO/SAP wording. The filter row's dropdowns were widened slightly (`min-w-28` → `min-w-32`) to match Claims' own proportions. The empty state was reworded to the approved two-line copy. Risk ID (first) and Action (last) columns are now pinned via sticky positioning across the table's 11 columns, reusing Claims' own established sticky-column pattern (itself reused from Contract List).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/risks/page.tsx` — info note text shortened.
+- `.../risks/_components/contract-risk-kpi-strip.tsx` — `valueClassName` per card.
+- `.../risks/_components/contract-risk-panel.tsx` — filter select widths; empty state copy; sticky Risk ID/Action columns (new `STICKY_LEFT_CLS`/`STICKY_RIGHT_CLS`/header variants, applied to the first/last `<th>`/`<td>`).
+
+No backend files touched — confirmed during audit this was achievable as pure frontend polish. Risk Response badge colors (Mitigate blue, Accept gray, Avoid red, Transfer purple) and Action Due Date coloring (overdue red / due-soon amber / future green) were already correct from CM-62 and needed no change; badge padding/style was already consistent with Claims/Variations and left unchanged rather than introducing a one-off style. `contract-risks.service.ts`, DTOs, migrations, `contractsApi.getContractRisks()`, `createRiskAction`/`updateRiskAction`, and the export route are all byte-for-byte unchanged.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 335/335 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1303/1303 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks, same route list as CM-62 |
+| `pnpm db:migrate:status` | ✓ up to date, 34 migrations (unchanged) |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding; unauthenticated smoke check of `/contracts/[id]/risks` and the 5 other listed contract-detail/module pages all returned clean 307 redirects (no 500s) |
+| Live UAT scenarios A–G | **Not run by the agent this unit** — see note below |
+
+**Live verification note:** same credential blocker as CM-62 — the dev database still only holds real-looking accounts (`superadmin`/`managercontract`/`usercontract`/`user1contract`) with no working credentials known to this session. Per this session's established precedent, no password was reset. All automated verification passed; the dev server is up and ready for the user to visually confirm the polish pass.
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–G (blocked on credentials, see note above).
+- Badge padding/style intentionally left unchanged — already consistent with the established Claims/Variations badge style; changing it here alone would have broken cross-page visual consistency rather than improved it.
+
+## CM-62 — Contract Risk Assessment Approved Design Build (Completed 2026-09-02)
+
+### Summary
+
+Built the Contract Detail Risk Assessment tab from a static/disabled stub to a fully working feature, matching the approved design: a brand-new additive `ContractRisk` model (this contract module had no risk-tracking backend at all before this unit — the stub page's "Risk Assessment backend is not implemented yet" note was literal), a new service/controller/DTOs, and a new display layer (6-card KPI strip, labeled filter row, approved column set, Add/Edit modal). This is explicitly a delivery/cost/schedule/production/erection/materials/client-approval/subcontractor/insurance/contract-execution risk tracker — not an ISO risk-scoring system.
+
+Two manager clarifications were followed verbatim: (1) Risk Response is exactly 4 real values — Mitigate / Accept / Avoid / Transfer — "Subcontracting" and "Insurance" (mentioned as examples) are not response types and appear only inside the free-text Risk Response Description field; (2) Residual Risk is a plain manual dropdown (Low/Medium/High/Critical), never derived from Risk Evaluation or Risk Response.
+
+### Backend Changed — Yes (new migration, additive only)
+
+- New enums `ContractRiskLevel` (LOW/MEDIUM/HIGH/CRITICAL), `ContractRiskResponse` (MITIGATE/ACCEPT/AVOID/TRANSFER), `ContractRiskStatus` (OPEN/IN_PROGRESS/MITIGATED/CLOSED/CANCELLED).
+- New model `ContractRisk` (`contract_risks` table) — `riskNo` optional with a `@@unique([contractId, riskNo])` constraint, `riskEvaluation`/`riskResponse`/`status` all have DB defaults (MEDIUM/MITIGATE/OPEN) so they are never null even though the create DTO allows omitting them; `residualRisk` has no default — genuinely nullable, matching "manual only, never fabricated."
+- Migration `20260902020000_add_contract_risks` — hand-written (the usual shadow-DB workaround: `prisma migrate diff` output included large unrelated `production_*` drift from earlier Prisma upgrades, so only the new-table/enum statements were hand-extracted), applied via `prisma migrate deploy`. `prisma migrate status` confirms 34 migrations, schema up to date.
+- `contract-risks.service.ts` — `computeRiskSummary()` (Total/High-Critical/Open/Mitigated/Risks-Due-Soon counts, plus `averageResidualRisk` using the documented Low=1/Medium=2/High=3/Critical=4 mapping, averaged only over risks with a real `residualRisk` set, rounded+clamped 1–4, mapped back to the nearest label — `null`, never a fabricated label, when zero risks have one set), `computeRiskDaysToDeadline()`/`computeRiskIsDueSoon()` (30-day window, resolved statuses excluded), `findAllForContract()`/`create()`/`update()` (permission + department-scope checks, `responsibleUserId` validated against real users, `riskNo` uniqueness enforced with `ConflictException`). 30 new unit/service tests, including an explicit assertion that `create()` never auto-populates `residualRisk` when omitted from the request.
+- `contracts.controller.ts` — `GET/POST /contracts/:id/risks`, `PATCH /contracts/risks/:riskId`, all behind `contracts.read`/`contracts.update`.
+
+### Frontend Changes
+
+- `apps/web/src/lib/contracts-api.ts` — `ContractRiskLevel`/`ContractRiskResponse`/`ContractRiskStatus`/`ContractRisk`/`ContractRiskSummary`/`ContractRiskDetail` types; `contractsApi.getContractRisks()`.
+- `_lib/contract-risk-helpers.ts` — label/badge-class maps and filter option lists (unit test asserts no Risk Response label matches `/subcontract|insurance/i`, directly encoding the manager's clarification as a regression-proof check).
+- `_lib/contract-risk-csv.ts` + `[id]/risks/export/route.ts` — new per-contract CSV export (no module-level Risk register exists yet to reuse, unlike Claims/Payments).
+- `[id]/(workspace)/risks/_components/` — `contract-risk-level-badge.tsx` (shared by both Risk Evaluation and Residual Risk columns — same LOW–CRITICAL scale), `contract-risk-response-badge.tsx`, `contract-risk-status-badge.tsx`, `contract-risk-kpi-strip.tsx` (6 cards, no `valueClassName` — first-build units in this app don't color KPI value text; a polish unit can add it later, matching the CM-58→58B/59→59B/60→60B/61→61B precedent), `contract-risk-panel.tsx` (bounded, contract-scoped, client-side-filtered table — same pattern as Production/Variations/Claims), `contract-risk-form-modal.tsx` (Add/Edit, Risk Response Description labeled with no "(Mitigation Plan)" wording, Action Due Date labeled and captioned "Action Due Date is when the Responsible Person should complete the risk response action.", Residual Risk captioned "Select the expected risk level after the response action.").
+- `[id]/(workspace)/risks/page.tsx` — rewritten from the disabled stub to the real tab.
+- `actions.ts` — `createRiskAction`/`updateRiskAction`/`readRiskFields()`, mirroring `createVariationAction`'s pattern.
+
+### Wording Decisions Applied
+
+- "Risk Response Description (Mitigation Plan)" → "Risk Response Description" (parenthetical dropped, per this unit's instruction).
+- "Due Date" → "Action Due Date" everywhere (column header, form label, CSV header).
+- Risk Response dropdown: exactly Mitigate/Accept/Avoid/Transfer — confirmed via unit test and manual code review that no UI surface offers "Subcontracting"/"Insurance" as a selectable response.
+
+### Changes
+
+- `packages/database/prisma/schema.prisma`, `packages/database/prisma/migrations/20260902020000_add_contract_risks/migration.sql`, `packages/database/src/index.ts`
+- `apps/api/src/contracts/dto/create-contract-risk.dto.ts`, `update-contract-risk.dto.ts`, `contract-risks.service.ts`, `contract-risks.service.test.ts`, `contracts.controller.ts`, `contracts.module.ts`
+- `apps/web/src/lib/contracts-api.ts`
+- `apps/web/src/app/(protected)/contracts/_lib/contract-risk-helpers.ts`, `contract-risk-helpers.test.ts`, `contract-risk-csv.ts`
+- `apps/web/src/app/(protected)/contracts/actions.ts`
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/risks/page.tsx`, `export/route.ts`, `_components/contract-risk-level-badge.tsx`, `contract-risk-response-badge.tsx`, `contract-risk-status-badge.tsx`, `contract-risk-kpi-strip.tsx`, `contract-risk-panel.tsx`, `contract-risk-form-modal.tsx`
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 335/335 (9 new — `contract-risk-helpers.test.ts`) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1303/1303 (30 new — `contract-risks.service.test.ts`) |
+| `pnpm build` | ✓ 8/8 tasks, `/contracts/[id]/risks` and `/contracts/[id]/risks/export` both present in the route list |
+| `pnpm db:migrate:status` | ✓ up to date, 34 migrations |
+| Dev server restart | ✓ `.next` cleared, `pnpm dev` restarted; `localhost:3000/` and `localhost:4000/health` both confirmed responding |
+| Live UAT scenarios A–I | **Not run by the agent this unit** — see note below |
+
+**Live verification note:** the dev database currently holds only real-looking accounts (`superadmin`, `managercontract`, `usercontract`, `user1contract`) and no working credentials for any of them are known to this session — the earlier ephemeral `test.manager`/`test.operator`/`test.nodept` UAT fixtures from prior units are gone (correctly cleaned up, or the DB was reset outside this session, consistent with the note already on record in CM-59B/60's own verification section). Rather than reset a password on what may be the user's own real login, or fabricate live-scenario results, the agent stopped short of the live UAT step and is flagging this explicitly. All automated verification (lint, typecheck, both test suites, build, migration status) passed; the dev server is up and ready for the user (or an agent given working credentials) to run scenarios A–I directly.
+
+### Unsupported/Deferred Items
+
+- Live UAT scenarios A–I (blocked on credentials, see note above).
+- KPI value color-coding (`valueClassName`) and any sticky-column table polish — deferred to a hypothetical CM-62B, matching the CM-59→59B/60→60B/61→61B first-build/polish-unit precedent.
+- No module-level "Risk Register" page exists yet (unlike Claims/Payments/Issues) — this unit only builds the contract-scoped tab, per the approved scope; a module-level register was not requested.
+
+## CM-61B — Claims Final UI Polish (Completed 2026-09-02)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-61 — no data, calculation, permission, backend, or API change. KPI values are now color-coded (not just their icon circles) via `DashboardKpiCard`'s `valueClassName` prop (already available since CM-60B, no component change needed this time): Open Claims/Submitted Value blue, Approved Value/EOT Approved green, Outstanding Value orange, EOT Claimed purple, Overdue Actions red. Empty state reworded to the approved two-line copy. Claim ID (first) and Action (last) columns are now pinned via sticky positioning across the table's 18 columns, reusing Contract List's own established sticky-column pattern (`contract-list-table.tsx`) with the header background adapted to this table's own light `bg-surface-secondary` header (Contract List's is dark navy).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/claims/_components/contract-claim-kpi-strip.tsx` — `valueClassName` per card.
+- `.../claims/_components/contract-claim-panel.tsx` — empty state copy; sticky Claim ID/Action columns (new `STICKY_LEFT_CLS`/`STICKY_RIGHT_CLS`/header variants, applied to the first/last `<th>`/`<td>`).
+
+No backend files touched — confirmed during audit this was achievable as pure frontend polish; `ClaimFormModal`/`closeClaimAction`/`ClaimStatusBadge` (all reused from the module-level register) were left untouched, so their behavior — and the module-level Claim Log's own rendering — is unaffected.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 326/326 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1273/1273 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date, 33 migrations (unchanged) |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ empty state (new two-line copy) and naming re-confirmed (plain "Claims", zero "Claims / Change Orders"); added 2 real claims via the actual backend endpoint — all 5 KPI value color classes (`text-info`/`text-success`/`text-warning`/`text-accent`/`text-error`) and both sticky-column classes (`sticky left-0`/`sticky right-0`) confirmed present in the rendered page; claim data unchanged and correct. Export re-verified unchanged and correctly scoped. All 12 other workspace tabs, 8 module-level pages (including the module-level Claim Log itself, given the shared `DashboardKpiCard` touch-point), and both staff pages returned 200. |
+
+### Unsupported/Deferred Items
+
+- None — pure UI/wording/layout polish, verified via the same live-endpoint technique used throughout this session.
+
+## CM-61 — Contract Claims Approved Design Build (Completed 2026-09-02)
+
+### Summary
+
+Rebuilt the Contract Detail Claims tab to match the approved design (7-card KPI strip, labeled filter row, approved column set), naming it "Claims" only — not "Claims / Change Orders" — per this unit's explicit decision that Variations / Change Orders already owns that framing; Claims separately tracks disputes, EOT, delays, payment issues, damage, and other contractual issues. Unlike every prior CM-59/60 unit, the starting point here was NOT a stub: CM-31 had already built a fully working `ContractClaim` backend, a working Add/Edit modal, and a working (if differently-labeled/differently-columned) contract-detail tab reusing the module-level Claim Log's own table. This unit therefore reused everything write-related unmodified (service create/update/close, `ClaimFormModal`, `closeClaimAction`, the module-level CSV export) and only rebuilt the *display* layer for this one tab — same "contract-scoped page reuses shared write actions, builds its own display layer" pattern established for Payments (CM-58).
+
+### Backend Changed — Yes (no migration — additive logic only)
+
+Two safe, audit-justified additions to the already-existing, already-shared `computeClaimSummary()`/`withDerivedFields()` pure functions in `contract-claims.service.ts` (used by BOTH the module-level Claim Log and this tab):
+1. **Bug fix, audit-proven and narrowly scoped:** `totalOutstandingValue` previously summed every claim's `submittedValue - approvedValue` unconditionally, including REJECTED/CANCELLED claims — a rejected claim with no real remaining balance was still inflating the aggregate Outstanding Value KPI on both surfaces. Fixed to exclude only REJECTED/CANCELLED from the aggregate sum (SETTLED/CLOSED deliberately left untouched — a settled claim can still carry a real balance). The per-row `outstandingValue` returned on every claim (and shown in its own table column) is **unchanged** — still the raw, unfiltered delta, for audit-trail honesty.
+2. **New derived field, purely additive:** `daysToDeadline` (signed days until `dueDate`, negative once overdue, `null` only when no due date is set) added to every claim's derived-fields response, and `totalEotClaimedDays`/`totalEotApprovedDays` added to the shared summary object — both required by this unit's approved KPI/column list and not previously computed anywhere.
+
+Verified live end-to-end (see below) that both the module-level Claim Log and this new tab reflect the corrected/extended numbers, and that the module-level page still renders correctly — this was a fix applied to shared logic, not a breaking change.
+
+### Naming Decision Applied
+
+- Tab label (`contract-workspace-tabs.tsx`): "Claims / Change Orders" → "Claims".
+- Page: section heading "Claims Summary", table heading "Claims", button "Add Claim" — confirmed live, zero "Claims / Change Orders" or "Change Order" wording anywhere on the tab (the only "Change Order" text on the rendered page is the *separate*, legitimate Variations / Change Orders tab link in the nav bar).
+- Claim type badges on this tab use new "X Claim" labels (Delay Claim, EOT Claim, Payment Claim, Damage Claim, Scope Change Claim, Other, **Variation Claim**) — a new, tab-local label map, not a rename of the shared enum or the module-level register's own badge. "VARIATION" (a real backend enum value, not "Change Order") is labeled "Variation Claim" — a claim *type* category, never a link to an actual `ContractVariation` record, so this does not mix the two features.
+
+### Changes
+
+**Backend:** `apps/api/src/contracts/contract-claims.service.ts` (+ 20 new/updated tests) — `OUTSTANDING_EXCLUDED_STATUSES`, `computeClaimDaysToDeadline()`, `totalEotClaimedDays`/`totalEotApprovedDays` on `ClaimSummary`, `SUMMARY_SELECT` extended with the two EOT columns.
+
+**Frontend:**
+- `apps/web/src/lib/contracts-api.ts` — `daysToDeadline` on `ContractClaim`; `totalEotClaimedDays`/`totalEotApprovedDays` on `ContractClaimSummary`.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-claim-detail-helpers.ts` (+ test, 8 tests) — `CLAIM_TYPE_DETAIL_LABELS`, filter option lists, `formatDaysToDeadline()`.
+- `.../contracts/[id]/(workspace)/claims/_components/` — `contract-claim-type-badge.tsx` (new "X Claim" labels), `contract-claim-kpi-strip.tsx` (7 `DashboardKpiCard`s), `contract-claim-panel.tsx` (client-side search/status/type/responsible/due-date-range/overdue filtering — same bounded, contract-scoped pattern as Production Status/Variations; reuses `ClaimFormModal`/`closeClaimAction`/`ClaimStatusBadge` from the module-level register unmodified).
+- `.../claims/page.tsx` — rewritten to the new display layer; `contractsApi.listClaims({ contractId, pageSize: 200 })` (unpaginated, same established convention).
+- `apps/web/src/app/(protected)/contracts/_components/contract-workspace-tabs.tsx` — tab label renamed.
+- No new export route — reused the existing module-level `/contracts/claims/export?contractId=...` directly (already supported contract-scoped filtering).
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 326/326 (318 + 8 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1273/1273 (1263 + 10 new) |
+| `pnpm build` | ✓ 8/8 tasks; `/contracts/[id]/claims` confirmed built |
+| `pnpm db:migrate:status` | ✓ up to date, 33 migrations (unchanged — no schema change) |
+| Live end-to-end check | ✓ see below |
+
+**Live verification** (UAT contract): empty-state and naming confirmed (scenario A/B — active tab plain "Claims", no "/ Change Orders" suffix, confirmed via the tab link's own `aria-current="page"` text). Created 4 real claims via the actual backend endpoint covering every scenario: UNDER_REVIEW with a past due date (submitted 15,000 / approved 5,000 → `outstandingValue: 10000.000`, `daysToDeadline: -100`), PARTIALLY_APPROVED with EOT (submitted 20,000 / approved 12,000, EOT claimed 20 / approved 10, future due date → `daysToDeadline: 90`), APPROVED EOT-only claim (EOT 15/10, no value fields → `outstandingValue: null`, honestly not "0"), REJECTED claim (submitted 8,000 / approved 0). Aggregate summary manually cross-checked and confirmed exact: `openClaims: 2` (only UNDER_REVIEW + PARTIALLY_APPROVED are non-final), `totalSubmittedValue: 43000`, `totalApprovedValue: 17000`, **`totalOutstandingValue: 18000`** (10,000 + 8,000 — the REJECTED claim's 8,000 correctly excluded; without the fix this would have been 26,000), `totalEotClaimedDays: 35`, `totalEotApprovedDays: 20`, `overdueClaims: 1`. Populated page render confirmed all 7 KPI values, all approved-design table columns (including "Intake ID" honestly showing "—" and "Days to Deadline" showing signed real values), and every claim's new "X Claim" type badge. Export confirmed scoped to only this contract's 4 claims. Permissions: `test.operator` (contracts.read only) could view (200) but create was rejected 403; `test.nodept` (no department) received a correctly-scoped empty result (0 claims, matching the module's existing department-scoped list-filtering pattern, unchanged by this unit). Module-level Claim Log (`/contracts/claims`) re-verified rendering correctly after the shared summary-function fix. Full regression sweep: all 12 other workspace tabs, 8 module-level pages, and both staff pages returned 200. All UAT fixtures removed afterward, `pnpm uat:cleanup` completed cleanly.
+
+### Unsupported/Deferred Items
+
+- **"Intake ID"** has no real backing field anywhere in `ContractClaim` — shown as its own table column, always "—", never invented. If a real intake-tracking concept is needed later, it would need a genuine new field (out of scope here — task explicitly permitted "map to the closest existing real field... show '—' for unsupported values").
+- No pagination on this tab (bounded per-contract fetch, `pageSize: 200`) — consistent with the Production Status/Variations precedent rather than the approved screenshot's own paginated-register mockup (which itself only showed 8 of 18 rows per page); the module-level Claim Log keeps its own real pagination unchanged.
+- Row-level Action column keeps the existing icon-button group (Edit/Settle/Close) from `ClaimRegisterTable`'s own established pattern rather than a new dropdown-menu treatment — functionally complete, not a redesign the task required.
+
+### Next Recommended Unit
+
+**CM-61B — Claims Final UI Polish** (optional), matching the CM-59B/CM-60B pattern already established for Production Status and Variations: KPI value-text coloring via the `valueClassName` prop (already available on `DashboardKpiCard` since CM-60B), tighter filter/table spacing, and empty-state wording refinement — once the manager has had a chance to react to this initial build.
+
+## CM-60C — Variation Supporting Document Uploads (Completed 2026-09-02)
+
+### Summary
+
+Real file upload for Variation / Change Order supporting documents (site instructions, drawing markups, client emails, BOQ sheets, quotations, engineer approvals), replacing the "uploading a new file here is not yet supported" note from CM-60. Storage/validation reuses the CM-32 workflow-attachment pattern exactly (10MB max; PDF/PNG/JPEG/XLSX/DOCX only; random on-disk filename, original name only in the DB; local disk under `apps/api/storage/variation-attachments`, `VARIATION_ATTACHMENTS_DIR` override). The older `supportingDocumentName`/`supportingDocumentUrl` plain text/link fields from CM-60 are kept, unrenamed, for backwards compatibility — a variation can have real uploaded files, an old text reference, both, or neither. As a "preferred" bonus, the previously-stub Attachments tab now shows a real, read-only aggregation of every attachment already uploaded across Workflow, Closeout, and Variations — no new upload path there, each source keeps its own real upload flow.
+
+### Backend Changed — Yes (additive only)
+
+New table `contract_variation_attachments` (1:many with `ContractVariation`, `onDelete: Cascade`). No existing table/column/migration touched; `ContractVariation.supportingDocumentName`/`supportingDocumentUrl` untouched.
+
+### Changes
+
+**Schema:** `packages/database/prisma/schema.prisma` — `ContractVariationAttachment` model (field names `fileName`/`fileSize` kept consistent with `ContractWorkflowTaskAttachment`/`ContractCloseoutAttachment` rather than the task's own literal `stored_file_name`/`size_bytes` wording — same meaning, matching established convention; `uploadedByUserId` kept required, not nullable, matching those same two sibling tables — an upload always has a real uploader); `attachments` back-relation on `ContractVariation`; `contractVariationAttachmentsUploaded` back-relation on `User`. `packages/database/src/index.ts` — new type exported. `packages/config/src/env/api.ts` — `VARIATION_ATTACHMENTS_DIR` env var + `variationAttachmentsDir` (default `./storage/variation-attachments`), mirroring `WORKFLOW_ATTACHMENTS_DIR`/`CLOSEOUT_ATTACHMENTS_DIR` exactly.
+
+**Migration:** `20260902010000_add_contract_variation_attachments` — hand-written via the established `migrate diff --from-config-datasource` extraction technique, applied via `migrate deploy`. Confirmed clean (33 migrations).
+
+**Backend:**
+- `apps/api/src/contracts/variation-attachment-storage.service.ts` (new) — local-disk storage, structure/validation constants reused directly from `WorkflowAttachmentStorageService`, mirrors `CloseoutAttachmentStorageService` exactly.
+- `apps/api/src/contracts/contract-variations.service.ts` (+ 13 new tests) — `VARIATION_SELECT` now embeds each variation's own `attachments` array; new `listAttachments()`/`createAttachment()`/`getAttachmentForDownload()`, all via a shared `loadVariationForContract(contractId, variationId)` that verifies the variation actually belongs to the given contractId (not just that variationId resolves to *some* variation) — a mismatched `:id`/`:variationId` URL pair is treated as not-found, confirmed live (see Security below).
+- `apps/api/src/contracts/contract-attachments.service.ts` (new, + 7 tests) — read-only aggregation across the 3 existing attachment tables (`contractWorkflowTaskAttachment` where `task.contractId`, `contractCloseoutAttachment` where `closeoutRequest.contractId`, `contractVariationAttachment` where `variation.contractId`), tagged with a real source label and a real download path into that source's own already-scoped download endpoint.
+- `apps/api/src/contracts/contracts.controller.ts` — `GET/POST :id/variations/:variationId/attachments`, `GET :id/variations/:variationId/attachments/:attachmentId/download` (multer `FileInterceptor`, same `fileFilter`/`limits` pattern as the workflow attachment route); `GET :id/attachments` (aggregation).
+- `apps/api/src/contracts/contracts.module.ts` — `VariationAttachmentStorageService`, `ContractAttachmentsService` registered.
+
+**Frontend:**
+- `apps/web/src/lib/contracts-api.ts` — `ContractVariationAttachment` type + `attachments` field on `ContractVariation`; `ContractAttachment`/`ContractAttachmentSource` types; `listVariationAttachments()`, `getContractAttachments()`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/[variationId]/attachments/route.ts` (new) — client-fetchable JSON proxy for a variation's own attachment list, mirrors the workflow task attachment list proxy.
+- `.../variations/[variationId]/attachments/[attachmentId]/download/route.ts` (new) — stream proxy, mirrors the workflow/closeout download proxies exactly.
+- `.../variations/_components/contract-variation-form-modal.tsx` — new `SupportingDocumentsSection` (own `useActionState`/form, separate from the variation's own field form) shown only in Edit mode (a real variationId is required to attach to); Add mode shows an honest "save the variation first" note instead of a disabled/fake upload control. Attachment list seeded from the already-embedded `variation.attachments` prop, refetched via the JSON proxy after each successful upload so multiple uploads in one session all show up without closing the modal. Old text/link fields relabeled "Reference Name/Link (optional)" with a note distinguishing them from the real upload section, kept functionally unchanged.
+- `.../variations/_components/contract-variation-panel.tsx` — Supporting Document column now shows the first real attachment's name (+"N more"), linking to the secure download proxy; falls back to the old text/link fields only when no real attachments exist, then "—".
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `uploadVariationAttachmentAction`, mirrors `uploadWorkflowTaskAttachmentAction`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/attachments/page.tsx` — rewritten from the CM-14-era stub to a real read-only table (File Name/Source/Uploaded By/Uploaded Date/Action) sourced from `contractsApi.getContractAttachments()`. The stub's own "File Status" KPI section (Total/Pending Review/Approved/Missing) was deliberately NOT rebuilt — there is no real approval-workflow status behind a generic uploaded file, and inventing one would be fake data (see Deferred).
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 318/318 (unchanged — no pure-function logic touched; test fixture updated for the new required `attachments` field) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1263/1263 (1243 + 13 attachment-service tests + 7 aggregation-service tests) |
+| `pnpm build` | ✓ 8/8 tasks; confirmed `/contracts/[id]/variations/[variationId]/attachments`, its `/download` route, and `/contracts/[id]/attachments` all built |
+| `pnpm db:migrate:status` | ✓ up to date, 33 migrations |
+| Live end-to-end check | ✓ see below |
+
+**Live verification** (UAT contract): created a variation with no attachment — table showed "—" (scenario A). Uploaded a real PDF via the actual backend endpoint — file confirmed written to `apps/api/storage/variation-attachments/{variationId}/{random-uuid}.pdf` (original name never used on disk); table showed the real file name; download succeeded both directly against the backend and through the frontend proxy route (scenario B). Uploaded a second file — table showed the first file's name + "+1 more"; the list endpoint returned both, newest first (scenario C). Contract Attachments tab showed both variation attachments with source label "Variation / Change Order" (scenario D). Permissions: `test.operator` (contracts.read, no contracts.update) could download (200) but upload was rejected 403; `test.nodept` (no department) download was rejected 403 `DEPARTMENT_ACCESS_DENIED` (scenario E). Security: a request with the real attachmentId but a fabricated `variationId`, and separately a fabricated `contractId`, both returned 404 `CONTRACT_VARIATION_ATTACHMENT_NOT_FOUND` rather than leaking any data — confirming `loadVariationForContract`'s explicit contractId-match check actually matters, not just defense-in-depth on paper. A disallowed `.txt` upload was rejected 422 `CONTRACT_VARIATION_ATTACHMENT_INVALID_TYPE`. Variation KPI/formula-strip totals re-verified unchanged after all uploads (`approvedValue: 25750.000`, matching the created variation, attachments contributing nothing to value calculations). CSV export re-verified unchanged (still uses only the old text field, correctly empty for a variation with only real attachments and no text reference). Full regression sweep: all 12 other workspace tabs, 8 module-level pages, and both staff pages (dashboard, My Tasks) returned 200. All UAT fixtures (variations, variation attachments, lazily-generated workflow tasks) removed afterward, on-disk test files also cleared from the storage folder, then `pnpm uat:cleanup` completed cleanly.
+
+### Unsupported/Deferred Items
+
+- The Attachments tab's "File Status" KPI section (Total Files/Pending Review/Approved Documents/Missing Required) from the original stub was not rebuilt — there is no real approval/review workflow behind a generically uploaded file across any of the 3 sources, and fabricating those counts would be fake data. The tab now shows real files with a real source/uploader/date instead.
+- The Attachments tab remains read-only (list + download only) — upload still happens from each source's own tab (Workflow, Closeout, Variations), not centrally from this page. A "full Attachments rebuild" with its own centralized upload was out of scope for this unit's task, which explicitly offered "report as deferred if it needs a full Attachments rebuild" as an acceptable outcome for anything beyond the aggregation itself.
+- The Add/Edit Variation modal's exact client-rendered attachment list/upload DOM could not be curled directly, since it only mounts/updates after client-side state changes — verified instead via source review plus the end-to-end functional check above through the same backend endpoints the modal calls, consistent with every other client-modal in this codebase.
+
+## CM-60B — Variations / Change Orders Final UI Polish (Completed 2026-09-02)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-60 — no data, calculation, permission, backend, or API change; `Contract.contractValue` still never mutated (re-verified live). KPI values are now color-coded, not just their icon circles — this required a small, opt-in `valueClassName` prop on the shared `DashboardKpiCard` (default `text-text-primary`, unchanged for every other existing consumer — Dashboard, Payments, Production Status all re-verified live rendering exactly as before). Formula strip values enlarged (`text-base` → `text-xl`/`text-2xl`) and given color identity (Original: info blue, Approved: success green, Current: accent, boxed for emphasis); formula meaning/inputs unchanged. Filter row gained small visible labels ("Status" / "Submitted Date" / "Affects Contract Value") above each select — their `aria-label`s already existed but nothing was visible; Affects Contract Value's own option text simplified back to plain "All"/"Yes"/"No" now redundant with its new heading. Empty state reworded to the approved copy with a helpful second line; Add Variation stays visible in the empty state (it was never gated on item count).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/dashboard-kpi-card.tsx` — new optional `valueClassName` prop (both dense and non-dense branches); defaults to `text-text-primary`, so every existing call site (Dashboard, Payments, Production Status, and any other consumer) is completely unaffected — confirmed via live render of all three.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/_components/contract-variation-kpi-strip.tsx` — `valueClassName` passed per money card (`text-success`/`text-warning`/`text-error`/`text-accent`/`text-teal`); Total Variations (a count) left at the default color.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/_components/contract-variation-formula-strip.tsx` — larger, color-coded values; Current Contract Value boxed (`bg-accent/5 border border-accent/15`) for emphasis as the strip's own result.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/_components/contract-variation-panel.tsx` — visible labels above Status/Submitted Date/Affects Contract Value selects; Affects Contract Value option text simplified; empty state copy updated.
+
+No backend files touched — confirmed during audit this was achievable as pure frontend polish.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 318/318 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1243/1243 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date, 32 migrations (unchanged) |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ empty state confirmed (new copy, filter labels, naming); added one APPROVED (25,750) and one SUBMITTED/pending (18,600) variation via the real create endpoint — business rule re-verified unchanged (`computedCurrentValue: 525750.000` = 500,000 + 25,750 only, pending excluded); all 5 KPI color classes (`text-success`/`text-warning`/`text-error`/`text-accent`/`text-teal`) confirmed present in the rendered page; Dashboard/Payments/Production Status all re-rendered 200 with their own KPI cards' default `text-text-primary` color unaffected. Export CSV re-verified unchanged (still scoped, same data). All 12 other workspace tabs, 8 module-level pages, and both staff pages (dashboard, My Tasks) returned 200. |
+
+### Unsupported/Deferred Items
+
+- None — pure UI/wording/layout polish, verified via the same live-endpoint + rendered-HTML technique used throughout this session; client-side filter/search behavior (unit-tested, unchanged) was not re-exercised via a browser since no filtering logic was touched, only the JSX labels surrounding it.
+
+## CM-60 — Contract Variations / Change Orders Approved Design Build (Completed 2026-09-02)
+
+### Summary
+
+Full rebuild of the Contract Detail Variations tab (previously a static stub with hardcoded "Not started" placeholders) to match the approved design: blue info note, 6-card KPI strip, formula strip, search/filter/action row, and a variations table — all backed by a new, additive `ContractVariation` model (no prior variations backend existed). Naming decision followed exactly: the tab/page title reads "Variations / Change Orders" (manager/client-friendly framing), while every table column, KPI label, and backend field stays "Variation" (the real contract/QS term) — nothing was renamed to "Change Order No." etc. Business rule enforced end-to-end and verified live: only APPROVED variations with `affectsContractValue=true` count toward Approved Variations Value and Current Contract Value; SUBMITTED/PENDING_APPROVAL count only toward Pending Variations Value and Net Variation Impact; REJECTED/CANCELLED count toward Rejected/Cancelled Value only; DRAFT and any `affectsContractValue=false` variation count only in the Total Variations record count, never in a money bucket. A deductive variation's amount is a real signed negative number, never clamped — shown honestly in the table, KPI totals, and CSV export.
+
+### Backend Changed — Yes (additive only)
+
+New table `contract_variations` + new enum `contract_variation_status` (DRAFT/SUBMITTED/PENDING_APPROVAL/APPROVED/REJECTED/CANCELLED). No existing column, table, or migration touched. `Contract.contractValue` (BOQ-derived, per `contracts.service.ts`) is **never written** by this unit — confirmed live: after creating/approving variations totalling real KWD amounts, `contract.contractValue` remained unchanged (`null`, as seeded). Current Contract Value for the Variations page is a page-level computed value (`Contract.originalContractValue + approvedValue`), returned by the API as `computedCurrentValue` — this is the "safest approach" the task explicitly asked for when uncertain about automatic mutation; no automatic `Contract.contractValue` mutation was implemented.
+
+### Naming Decision Applied
+
+- Tab label (`contract-workspace-tabs.tsx`): "Variations" → "Variations / Change Orders".
+- Page title/metadata: "Variations / Change Orders".
+- Info note, table headers, KPI labels, CSV headers, DTOs, model, enum, service: all "Variation" — never renamed to "Change Order".
+
+### Changes
+
+**Schema:** `packages/database/prisma/schema.prisma` — `ContractVariation` model + `ContractVariationStatus` enum; `variations` back-relation on `Contract`; `contractVariationsCreated`/`contractVariationsUpdated` back-relations on `User`. `packages/database/src/index.ts` — both new types exported. `createdByUserId` is required (not nullable) — a deliberate, documented deviation from the task's literal "nullable" spec, matching the established convention already used by `ContractPayment`/`ContractClaim` (a record is always created by someone; nothing in this codebase makes that field optional).
+
+**Migration:** `20260902000000_add_contract_variations` — hand-written using the established `prisma migrate diff --from-config-datasource --to-schema` extraction technique (the shadow database still fails `migrate dev` in this environment), trimmed to only the new table/enum statements. Applied via `prisma migrate deploy`, confirmed via `prisma migrate status` → "Database schema is up to date!" (32 migrations).
+
+**Backend:**
+- `apps/api/src/contracts/dto/create-contract-variation.dto.ts` / `update-contract-variation.dto.ts` — `description`/`amount` required on create (amount has no `@Min` — a deductive variation is real, never clamped); `supportingDocumentUrl` is a plain `@IsString()`, not `@IsUrl()`, so a manager can reference an internal file path or an existing Documents & Obligations entry, not only a web URL.
+- `apps/api/src/contracts/contract-variations.service.ts` (+ test, 25 tests) — new `ContractVariationsService`: `findAllForContract()` (contracts.read, department-scoped, mirrors `:id/schedule`/`:id/production`'s unpaginated pattern) and `create()`/`update()` (contracts.update, department-scoped, duplicate-`variationNo`-per-contract check). Pure exported `computeVariationSummary()` — divide/clamp-free, bucket assignment documented inline (DRAFT and `affectsContractValue=false` excluded from every value bucket but counted in `totalVariations`).
+- `apps/api/src/contracts/contracts.controller.ts` — `GET :id/variations`, `POST :id/variations`, `PATCH variations/:variationId` (2-segment route avoiding collision with `:id`, same pattern as `payments/:paymentId`/`production/:itemId`).
+- `apps/api/src/contracts/contracts.module.ts` — `ContractVariationsService` registered.
+
+**Frontend:**
+- `apps/web/src/lib/contracts-api.ts` — `ContractVariationStatus`, `ContractVariation`, `ContractVariationSummary`, `ContractVariationDetail` types; `getContractVariations()`.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-variation-helpers.ts` (+ test, 9 tests) — status labels/badge classes/filter+select options; `matchesSubmittedDateFilter()` (This Month/Last Month/This Year, real calendar-month comparison, excludes unset dates rather than fabricating a match).
+- `apps/web/src/app/(protected)/contracts/_lib/contract-variation-csv.ts` (+ test, 5 tests) — CSV builder, reuses `csvField()` from `contract-payment-csv.ts`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/_components/` — `contract-variation-status-badge.tsx`, `contract-variation-kpi-strip.tsx` (6 `DashboardKpiCard`s), `contract-variation-formula-strip.tsx` (Original + Approved = Current, using the same server-computed values as the KPI strip — deliberately reconciled, unlike the approved-design screenshot's own mockup numbers, which don't actually agree between its KPI card and its formula strip for the same inputs), `contract-variation-panel.tsx` (client-side search/status/submitted-date/affects-value filtering over the full fetched list — same bounded, contract-scoped pattern established for Production Status in CM-59/CM-59B; no pagination, consistent with that precedent rather than the approved screenshot's paginated-register mockup), `contract-variation-form-modal.tsx` (Description/Amount required; Affects Contract Value checkbox always sent explicitly, never omitted, on both create and update — omitting it would leave an unintended default/stale value).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/page.tsx` — rewritten from the CM-14-era static stub to the real page.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/export/route.ts` — new per-contract CSV export, mirrors `../../production/export/route.ts`.
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `createVariationAction`/`updateVariationAction` (+ `readVariationFields` helper), mirrors `updatePaymentAction`/`updateProductionAction`.
+- `apps/web/src/app/(protected)/contracts/_components/contract-workspace-tabs.tsx` — tab label renamed.
+
+### Verification Results (2026-09-02)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 318/318 (304 + 14 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1243/1243 (1218 + 25 new) |
+| `pnpm build` | ✓ 8/8 tasks, confirmed `/contracts/[id]/variations` and `/contracts/[id]/variations/export` both built |
+| `pnpm db:migrate:status` | ✓ up to date, 32 migrations |
+| Live end-to-end check | ✓ see below |
+
+**Live verification** (UAT contract, `originalContractValue` set to 500,000 KWD via the real Edit Contract endpoint): empty-state wording confirmed on zero variations, formula strip still showed the real original value (500,000.000 → current 500,000.000). Added one APPROVED (25,750), one SUBMITTED/pending (18,600), one REJECTED with a deductive negative amount (-12,000), and one APPROVED-but-`affectsContractValue=false` (6,750) variation via the real create endpoint — summary correctly returned `approvedValue: 25750.000` (VO-004 excluded), `pendingValue: 18600.000`, `rejectedCancelledValue: -12000.000` (shown negative, not clamped), `netVariationImpact: 44350.000` (approved+pending only), `computedCurrentValue: 525750.000` (500000+25750). Updating the pending variation to APPROVED live-recalculated everything correctly (`approvedValue: 44350.000`, `pendingValue: 0.000`, `computedCurrentValue: 544350.000`) — confirmed via a second `GET`. `Contract.contractValue` remained untouched (`null`) throughout. Duplicate `variationNo` rejected 409; missing `description`/`amount` rejected 400. `test.operator` (contracts.read only) could view (200) but POST was rejected 403; `test.nodept` (no department) GET was rejected 403 `DEPARTMENT_ACCESS_DENIED`. CSV export returned HTTP 200 with data matching the table exactly, including the negative amount unclamped. Overview's own "Approved Variations: 0" display was confirmed unaffected (still the pre-existing decoupled 0, not wired to real data by this unit — see Deferred). Full regression sweep: all 12 other contract-detail workspace tabs + all 8 module-level pages returned 200 for `test.manager`; both staff pages (dashboard, My Tasks) returned 200, unaffected. All UAT fixtures removed afterward (test variations + lazily-generated workflow tasks manually cleared first, same pre-existing `uat-cleanup.ts` limitation noted in CM-59/CM-59B — then `pnpm uat:cleanup` completed cleanly).
+
+### Unsupported/Deferred Items
+
+- **Overview's "Approved Variations: 0" / "Last Variation: —" display was deliberately left unwired in this unit.** The task allowed either outcome ("Overview should still show variations as real values if new data is added, or remain 0/— if not wired in this unit"); wiring it would mean deciding how a variations-aware value interacts with Overview's own "Current Contract Value" row (which shows the real, BOQ-derived `contract.contractValue`, not this unit's computed value) — a design decision the task didn't specify, so it's left as its own follow-up unit (e.g. "CM-60B — Overview Variations Wiring") rather than guessed at here.
+- **Supporting Document is a plain optional text/link pair, not a file upload.** No new attachment/storage pipeline was added — a manager can name/link an already-existing document (e.g. from Documents & Obligations) but cannot upload a new file from this tab. The table only ever shows a real stored name/link or "—", never a fake document.
+- **No pagination.** A contract's variation list is expected to be small (per-contract, not cross-contract), so it follows the same bounded, client-side-filtered, unpaginated pattern established for Production Status rather than the approved screenshot's paginated-register mockup (which itself only showed 10 rows).
+- The Add/Edit Variation modal's exact client-rendered DOM (post-click) could not be curled directly, since it only mounts after a client-side state change — verified instead via source review plus the end-to-end functional check above through the same backend endpoint the modal calls, consistent with every other client-modal in this codebase.
+
+### Next Recommended Unit
+
+**CM-60B — Overview Variations Wiring** (optional polish, not required): wire Overview's "Contract Value Summary" card to real variation totals (Approved Variations, Last Variation) now that real data exists, deciding how it reconciles with `contract.contractValue`. Alternatively, **CM-61 — Claims / Change Orders tab** could reuse the same summary-KPI + formula-strip + client-filtered-table pattern established here, since Claims already shares "Change Orders" framing in its own tab label.
+
+## CM-59B — Production Status Final UI Polish (Completed 2026-09-01)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-59 — no data, calculation, permission, schema, migration, or API change. Info bar wording reworded ("Future release: Automatically linked with Production Module" → "Production module integration can be added in a future phase.") since the old phrasing read like a promise/pending sync rather than a possibility; button relabeled "Open Production Module" (was "View") since it only navigates to the separate, non-data-linked `/production` module — kept (not omitted) because that route is real and working. KPI labels reworded to the approved slash form ("Casted / Produced", "Stock / Not Delivered", matching CSV headers and the table). The 6th (ring) KPI card's padding/gap brought in line with `DashboardKpiCard`'s own p-4/gap-2 so all six cards read as one consistent row. Filter/action row collapsed from a label-per-field grid + separate actions row into a single flex-wrap row (search flex-1, compact status/category selects, actions pushed right via `ml-auto`) — visibly shorter, same filtering/export/add-update behavior. Table header strengthened (`font-bold text-text-primary`, was `font-semibold text-text-secondary`), S/N centered, row hover state added, progress bar thickened (`h-1.5`→`h-2`) with a bold percent, status badge bumped to `font-semibold`. Row action changed from a bare Pencil icon to an icon+"Update" button with an item-specific `aria-label`, clearer than a tiny icon alone.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/page.tsx` — info bar wording + button label.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/_components/contract-production-kpi-strip.tsx` — label wording; ring card padding/gap/size.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/_components/contract-production-panel.tsx` — filter/action row collapsed to one flex row; table header/S/N/hover/progress-bar/action-button polish; `Stock (Not Delivered)` → `Stock / Not Delivered` column header.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/_components/contract-production-status-badge.tsx` — `font-medium` → `font-semibold`.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-production-csv.ts` — CSV header wording (`Stock (Not Delivered)` → `Stock / Not Delivered`), matching the on-screen table; existing CSV test still passes unchanged (it reads the header from the exported constant, not a hardcoded string).
+
+No backend files touched — confirmed during audit this was achievable as pure frontend polish; the Add/Update Production modal's own validation/save behavior (`contract-boq-production.service.ts`, `updateProductionAction`) was not touched.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 304/304 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1218/1218 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date, 31 migrations (unchanged) |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ empty-state wording/honesty confirmed on a contract with no BOQ items; populated page confirmed new KPI/table/CSV wording, no "Physical"/"SAP"/"Auto linked" anywhere; Add/Update Production re-verified live through the same backend endpoint (produced 1100/delivered 900/total 1200 → 92% progress, stock 200, remaining 100 — calculation unchanged from CM-59) and the delivered-exceeds-produced validation still rejects with 422; CSV export reflects the same updated values and new header wording. All 12 other workspace tabs, 8 module-level pages, and both staff pages (dashboard, My Tasks) returned 200. |
+
+### Unsupported/Deferred Items
+
+- None — this was a pure UI/wording/layout polish pass with no new client-only interaction beyond what CM-59 already established; verified the same way (source review of the JSX polish plus the live functional check above through the real backend endpoint).
+
+## CM-59 — Contract Production Status Approved Design Rebuild (Completed 2026-09-01)
+
+### Summary
+
+Full rebuild of the Contract Detail Production Status tab (previously a static stub with hardcoded "Not started" placeholders) to match the approved design: blue info bar, 6-card KPI strip, search/filter/action row, and a per-item production table — all backed by real data. Production is manually tracked inside Contract Management; no Production Module integration exists yet (the "View Production Module" link is real navigation to the separately-built `/production` module, but the two are never data-linked). Total Qty per item is the contract's own existing BOQ Qty/Area (`revisedQty ?? originalEstimatedQty`, same precedence as `boqRowQty()`/the BOQ total-price calculation) — this unit never overwrites or reinterprets that value. Casted/Produced, Delivered, Production Status and Remarks are new, additive, per-BOQ-item tracking fields; Stock/Not Delivered, Remaining to Cast and Progress % are always derived (server-computed), never stored. A contract with no BOQ items shows the real empty state ("No BOQ items available for production tracking. Add BOQ items from contract register/edit first.") — never fabricated rows.
+
+### Backend Changed — Yes (additive only)
+
+New table `contract_boq_item_production_status` (1 row per `ContractBoqItem`, created lazily on first update, unique on `contract_boq_item_id`) + new enum `contract_boq_production_status` (NOT_STARTED/IN_PRODUCTION/PARTIALLY_DELIVERED/COMPLETED/DELAYED). No existing column, table, or migration touched; BOQ item's own `originalEstimatedQty`/`revisedQty` meaning is untouched.
+
+**Important documented tradeoff:** Edit Contract's BOQ save path (`contracts.service.ts` `update()`) deletes and recreates ALL of a contract's `ContractBoqItem` rows whenever the BOQ is replaced (pre-existing behavior, confirmed via audit before this unit). The new FK therefore uses `onDelete: Cascade` rather than `Restrict` — `Restrict` would have broken Edit Contract's existing save flow the moment any item had production tracked. This means **editing a contract's BOQ resets production tracking for the replaced items** — verified live: replacing a UAT contract's BOQ items via `PATCH /contracts/:id` succeeded (HTTP 200, Edit Contract unaffected) and the new item's production status came back reset to NOT_STARTED/0, exactly as designed. This is a real, honest limitation, not hidden — flagged here for awareness; no user-facing warning banner was added since the task didn't ask for one and CLAUDE.md prohibits inventing unscoped workflow.
+
+### Changes
+
+**Schema:** `packages/database/prisma/schema.prisma` — `ContractBoqItemProductionStatus` model + `ContractBoqProductionStatus` enum; `productionStatus` back-relation on `ContractBoqItem`; `contractBoqProductionStatusUpdated` back-relation on `User`. `packages/database/src/index.ts` — both new types exported.
+
+**Migration:** `20260901020000_add_contract_boq_item_production_status` — hand-written (not `prisma migrate dev`, which still fails against the shadow database on this environment per the established workaround) using `prisma migrate diff --from-config-datasource --to-schema` to generate the correct DDL, then trimmed down to only the 2 new-table/new-enum statements (the raw diff also contained a large amount of pre-existing, unrelated drift between the live dev DB and migration history — index renames and FK re-creates on `production_*` tables from an earlier Prisma version upgrade — which was deliberately NOT included in this migration). Applied via `prisma migrate deploy` (bypasses the shadow database), confirmed via `prisma migrate status` → "Database schema is up to date!" (31 migrations).
+
+**Backend:**
+- `apps/api/src/contracts/dto/update-contract-boq-item-production.dto.ts` — new DTO (`producedQty`/`deliveredQty`/`status`/`remarks`, all optional, `@Min(0)` on quantities).
+- `apps/api/src/contracts/contract-boq-production.service.ts` (+ test, 28 tests) — new `ContractBoqProductionService`: `findAllForContract()` (contracts.read, department-scoped, mirrors `contract-schedule.service.ts`'s unpaginated `findAllForContract` pattern) and `upsertForItem()` (contracts.update, department-scoped, lazy upsert). Pure exported functions: `computeTotalQty`, `computeStockNotDelivered`, `computeRemainingToCast`, `computePercentOfTotal`, `assertProductionAmountsValid`, `computeProductionSummary` — all divide-by-zero safe.
+- `apps/api/src/contracts/contracts.controller.ts` — `GET :id/production` (contracts.read) and `PATCH production/:itemId` (contracts.update, 2-segment route avoiding collision with `:id`, same pattern as `payments/:paymentId`).
+- `apps/api/src/contracts/contracts.module.ts` — `ContractBoqProductionService` registered.
+
+**Frontend:**
+- `apps/web/src/lib/contracts-api.ts` — `ContractBoqProductionStatus`, `ContractProductionItem`, `ContractProductionSummary`, `ContractProductionDetail` types; `getContractProduction()`.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-production-helpers.ts` (+ test, 10 tests) — status labels/badge/bar classes/filter+select options; `computeStockNotDelivered`/`computeRemainingToCast`/`computePercentOfTotal`/`formatQty`, mirroring the backend's own pure functions exactly so the Add/Update modal can show a live preview before saving.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-production-csv.ts` (+ test, 4 tests) — CSV builder, reuses `csvField()` from `contract-payment-csv.ts`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/_components/contract-production-status-badge.tsx`, `contract-production-kpi-strip.tsx` (5 `DashboardKpiCard`s + 1 inline-SVG ring, same ring pattern as `ContractOverviewProgressCard` but a separate component — different underlying ratio), `contract-production-panel.tsx` (client-side search/status/category filtering over the full fetched item list — no pagination needed at BOQ-item scale, unlike the searchParams-driven Payments tab; table; row-level Edit action; an item-picker step for the top-level "Add / Update Production" button so it never silently edits an unstated item), `contract-production-form-modal.tsx` (Item Description/Total Qty read-only; Casted/Delivered/Status/Remarks editable; live Stock/Remaining/Progress preview).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/page.tsx` — rewritten from the CM-14-era static stub to the real page.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/export/route.ts` — new per-contract CSV export, mirrors `../../../payments/export/route.ts`.
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `updateProductionAction` (+ `readProductionFields` helper), mirrors `updatePaymentAction`.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 304/304 (290 + 14 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1218/1218 (1190 + 28 new) |
+| `pnpm build` | ✓ 8/8 tasks, confirmed `/contracts/[id]/production` and `/contracts/[id]/production/export` both built |
+| `pnpm db:migrate:status` | ✓ up to date, 31 migrations |
+| Live end-to-end check | ✓ see below |
+
+**Live verification** (UAT contract, 3 real BOQ items added via the real Edit Contract endpoint, one deliberately with `originalEstimatedQty: 0` to exercise the divide-by-zero path): empty state exact wording confirmed on a contract with no BOQ items; populated page renders real KPI values (Total Qty 3,600, correct per-item Casted/Delivered/Stock/Remaining/Progress), no "Physical" or "SAP" wording anywhere; `PATCH /contracts/production/:itemId` valid update returns correct derived fields (produced 1050/total 1200 → 88% progress); all 3 validation rules confirmed live (delivered > produced → 422 `CONTRACT_BOQ_PRODUCTION_DELIVERED_EXCEEDS_PRODUCED`; produced > totalQty → 422 `CONTRACT_BOQ_PRODUCTION_PRODUCED_EXCEEDS_TOTAL`; negative qty → 400 from DTO `@Min(0)`); zero-totalQty item correctly never blocked by the totalQty cap (nothing real to cap against). CSV export (`/contracts/:id/production/export`) returns HTTP 200 with data matching the table exactly. Permissions: `test.operator` (contracts.read, no contracts.update) can view (200) but PATCH is rejected 403; `test.nodept` (no department, fail-closed) GET is rejected 403 `DEPARTMENT_ACCESS_DENIED`. BOQ-edit cascade tradeoff verified live (see Backend Changed section above). Full regression sweep: all 12 other contract-detail workspace tabs + all 8 module-level pages returned 200 for `test.manager`; staff (`test.operator`) `/contracts/dashboard` and `/contracts/workflow?mode=my-tasks` both 200, unaffected. All UAT fixtures removed afterward (test BOQ items + lazily-generated workflow tasks manually cleared first — an unrelated pre-existing `uat-cleanup.ts` limitation that only surfaces when a UAT contract gains BOQ items or visits the Workflow tab, neither of which the normal seed does — then `pnpm uat:cleanup` completed cleanly).
+
+### Unsupported/Deferred Items
+
+- The Add/Update Production modal's exact client-rendered DOM (post-click) could not be curled directly, since it only mounts after a client-side state change — verified instead via careful source review plus the end-to-end functional check above through the same backend endpoint the modal calls, consistent with every other client-modal in this codebase.
+- No category field synonym/mapping was invented — the Category filter's options are the real, distinct `ContractBoqItem.category` values already present on the contract's own BOQ items (empty dropdown beyond "All" for a contract with no categorized items — never a fabricated list).
+- Editing a contract's BOQ resets production tracking for the replaced items (see Backend Changed section) — a real, documented tradeoff of the additive-table approach the task specified, not a defect, but worth a manager's awareness before this ships.
+
+## CM-58C — Move Payment Terms Summary to Compact Strip (Completed 2026-09-01)
+
+Note: this unit reuses the "CM-58C" code from the task text it was given, distinct from the earlier "CM-58C — Add Payment Modal Final UX Polish" entry directly below.
+
+### Summary
+
+Repositioning-only change on the Contract Detail Payments tab: Payment Terms Summary moved from a full table card below Payment Tracker (`ContractPaymentTermsSummaryCard`, deleted) to a compact horizontal chip strip (`ContractPaymentTermsStrip`, new) placed between the KPI strip and the filter/search section. Same real data (`contract.paymentTerms`, a plain `Record<string, boolean>`), no invented percentages/amounts/notes — each chip shows only that term's real saved selected/not-selected boolean, with a `Check`/`Minus` icon and `bg-success-light text-success` (selected) vs. `bg-surface-secondary text-text-muted` (not selected) styling, no third state. A manager now sees the contract's agreed payment terms before scrolling into the payment records, instead of after. Final page order is now: KPI strip → Payment Terms strip → search/filter/actions (with Export Excel) → Payment Tracker table → bottom helper note. Payment Statement/Account Statement remains removed (per the earlier CM-58B Tracker-Focused Cleanup business correction) — not reintroduced by this unit. No payment calculation, create/update API, or export route touched.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-terms-strip.tsx` — **new**: compact chip-strip component, reuses the existing `PAYMENT_TERM_OPTIONS` from `contract-ui-helpers.ts`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-terms-summary-card.tsx` — **deleted** (zero remaining consumers, confirmed via grep).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/page.tsx` — `ContractPaymentTermsStrip` now rendered between `ContractPaymentKpiStrip` and `ContractPaymentFilterBar`; old `max-w-xl` Payment Terms Summary card position (below Payment Tracker) removed.
+
+No backend files touched — pure frontend repositioning/presentation change; `contract.paymentTerms` was already fetched and passed down unchanged.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 290/290 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date, 30 migrations |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ confirmed on a populated UAT contract: page order KPI strip → Payment Terms strip → filter bar → Payment Tracker holds (verified via HTML position of each section's marker in the rendered response); both selected (`bg-success-light text-success`) and not-selected (`bg-surface-secondary text-text-muted`) chip styles present and correctly matched to the contract's real `paymentTerms` values; no "Payment Statement"/"Account Statement" wording anywhere on the page. Created a real payment (`PAY-CM58C2-01`) via the same backend endpoint the Add Payment modal calls — confirmed it renders correctly in Payment Tracker, and that `/contracts/payments/export?contractId=…` returns HTTP 200 with a CSV correctly scoped to only that one contract's payment. Full regression sweep: all 12 other contract-detail workspace tabs (schedule, production, variations, claims, risks, documents, workflow, issues, attachments, closeout, activity, overview) and all 8 module-level pages (`/contracts`, `/contracts/dashboard`, `/contracts/new`, `/contracts/workflow`, `/contracts/payments`, `/contracts/claims`, `/contracts/issues`, `/contracts/closeouts`) returned HTTP 200 for `test.manager`. Staff (`test.operator`) `/contracts/dashboard` and `/contracts/workflow?mode=my-tasks` both returned HTTP 200, unaffected. Test payment and all other UAT fixtures removed afterward via direct SQL + `pnpm uat:cleanup`. |
+
+### Unsupported/Deferred Items
+
+- None — this was a pure repositioning change with no new client-only interaction to verify beyond static rendering, which was checked directly via the rendered HTML response (no client-side-only mount step, unlike the Add Payment modal).
+
+## CM-58C — Add Payment Modal Final UX Polish (Completed 2026-09-01)
+
+### Summary
+
+Frontend-only UX polish on the shared `PaymentFormModal` (`contracts/payments/_components/`) — no backend, enum, or field-name change. Its `STATUS_OPTIONS` list previously showed the raw backend enum label "Draft" (confusing — a payment in that state simply hasn't been submitted yet); now built directly from the manager-friendly `PAYMENT_STATUS_LABELS` map already established in CM-58 (DRAFT→Pending, PARTIALLY_PAID→Partially Received, PAID→Received, etc.), applied to **both** modal variants per this unit's own instruction that the cleanup should reach the module-level register too. CERTIFIED is kept (existing records can still carry that status) but moved to the end of the option list, so it reads as the least prominent choice without being hidden or renamed. The contract-detail variant's plain "Contract" text was replaced with a small bordered "Adding payment for" / project name / reference number context block (real data, same hidden `contractId` field, unchanged submission), and a subtle `InfoBox` note ("Remaining Amount is calculated from Invoice Amount minus Received Amount.") was added under the amount fields — both scoped to `variant="contractDetail"` only, so the module-level register's own Add/Edit form is visually untouched beyond the shared status-label fix.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/payments/_components/payment-form-modal.tsx` — `STATUS_OPTIONS` rebuilt from `PAYMENT_STATUS_LABELS` (imported from `contract-payment-detail-helpers.ts`), reordered so CERTIFIED is last; new `contractContext` value (the single known contract, for both Add and Edit in `contractDetail` mode) rendered as a bordered read-only block instead of plain text; new subtle amount-helper `InfoBox`, shown only when `isContractDetail`.
+
+No backend files touched — confirmed during audit this was achievable as pure frontend/UX polish; no field `name` attribute, DTO shape, or backend enum was touched anywhere.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 290/290 (unchanged — no pure-function logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ created a real payment via the same backend endpoint the modal's Add flow calls (`submittedAmount: 6000, paidAmount: 2000` → `outstandingAmount: 4000.000`, unchanged calculation), confirmed it renders in the tracker with the "Partially Received" label. Confirmed via source grep that the module-level register's own `PaymentFormModal` calls pass no `variant` (file untouched) — Contract dropdown and Certified Amount remain exactly as before there, while the shared status-label fix now also applies to that page per this unit's own instruction. All 12 other workspace tabs, module-level `/contracts/payments`, Contract List, Manager Dashboard, New Contract Register, Workflow/Claims/Issues/Closeout, and staff dashboard/My Tasks all 200. Test payment deleted afterward via direct SQL. |
+
+### Unsupported/Deferred Items
+
+- As in the previous unit, the modal's exact post-click client-rendered DOM (the new context block, helper note, and reordered status options) could not be curled directly, since it only mounts after a client-side state change. Verified instead via careful source review of the new conditional JSX plus an end-to-end functional check through the same backend endpoint the modal calls — the same approach used throughout this session for every client-modal change.
+
+## CM-58B — Contract Payments Page Tracker-Focused Cleanup (Completed 2026-09-01)
+
+Note: this unit reuses the "CM-58B" code from the task text it was given, distinct from the earlier "CM-58B — Contract Payments Page Final UI Polish" entry directly below.
+
+### Summary
+
+Business correction on top of the earlier CM-58B UI polish: manager confirmed RECAFCO FMP is not linked to any Account/SAP/accounting module, so the lower "Payment Statement" card (the approved screenshot's own "Account Statement (Linked to Account Model)", already renamed once in CM-58) was removed **entirely** rather than kept under any name — it duplicated Payment Tracker's own rows under a second title with no real added information. Payment Tracker is now the page's single, focused payments table; Payment Terms Summary remains, now as its own compact (`max-w-xl`) card directly below Payment Tracker instead of sharing a row with the removed card.
+
+The Add Payment modal (`PaymentFormModal`, shared with the module-level `/contracts/payments` register) gained an opt-in `variant?: 'register' | 'contractDetail'` prop (default `'register'`, so the module-level register's exact original behavior — Contract picker, Certified Amount field, original labels — is completely unchanged). The Contract Detail Payments tab now passes `variant="contractDetail"`: no Contract picker (the single known contract is submitted as a hidden field and shown as read-only context instead), no Certified Amount field, and four labels renamed (Submitted Amount→Invoice Amount, Due Date→Payment Due Date, Paid Date→Received On, Paid Amount→Received Amount). Confirmed via the backend's own update logic that omitting Certified Amount from an edit never nulls an existing stored value — Prisma's `data` spread only includes fields present in the DTO, so a payment previously given a certifiedAmount via the module register keeps it silently, even when edited from the contract-detail tab where that field isn't shown.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/payments/_components/payment-form-modal.tsx` — new optional `variant` prop; conditional Contract picker vs. read-only+hidden-input; Certified Amount field hidden when `contractDetail`; four field labels computed from `variant`. Underlying `name` attributes (and therefore the create/update payload) never change between variants.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-tracker-table.tsx` — both `PaymentFormModal` calls now pass `variant="contractDetail"`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-statement-card.tsx` — **deleted** (zero remaining consumers, confirmed via grep).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/page.tsx` — removed the `grid-cols-[2fr_1fr]` row and `ContractPaymentStatementCard` import/usage; Payment Terms Summary now rendered alone in a `max-w-xl` wrapper below Payment Tracker.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-payment-detail-helpers.ts` (+ test) — removed `computePercentOfContractValue()` (its only consumer, the deleted Payment Statement card's "% of Contract Value" column, no longer exists) and its 4 tests.
+
+No backend files touched — confirmed during audit this was achievable as pure frontend/UI cleanup; the existing update endpoint's "omitted field ⇒ unchanged, never nulled" behavior (verified by reading `contract-payments.service.ts`'s `update()`) made hiding Certified Amount safe without any backend change.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors (no orphaned imports after the file deletion) |
+| `pnpm --filter @recafco/web test --run` | ✓ 290/290 (294 − 4 removed tests for the deleted percent-of-value function) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ confirmed live: no "Payment Statement" section, no "Account Statement"/"Linked to Account Model" wording, no orphaned "View Payment Records" link, on both an empty and a populated contract. Created a real payment via the same API endpoint the modal's Add flow uses — appeared correctly in Payment Tracker with all approved-design column labels intact; Payment Terms Summary still present and correctly positioned. Confirmed the module-level `/contracts/payments` register's own `PaymentFormModal` calls pass no `variant` (via source grep — file untouched), so its Contract picker/Certified Amount/original labels are unaffected by construction. Export CSV re-verified unchanged and correctly contract-scoped. All 12 other workspace tabs, Contract List, Manager Dashboard, New Contract Register, Workflow/Claims/Issues/Closeout, and staff dashboard/My Tasks all 200. Test payment deleted afterward via direct SQL. |
+
+### Unsupported/Deferred Items
+
+- The Add Payment modal's exact client-rendered DOM (post-click) could not be curled directly, since it only mounts after a client-side state change — verified instead via careful source review of the new conditional JSX plus an end-to-end functional check (create via the same backend endpoint the modal calls, confirm the result renders correctly). Consistent with how every other client-modal in this codebase has been verified throughout this session.
+
+## CM-58B — Contract Payments Page Final UI Polish (Completed 2026-09-01)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-58 — no data, calculation, filter, Add/Edit, export, or backend change. `DashboardKpiCard` (shared with the Contract Manager Dashboard) gained an opt-in `dense` prop — a horizontal (icon left, value/label right) layout, shorter row — used only by the Payments KPI strip; verified live that the dashboard's own KPI cards still render in their original vertical layout unaffected. Export Excel was pulled out of its own floating flex row and now renders inside the filter bar's own bottom action row (next to Reset/Apply Filters) via a new `actions` slot, so it reads as part of that card instead of a detached sibling. Payment Tracker's and Payment Statement's empty states were rebuilt as compact, centered, dashed-border boxes with an icon (matching the task's exact "No payment records yet." wording) instead of a tall plain-text block. Payment Terms Summary rows tightened (`py-2`→`py-1.5`) and its Selected/Not-selected pill badges replaced with a lighter dot+text treatment. The bottom helper note shortened to the task's exact requested one-line wording.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/dashboard/_components/dashboard-kpi-card.tsx` — new optional `dense?: boolean` prop (default `false`, so every existing consumer is unaffected); when `true`, renders a horizontal icon-left/text-right layout instead of the default vertical stack.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-kpi-strip.tsx` — all 5 `DashboardKpiCard`s now pass `dense`; grid gap `gap-4`→`gap-3`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-filter-bar.tsx` — new optional `actions?: React.ReactNode` prop rendered in the bottom action row, before Reset/Apply Filters.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/page.tsx` — Export Excel now passed as the filter bar's `actions` prop (no longer a separate flex-row sibling); bottom `InfoBox` text shortened to "Overdue payments are based on Payment Due Date and Remaining Amount."
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-tracker-table.tsx` — empty state rebuilt as a compact centered dashed-border box with a `Receipt` icon; wording "No payments recorded yet."→"No payment records yet." (Add Payment button, already in the section header above, unaffected).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-statement-card.tsx` — same compact empty-state treatment (was a bare `<p>` stretching to fill the row's full height).
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-terms-summary-card.tsx` — row/header padding tightened; Selected/Not-selected badge changed from a filled pill to a small colored dot + text.
+
+No backend files touched — confirmed during audit this was achievable as pure frontend/UI polish.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 294/294 (unchanged — no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`, dev servers already running and confirmed healthy after the build) | ✓ empty-state wording/dashed-box confirmed on a payment-less UAT contract; created a real overdue payment — Payment Tracker/Statement showed it correctly with all approved-design column labels unchanged, Export CSV correctly scoped to the one contract, Payment Terms Summary showed the new dot-badge style; confirmed the Contract Manager Dashboard's own KPI cards remain in their original non-dense vertical layout (`dense` is truly opt-in); all 12 other workspace tabs, Contract List, Manager Dashboard, New Contract Register, Workflow/Claims/Issues/Closeout, module-level `/contracts/payments`, and staff dashboard/My Tasks all unaffected. Test payment deleted afterward via direct SQL. |
+
+### Deferred
+
+None new — same deferrals as CM-58 stand.
+
+## CM-58 — Contract Payments Page Approved Design Rebuild (Completed 2026-09-01)
+
+### Summary
+
+Rebuilt the Contract Detail Payments tab (`/contracts/:id/payments`) to match the approved design, reusing the module-level payments register's real, already-working components (`PaymentFormModal`, `cancelPaymentAction`, the CSV export route) wherever possible rather than duplicating logic, while giving this contract-scoped page its own leaner filter bar, its own manager-friendly status labels, and the approved design's clearer column wording. Audit confirmed no external Account/SAP module exists anywhere in this system — payments are, and remain, manual Contract Management entries only. The module-level `/contracts/payments` register (its own KPI labels, filter bar, table, and status badge) was explicitly left untouched — a brand-new set of contract-detail-scoped components was built alongside it instead of modifying the shared ones.
+
+Two small, honest interpretive decisions were needed since the approved screenshot's own column wording didn't cleanly map to the real schema:
+- **"Submitted to Client"** — no distinct submitted-date field exists on `ContractPayment` (only `invoiceDate`/`dueDate`/`paidDate`). Uses the payment record's real `createdAt` (already returned by the API, already typed on the frontend) — the closest real event to "submitted," honestly labeled as such rather than reusing `invoiceDate` under a different name.
+- **"Search by payment no., invoice, remarks…"** — the backend's existing search only matched `paymentNo`/`invoiceNumber`/contract reference/title, not `remarks`, even though `remarks` is already a real stored field. Extended the existing search `OR` clause (one line, no schema change) so the placeholder text is actually true.
+
+### Migration
+
+None added. No schema change.
+
+### Changes
+
+**Backend (minimal, additive):**
+- `apps/api/src/contracts/contract-payments.service.ts` — `buildPaymentListWhere()`'s search `OR` clause gained `{ remarks: { contains: s, mode: 'insensitive' } }`. Same `contracts.read` + department-scope AND clause applies regardless; no other behavior changed.
+- `apps/api/src/contracts/contract-payments.service.test.ts` — existing search test extended to assert the new `remarks` clause.
+
+**Frontend — new pure helpers (fully unit tested):**
+- `apps/web/src/app/(protected)/contracts/_lib/contract-payment-detail-helpers.ts` (+11 tests) — `PAYMENT_STATUS_LABELS`/`PAYMENT_STATUS_BADGE_CLASSES` (manager-friendly display-only re-labeling of the real `ContractPaymentStatus` enum — DB values never renamed), `PAYMENT_STATUS_FILTER_OPTIONS`, `findNextDuePayment()` (soonest-due not-Received/not-Cancelled payment, real, null when none), `computePercentOfContractValue()` (real, divide-by-zero-safe, null when the contract has no current value).
+
+**Frontend — new components** (`[id]/(workspace)/payments/_components/`):
+- `contract-payment-status-badge.tsx` — manager-friendly badge (Pending/Submitted/Certified/Partially Received/Received/Overdue/Cancelled), a separate component from the module-level register's own `PaymentStatusBadge` (untouched, keeps "Paid"/"Partially Paid").
+- `contract-payment-kpi-strip.tsx` — 5 KPI cards (Submitted Invoices/Received Payments/Outstanding Payment/Overdue Payment/Next Due Payment), reusing the already-established `DashboardKpiCard` (icon-in-soft-circle style) rather than the module-level `PaymentSummaryCards` (whose "Total Submitted"/"Total Paid" labels this unit's task explicitly forbids here).
+- `contract-payment-filter-bar.tsx` — leaner than the module-level filter bar: Search / Payment Status / Date Range (Invoice Date) / Overdue Only only — no Contract/Company/Department/Manager pickers, since the page is already scoped to one contract.
+- `contract-payment-tracker-table.tsx` — the 12-column Payment Tracker table with the approved-design wording fix (Submitted to Client / Payment Due Date / Received On / Received Amount, never both "Received Date" and "Paid On"). Reuses `PaymentFormModal`/`cancelPaymentAction` unmodified.
+- `contract-payment-statement-card.tsx` — "Payment Statement" (renamed from the approved screenshot's "Account Statement (Linked to Account Model)"), with the required "Manual payment entries inside Contract Management" subtitle and a real "% of Contract Value" column.
+- `contract-payment-terms-summary-card.tsx` — "Payment Terms Summary" table (Payment Term / Selected / Notes), Notes always "—" (no notes field exists), Selected always the real saved boolean.
+
+**Frontend — rewritten:**
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/page.tsx` — fully rewritten as a `searchParams`-driven page (search/status/dateFrom/dateTo/overdueOnly), scoped to `contractId` from the route (never a user-editable filter); Export Excel link built server-side with `contractId` always included (verified live to never leak cross-contract data); bottom info note states the exact real Remaining Amount / Days Overdue logic, honestly.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 294/294 (283 + 11 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (existing search test extended, not a new count) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date (no migration) |
+| Live end-to-end check (fresh dev servers — backend changed; `.next` cleared first per the earlier build/dev-cache lesson; `uat:seed`/`uat:cleanup`) | ✓ empty-state Payments tab confirmed honest ("No payments recorded yet", all 5 KPIs still visible at KWD 0.000, zero "Linked to Account Model"/SAP/"Payment Claims" anywhere). Created a real OVERDUE payment via the API: KPI strip showed real "KWD 5,000.000" on Submitted Invoices/Overdue Payment/Next Due Payment (with "Due on 15 Aug 2026" subtext and "1 payment overdue" subtext), Payment Tracker showed 17d Days Overdue and the correct Overdue badge, Payment Statement showed "—" for % of Contract Value (this UAT contract has no contractValue — divide-by-zero correctly avoided), Payment Terms Summary showed all 6 terms as real "Not selected". Confirmed the new `remarks` search extension actually finds a payment by its remarks text. Confirmed the Export Excel CSV is correctly scoped to only this one contract's payment (no cross-contract leakage). Module-level `/contracts/payments` confirmed completely unchanged (still shows "Total Submitted"/"Total Paid"). All 12 other workspace tabs, Contract List, Manager Dashboard, New Contract Register, Workflow/Claims/Issues/Closeout, and staff dashboard/My Tasks all 200. Test payment deleted afterward via direct SQL. |
+
+### Deferred
+
+- "Submitted to Client" uses `createdAt` (record-entry time) as the closest real proxy for "when this was submitted" — no distinct submitted-date field exists; flagged rather than silently repurposing `invoiceDate`.
+- "Certified" kept as its own manager-friendly status label (not merged into the task's 6-label list) since it is a real, distinct backend state — collapsing it would hide real information.
+- Duration (payment-period days) is not shown — only the real, already-computed "Days Overdue" is; no separate duration field exists.
+
+## CM-57B — Contract Detail Overview Final UI Polish (Completed 2026-09-01)
+
+### Summary
+
+Frontend-only UI/UX polish pass on top of CM-57 — no data, calculation, backend, permission, or route change. The full-width "Available Actions" section (its own bordered card with an uppercase heading, sitting between Contract Summary and the Progress/Value/Financial row) broke the approved layout's flow, so it was removed; the exact same real components (`ContractTransitions`/`ContractClosureAction`, same visibility conditions) now render inline in Contract Summary's own header row, next to the "Contract Summary" heading — a placement change only, verified live to still show "Terminate Contract"/"Request Closeout" exactly where `hasActions` says they should. The header's `Actions`/`Print / Export` remain honest disabled placeholders (task confirmed the "Actions" dropdown is not actually wired up, so nothing was moved into it — wiring real behavior into a still-fake control would itself have been "fake action behavior"); their visual hierarchy was reordered to Edit Contract → Actions → Print/Export, matching the approved screenshot, with a Pencil icon added to Edit Contract and a stronger (text-2xl font-bold) title. Progress rings grew from 76px→88px with a thicker stroke and bolder center label. Value/Financial cards gained a highlighted "Current Contract Value" box and bolder color-coded amounts. Scope of Work switched to a 2-column checklist grid (matching Payment Terms) with a subtle checked-row background. Attention Required gained a warning-triangle icon, a count badge, and each row is now a single hover-able link (rather than text + separate link). The three bottom cards were rewritten from a stat-chip grid into a genuine compact `<table>` (header row of labels, one data row of values) per the task's explicit "make it look like a compact summary table" instruction. The bottom info note switched to `InfoBox`'s existing `variant="subtle"`.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-summary-card.tsx` — new optional `actions?: React.ReactNode` prop, rendered right-aligned in the card's own header row.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/page.tsx` — removed the boxed "Available Actions" `<section>`; `ContractTransitions`/`ContractClosureAction` now passed as `ContractOverviewSummaryCard`'s `actions` prop when `hasActions` is true; bottom `InfoBox` switched to `variant="subtle"`.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/layout.tsx` — title `text-xl font-semibold` → `text-2xl font-bold`; department/scope badges moved from the title row into the metadata row (de-emphasized, no longer competing with the title/status badge); header buttons reordered (Edit Contract → Actions → Print/Export) with a `Pencil` icon added to Edit Contract and `Print / Export` restyled as the visually strongest (dark) of the three, matching the approved screenshot's hierarchy — all three still exactly as functional/non-functional as before (Edit Contract real, Actions/Print still honest disabled placeholders).
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-progress-card.tsx` — ring size 76px→88px, radius 30→36, stroke 7→8, center label `text-sm font-bold`→`text-base font-extrabold`, row labels gained `font-medium`.
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-value-financial-cards.tsx` — Current Contract Value now a highlighted `bg-accent/5` box with a `text-lg font-bold` value; Approved Variations muted (`text-text-muted`) to read as an intentional placeholder; Financial Summary's four amount rows now `bold`; payment progress bar `h-1.5`→`h-2`.
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-checklist-cards.tsx` — Scope of Work switched from a single column to `grid-cols-2` (matching Payment Terms); `ChecklistRow` gained a subtle `bg-success/5` background + `font-medium` label when checked.
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-attention-card.tsx` — header gained an `AlertTriangle` icon and a real item-count badge; each row is now one `<Link>` (icon + text + action label, hover background) instead of separate text + link elements — same `AttentionItem[]` data, same hrefs.
+- `apps/web/src/app/(protected)/contracts/_components/contract-overview-bottom-summary-cards.tsx` — replaced the `Stat` chip-grid with a new `SummaryTable` (header row of labels, one bold data row of values) for all three cards; "Pending Obligations" value styled `text-text-muted` to read as an intentional "—", not a broken 0.
+
+No backend files touched — confirmed during audit this was achievable as pure frontend/UI polish.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 283/283 (unchanged — no data/logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ on the real `test project` contract (ACTIVE, real terminate/closeout permissions): no boxed "Available Actions" heading anywhere; "Terminate Contract" and "Request Closeout" confirmed rendering inline in Contract Summary's own header row; 88px progress rings, highlighted Current Contract Value box, 2-column Scope of Work grid, `<thead>`-based summary tables all present in the raw HTML; zero "Design Production"/"Risk Rating"/Account-module/Production-module/SAP wording. All 13 workspace routes (Overview + 12 tabs) and every module-level Contract Management page (List/Dashboard/New Register/Workflow/Payments/Claims/Issues/Closeouts) returned 200. Staff dashboard and My Tasks returned 200, unaffected. |
+
+### Deferred
+
+None new — same deferrals as CM-57 (Variations backend, document-expiry tracking, "Updated by" field, BOQ-item/scope-narrative/crane-detail viewing not yet relocated to a new tab).
+
+## CM-57 — Contract Detail Overview Approved Design Rebuild (Completed 2026-09-01)
+
+### Summary
+
+Rebuilt `/contracts/:id`'s Overview tab to match the approved executive-dashboard screenshot: full-width Contract Summary, a Progress/Value/Financial row, a Scope/Payment Terms/Attention row, and a Payment Statement/Production/Documents row, plus a bottom info note. Audit confirmed almost everything needed already existed via real endpoints — `contractsApi.get()`, `listPayments({contractId})`'s server-computed `.summary` (full filtered set, not one page), and `getCloseoutChecks()`'s existing cross-module aggregation (workflow/issues/claims/payments/documents) — so this was overwhelmingly a frontend + pure-function unit. The one real gap: `getWorkflow()` lazily **generates** a contract's default workflow tasks on first call if none exist, which is fine for the real Workflow tab (a deliberate action) but would have made simply *viewing* Overview on a fresh Draft contract silently create a full task set — a write side effect the task explicitly said to avoid. Added one new read-only backend endpoint (`GET :id/workflow-summary`) that returns the same team/status/attachment data without ever generating anything, verified live (0 tasks before and after opening Overview on a task-less Draft contract).
+
+No fake data anywhere: Variations show 0/"—" (no Variations backend exists — the `/variations` tab is itself an honest "tracking will be enabled after the Variations backend unit" stub); Production Summary falls back to real PRODUCTION-team workflow-task counts (never fabricated cast/delivered/stock numbers); Documents & Obligations shows the real sum of workflow-task + closeout-request attachment counts, with Pending Obligations shown as "—" (no such data exists); Risk Rating is never shown (Risk Assessment is itself a stub tab); a legacy `scopeOfWork.designProduction: true` value is never displayed as "Design Production" on this page.
+
+### Migration
+
+None added. No schema change — every field this unit reads already existed.
+
+### Changes
+
+**Backend (read-only addition):**
+- `apps/api/src/contracts/contract-workflow.service.ts` — new `getWorkflowSummaryForContract()`: same `contracts.read` + department-scope checks as every other read here, plain `contractWorkflowTask.findMany()` (team/status/dueDate/attachment count), computes `isOverdue` via the existing `computeTaskIsOverdue()`. Never calls `generateWorkflowTaskTemplates()`/`createMany()` — no side effects.
+- `apps/api/src/contracts/contracts.controller.ts` — new `GET :id/workflow-summary` (`@Permissions('contracts.read')`), separate from the existing `GET :id/workflow`.
+- `apps/api/src/contracts/contract-workflow.service.test.ts` — +4 tests: rejects without `contracts.read`, 404 on missing contract, asserts department-scope check, and — the key regression guard — "never creates tasks, even when none exist yet."
+- `apps/web/src/lib/contracts-api.ts` — `contractsApi.getWorkflowSummary()` + `ContractWorkflowSummaryData` type; `attachmentsCount` added to `ContractCloseoutRequest`'s already-existing field (no change needed there, already present).
+
+**Frontend — new pure helpers (fully unit tested):**
+- `apps/web/src/app/(protected)/contracts/_lib/contract-overview-helpers.ts` (+19 tests) — `computeTeamProgress()`/`computeOverallProgress()` (real completed/total workflow-task ratios per team), `computeProductionTaskSummary()` (real PRODUCTION-team task counts by bucket), `computePaymentProgressPercent()` (Received ÷ Current Value, divide-by-zero safe), `buildAttentionItems()` (every row gated behind a real count > 0 or a real overdue/closing-soon date condition — never expiring-document rows, since no expiry tracking exists), `OVERVIEW_SCOPE_DISPLAY_KEYS` (fixed 5-option scope list, `designProduction` excluded).
+
+**Frontend — new Overview components:**
+- `contract-overview-summary-card.tsx` (Section 1), `contract-overview-progress-card.tsx` (Section 2, plain inline SVG circular progress rings — no chart library added), `contract-overview-value-financial-cards.tsx` (Sections 3–4), `contract-overview-checklist-cards.tsx` (Sections 5–6), `contract-overview-attention-card.tsx` (Section 7), `contract-overview-bottom-summary-cards.tsx` (Sections 8–10).
+- `contract-lifecycle-badge.tsx` — exported its label map as `LIFECYCLE_STATUS_LABEL` (was a private const) so the new Contract Status field can reuse it without duplicating the mapping.
+
+**Frontend — rewritten/updated:**
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/page.tsx` — fully rewritten: fetches `get()`, `getWorkflowSummary()`, `listPayments({contractId, pageSize:1})`, `getCloseoutChecks()`, `listCloseoutRequests()` in parallel; renders the 10 approved-design cards; keeps the real (unchanged) Available Actions block (`ContractTransitions`/`ContractClosureAction`) conditionally, right after Contract Summary.
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/layout.tsx` — title now `<Job Order or Reference> – <Project Name>`; status badge prefers real `scheduleStatus` (colored per the existing `SCHEDULE_STATUS_BADGE_CLASSES`), falling back to the real lifecycle badge — never a guessed schedule value; metadata row simplified to Contract ID / Created on / Last Updated (Client/Contract Manager moved into the new Contract Summary card, no longer duplicated; "Updated by" omitted — no real field backs it).
+- `apps/web/src/app/(protected)/contracts/_components/contract-workspace-tabs.tsx` — two label-only alignments: "Claims Registry"→"Claims / Change Orders", "Activity / Audit History"→"Activity Log". Every route/segment unchanged.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 283/283 (264 + 19 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1190/1190 (1185 + ~5 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date (no migration) |
+| Live end-to-end check (fresh dev servers — backend changed, restarted per the established staleness check; `uat:seed`/`uat:cleanup`) | ✓ opened Overview on the real pre-existing `test project` contract (which has a legacy `scopeOfWork.designProduction: true`): all 10 section headings present, exactly 5 Scope of Work rows rendered (Shop Drawing/Production/Delivery/Erection checked, Ex-Factory unchecked) with zero "Design Production" anywhere; Contract Summary showed real Job Order/Date/Quotation/Company/Project/Manager/Status/Schedule Status/Days Remaining (24d, correctly computed); Attention Required showed real rows ("4 overdue workflow tasks", "Contract completion date is approaching (24d)") each with a working action link; Financial/Payment Statement cards showed real `KWD 0.000` (no manual payments entered yet — honest zero, not fake); zero occurrences of "Account module"/"linked account"/"Production Module"/"Payment Claims"/"Risk Rating"/"SAP" anywhere. Confirmed on a task-less Draft UAT contract that opening Overview does NOT auto-generate workflow tasks (0 tasks before and after, via a direct `GET :id/workflow-summary` check). All 14 other workspace routes (schedule/payments/production/variations/claims/risks/documents/workflow/issues/attachments/closeout/activity/edit) still 200. Contract List/dashboard/New Contract Register/workflow/payments/claims/issues/closeouts all 200. Staff redirect logic in `layout.tsx` verified byte-for-byte unchanged by this unit's diff. |
+
+### Data Honesty Confirmation
+
+Every number on the page is real or an honest 0/"—":
+- Real, direct: Job Order, Date, Quotation #, Company Name, Project Name, Project Number, Contract Manager, Contract/Schedule Status, Days Remaining, Original/Current Contract Value, Scope of Work, Payment Terms (selected/unselected only — no invented percentages/status text).
+- Real, computed: Technical/Production/Erection/Overall Progress (real workflow-task ratios), Payment Progress %, Submitted/Received/Outstanding/Overdue payment amounts, Attention Required rows, Total Attachments.
+- Honest placeholders (explicitly, not silently): Approved Variations = 0, Last Variation = "—" (no Variations backend); Pending Obligations = "—" (no obligations tracking).
+- Never shown: Risk Rating, expiring documents/performance bonds/insurance, "Design Production", any Account/Production/SAP-module wording.
+
+### Unsupported/Deferred Metrics
+
+- **Variations** — no backend exists yet (the `/variations` tab is itself a stub); Approved Variations/Last Variation are placeholders by necessity, not by choice.
+- **Document expiry tracking** — no schema support; Documents & Obligations only ever shows real attachment counts, never expiry status.
+- **"Updated by" name** — Contract has no generic `updatedByUser` field (only `activatedByUser`/`terminatedByUser`/`closedByUser`, each tied to a specific transition); inferring it from the latest `ContractActivity` would be an unreliable guess, so it is omitted entirely per the task's own "do not invent user names" rule.
+- **"Main Contractor" field** — no distinct field exists separate from `counterpartyName` (already shown as Company Name); omitted rather than shown twice under a different label.
+- **BOQ item line-by-line view, full scope narrative (scopeDescription/scopeExclusions/deliverables/milestones), and crane details** — the pre-existing `ContractInfoCard`/`ContractRegisterDetailsCard`/`ContractBadgeGroupCard`/`ContractScopeDetailsCard`/`ContractCraneDetailsCard`/`ContractBoqItemsCard` components are no longer rendered on Overview (replaced by the approved-design summary cards) but were **not deleted** — they're real, working components with no other consumer. Flagged here as a follow-up decision (e.g. a future "Details" or "BOQ" tab), not silently dropped.
+
+### Next Recommended Unit
+
+Decide where the now-unrendered detail components (BOQ items, full scope narrative, crane details) should resurface — most likely a new tab, since Overview is now intentionally an executive summary rather than a full record view.
+
+## CM-56E — New Contract BOQ Table Final Readability Polish (Completed 2026-09-01)
+
+### Summary
+
+Frontend-only column-width rebalance on the New Contract Register BOQ table — no backend, DTO, service, or formula change. Audit confirmed the read-only calculated-cell styling, right-aligned numeric inputs, and scoped horizontal scroll from CM-56D were already in place; the remaining gap was column-width balance now that the table carries 13 columns (Drawing Qty added in the prior unit). Item Description widened (280px→320px, still a single-line input, row height unchanged); Unit Price widened slightly (96px→112px) for larger monetary values; Total Price and Amount Remaining (the two currency-formatted read-only cells, e.g. "KWD 2,400.000") widened (112px→128px) so formatted values don't crowd; Drawing Ref. and Calculation Ref. narrowed (112px→96px) to free up space, matching the "compact optional fields" guidance; BOQ Qty/Area, Drawing Qty, and Invoice Qty stayed equal-width (96px) as required. Table `min-w` bumped from 1400px to 1500px (`min-w-375`) to match.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_components/contract-boq-register-table.tsx` — column width classes only: Item Description `min-w-70`→`min-w-80`; Unit Price `w-24`→`w-28`; Total Price / Amount Remaining `w-28`→`w-32`; Drawing Ref. / Calculation Ref. `w-28`→`w-24`; table `min-w-[1400px]`→`min-w-375` (1500px). No column added/removed/reordered, no formula touched, no field name touched.
+
+No backend files touched — confirmed during audit this was achievable as pure column-width polish.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 264/264 (unchanged — no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1185/1185 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (`uat:seed`/`uat:cleanup`) | ✓ all 12 required column labels present and in the correct left-to-right order (verified programmatically against the raw HTML); no "Design Production"/"P/R"; `unitOfMeasure="m²"` confirmed selected by default. Real `POST /contracts` with `drawingQty`/`invoiceQty`/`drawingReference`/`specificationReference` → 201, all round-tripped identically to CM-56D (`totalPrice` = 80×30 = 2400, unaffected by drawingQty). Contract List, dashboard, workflow, payments, schedule, and Contract Staff (`test.operator`) pages all 200 |
+
+### Deferred
+
+None new.
+
+## CM-56D — Add Drawing Qty to New Contract BOQ (Completed 2026-09-01)
+
+Note: this unit reuses the "CM-56D" code from the task text it was given, distinct from the earlier "CM-56D — New Contract Register Final UX Polish" entry directly below.
+
+### Summary
+
+Added an optional "Drawing Qty" column to the New Contract Register BOQ table, placed before Invoice Qty. Audit confirmed no existing field covered this (`revisedQty` exists but already feeds `boqRowQty()`/Total Price as an override — reusing it would have silently pulled Drawing Qty into the Total Price formula, violating the explicit "Drawing Qty must never affect calculations" requirement), so one new additive nullable column (`contract_boq_items.drawing_qty`) was required. Wired through the full stack: Prisma schema/migration, `CreateContractBoqItemDto`, both `create()`/`update()` BOQ `createMany` mappings and the shared `select` block in `contracts.service.ts`, the frontend `ContractBoqItem` API type, and `contract-boq-helpers.ts` (`BoqRow`, `emptyBoqRow()`, `boqRowHasAnyValue()`, `validateBoqRows()`, `BoqApiItem`/`toBoqApiItems()`, `ExistingBoqItem`/`boqRowsFromExisting()`). `boqLineTotal()`, `boqProgressPercent()`, and `boqAmountRemaining()` were deliberately left untouched — Drawing Qty is never read by any of them. The BOQ helper note was updated to the exact required wording explaining BOQ Qty / Area vs. Drawing Qty vs. Progress / Invoice %.
+
+### Migration
+
+`20260901010000_add_contract_boq_drawing_qty` — one new nullable column, `contract_boq_items.drawing_qty DECIMAL(14,3)`. Purely additive; no existing column, constraint, or migration touched. Applied via the established shadow-DB workaround; confirmed via `prisma migrate status` → "Database schema is up to date!".
+
+### Changes
+
+- `packages/database/prisma/schema.prisma` — `ContractBoqItem.drawingQty` (new, nullable), placed before `invoiceQty` with a comment explaining it is deliberately never read by any BOQ formula.
+- `apps/api/src/contracts/dto/create-contract-boq-item.dto.ts` — added `drawingQty?: number` (`@IsOptional @IsNumber(maxDecimalPlaces:3) @Min(0)`), same shape as `invoiceQty`. Shared by create and update DTOs.
+- `apps/api/src/contracts/contracts.service.ts` — `drawingQty: true` added to the shared BOQ item `select` block; `...(item.drawingQty !== undefined ? { drawingQty: item.drawingQty } : {})` added to both `create()`'s and `update()`'s BOQ `createMany` mappings (two separate edits, differing indentation, verified via grep afterward).
+- `apps/api/src/contracts/contracts.service.test.ts` — +3 tests: drawingQty persisted on create (totalPrice unaffected), omitted (not forced to 0) when absent, persisted on update's BOQ replace.
+- `apps/web/src/lib/contracts-api.ts` — `ContractBoqItem.drawingQty?: string` added.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-boq-helpers.ts` — `drawingQty` wired through `BoqRow`, `emptyBoqRow()`, `boqRowHasAnyValue()`, `validateBoqRows()` (rejects negative, allows blank), `BoqApiItem`/`toBoqApiItems()`, `ExistingBoqItem`/`boqRowsFromExisting()`. `boqRowQty()`, `boqLineTotal()`, `boqProgressPercent()`, `boqAmountRemaining()` untouched.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-boq-helpers.test.ts` — +9 tests, including three explicit "drawingQty does not affect boqLineTotal/boqProgressPercent/boqAmountRemaining" comparisons (same inputs with and without a large `drawingQty` produce identical results).
+- `apps/web/src/app/(protected)/contracts/_components/contract-boq-register-table.tsx` — "Drawing Qty" column inserted between Total Price and Invoice Qty in `BOQ_COLUMNS`/`RIGHT_ALIGNED_COLUMNS`; new right-aligned numeric input cell with a title tooltip clarifying it's informational only.
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — BOQ helper note updated to the exact required wording: "BOQ Qty / Area is the original contract quantity. Drawing Qty can be updated when drawing/calculation quantity is confirmed. Progress / Invoice % is calculated from Invoice Qty against BOQ Qty / Area."
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 264/264 (255 + 9 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1185/1185 (1182 + 3 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ "Database schema is up to date!" |
+| Live end-to-end check (fresh dev servers — prior ones predated this unit's backend edits and the API has no hot reload; `uat:seed`/`uat:cleanup`) | ✓ "Drawing Qty" header confirmed to render between "Total Price (T/P) KWD" and "Invoice Qty" via raw HTML index comparison; no "Design Production"/"P/R"; helper note text matches exactly. Real `POST /contracts` with `drawingQty: 95` on one row and no `drawingQty` on a second row → 201; `drawingQty` round-tripped as `"95"`/`null` respectively; `totalPrice` stayed `100×20=2000` (unaffected); blank Drawing Qty did not block save. Contract List, dashboard, workflow, payments, schedule, and Contract Staff (`test.operator`) pages all 200. Test contract deleted afterward via direct SQL. |
+
+### Deferred
+
+- None new. Edit Contract's own BOQ table still doesn't expose `invoiceQty`/`drawingQty` in its UI (both are stored/API-visible regardless) — same pre-existing deferral from CM-56/CM-56C.
+- No hard-delete endpoint for contracts — still requires direct SQL for test-data cleanup.
+
+## CM-56D — New Contract Register Final UX Polish (Completed 2026-09-01)
+
+### Summary
+
+Final UI/UX polish pass on `/contracts/new` — no rebuild, no functional change. `InfoBox` (shared by New Register and Edit Contract) gained an opt-in `variant="subtle"` (default unchanged) for a lighter/shorter helper-note style; `ScopeOfWorkFieldset` forwards an `infoBoxVariant` prop so its own Ex-Factory note can use the subtle style too, without touching Edit Contract's rendering (which passes neither prop). New Register's own three inline notes (department banner, Progress/Invoice % note, Register Contract note) now use the subtle variant. The BOQ table's calculated columns (Total Price, Progress / Invoice %, Amount Remaining) now render inside a muted read-only-looking box instead of plain text; the three raw-number input columns (BOQ Qty/Area, Unit Price, Invoice Qty) are right-aligned with tabular numerals; Item Description's minimum width grew (220px → 280px); column headers for every numeric/amount column are now right-aligned to match; the Total Amount summary box got a stronger accent-tinted, bold treatment. Section card padding/gaps were tightened slightly (`p-6`→`p-5`, `space-y-5`/`gap-5`→`space-y-4`/`gap-4`). Bottom-row Save Draft is now visually distinct from Cancel (light accent-tinted "secondary" style instead of an identical plain outline), giving Cancel / Save Draft / Register Contract three distinct visual weights.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_components/contract-form-fields.tsx` — `InfoBox` gained `variant?: 'default' | 'subtle'` (default `'default'`, unchanged look); `ScopeOfWorkFieldset` gained `infoBoxVariant?: 'default' | 'subtle'` (default `'default'`), forwarded to its own `InfoBox`.
+- `apps/web/src/app/(protected)/contracts/_components/contract-boq-register-table.tsx` — Total Price/Progress-Invoice-%/Amount Remaining cells now render in a muted `boqReadOnlyCls` box (right-aligned, tabular-nums) instead of plain `<td>` text; BOQ Qty/Area, Unit Price, Invoice Qty inputs gained `text-right tabular-nums`; Item Description `min-w` increased to `min-w-70` (280px); table header cells for numeric/amount columns right-aligned to match; Total Amount summary box restyled with an accent border/tint and bold `text-lg` value.
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — `SectionCard` padding `p-5 sm:p-6`→`p-5`, header margin `mb-4`→`mb-3`; form/grid spacing `space-y-5`/`gap-5`→`space-y-4`/`gap-4`; department banner, Progress/Invoice % note, and Register Contract note switched to `<InfoBox variant="subtle">`; `ScopeOfWorkFieldset` now passes `infoBoxVariant="subtle"`; bottom-row Save Draft button restyled (`border-accent/30 bg-accent/5 text-accent`) to read as a distinct secondary action next to the plain-outline Cancel and solid-green Register Contract.
+
+No backend files touched — confirmed during audit that this was achievable as pure frontend/UI polish with zero field-name, action, or calculation changes.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 255/255 (unchanged — no pure-function/calculation changes) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1182/1182 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check (fresh `uat:seed`/`uat:cleanup`) | ✓ all 12 BOQ columns still present, no "Design Production"/"P/R", read-only calculated-cell styling and the accent Total Amount box confirmed in the raw HTML; real `POST /contracts` with `invoiceQty`/`drawingReference`/`specificationReference`/dates/`originalContractValue` all round-tripped identically to CM-56C (contractValue stayed BOQ-derived, independent of originalContractValue); Contract List, dashboard, workflow, payments, schedule, and Contract Staff (`test.operator`) pages all 200 |
+
+### Deferred
+
+None new.
+
+## CM-56C — New Contract Register Dates and Value Sections (Completed 2026-09-01)
+
+### Summary
+
+Added Contract Dates (Start Date / End Date / Forecast Completion Date) and Contract Value (Original Value / Currency) sections to `/contracts/new`, matching the CM-56B wide layout. Audit confirmed this was purely frontend-only: `startDate`, `endDate`, `forecastCompletionDate`, `originalContractValue`, `originalCurrency` were already declared (optional) in `create-contract.dto.ts`, already persisted by `contracts.service.ts`, and already read from `FormData` by `createContractAction` — none of that needed to change. The existing shared `ContractDatesFields`/`ContractValueFields` components (already used by Edit Contract) were reused as-is; New Register only supplies a `defaults={{ originalCurrency: 'KWD' }}` prop to `ContractValueFields` so Currency starts pre-filled — a prop-level default that leaves the shared component's own fallback (blank) untouched for Edit Contract. Section numbering was updated (Contract Dates=3, Contract Value=4, Payment Terms=5, BOQ=6, Actions=7) and a new Row 2 (`grid-cols-2` on desktop) places Contract Dates and Contract Value side by side, mirroring Row 1's side-by-side Basic Details/Scope of Work.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — imported `ContractDatesFields`/`ContractValueFields`; inserted a new Row 2 (`grid-cols-1 lg:grid-cols-2 gap-5`) between Row 1 and Payment Terms containing Section 3 (Contract Dates) and Section 4 (Contract Value, with `defaults={{ originalCurrency: 'KWD' }}`); renumbered Payment Terms (3→5), Contract BOQ / Items (4→6), Actions (5→7).
+
+No other files changed — `contract-form-fields.tsx` (where `ContractDatesFields`/`ContractValueFields` already lived), `actions.ts`, `contracts.service.ts`, DTOs, and the schema were all read during the audit but needed no edits.
+
+### Migration
+
+None added. No schema change — all six fields already existed as nullable/optional columns from earlier units.
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 255/255 (unchanged — no pure-function/logic changes) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1182/1182 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ "Database schema is up to date!" |
+| Live end-to-end check (fresh `uat:seed`/`uat:cleanup`, real dev DB) | ✓ `/contracts/new` renders sections in order 1–7 with all required field names present, Currency pre-filled "KWD". Real `POST /contracts` with `startDate`/`endDate`/`forecastCompletionDate`/`originalContractValue: 5000`/`originalCurrency: "KWD"` plus one real BOQ item (100×20=2000) → 201; all three dates round-tripped; `contractValue` (current) = 2000 from the BOQ total, `originalContractValue` stayed 5000 — confirming the two never collide. New contract appeared correctly in Contract List (with its real dates/values in the raw payload). Dashboard/workflow/payments/schedule pages and Contract Staff (`test.operator`) `/contracts`, `/contracts/dashboard`, `/contracts/workflow` all 200. Test contract deleted afterward via direct SQL (still no hard-delete API route for contracts). |
+
+### Key Implementation Notes
+
+- `ContractsService.create()`'s existing rule (`effectiveContractValue = boqItems.length > 0 ? BOQ total : dto.contractValue`, with `effectiveOriginalContractValue = dto.originalContractValue ?? effectiveContractValue`) already did exactly what this unit needed: Original Value is a genuinely separate, manually-entered field, and Current (BOQ-derived) Value is untouched by it. No service change required.
+- Passing `defaults={{ originalCurrency: 'KWD' }}` as a prop (rather than editing `ContractValueFields`'s own internal `?? ''` fallback) keeps Edit Contract's blank-when-unset behavior completely unchanged — only New Register's call site opts into a pre-filled default.
+
+### Deferred
+
+- None new. CM-56/CM-56B's existing deferrals (Edit Contract's BOQ table not yet showing invoiceQty in its UI; no hard-delete endpoint for contracts) still stand.
+
+## CM-56B — New Contract Register Approved Layout Correction (Completed 2026-09-01)
+
+### Summary
+
+Layout-only correction on top of CM-56: the initial rebuild was functionally correct but visually too narrow/stacked. Widened `/contracts/new` to the same `max-w-[1920px]` wide-workspace container `contracts/page.tsx` already uses, put Basic Contract Details (~60%, `lg:grid-cols-[3fr_2fr]`) and Scope of Work (~40%) side by side on desktop, widened Payment Terms to a `lg:grid-cols-6` single-row layout with larger cards, and enlarged/restyled the Cancel/Save Draft buttons (blue primary Save Draft, white outline Cancel) in both the page header and Section 5's Actions row. `ScopeOfWorkFieldset` gained an optional `gridClassName` prop (default unchanged) so New Register's narrower column could use a 2-column checkbox grid without touching Edit Contract, which passes no override.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/_components/contract-form-fields.tsx` — `ScopeOfWorkFieldset` gained `gridClassName?: string` (default `gridCls3`).
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — Row 1 wraps Basic Contract Details + Scope of Work in a `grid-cols-[3fr_2fr]` container; Payment Terms grid widened to `lg:grid-cols-6`; all `SectionCard`s gained `shadow-sm`; Actions/header buttons enlarged (`h-11 px-5`).
+- `apps/web/src/app/(protected)/contracts/new/page.tsx` — container widened `max-w-5xl` → `max-w-[1920px]`; header Cancel/Save Draft buttons enlarged and restyled (Save Draft now `bg-accent` primary).
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` / `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 255/255 (unchanged — layout-only) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1182/1182 (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ up to date |
+| Live end-to-end check | ✓ wide layout confirmed via SSR HTML (`max-w-[1920px]`, `grid-cols-[3fr_2fr]`, `lg:grid-cols-6` all present); real `POST /contracts` with `invoiceQty`/`drawingReference`/`specificationReference` still round-tripped correctly; Contract List/dashboard/workflow/payments/schedule/claims/closeouts/issues and Contract Staff pages all 200 |
+
+### Deferred
+
+None new.
+
+## CM-56 — New Contract Register Approved Design Rebuild (Completed 2026-09-01)
+
+### Summary
+
+Rebuilt `/contracts/new` to match the approved design screenshot: a single dedicated page (breadcrumb "Contract Management > Contract List > New Contract Register") with 5 numbered sections — Basic Contract Details, Scope of Work, Payment Terms, Contract BOQ / Items, Actions — and top-right Cancel + Save Draft buttons that operate on the same form. Audited first: found both a real page and a modal (`new-contract-register-modal.tsx`) wrapping the same shared `NewContractForm` via a `layout` prop; deleted the modal entirely and pointed the Contract List's "+ New Contract Register" button at the page, since the approved breadcrumb design is inherently page-based. Scope of Work now excludes Design Production (plus Other/Not Applicable, to match the approved 5-option list); the Ex-Factory→disables-Delivery/Erection rule is untouched. Rebuilt the BOQ table with the approved column set and renamed "P/R" to "Progress / Invoice %" everywhere. Added a real, persisted `invoiceQty` column so Progress % and Amount Remaining are genuine, live-calculated values instead of permanently-zero placeholders — Total Price stays exactly `BOQ Qty × Unit Price`, unaffected by invoiceQty. "Register Contract" replaces the old "Create Draft Contract" label; both submit buttons still produce an identical Draft-status contract (no separate register-vs-draft backend state exists), and Section 5's copy says so honestly instead of implying auto-activation.
+
+### Migration
+
+`20260901000000_add_contract_boq_invoice_qty` — one new nullable column, `contract_boq_items.invoice_qty DECIMAL(14,3)`. Purely additive; no existing column, constraint, or migration touched. Applied via the established shadow-DB workaround (`prisma db execute --file` → `prisma migrate resolve --applied`); confirmed via `prisma migrate status` → "Database schema is up to date!".
+
+### Changes
+
+- `packages/database/prisma/schema.prisma` — `ContractBoqItem.invoiceQty` (new, nullable); model header comment updated to say only Progress %/Amount Remaining stay derived (invoiceQty is now real/stored).
+- `apps/api/src/contracts/dto/create-contract-boq-item.dto.ts` — added `invoiceQty?: number` (`@IsOptional @IsNumber(maxDecimalPlaces:3) @Min(0)`); added `'ls'` to `CONTRACT_BOQ_UNIT_OPTIONS`. Shared by both create and update DTOs.
+- `apps/api/src/contracts/contracts.service.ts` — `invoiceQty` added to the shared BOQ `select` block and to both `create()`'s and `update()`'s BOQ `createMany` mappings (two separate edits — different indentation between the two blocks). `computeBoqItemTotal()` untouched — Total Price stays independent of invoiceQty.
+- `apps/api/src/contracts/contracts.service.test.ts` — +3 tests covering invoiceQty persisted on create, omitted (not forced to 0) when absent, and persisted on update's BOQ replace.
+- `apps/web/src/lib/contracts-api.ts` — `ContractBoqItem.invoiceQty?: string` added to the client type.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-boq-helpers.ts` — new `emptyRegisterBoqRow()` (m² default, separate from `emptyBoqRow()` so Edit Contract's row-add is unaffected), `boqInvoicedValue()`, `boqProgressPercent()`, `boqAmountRemaining()` (qty-guarded — returns 0 rather than a spurious negative when BOQ Qty is blank/0; not clamped once qty is valid, so genuine over-invoicing still shows as negative); `invoiceQty` wired through `BoqRow`, `validateBoqRows()`, `toBoqApiItems()`, `boqRowsFromExisting()`; `'ls'` added to `UNIT_OF_MEASURE_OPTIONS` (free VARCHAR column, no migration needed).
+- `apps/web/src/app/(protected)/contracts/_lib/contract-boq-helpers.test.ts` — +16 tests (20→36) for the new helpers, including the blank/zero-qty divide-by-zero guards and an explicit over-invoiced negative case.
+- `apps/web/src/app/(protected)/contracts/_components/contract-form-fields.tsx` — `ScopeOfWorkFieldset` gained an optional `excludeKeys?: string[]` prop to hide specific scope options (and their Other/Not Applicable helper text) without affecting Edit Contract, which passes none.
+- `apps/web/src/app/(protected)/contracts/_components/contract-boq-register-table.tsx` (new) — dedicated BOQ table for New Register only: S/N, Item Description, Unit, BOQ Qty / Area, Unit Price (U/P) KWD, Total Price (T/P) KWD, Invoice Qty, Progress / Invoice %, Amount Remaining KWD, Drawing Ref., Calculation Ref., Action. Delete blocked at 1 row (disabled + tooltip). Deliberately separate from the shared `contract-boq-table.tsx`, which Edit Contract keeps using unchanged with its own larger column set.
+- `apps/web/src/app/(protected)/contracts/new/_components/new-contract-form.tsx` — rewritten: dropped unused `depts`/`plantsData`/`locations`/`people`/`onCancel`/`layout` props and the entire modal-layout branch; now a single always-page form with `id={NEW_CONTRACT_FORM_ID}` (exported), 5 `SectionCard`s matching the approved design, 5 blank BOQ rows on mount, honest Section 5 copy.
+- `apps/web/src/app/(protected)/contracts/new/page.tsx` — rewritten: only fetches `contractsApi.dashboard()` (scope banner); real Cancel `<Link>` + a `<button form={NEW_CONTRACT_FORM_ID}>Save Draft</button>` in the page header submit/cancel `NewContractForm`'s form via the plain HTML `form` attribute — no client wrapper or shared state needed.
+- `apps/web/src/app/(protected)/contracts/page.tsx` — "+ New Contract Register" now a `<Link href="/contracts/new">` (was a modal trigger); dropped the now-unused `departments()`/`plants()`/`locations()` fetches (kept `people()` for the filter bar).
+- `apps/web/src/app/(protected)/contracts/_components/new-contract-register-modal.tsx` — deleted (zero remaining consumers, confirmed via grep).
+
+### Verification Results (2026-09-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` (web + api) | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 255/255 tests (239 + 16 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1182/1182 tests (1179 + 3 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ "Database schema is up to date!" |
+| Live end-to-end check (fresh dev servers — prior ones were stale from before this unit's edits; idempotent `uat:seed`/`uat:cleanup`) | ✓ `/contracts/new` page HTML: correct title/subtitle/breadcrumb/5 section headers, zero "Design Production", zero standalone "P/R", all 8 required BOQ column labels present, "m²" present 3×, both submit buttons render. Real `POST /contracts` with `unitOfMeasure: "m²"`, `invoiceQty: 100`, `drawingReference`, `specificationReference` → 201, `contractValue` = 6250 = 500×12.5 (unaffected by invoiceQty), all fields round-tripped on the created record including the second, mostly-blank BOQ row (didn't block save). New contract appeared correctly in `/contracts` (list), `/contracts/:id` (detail), `/contracts/dashboard` (all 200). `/contracts/workflow`, `/payments`, `/schedule`, `/claims`, `/closeouts`, `/issues` and the Contract Staff (`test.operator`) `/contracts`, `/contracts/dashboard`, `/contracts/workflow` all 200. Test contract + its BOQ rows deleted afterward via direct SQL (no hard-delete API route exists for contracts yet) since it was UAT-created data, not a pre-existing record. |
+
+### Key Implementation Notes
+
+- The HTML native `form` attribute (`<button type="submit" form="...">`) lets a Server-Component page header submit a Client Component's `<form>` with zero shared state — a reusable pattern for any future "external action buttons for an internal client form" need. Documented in `ui-registry.md`.
+- `boqAmountRemaining()`'s qty guard was added after a test failure: without it, a blank/zero BOQ Qty with a real invoiceQty×unitPrice produced a spurious negative (`0 − invoicedValue`) instead of 0. Once qty is valid, negative "over-invoiced" values are intentionally preserved (real signal), so the guard only fires when qty itself is unusable.
+- `unitOfMeasure` is a free VARCHAR, not a Prisma/DB enum, so adding `'ls'` needed no migration.
+- Global `ValidationPipe({ whitelist: true })` silently strips any field not declared in a DTO — `invoiceQty` had to be added to `create-contract-boq-item.dto.ts` (not just the Prisma schema) or it would never have reached the database.
+
+### Deferred
+
+- Edit Contract's BOQ table (`contract-boq-table.tsx`) does not yet expose `invoiceQty`/Progress %/Amount Remaining — only New Register does. The value is stored and API-visible either way; wiring it into Edit Contract's UI is a separate, contained follow-up, deliberately left out of this unit's scope (redesigning the shared table would also change Edit Contract's UX, not requested here).
+- No hard-delete endpoint exists for contracts (archive/delete was added for Departments/Plants/Locations/Users in an earlier unit, not Contracts) — noted for whoever picks up contract lifecycle cleanup next; today, removing an accidental contract still requires direct SQL.
+
+## CM-55D — Contract List Final Table Polish (Completed 2026-08-31)
+
+### Summary
+
+Final frontend-only polish on the CM-55/CM-55B/CM-55C Contract List — no backend, data, `scheduleStatus`, or filter change. Audited Contract ID wrapping first: CM-55C had already applied `whitespace-nowrap` to that cell, so the literal "CONTRACT-\n2026-000001" wrap wasn't actually reproducible — the real gap was that `table-layout: auto` had no reserved width for the column, so it could still render uncomfortably narrow. Added an explicit `min-w-40` (plus a defensive `title` tooltip) to close that gap for good. Restructured the Action column so only "Open" and a "···" More menu are ever visible — the status-driven primary action (Activate/Assign Tasks/Review Closeout) moved to the top of the dropdown instead of sitting as a third always-visible button — and added a compact top-of-table row with a real "Showing X to Y of Z contracts" count on the left and the Simple/Full View toggle (now labeled "View:") on the right, matching the approved design direction.
+
+### Changes
+
+- `contract-row-actions.tsx` — the "primary" action (Activate/Assign Tasks/Review Closeout) is now the first item inside the "···" menu (`text-accent font-medium`) instead of an inline button between Open and the menu trigger. Activate's confirm-dialog flow is unchanged, just triggered from a menu `<button>`. `computeContractRowActionPlan()` (the pure, already-tested decision function) is completely untouched — this is a rendering-only change in the one component that consumes its output.
+- `contract-list-table.tsx` — Contract ID header/cells gained `min-w-40` + a `title` tooltip (on top of CM-55C's existing `whitespace-nowrap`); new top toolbar row combines a real pagination-derived count (`page`/`pageSize`/`total` — 3 new optional props, falling back to a plain "Showing N contracts" when not supplied) on the left with the "View:" + Simple/Full toggle on the right, replacing the toggle-only row.
+- `page.tsx` — extracted the `pageSize: 25` literal into a named `PAGE_SIZE` constant, passed `page`/`pageSize`/`total` through to `ContractListTable`; the bottom Previous/Next block dropped its now-redundant "Showing X of Y" text (superseded by the new, more accurate top-row count) but keeps full Previous/Next navigation.
+- `context/ui-registry.md` — new entries for the restructured `ContractRowActions` and the Contract ID `min-w-40` addition.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 239/239 tests (unchanged — `computeContractRowActionPlan` untouched, no new pure-function surface added this unit) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1179/1179 tests (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, real dev DB) | ✓ top row renders "Showing 1 to 3 of 3 contracts" (real, matches the 3 in-scope contracts) + "View:" label; exactly one "Open" link and one "···" trigger per row (no extra visible primary button); Contract ID `min-w-40` present on header and all 3 rows; sticky-left/sticky-right classes still intact; `PATCH .../schedule-status` re-verified to persist without touching `status`/`version`; the real contract's `scheduleStatus` reverted to NULL via direct SQL afterward; Staff dashboard/My Tasks/list and manager dashboard/workflow/payments/claims all unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- **Contract ID audit finding:** the "wraps like CONTRACT-\n2026-000001" symptom described in this unit's task was not reproducible as literally described — CM-55C had already set `whitespace-nowrap` on that cell. The real remaining gap (no reserved minimum width under `table-layout: auto`) is now closed with `min-w-40`, reported honestly rather than claiming to have fixed a bug that, on inspection, was already partially fixed.
+- `ContractRowActions` has no direct component test file in this codebase (only its pure `computeContractRowActionPlan()` decision logic is unit tested) — the restructure's correctness was confirmed via live SSR-HTML rendering (element counts) rather than `pnpm test`, consistent with how every other UI-only change in this CM-54/55 series has been verified.
+
+### Deferred
+
+- Nothing new deferred this unit — CM-55C's already-reported deferrals (sticky Contract No., full elimination of Full View's horizontal scroll) still stand; this unit didn't attempt either.
+
+## CM-55C — Contract List Table UX Polish (Completed 2026-08-31)
+
+### Summary
+
+Frontend-only UX polish on the CM-55/CM-55B Contract List table — no backend, data, or `scheduleStatus`/status-dropdown API change. Fixed the reported row-height/horizontal-scroll problem: rows were tall because text-heavy cells (Contract Name, Client, Contract Type's full comma-joined scope list) had no truncation and wrapped across multiple lines. Contract Type in particular could show 5+ scope labels as one long wrapped string. Compact padding, `truncate`/`whitespace-nowrap`/`max-w-*` + `title` tooltips on the text-heavy cells, and a new `formatScopeCompact()` ("Shop Drawing +4" instead of the full list) fix that. Full View still needs horizontal scroll on typical desktop widths — it has up to 15 real columns — so Contract ID (left) and Action (right) are now `sticky`, keeping identity and the primary action reachable without scrolling regardless of scroll position.
+
+### Changes
+
+- `contract-ui-helpers.ts` (+4 tests) — new `formatScopeCompact()`, a sibling to `formatScopeSummary()` (which is unchanged and still used as-is by `workflow-contract-header.tsx`/`contracts-needing-setup-section.tsx`). Returns `{ display: "Shop Drawing +4", fullList }` — `fullList` is always identical to what `formatScopeSummary()` already returns, for a `title` tooltip.
+- `contract-list-table.tsx` — full visual rewrite: row padding `px-4 py-3`→`px-3 py-2`; Contract Name/Client/Contract Manager/Contract No. gained `max-w-*` + `truncate` + `title`; Contract Type now renders via the new compact `ScopeCell` (was the full, unbounded `formatScopeSummary()` string); Current Value right-aligned, Open Claims/Days Remaining centered; progress bars narrowed slightly (`w-16`→`w-12`, `gap-2`→`gap-1.5`); Contract ID column is `sticky left-0` and Action column is `sticky right-0` (both with an explicit opaque background + border, in both the navy header and the body rows) so both stay reachable without horizontal scrolling. Same columns, same `ContractScheduleStatusSelect`/`ContractRowActions`, same Full View default from CM-55 — purely `className`/JSX-structure changes.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 239/239 tests (235 + 4 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1179/1179 tests (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, real dev DB) | ✓ sticky-left/sticky-right classes render on both header and exactly 3 body rows (matching the 3 in-scope contracts); a real 5-scope contract renders "Shop Drawing +4" (not the full wrapped list); `PATCH .../schedule-status` re-verified to persist without touching `status`/`version`; the real (non-UAT) contract's `scheduleStatus` was reverted to NULL via direct SQL afterward, as in CM-55; Staff dashboard/My Tasks and manager dashboard/workflow/payments/claims all unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- Sticky cells need their own explicit opaque background (`bg-surface` for body, `bg-nav` for header) — a `<tr>`-level hover tint alone would let scrolled content show through a transparent sticky cell. Documented in `ui-registry.md` for reuse elsewhere.
+- Full View (15 real columns) still requires horizontal scroll on typical laptop/desktop widths even after this polish pass — this is reported honestly, not hidden. The sticky columns make that scroll far less painful (identity + primary action are always reachable), but eliminating the scroll entirely would mean cutting required columns, which this unit was told not to do.
+
+### Deferred
+
+- Sticky Contract No. (in addition to Contract ID) — task allowed deferring this ("if not feasible, defer"); Contract ID alone already anchors row identity, and a second sticky-left column would eat into the scrollable width budget for comparatively little benefit.
+- Full elimination of horizontal scroll in Full View — not achievable without removing required columns (out of scope per this unit's own instructions).
+
+## CM-55B — Remove Contract List Bottom Explanation Cards (Completed 2026-08-31)
+
+### Summary
+
+Frontend-only removal — no backend, data, or behavior change. CM-55's 4-card "About This Page / Column Explanations / Statuses / Important Notes" bottom section was judged unnecessary/space-consuming after review and removed entirely from `/contracts`, along with its now-orphaned component file.
+
+### Changes
+
+- `contracts/page.tsx` — removed the `<ContractListInfoCards />` render call and its import. Nothing else in the page changed (header, KPI cards, filter bar, table, pagination all untouched) — `space-y-6` on the page's outer container simply ends at whatever the last real element is now (pagination when present, otherwise the table/empty-state), so no leftover gap.
+- Deleted: `contracts/_components/contract-list-info-cards.tsx` — confirmed orphaned (grepped for every importer) before deletion.
+- `context/ui-registry.md` — `ContractListInfoCards` entry marked deleted with a pointer back to CM-55 if the content is ever wanted again.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 235/235 tests (unchanged — no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1179/1179 tests (unchanged — zero backend files touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live check (idempotent `uat:seed`/`uat:cleanup`) | ✓ "About This Page"/"Column Explanations"/"Important Notes"/Statuses-heading all absent from rendered HTML; KPI cards, filter labels, Full View/Simple toggle, Contract No. column, and the schedule-status `<select>` all still render exactly as CM-55 left them; Staff dashboard/My Tasks and manager dashboard/workflow unaffected (200, no error boundaries) |
+
+## CM-55 — Contract List Approved Design Rebuild (Completed 2026-08-31)
+
+### Summary
+
+Rebuilt the Contract List page (`/contracts`) to match the approved design screenshot: 4 KPI cards, a new filter row, a navy-header full table, a Simple/Full View toggle (now defaulting to Full View), and 4 bottom explanation cards — all with real data, plus the requested removals (Avg. Physical Progress KPI, Risk Rating filter/column/guide, the word "Physical"). Audited first and found no existing manager-facing schedule/progress status field, so added one additively: a new nullable `Contract.scheduleStatus` enum column (`ContractScheduleStatus`: IN_PROGRESS/ON_TRACK/DELAYED/COMPLETED/AHEAD_OF_SCHEDULE), completely separate from `Contract.status` (the real lifecycle: DRAFT/ACTIVE/TERMINATED/CLOSED) — never written by activate/terminate/close, never read by closeout eligibility, and updated through its own dedicated endpoint with no version/optimistic-concurrency coupling to the real lifecycle transitions.
+
+The table's previously-placeholder "Physical Progress %"/"Payment Progress %"/"Risk Rating"/Contract No. columns (all rendered `"Not tracked yet"` before this unit — confirmed via audit, not fake data) are now real: Progress % from workflow-task completion ratio (same methodology as CM-54's dashboard), Payment Progress % from total-paid/current-value, Open Claims from a real filtered relation count, Contract No. from the real `jobOrder` field (falls back to the reference number when unset). Risk Rating is removed entirely, not backfilled.
+
+### Migration
+
+- `20260831000000_add_contract_schedule_status` — additive only: `CREATE TYPE contract_schedule_status` + one nullable `contracts.schedule_status` column. Applied via the established shadow-DB workaround (`prisma db execute --file` then `prisma migrate resolve --applied`) — see prior units (CM-08/09/10, CM-13) for the same pattern. `pnpm db:migrate:status` confirms "Database schema is up to date!" (28 migrations).
+
+### Changes
+
+- **Schema:** `packages/database/prisma/schema.prisma` (+migration above), `packages/database/src/index.ts` (exports `ContractScheduleStatus`).
+- **Backend (`apps/api/src/contracts/`):**
+  - `contracts.service.ts` — `CONTRACT_SELECT` gained `scheduleStatus`; new pure `computeEffectiveScheduleStatus()`, `computeContractProgressPercent()`, `computeContractPaymentProgressPercent()`; new `CONTRACT_LIST_SELECT`/`toListItem()` (findAll only — findOne/update/etc. untouched) computing `progressPercent`/`paymentProgressPercent`/`openClaimsCount`/`effectiveScheduleStatus` per row from real `workflowTasks`/`payments`/a filtered `_count.claims`; `buildListWhere()` extended (search now also matches `jobOrder`/`counterpartyName`; new `contractType` — a real `scopeOfWork` JSONB path filter, not an invented column; new `scheduleStatus` filter with the same null-fallback-default logic as the display; new `daysRemaining` filter, forecast-date-first with end-date fallback) — restructured onto an `AND` array so `search` no longer silently clobbers `lifecycleStatus=EXPIRING`'s own `OR` clause (a latent pre-existing bug, fixed as a side effect); new `updateScheduleStatus()` service method; `getSummary()` gained real `totalContractValue`/`totalOpenClaims` aggregates.
+  - `contracts.controller.ts` — new `PATCH :id/schedule-status` (`@Permissions('contracts.update')`).
+  - New: `dto/update-contract-schedule-status.dto.ts`; `dto/contract-list-query.dto.ts` extended (`contractType`/`scheduleStatus`/`daysRemaining`, all `@IsIn`-validated).
+  - `contracts.service.test.ts` — 29 new tests (161 total, up from 132).
+- **Frontend:**
+  - `lib/contracts-api.ts` — `Contract` gained `scheduleStatus`/`effectiveScheduleStatus`/`progressPercent`/`paymentProgressPercent`/`openClaimsCount` (list-only, undefined from `get()`); `ContractSummary` gained `totalContractValue`/`totalOpenClaims`; `ContractListQuery`/`buildQuery` extended.
+  - `contracts/actions.ts` — new `updateContractScheduleStatusAction`.
+  - `contracts/_lib/contract-ui-helpers.ts` (+15 tests) — `SCHEDULE_STATUS_OPTIONS`, `SCHEDULE_STATUS_BADGE_CLASSES`, `scheduleStatusLabel()`, `DAYS_REMAINING_FILTER_OPTIONS`, `formatDaysRemainingDisplay()` (forecast-date-first, same fallback order as the backend filter).
+  - New: `contract-schedule-status-select.tsx` (read-only badge for non-`contracts.update` actors, real `<select>` + PATCH for the rest), `contract-list-info-cards.tsx`.
+  - Rewritten: `contract-summary-cards.tsx` (4 cards, reuses CM-54's `DashboardKpiCard` for one consistent executive-dashboard visual language across List and Dashboard), `contract-filter-bar.tsx` (Search/Contract Status/Contract Type/Contract Manager/Days Remaining/Reset — Department dropdown dropped, not in the approved design's filter list), `contract-list-table.tsx` (navy header, Full View default, Risk Rating column removed, real Progress %/Payment Progress %/Open Claims/Contract No.), `page.tsx` (header button order: New Contract Register/Export Excel/Open Dashboard; `lifecycleStatus` kept as a silent pass-through param — no UI field — since the Contract Manager Dashboard and root dashboard both deep-link `/contracts?lifecycleStatus=ACTIVE`).
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 235/235 tests (227 + 8 new) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1179/1179 tests (1150 + 29 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 28 migrations, up to date |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, real dev DB) | ✓ all 4 KPI cards + navy table + filters render with real data; live `PATCH .../schedule-status` confirmed to persist across a fresh GET **without changing `status`/`version`**; live `contractType=erection`/`exFactory` confirmed the Prisma JSONB path filter genuinely matches/excludes correctly against real scope data; `scheduleStatus=DELAYED` filter confirmed exact-match only; a real (non-UAT) contract's `scheduleStatus` was reverted to NULL via direct SQL after the PATCH test, since it isn't UAT-sandboxed data; Contract Staff (`test.operator`) sees read-only badges (0 `<select>` elements) and is correctly scoped to fewer rows than the ALL_DEPARTMENTS manager; Staff dashboard/My Tasks and manager dashboard/workflow/payments/claims/issues all unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- **Schedule/progress status decision:** audited first per the task's own instruction — no existing field could safely represent this (lifecycle `status` has fixed DRAFT/ACTIVE/TERMINATED/CLOSED values with real transition rules and closeout gating). Added the smallest safe additive column instead of overloading an existing one.
+- **`toListItem()` intentionally scoped to `findAll` only** — `findOne`/`update`/`activate`/etc. still use the original `CONTRACT_SELECT` with no `workflowTasks`/`payments`/`_count` relations, so the contract detail page and every mutation payload are provably unaffected by this unit's list-only additions.
+- **Fixed a latent pre-existing bug as a side effect:** `buildListWhere()` previously let `search` silently overwrite `lifecycleStatus=EXPIRING`'s own `where.OR` (both wrote to the same top-level key) — restructuring onto an `AND` array fixes this for free while adding the 3 new OR-needing filters (contractType is a plain equals, not affected).
+- **"Click column headers to sort data"** — one of the approved screenshot's 4 "Important Notes" — was deliberately omitted rather than kept verbatim, since no sort implementation exists; keeping it would have been a false capability claim. Documented as a deferred item, not silently dropped.
+
+### Unsupported/Deferred (reported honestly, not faked)
+
+- Column-header click-to-sort (see note above) — would need dynamic `orderBy` support in `findAll()`, out of scope for this unit.
+- Export Excel — unchanged from the pre-existing disabled/honest state (`title="Export to Excel is planned for a future unit"`).
+- Contract Type is derived from the real `scopeOfWork` JSONB flags (Shop Drawing/Production/Delivery/Erection/Ex-Factory/Other) since no dedicated "contract type" column exists — a contract with multiple scope flags shows all of them (e.g. "Production, Delivery, Erection"), not a single canonical "type" like the approved screenshot's "PC"/"HC"/"GRC" codes (no such classification exists anywhere in this schema).
+- Direct-URL access to `/contracts` by a Contract Staff actor (`contracts.read` only) is unchanged pre-existing behavior — the sidebar simply never links to it for Staff (CM-41), and this unit did not add or remove any server-side gate beyond what already existed.
+
+## CM-54D — Manager Dashboard Final Visual Tightening (Completed 2026-08-31)
+
+### Summary
+
+Final small visual-tightening pass on the CM-54/CM-54B/CM-54C Contract Manager Dashboard — no backend, calculation, data-shape, or wording change. CM-54C had loosened padding/gaps/icon size for a "premium" feel; this unit pulled those values back down a notch across every dashboard component (KPI card padding/icon circle, grid gaps, chart header spacing, bottom-row spacing) so the dashboard reads as compact and tight rather than tall, while keeping every value, label, and href exactly as CM-54B/CM-54C left them. The KPI card's secondary line lost its `border-t` divider in favor of a plain lighter-muted footnote line, per the "lighter and cleaner" request.
+
+### Changes
+
+- `dashboard-kpi-card.tsx` — icon circle `size-10`→`size-9` (icon `size-5`→`size-4.5`), card padding `p-4.5 gap-2.5`→`p-4 gap-2`, label margin `mt-1.5`→`mt-1`, secondary line: dropped `border-t border-border/70 pt-2` in favor of a borderless `text-text-muted/90 pt-1.5` footnote.
+- `manager-kpi-grid.tsx` — grid gap `gap-4`→`gap-3`.
+- `discipline-progress-panel.tsx` — header `mb-5`→`mb-4`, rows `space-y-4`→`space-y-3.5`.
+- `financial-performance-chart.tsx` — header `mb-5`→`mb-4`, bar area `h-44 gap-3`→`h-40 gap-2.5`, bar width `max-w-16`→`max-w-18` (fewer, slightly wider bars read less sparse at the tighter card height).
+- `donut-chart.tsx` — header `mb-5`→`mb-4`, donut/legend row gap `gap-6`→`gap-5`, empty-state vertical padding `py-8`→`py-7`.
+- `management-attention-required-panel.tsx` — header `mb-4`→`mb-3`, row padding `py-3`→`py-2.5`, icon circle `size-9`→`size-8` (icon `size-4.5`→`size-4`).
+- `top-contracts-table.tsx` — header `mb-4`→`mb-3`, header-row padding `py-2`→`py-1.5`, body-row padding `py-2.5`→`py-2`.
+- `page.tsx` — section spacing `space-y-6`→`space-y-5`, middle/bottom grid gaps `gap-6`→`gap-5`.
+- `context/ui-registry.md` — `DashboardKpiCard` entry updated with the new compact sizing.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 227/227 tests (unchanged — pure className tightening, no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1150/1150 tests (unchanged — zero files under `apps/api` touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, `test.manager`/`test.operator`) | ✓ identical real values to CM-54C's own live check (`KWD 9.00K` contract value, 4 overdue tasks, 1 critical contract, 1 closing soon); all 11 KPI cards confirmed rendering the new tightened `p-4 gap-2` class exactly once each; `gap-3` grid, "No claims in scope." empty state, and every CM-54B label all intact; zero forbidden wording; Contract Staff dashboard and `/contracts`, `/contracts/workflow`, `/contracts/payments` unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- Deliberately did not touch `dashboard-insights-helpers.ts`, `contract-dashboard.service.ts`, or any chart math — every change here is `className`-only, verified by the unchanged 227/1150 test counts.
+- Observed (not investigated further, out of scope): both dev servers were found already running at the start of this unit's live-verification step, under process start timestamps that predate this unit's own edits. Since this unit made zero backend changes, the API dev server's lack of hot-reload (documented since CM-24) didn't matter for verification here; the Next.js web dev server hot-reloads on file change regardless. Both were stopped again after verification, as in CM-54/CM-54B/CM-54C.
+
+## CM-54C — Manager Dashboard UI Polish and Icon Upgrade (Completed 2026-08-31)
+
+### Summary
+
+Visual-only polish pass on the CM-54/CM-54B Contract Manager Dashboard — no backend, calculation, wording (beyond what CM-54B already set), or data-source change. Audited icon dependencies first: `lucide-react` (`^1.22.0`) is the sole icon library already installed and used in 74+ files repo-wide, so no new dependency was added or needed. Every KPI card now has a fully distinct icon (previously "Critical Project Contracts" and "Overdue Workflow Tasks" used icons that, while already different from each other, weren't the clearest semantic fit — `AlertTriangle`/`ClockAlert` now map onto them per the task's suggested pairing, freeing `FileWarning` from double duty). One new CSS token (`--color-teal`/`--color-teal-light`) was added, following the exact precedent CM-40B set for `--color-team-production` (documented justification comment, no raw hardcoded hex), so "Submitted Invoices" reads as a distinct payment-flow color rather than reusing the general "info" blue already used for contract-level cards.
+
+### Changes
+
+- `globals.css` / `context/ui-tokens.md` — added `--color-teal`/`--color-teal-light`.
+- `dashboard-kpi-card.tsx` — larger icon circle (`size-9`→`size-10`, icon `size-4.5`→`size-5`), bolder value (`text-xl font-semibold`→`text-2xl font-bold`), `rounded-lg`→`rounded-xl`, refined spacing, subtle `hover:-translate-y-0.5` + `group-hover:shadow-md` lift **only** on clickable cards (non-clickable cards get zero hover styling — no fake interactivity); new `teal` accent option.
+- `manager-kpi-grid.tsx` — icon swap: Submitted Invoices `Send`→`FileUp` (+ `teal` accent), Outstanding Payment `Receipt`→`CircleDollarSign`, Critical Project Contracts `FileWarning`→`AlertTriangle`, Overdue Workflow Tasks `AlertTriangle`→`ClockAlert`; grid gap `gap-3`→`gap-4`. Every other card's icon/accent/label/href/value binding unchanged.
+- `discipline-progress-panel.tsx` — thicker bars (`h-2`→`h-2.5`), roomier header/rows.
+- `financial-performance-chart.tsx` — baseline rule under bars, wider/rounder bars (`max-w-14`→`max-w-16`, `rounded-t-md`→`rounded-t-lg`), tabular-numeral value labels, labels moved below the baseline for a cleaner axis look.
+- `donut-chart.tsx` — roomier legend rows, bold tabular-numeral center total, and a proper icon+message empty state (`PieChart` icon, was plain muted text) — most visible on "Claims Status Overview" when a scope has no claims.
+- `management-attention-required-panel.tsx` / `top-contracts-table.tsx` — roomier rows, stronger count badge, shaded table header row for contrast, row hover states.
+- `page.tsx` — section/grid spacing `gap-5`/`space-y-5`→`gap-6`/`space-y-6`.
+- `context/ui-registry.md` — updated entries for the touched components.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 227/227 tests (unchanged — pure className/markup, no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1150/1150 tests (unchanged — zero files under `apps/api` touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, `test.manager`/`test.operator`) | ✓ identical real values to CM-54B's own live check (`KWD 9.00K` contract value, 4 overdue tasks, 1 critical contract, 1 closing soon); all CM-54B wording intact; zero "Physical"/"Expiring Documents"/"Total Submitted"/"Total Paid"/"Certified"/"Payment Claims" anywhere; new icon classes (`lucide-file-up`, `lucide-clock-alert`, `lucide-triangle-alert`, `lucide-circle-dollar-sign`) and `bg-teal-light text-teal` all render; Contract Staff dashboard and `/contracts`, `/contracts/workflow`, `/contracts/payments` unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- Confirmed via `grep -o 'lucide-[a-z-]*'` on rendered SSR HTML that lucide-react sometimes emits a different kebab-case class than the exported name suggests (e.g. `AlertTriangle` renders as `lucide-triangle-alert`, not `lucide-alert-triangle` — the export name is a backward-compatible alias for a renamed icon slug). Not a bug, just worth knowing when grepping rendered output for icon verification.
+- Deliberately did not touch `dashboard-insights-helpers.ts`, `contract-dashboard.service.ts`, or any chart *math* — every polish here is `className`/JSX-structure only, verified by the unchanged 227/1150 test counts.
+- Reused the exact `uat:seed`/`uat:cleanup` verification flow CM-54/CM-54B established; dev servers were stopped again afterward.
+
+## CM-54B — Manager Dashboard Payment KPI Label Cleanup (Completed 2026-08-31)
+
+### Summary
+
+Pure wording cleanup on the CM-54 Contract Manager Dashboard — no backend, calculation, or data-source change. "Total Submitted"/"Total Paid" (unclear) and the rejected "Submitted Payment Claims" suggestion (collides with the separate Claim Log module's "claims" terminology) are replaced with plain payment-flow wording: **Submitted Invoices** / **Received Payments** / **Outstanding Payment**, each backed by the exact same `insights.financials` fields CM-54 already computed (`submittedTotal`/`paidTotal`/`outstandingTotal`). "Open Claims" is untouched — it correctly refers to the Claim Log/contract-claims module, not payments, and the word "Claims" is now confirmed to appear only on that one card.
+
+### Changes
+
+- `dashboard/_components/manager-kpi-grid.tsx` — "Total Submitted" → "Submitted Invoices" (subtext "Submitted to client"); "Total Paid" → "Received Payments" (subtext "Paid by client"); "Outstanding Payment" subtext → "Submitted but not received". Same `financials?.submittedTotal`/`paidTotal`/`outstandingTotal` bindings, unchanged.
+- `dashboard/_components/financial-performance-chart.tsx` — bar labels "Current Contract"/"Submitted"/"Paid" → "Contract Value"/"Submitted Invoices"/"Received Payments" ("Outstanding" unchanged, still no Certified bar). Same `contractValueTotal`/`submittedTotal`/`paidTotal`/`outstandingTotal` values.
+- `dashboard/_components/management-attention-required-panel.tsx` — "Overdue Payments" row → "Overdue Payment Follow-ups", description → "Payments pending follow-up or release" (static caption, matching the KPI cards' pattern; the real count still renders in the badge). Same `insights.financials.overduePayments` count/href.
+- `context/ui-registry.md` — `FinancialPerformanceChart`/`ManagementAttentionRequiredPanel` entries updated to the new label wording.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 227/227 tests (unchanged — pure label text, no logic touched) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1150/1150 tests (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Repo-wide grep for old strings ("Total Submitted", "Total Paid", "Overdue Payments", "Payment Claims") in `dashboard/` | ✓ zero matches outside the changelog comment explaining the rename |
+
+### Key Implementation Notes
+
+- Deliberately did not touch `ContractDashboardService`/`ManagerDashboardFinancials` (CM-54) — every renamed label reads the identical already-computed field; this was purely a label/subtext substitution in 3 already-existing components.
+- "Claims with Action Due" (the Claim Log follow-up row) and "Open Claims" (KPI card) were left as-is — both correctly describe the contract-claims module, not payments, so keeping "Claims" there does not conflict with the "avoid Claims in payment cards" rule.
+
+## CM-54 — Contract Manager Dashboard Approved Design Rebuild (Completed 2026-08-31)
+
+### Summary
+
+Rebuilt the Contract Manager Dashboard (`/contracts/dashboard`, MANAGER dashboardType only — Contract Staff's dashboard, built by CM-48, is a completely separate return path in `page.tsx` and was not touched) to match a user-approved design screenshot: an 11-card KPI grid, a middle row of Progress by Discipline / Financial Performance / Contracts by Status, and a bottom row of Management Attention Required / Top 5 Delayed Contracts / Top 5 Contracts by Value / Claims Status Overview. Every number shown is real, department-scope-respecting data — no invented counts, statuses, or financial figures. This unit superseded CM-39's manager dashboard UI entirely (its 5 orphaned components/libs — `TodaysFocusPanel`, `ManagerSummaryCards`, `ManagerAttentionTable`, `ManagerSecondaryTabs`, `WorkflowOverviewPanel`, `contract-dashboard-attention.ts`, `contract-dashboard-focus.ts` — were deleted, following the same "delete once truly orphaned" precedent CM-39 itself set for `manager-quick-actions.tsx`).
+
+Small backend addition: `ContractDashboardService` (CM-37) gained a new `manager.insights` block (financial totals, top-5 lists, claims-by-status, critical-contract/closing-soon counts) computed entirely from data already fetched for the existing `manager` payload, reusing `computePaymentSummary`/`computeClaimSummary` (CM-28/CM-31) rather than re-deriving payment/claim math. Three new `Contract` fields (`jobOrder`, `contractValue`, `originalContractValue`) were added to the dashboard's Prisma `select` — same `contracts.read` authorization boundary as every other field already selected there, not new data exposure.
+
+### Wording changes (per approved-design change request)
+- "Physical" removed everywhere ("Overall Progress", "Progress by Discipline").
+- "Outstanding Amount" → "Outstanding Payment"; "High/Critical Risks" → "Critical Project Contracts" (word "Risk" never used).
+- "Expiring Documents" KPI and attention row removed (no document-expiry tracking exists in this schema).
+- Financial Performance's "Certified" bar removed (Current Contract / Submitted / Paid / Outstanding only).
+- Top 5 tables: "Contract ID"/"Contract Name" → "Job Order"/"Project Name" (`jobOrder ?? referenceNumber` when a contract has no job order recorded).
+- Claims Status Overview excludes `PARTIALLY_APPROVED` only — every other real `ContractClaimStatus` value present in the data (including `CANCELLED`, if any exist) is still shown, so no real data is hidden beyond that one named exclusion.
+- Open Claims KPI card is 7th in card order so it lands on the grid's second row (`xl:grid-cols-6`) as requested.
+
+### Changes
+
+- **Backend:** `apps/api/src/contracts/contract-dashboard.service.ts` — `jobOrder`/`contractValue`/`originalContractValue` added to `CONTRACT_DASHBOARD_SELECT`/`DashboardContractRow`; new `computeManagerFinancials`, `buildTopDelayedContracts`, `buildTopValueContracts`, `countClaimsByStatus`, `computeManagerInsights` pure functions + `ManagerDashboardInsights` on `ManagerDashboardData`; `contract-dashboard.service.test.ts` — 50 new/updated tests.
+- **Frontend types:** `apps/web/src/lib/contracts-api.ts` — mirrors the new insights types.
+- **New:** `dashboard/_lib/dashboard-insights-helpers.ts` (+ `.test.ts`, 15 tests) — `formatKwdCompact`, discipline-progress %, mutually-exclusive Contracts-by-Status segments (see Key Implementation Notes), Claims-by-Status label mapping.
+- **New components:** `dashboard-kpi-card.tsx`, `manager-kpi-grid.tsx`, `discipline-progress-panel.tsx`, `financial-performance-chart.tsx`, `donut-chart.tsx`, `management-attention-required-panel.tsx`, `top-contracts-table.tsx` (see `ui-registry.md` for full details).
+- **Modified:** `dashboard/page.tsx` (MANAGER branch rewritten; STAFF and legacy-fallback branches untouched byte-for-byte), `dashboard-toolbar.tsx` (added honest "Filters"/"Export" controls — Filters links to the real Contract List filters, Export is disabled with the same "planned for a future unit" tooltip pattern already used on `contracts/page.tsx`; "As of Today" is now a literal label, not a fake historical-snapshot picker).
+- **Deleted:** `todays-focus-panel.tsx`, `manager-summary-cards.tsx`, `manager-attention-table.tsx`, `manager-secondary-tabs.tsx`, `workflow-overview-panel.tsx`, `_lib/contract-dashboard-attention.ts(.test.ts)`, `_lib/contract-dashboard-focus.ts(.test.ts)` — confirmed orphaned (grepped for every import site) before deletion.
+
+### Verification Results (2026-08-31)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (12/12 tasks) |
+| `pnpm --filter @recafco/web test --run` | ✓ 227/227 tests (19 files) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1150/1150 tests (36 files) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Live end-to-end check (idempotent `uat:seed`/`uat:cleanup`, `test.manager`/`test.operator`, real dev DB) | ✓ manager dashboard renders all 11 KPI cards + 3 middle + 4 bottom sections with real live-computed numbers (e.g. `KWD 9.00K` contract value, `Original: KWD 100.00K`, real "test project" row in both Top 5 tables via its real `jobOrder` "2026"); zero occurrences of "Physical"/"Expiring Documents"/"Partially Approved" anywhere in the rendered HTML; Contract Staff dashboard, `/contracts`, `/contracts/workflow`, `/contracts/payments` all unaffected (200, no error boundaries) |
+
+### Key Implementation Notes
+
+- **Double-count bug avoided:** the base dashboard's `metrics` block (`totalDraft/totalActive/totalExpiring/totalExpired/totalTerminated/totalClosed`, from CM-37/`ContractsService.getDashboard`) is NOT six mutually-exclusive categories — `totalExpiring`/`totalExpired` are subsets of `totalActive` (same `ContractStatus.ACTIVE` rows, refined by `renewalNoticeDate`/`endDate`, see `contracts.service.ts`). The older, unused `ContractKpiGrid` fallback component sums all 6 and double-counts; `totalContractsFromMetrics`/`buildContractsByStatusSegments` in `dashboard-insights-helpers.ts` subtract expiring/expired back out of active instead, so the KPI total and the Contracts-by-Status donut both sum correctly to the real total. Not fixed in the untouched fallback component (out of scope — that branch is dead code for real actors).
+- **Latent `text-danger`/`bg-danger-light` token bug found (pre-existing, not fixed):** `--color-danger` is not defined anywhere in `globals.css` or any other stylesheet in this repo, yet `text-danger`/`bg-danger-light` are used in ~100 files (e.g. `manager-attention-table.tsx`, since deleted by this unit). These classes silently produce no color (Tailwind can't generate a utility for an undefined token). New CM-54 components use the real `error`/`error-light` token instead. Worth a dedicated cleanup unit — out of scope here (would touch ~100 unrelated files).
+- **API dev server requires a manual restart to pick up service-layer changes** (no hot reload under `ts-node/register` — same caveat CM-24 already documented) — this unit's live verification initially read stale data because a pre-existing `node` process from earlier in the session was still bound to port 4000 running the pre-CM-54 code; restarting it (after confirming via `Get-NetTCPConnection`/`Get-Process` that it started well before this unit's edits) fixed it.
+- **Deferred/unsupported metrics, reported honestly rather than faked:**
+  - "At Risk"/"Delayed" sub-counts on the Active Contracts card, and "On Hold" on the Total Contracts card — `ContractStatus` has only `DRAFT/ACTIVE/TERMINATED/CLOSED`, no such states exist. Omitted rather than mislabeling `EXPIRING`/`EXPIRED` (a different, real concept) as "At Risk"/"Delayed".
+  - No month-over-month delta (e.g. screenshot's "+3% vs last month") anywhere — this system has no historical dashboard snapshot to compute one honestly against.
+  - "Critical Project Contracts" is a distinct-contract count of every HIGH-priority manager attention item (overdue task, high/critical issue, overdue payment, pending closeout review) — the closest honest analog to the approved design's "High/Critical Risks" without using the word "Risk" or inventing a new risk-scoring model.
 
 ## CM-53 — Manager Workflow Task Review Drawer Upgrade (Completed 2026-08-26)
 

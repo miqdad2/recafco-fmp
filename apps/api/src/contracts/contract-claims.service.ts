@@ -12,6 +12,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractClaimDto } from './dto/create-contract-claim.dto';
 import type { UpdateContractClaimDto } from './dto/update-contract-claim.dto';
 import type { ContractClaimListQueryDto } from './dto/contract-claim-list-query.dto';
+import { logContractActivity } from './contract-activity-log';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -55,6 +56,25 @@ const FINAL_STATUSES = ['APPROVED', 'REJECTED', 'SETTLED', 'CLOSED', 'CANCELLED'
 /** Statuses counted under the "Closed / Settled Claims" summary card. */
 const CLOSED_OR_SETTLED_STATUSES = ['CLOSED', 'SETTLED'];
 
+/**
+ * CM-61 — statuses excluded from the Outstanding Value summary total. A
+ * rejected or cancelled claim has no real balance still pending — before
+ * this fix, computeClaimSummary() summed every row's submittedValue minus
+ * approvedValue unconditionally, so a fully-rejected claim (e.g. submitted
+ * 8,000, approved 0) still added its full 8,000 to the aggregate Outstanding
+ * Value shown on both the module-level Claim Log and the Contract Detail
+ * Claims tab, overstating real exposure. Deliberately narrower than
+ * OVERDUE_EXCLUDED_STATUSES/CLOSED_OR_SETTLED_STATUSES — SETTLED/CLOSED are
+ * NOT included here; a settled claim can genuinely still carry a real
+ * outstanding balance (e.g. settled at a value not yet paid), so their
+ * contribution is left exactly as it already was. Per-row outstandingValue
+ * (computeOutstandingValue(), returned on every claim and shown in its own
+ * table column) is intentionally NOT changed by this — that stays the raw,
+ * unfiltered submitted-minus-approved delta for audit-trail honesty; only
+ * the aggregate SUM excludes these two statuses.
+ */
+const OUTSTANDING_EXCLUDED_STATUSES = ['REJECTED', 'CANCELLED'];
+
 /** Statuses that auto-set closedDate when reached without an explicit value. */
 const AUTO_CLOSE_DATE_STATUSES = ['CLOSED', 'SETTLED'];
 
@@ -94,16 +114,32 @@ export function computeClaimIsOverdue(row: OverdueFields, today: Date = utcToday
   return computeClaimOverdueDays(row, today) !== null;
 }
 
+/**
+ * CM-61 — signed days until dueDate (negative once past due), for the
+ * approved design's "Days to Deadline" table column. Unlike
+ * computeClaimOverdueDays() (unsigned, status-gated, only ever non-null once
+ * actually overdue), this is a neutral, always-present-when-dueDate-exists
+ * value — never gated by status, so a manager can see how far past/before a
+ * deadline any claim is regardless of its current state. null only when
+ * dueDate itself is unset (never a fabricated number).
+ */
+export function computeClaimDaysToDeadline(row: { dueDate: Date | null }, today: Date = utcToday()): number | null {
+  if (!row.dueDate) return null;
+  const due = new Date(Date.UTC(row.dueDate.getUTCFullYear(), row.dueDate.getUTCMonth(), row.dueDate.getUTCDate()));
+  return Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 function withDerivedFields<T extends ValueFields & OverdueFields>(
   row: T,
   today: Date,
-): T & { outstandingValue: string | null; overdueDays: number | null; isOverdue: boolean } {
+): T & { outstandingValue: string | null; overdueDays: number | null; isOverdue: boolean; daysToDeadline: number | null } {
   const outstanding = computeOutstandingValue(row);
   return {
     ...row,
     outstandingValue: outstanding !== null ? outstanding.toFixed(3) : null,
     overdueDays: computeClaimOverdueDays(row, today),
     isOverdue: computeClaimIsOverdue(row, today),
+    daysToDeadline: computeClaimDaysToDeadline(row, today),
   };
 }
 
@@ -232,10 +268,28 @@ export interface ClaimSummary {
   totalOutstandingValue: string;
   overdueClaims: number;
   closedOrSettledClaims: number;
+  totalEotClaimedDays: number;
+  totalEotApprovedDays: number;
+}
+
+interface EotFields {
+  // Optional — contract-dashboard.service.ts's own DashboardClaimRow feeds
+  // computeClaimSummary() for openClaims/overdueClaims only (it never reads
+  // totalEotClaimedDays/totalEotApprovedDays), so it doesn't select these
+  // two columns. toEotDays() below treats an absent field the same as a
+  // real 0, so that caller's totals are simply never read, never wrong.
+  eotClaimedDays?: unknown;
+  eotApprovedDays?: unknown;
+}
+
+/** Prisma Decimal | number | null -> plain number, defaulting to 0 for an unset EOT day count. */
+function toEotDays(value: unknown): number {
+  if (value === null || value === undefined) return 0;
+  return toNum(value) ?? 0;
 }
 
 export function computeClaimSummary(
-  rows: (ValueFields & OverdueFields)[],
+  rows: (ValueFields & OverdueFields & EotFields)[],
   today: Date = utcToday(),
 ): ClaimSummary {
   let openClaims = 0;
@@ -244,14 +298,20 @@ export function computeClaimSummary(
   let totalOutstandingValue = 0;
   let overdueClaims = 0;
   let closedOrSettledClaims = 0;
+  let totalEotClaimedDays = 0;
+  let totalEotApprovedDays = 0;
 
   for (const row of rows) {
     if (!FINAL_STATUSES.includes(row.status)) openClaims += 1;
     totalSubmittedValue += toNum(row.submittedValue) ?? 0;
     totalApprovedValue += toNum(row.approvedValue) ?? 0;
-    totalOutstandingValue += computeOutstandingValue(row) ?? 0;
+    if (!OUTSTANDING_EXCLUDED_STATUSES.includes(row.status)) {
+      totalOutstandingValue += computeOutstandingValue(row) ?? 0;
+    }
     if (computeClaimIsOverdue(row, today)) overdueClaims += 1;
     if (CLOSED_OR_SETTLED_STATUSES.includes(row.status)) closedOrSettledClaims += 1;
+    totalEotClaimedDays += toEotDays(row.eotClaimedDays);
+    totalEotApprovedDays += toEotDays(row.eotApprovedDays);
   }
 
   return {
@@ -261,6 +321,8 @@ export function computeClaimSummary(
     totalOutstandingValue: round3(totalOutstandingValue).toFixed(3),
     overdueClaims,
     closedOrSettledClaims,
+    totalEotClaimedDays,
+    totalEotApprovedDays,
   };
 }
 
@@ -312,6 +374,8 @@ const SUMMARY_SELECT = {
   submittedValue: true,
   approvedValue: true,
   dueDate: true,
+  eotClaimedDays: true,
+  eotApprovedDays: true,
 } as const;
 
 export interface PaginatedClaimResult<T> {
@@ -371,7 +435,7 @@ export class ContractClaimsService {
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
-      summary: computeClaimSummary(summaryRows as unknown as (ValueFields & OverdueFields)[], today),
+      summary: computeClaimSummary(summaryRows as unknown as (ValueFields & OverdueFields & EotFields)[], today),
     };
   }
 
@@ -454,6 +518,11 @@ export class ContractClaimsService {
         ...(dto.remarks !== undefined ? { remarks: dto.remarks } : {}),
       },
       select: CLAIM_SELECT,
+    });
+
+    await logContractActivity(this.db, contractId, actor, 'claim_created', {
+      claimId: created.id,
+      claimNo: created.claimNo ?? null,
     });
 
     return withDerivedFields(created, utcToday());
@@ -551,6 +620,11 @@ export class ContractClaimsService {
         ...(dto.remarks !== undefined ? { remarks: dto.remarks } : {}),
       },
       select: CLAIM_SELECT,
+    });
+
+    await logContractActivity(this.db, existing.contractId, actor, 'claim_updated', {
+      claimId: updated.id,
+      claimNo: updated.claimNo ?? null,
     });
 
     return withDerivedFields(updated, utcToday());

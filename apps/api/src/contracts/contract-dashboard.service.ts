@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { ModuleIdentifier } from '@recafco/database';
+import { ModuleIdentifier, ContractStatus } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsService } from './contracts.service';
@@ -7,7 +7,11 @@ import { ContractScheduleService } from './contract-schedule.service';
 import { computeTaskIsOverdue } from './contract-workflow.service';
 import { computeIssueSummary } from './contract-issues.service';
 import { computeClaimSummary } from './contract-claims.service';
-import { computeOverdueDays as computePaymentOverdueDays, computeOutstandingAmount as computePaymentOutstanding } from './contract-payments.service';
+import {
+  computeOverdueDays as computePaymentOverdueDays,
+  computeOutstandingAmount as computePaymentOutstanding,
+  computePaymentSummary,
+} from './contract-payments.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { ScheduleItem } from './contract-schedule.service';
 import type { ContractScheduleListQueryDto } from './dto/contract-schedule-list-query.dto';
@@ -52,6 +56,20 @@ function diffDays(today: Date, date: Date): number {
   return Math.round((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+/** Prisma Decimal | number | null -> plain number | null, without importing the Decimal type directly. Mirrors the same-name helper in contract-payments.service.ts / contract-claims.service.ts. */
+function toNum(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'object' && value !== null && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value);
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard type — permissions only.
 // ---------------------------------------------------------------------------
@@ -75,6 +93,14 @@ export interface DashboardContractRow {
   endDate: Date | null;
   forecastCompletionDate: Date | null;
   counterpartyName: string;
+  // CM-54 — needed for the approved-design dashboard's financial totals
+  // (contractValue/originalContractValue) and Top 5 tables' "Job Order"
+  // column. Same contracts.read authorization boundary as every other field
+  // already selected here — not new data exposure, just new fields on rows
+  // this actor could already read.
+  jobOrder: string | null;
+  contractValue: unknown;
+  originalContractValue: unknown;
 }
 
 export interface DashboardTaskRow {
@@ -452,11 +478,209 @@ export function computeManagerSummary(input: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// CM-54 — approved-design dashboard insights: financial totals, top-5 lists,
+// and claims-by-status. Deliberately REUSES the same pure summary functions
+// as CM-37/CM-31/CM-28 (computePaymentSummary, computeClaimSummary) rather
+// than re-deriving payment/claim math — same "reuse, don't re-derive" choice
+// this file's header already commits to.
+// ---------------------------------------------------------------------------
+
+export interface ManagerDashboardFinancials {
+  contractValueTotal: number;
+  originalContractValueTotal: number;
+  submittedTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  /** Outstanding (submitted - approved) value of only the currently-open claims — not all-time. */
+  openClaimsValue: number;
+  overduePayments: number;
+}
+
+export function computeManagerFinancials(input: {
+  contracts: DashboardContractRow[];
+  payments: DashboardPaymentRow[];
+  claims: DashboardClaimRow[];
+  today?: Date;
+}): ManagerDashboardFinancials {
+  const today = input.today ?? utcToday();
+  let contractValueTotal = 0;
+  let originalContractValueTotal = 0;
+  for (const c of input.contracts) {
+    contractValueTotal += toNum(c.contractValue) ?? 0;
+    originalContractValueTotal += toNum(c.originalContractValue) ?? 0;
+  }
+
+  const paymentSummary = computePaymentSummary(input.payments, today);
+  const openClaims = input.claims.filter((cl) => !FINAL_CLAIM_STATUSES_FOR_DASHBOARD.includes(cl.status));
+  const openClaimsSummary = computeClaimSummary(openClaims, today);
+
+  return {
+    contractValueTotal: round3(contractValueTotal),
+    originalContractValueTotal: round3(originalContractValueTotal),
+    submittedTotal: Number(paymentSummary.totalSubmitted),
+    paidTotal: Number(paymentSummary.totalPaid),
+    outstandingTotal: Number(paymentSummary.totalOutstanding),
+    openClaimsValue: Number(openClaimsSummary.totalOutstandingValue),
+    overduePayments: paymentSummary.overdueCount,
+  };
+}
+
+export interface TopDelayedContract {
+  contractId: string;
+  contractReference: string;
+  jobOrderLabel: string;
+  projectName: string;
+  delayDays: number;
+}
+
+export interface TopValueContract {
+  contractId: string;
+  contractReference: string;
+  jobOrderLabel: string;
+  projectName: string;
+  value: number;
+}
+
+const TOP_LIST_LIMIT = 5;
+
+// Delay is the largest real overdueDays already computed onto any attention
+// item for that contract (overdue workflow task, overdue payment, overdue
+// claim, or a past-due end/forecast date) — never invented. `items` must be
+// the UNCAPPED attention list (before MANAGER_ATTENTION_LIST_CAP) so a
+// portfolio with more than 30 simultaneous attention items still ranks
+// correctly.
+export function buildTopDelayedContracts(
+  items: ManagerAttentionItem[],
+  contracts: DashboardContractRow[],
+  limit = TOP_LIST_LIMIT,
+): TopDelayedContract[] {
+  const contractsById = new Map(contracts.map((c) => [c.id, c]));
+  const maxDelayByContract = new Map<string, number>();
+  for (const item of items) {
+    if (!item.isOverdue || item.overdueDays === null) continue;
+    const current = maxDelayByContract.get(item.contractId) ?? 0;
+    if (item.overdueDays > current) maxDelayByContract.set(item.contractId, item.overdueDays);
+  }
+
+  const rows: TopDelayedContract[] = [];
+  for (const [contractId, delayDays] of maxDelayByContract) {
+    const c = contractsById.get(contractId);
+    if (!c) continue;
+    rows.push({ contractId, contractReference: c.referenceNumber, jobOrderLabel: c.jobOrder ?? c.referenceNumber, projectName: c.title, delayDays });
+  }
+  return rows.sort((a, b) => b.delayDays - a.delayDays).slice(0, limit);
+}
+
+export function buildTopValueContracts(contracts: DashboardContractRow[], limit = TOP_LIST_LIMIT): TopValueContract[] {
+  const rows: TopValueContract[] = [];
+  for (const c of contracts) {
+    const value = toNum(c.contractValue);
+    if (value === null) continue;
+    rows.push({ contractId: c.id, contractReference: c.referenceNumber, jobOrderLabel: c.jobOrder ?? c.referenceNumber, projectName: c.title, value });
+  }
+  return rows.sort((a, b) => b.value - a.value).slice(0, limit);
+}
+
+export interface ClaimStatusCount {
+  status: string;
+  count: number;
+}
+
+// PARTIALLY_APPROVED excluded from this dashboard's Claims Status Overview
+// per explicit user instruction — every other real ContractClaimStatus value
+// present in the data is kept (including CANCELLED, if any exist), so this
+// never hides real data beyond that one named exclusion.
+const CLAIMS_OVERVIEW_EXCLUDED_STATUSES = ['PARTIALLY_APPROVED'];
+
+export function countClaimsByStatus(claims: DashboardClaimRow[]): ClaimStatusCount[] {
+  const counts = new Map<string, number>();
+  for (const cl of claims) {
+    if (CLAIMS_OVERVIEW_EXCLUDED_STATUSES.includes(cl.status)) continue;
+    counts.set(cl.status, (counts.get(cl.status) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([status, count]) => ({ status, count }));
+}
+
+const CONTRACTS_CLOSING_SOON_WINDOW_DAYS = 60;
+
+// Active contracts only, end/forecast date falling within the next 60 days
+// (already-past dates are represented separately via the EXPIRED derived
+// lifecycle status, not double-counted here).
+function countContractsClosingSoon(contracts: DashboardContractRow[], today: Date): number {
+  const todayIso = isoDate(today);
+  const windowEndIso = isoDate(new Date(today.getTime() + CONTRACTS_CLOSING_SOON_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+  let count = 0;
+  for (const c of contracts) {
+    if (c.status !== 'ACTIVE') continue;
+    const endish = c.endDate ?? c.forecastCompletionDate;
+    if (!endish) continue;
+    const endishIso = isoDate(endish);
+    if (endishIso >= todayIso && endishIso <= windowEndIso) count += 1;
+  }
+  return count;
+}
+
+export interface ManagerDashboardInsights {
+  financials: ManagerDashboardFinancials;
+  /** Distinct contracts carrying at least one HIGH-priority attention item (overdue task, high/critical issue, overdue payment, or pending closeout review) — the dashboard's "Critical Project Contracts" count. Deliberately not named/framed as "risk". */
+  criticalProjectContracts: number;
+  /** Distinct contracts with at least one overdue workflow task. */
+  overdueWorkflowTasksContracts: number;
+  claimsWithActionDue: number;
+  contractsClosingSoon: number;
+  claimsByStatus: ClaimStatusCount[];
+  topDelayedContracts: TopDelayedContract[];
+  topValueContracts: TopValueContract[];
+}
+
+export function computeManagerInsights(input: {
+  contracts: DashboardContractRow[];
+  tasks: DashboardTaskRow[];
+  claims: DashboardClaimRow[];
+  payments: DashboardPaymentRow[];
+  /** Full, uncapped, sorted attention list — see buildTopDelayedContracts note. */
+  sortedAttentionItems: ManagerAttentionItem[];
+  today?: Date;
+}): ManagerDashboardInsights {
+  const today = input.today ?? utcToday();
+
+  return {
+    financials: computeManagerFinancials({ contracts: input.contracts, payments: input.payments, claims: input.claims, today }),
+    criticalProjectContracts: new Set(
+      input.sortedAttentionItems.filter((i) => i.priority === 'HIGH').map((i) => i.contractId),
+    ).size,
+    overdueWorkflowTasksContracts: new Set(
+      input.tasks.filter((t) => computeTaskIsOverdue(t, today)).map((t) => t.contractId),
+    ).size,
+    claimsWithActionDue: computeClaimSummary(input.claims, today).overdueClaims,
+    contractsClosingSoon: countContractsClosingSoon(input.contracts, today),
+    claimsByStatus: countClaimsByStatus(input.claims),
+    topDelayedContracts: buildTopDelayedContracts(input.sortedAttentionItems, input.contracts),
+    topValueContracts: buildTopValueContracts(input.contracts),
+  };
+}
+
+const EMPTY_MANAGER_INSIGHTS: ManagerDashboardInsights = {
+  financials: {
+    contractValueTotal: 0, originalContractValueTotal: 0, submittedTotal: 0, paidTotal: 0,
+    outstandingTotal: 0, openClaimsValue: 0, overduePayments: 0,
+  },
+  criticalProjectContracts: 0,
+  overdueWorkflowTasksContracts: 0,
+  claimsWithActionDue: 0,
+  contractsClosingSoon: 0,
+  claimsByStatus: [],
+  topDelayedContracts: [],
+  topValueContracts: [],
+};
+
 export interface ManagerDashboardData {
   summary: ManagerDashboardSummary;
   attentionItems: ManagerAttentionItem[];
   workflowOverview: TeamWorkflowOverview[];
   upcomingSchedule: ScheduleItem[];
+  insights: ManagerDashboardInsights;
 }
 
 // ---------------------------------------------------------------------------
@@ -650,6 +874,10 @@ const CONTRACT_DASHBOARD_SELECT = {
   // contracts.read scope (e.g. contract-schedule.service.ts); adding it
   // here is a same-authorization-boundary field exposure, not new data.
   counterpartyName: true,
+  // CM-54 — see DashboardContractRow comment above.
+  jobOrder: true,
+  contractValue: true,
+  originalContractValue: true,
 } as const;
 
 const TASK_DASHBOARD_SELECT = {
@@ -700,7 +928,17 @@ export class ContractDashboardService {
     const today = utcToday();
 
     const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
-    const where = deptFilter !== null ? { departmentId: deptFilter } : {};
+    // CM-69H — a cancelled/voided contract is an audit record, not active
+    // working data: excluded here so every downstream computation (manager
+    // summary, financials, attention items, workflow overview, top
+    // contracts) — all derived from this one `contracts`/`contractIds` pair —
+    // never has to re-check status individually. Cancelled contracts remain
+    // fully visible elsewhere for audit (Contract List's Lifecycle Status
+    // filter, the "Cancelled" KPI note below, Activity History).
+    const where = {
+      status: { not: ContractStatus.CANCELLED },
+      ...(deptFilter !== null ? { departmentId: deptFilter } : {}),
+    };
 
     const contracts = await this.db.getClient().contract.findMany({
       where,
@@ -734,6 +972,7 @@ export class ContractDashboardService {
         attentionItems: [],
         workflowOverview: buildWorkflowOverview([], today),
         upcomingSchedule: scheduleResult.items,
+        insights: EMPTY_MANAGER_INSIGHTS,
       };
     }
 
@@ -749,12 +988,14 @@ export class ContractDashboardService {
     const summary = computeManagerSummary({
       contracts, tasks, issues, claims, payments, closeoutRequests, dueThisWeek: scheduleResult.summary.upcomingThisWeek, today,
     });
-    const attentionItems = sortAttentionItems(
+    const sortedAttentionItems = sortAttentionItems(
       buildManagerAttentionItems({ contracts, tasks, issues, claims, payments, closeoutRequests, today }),
-    ).slice(0, MANAGER_ATTENTION_LIST_CAP);
+    );
+    const attentionItems = sortedAttentionItems.slice(0, MANAGER_ATTENTION_LIST_CAP);
     const workflowOverview = buildWorkflowOverview(tasks, today);
+    const insights = computeManagerInsights({ contracts, tasks, claims, payments, sortedAttentionItems, today });
 
-    return { summary, attentionItems, workflowOverview, upcomingSchedule: scheduleResult.items };
+    return { summary, attentionItems, workflowOverview, upcomingSchedule: scheduleResult.items, insights };
   }
 
   private async buildStaffData(

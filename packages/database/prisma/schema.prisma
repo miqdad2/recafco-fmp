@@ -24,19 +24,19 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Department {
-  id                  String               @id @default(uuid()) @db.Uuid
-  code                String               @unique @db.VarChar(32)
-  name                String               @db.VarChar(200)
-  description         String?              @db.VarChar(500)
-  isActive            Boolean              @default(true) @map("is_active")
-  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(3)
-  archivedByUserId    String?              @map("archived_by_user_id") @db.Uuid
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                  String                      @id @default(uuid()) @db.Uuid
+  code                String                      @unique @db.VarChar(32)
+  name                String                      @db.VarChar(200)
+  description         String?                     @db.VarChar(500)
+  isActive            Boolean                     @default(true) @map("is_active")
+  archivedAt          DateTime?                   @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId    String?                     @map("archived_by_user_id") @db.Uuid
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
   users               User[]
   incidents           Incident[]
-  tasksRequesting     FactoryTask[]        @relation("TaskRequestingDept")
-  tasksResponsible    FactoryTask[]        @relation("TaskResponsibleDept")
+  tasksRequesting     FactoryTask[]               @relation("TaskRequestingDept")
+  tasksResponsible    FactoryTask[]               @relation("TaskResponsibleDept")
   maintenanceRequests MaintenanceRequest[]
   safetyInspections   SafetyInspection[]
   contracts           Contract[]
@@ -220,37 +220,50 @@ model User {
   safetyFindingsReopened     SafetyFinding[]           @relation("FindingReopenedBy")
   safetyInspectionComments   SafetyInspectionComment[] @relation("SafetyCommentAuthor")
 
-  contractsOwned       Contract[]        @relation("ContractOwner")
-  contractsCreated     Contract[]        @relation("ContractCreatedBy")
-  contractsActivated   Contract[]        @relation("ContractActivatedBy")
-  contractsTerminated  Contract[]        @relation("ContractTerminatedBy")
-  contractsClosed      Contract[]        @relation("ContractClosedBy")
-  contractComments     ContractComment[] @relation("ContractCommentAuthor")
-  contractPaymentsCreated ContractPayment[] @relation("ContractPaymentCreatedBy")
-  contractPaymentsUpdated ContractPayment[] @relation("ContractPaymentUpdatedBy")
-  contractWorkflowTasksResponsible ContractWorkflowTask[] @relation("ContractWorkflowTaskResponsible")
-  contractWorkflowTasksCreated     ContractWorkflowTask[] @relation("ContractWorkflowTaskCreatedBy")
-  contractWorkflowTasksUpdated     ContractWorkflowTask[] @relation("ContractWorkflowTaskUpdatedBy")
-  contractWorkflowTaskAttachmentsUploaded ContractWorkflowTaskAttachment[] @relation("ContractWorkflowTaskAttachmentUploadedBy")
-  contractWorkflowTaskCommentsCreated     ContractWorkflowTaskComment[]    @relation("ContractWorkflowTaskCommentCreatedBy")
-  contractIssuesResponsible ContractIssue[] @relation("ContractIssueResponsible")
-  contractIssuesCreated     ContractIssue[] @relation("ContractIssueCreatedBy")
-  contractIssuesUpdated     ContractIssue[] @relation("ContractIssueUpdatedBy")
-  contractClaimsResponsible ContractClaim[] @relation("ContractClaimResponsible")
-  contractClaimsCreated     ContractClaim[] @relation("ContractClaimCreatedBy")
-  contractClaimsUpdated     ContractClaim[] @relation("ContractClaimUpdatedBy")
-  contractCloseoutRequestsRequested ContractCloseoutRequest[] @relation("ContractCloseoutRequestRequestedBy")
-  contractCloseoutRequestsReviewed  ContractCloseoutRequest[] @relation("ContractCloseoutRequestReviewedBy")
-  contractCloseoutAttachmentsUploaded ContractCloseoutAttachment[] @relation("ContractCloseoutAttachmentUploadedBy")
+  contractsOwned                                Contract[]                             @relation("ContractOwner")
+  contractsCreated                              Contract[]                             @relation("ContractCreatedBy")
+  contractsActivated                            Contract[]                             @relation("ContractActivatedBy")
+  contractsTerminated                           Contract[]                             @relation("ContractTerminatedBy")
+  contractsClosed                               Contract[]                             @relation("ContractClosedBy")
+  contractsCancelled                            Contract[]                             @relation("ContractCancelledBy")
+  contractComments                              ContractComment[]                      @relation("ContractCommentAuthor")
+  contractPaymentsCreated                       ContractPayment[]                      @relation("ContractPaymentCreatedBy")
+  contractPaymentsUpdated                       ContractPayment[]                      @relation("ContractPaymentUpdatedBy")
+  contractBoqProductionStatusUpdated            ContractBoqItemProductionStatus[]      @relation("ContractBoqProductionStatusUpdatedBy")
+  contractWorkflowTasksResponsible              ContractWorkflowTask[]                 @relation("ContractWorkflowTaskResponsible")
+  contractWorkflowTasksCreated                  ContractWorkflowTask[]                 @relation("ContractWorkflowTaskCreatedBy")
+  contractWorkflowTasksUpdated                  ContractWorkflowTask[]                 @relation("ContractWorkflowTaskUpdatedBy")
+  contractWorkflowTaskAttachmentsUploaded       ContractWorkflowTaskAttachment[]       @relation("ContractWorkflowTaskAttachmentUploadedBy")
+  contractWorkflowTaskCommentsCreated           ContractWorkflowTaskComment[]          @relation("ContractWorkflowTaskCommentCreatedBy")
+  contractIssuesResponsible                     ContractIssue[]                        @relation("ContractIssueResponsible")
+  contractIssuesCreated                         ContractIssue[]                        @relation("ContractIssueCreatedBy")
+  contractIssuesUpdated                         ContractIssue[]                        @relation("ContractIssueUpdatedBy")
+  contractClaimsResponsible                     ContractClaim[]                        @relation("ContractClaimResponsible")
+  contractClaimsCreated                         ContractClaim[]                        @relation("ContractClaimCreatedBy")
+  contractClaimsUpdated                         ContractClaim[]                        @relation("ContractClaimUpdatedBy")
+  contractVariationsCreated                     ContractVariation[]                    @relation("ContractVariationCreatedBy")
+  contractVariationsUpdated                     ContractVariation[]                    @relation("ContractVariationUpdatedBy")
+  contractVariationAttachmentsUploaded          ContractVariationAttachment[]          @relation("ContractVariationAttachmentUploadedBy")
+  contractRisksResponsible                      ContractRisk[]                         @relation("ContractRiskResponsible")
+  contractRisksCreated                          ContractRisk[]                         @relation("ContractRiskCreatedBy")
+  contractRisksUpdated                          ContractRisk[]                         @relation("ContractRiskUpdatedBy")
+  contractDocumentObligationsCreated            ContractDocumentObligation[]           @relation("ContractDocumentObligationCreatedBy")
+  contractDocumentObligationsUpdated            ContractDocumentObligation[]           @relation("ContractDocumentObligationUpdatedBy")
+  contractDocumentObligationAttachmentsUploaded ContractDocumentObligationAttachment[] @relation("ContractDocumentObligationAttachmentUploadedBy")
+  contractCloseoutRequestsRequested             ContractCloseoutRequest[]              @relation("ContractCloseoutRequestRequestedBy")
+  contractCloseoutRequestsReviewed              ContractCloseoutRequest[]              @relation("ContractCloseoutRequestReviewedBy")
+  contractCloseoutAttachmentsUploaded           ContractCloseoutAttachment[]           @relation("ContractCloseoutAttachmentUploadedBy")
+  contractScheduleItemsCreated                  ContractScheduleItem[]                 @relation("ContractScheduleItemCreatedBy")
+  contractScheduleItemsUpdated                  ContractScheduleItem[]                 @relation("ContractScheduleItemUpdatedBy")
 
-  productionOrdersCreated   ProductionOrder[] @relation("ProdOrderCreatedBy")
-  productionOrdersSupervised ProductionOrder[] @relation("ProdOrderSupervisor")
-  productionOrdersStarted   ProductionOrder[] @relation("ProdOrderStartedBy")
-  productionOrdersPaused    ProductionOrder[] @relation("ProdOrderPausedBy")
-  productionOrdersResumed   ProductionOrder[] @relation("ProdOrderResumedBy")
-  productionOrdersCompleted ProductionOrder[] @relation("ProdOrderCompletedBy")
-  productionOrdersCancelled ProductionOrder[] @relation("ProdOrderCancelledBy")
-  productionComments        ProductionComment[] @relation("ProdCommentAuthor")
+  productionOrdersCreated    ProductionOrder[]   @relation("ProdOrderCreatedBy")
+  productionOrdersSupervised ProductionOrder[]   @relation("ProdOrderSupervisor")
+  productionOrdersStarted    ProductionOrder[]   @relation("ProdOrderStartedBy")
+  productionOrdersPaused     ProductionOrder[]   @relation("ProdOrderPausedBy")
+  productionOrdersResumed    ProductionOrder[]   @relation("ProdOrderResumedBy")
+  productionOrdersCompleted  ProductionOrder[]   @relation("ProdOrderCompletedBy")
+  productionOrdersCancelled  ProductionOrder[]   @relation("ProdOrderCancelledBy")
+  productionComments         ProductionComment[] @relation("ProdCommentAuthor")
 
   moduleAccess        UserModuleAccess[] @relation
   moduleAccessGranted UserModuleAccess[] @relation("ModuleAccessGrantedBy")
@@ -881,28 +894,28 @@ model SafetyInspection {
 }
 
 model SafetyFinding {
-  id                String         @id @default(uuid()) @db.Uuid
-  inspectionId      String         @map("inspection_id") @db.Uuid
-  title             String         @db.VarChar(300)
-  description       String         @db.VarChar(10000)
+  id                String          @id @default(uuid()) @db.Uuid
+  inspectionId      String          @map("inspection_id") @db.Uuid
+  title             String          @db.VarChar(300)
+  description       String          @db.VarChar(10000)
   severity          FindingSeverity
-  status            FindingStatus  @default(OPEN)
-  assignedToUserId  String?        @map("assigned_to_user_id") @db.Uuid
-  dueAt             DateTime?      @map("due_at") @db.Timestamptz(3)
-  actionRequired    String?        @map("action_required") @db.VarChar(5000)
-  resolutionSummary String?        @map("resolution_summary") @db.VarChar(10000)
-  resolvedAt        DateTime?      @map("resolved_at") @db.Timestamptz(3)
-  resolvedByUserId  String?        @map("resolved_by_user_id") @db.Uuid
-  verifiedAt        DateTime?      @map("verified_at") @db.Timestamptz(3)
-  verifiedByUserId  String?        @map("verified_by_user_id") @db.Uuid
-  closedAt          DateTime?      @map("closed_at") @db.Timestamptz(3)
-  closedByUserId    String?        @map("closed_by_user_id") @db.Uuid
-  reopenedAt        DateTime?      @map("reopened_at") @db.Timestamptz(3)
-  reopenedByUserId  String?        @map("reopened_by_user_id") @db.Uuid
-  reopenReason      String?        @map("reopen_reason") @db.VarChar(1000)
-  createdByUserId   String         @map("created_by_user_id") @db.Uuid
-  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  status            FindingStatus   @default(OPEN)
+  assignedToUserId  String?         @map("assigned_to_user_id") @db.Uuid
+  dueAt             DateTime?       @map("due_at") @db.Timestamptz(3)
+  actionRequired    String?         @map("action_required") @db.VarChar(5000)
+  resolutionSummary String?         @map("resolution_summary") @db.VarChar(10000)
+  resolvedAt        DateTime?       @map("resolved_at") @db.Timestamptz(3)
+  resolvedByUserId  String?         @map("resolved_by_user_id") @db.Uuid
+  verifiedAt        DateTime?       @map("verified_at") @db.Timestamptz(3)
+  verifiedByUserId  String?         @map("verified_by_user_id") @db.Uuid
+  closedAt          DateTime?       @map("closed_at") @db.Timestamptz(3)
+  closedByUserId    String?         @map("closed_by_user_id") @db.Uuid
+  reopenedAt        DateTime?       @map("reopened_at") @db.Timestamptz(3)
+  reopenedByUserId  String?         @map("reopened_by_user_id") @db.Uuid
+  reopenReason      String?         @map("reopen_reason") @db.VarChar(1000)
+  createdByUserId   String          @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   inspection     SafetyInspection @relation(fields: [inspectionId], references: [id], onDelete: Restrict)
   createdByUser  User             @relation("FindingCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -980,6 +993,13 @@ enum ContractStatus {
   ACTIVE
   TERMINATED
   CLOSED
+  // CM-69A — safe void/cancel flow for a wrongly created draft/test contract
+  // (from DRAFT) or a mistakenly activated one (from ACTIVE). Distinct from
+  // TERMINATED, which keeps its own real meaning (a genuinely executed
+  // contract ended early, still closeout-eligible) — a cancelled contract is
+  // never closeout-eligible and is never hard-deleted; related records are
+  // always kept for audit.
+  CANCELLED
 
   @@map("contract_status")
 }
@@ -1004,6 +1024,25 @@ enum ContractPaymentStatus {
   @@map("contract_payment_status")
 }
 
+// CM-55 — manager-facing schedule/progress status for the Contract List's
+// Status column. Deliberately a SEPARATE field from Contract.status
+// (the real lifecycle: DRAFT/ACTIVE/TERMINATED/CLOSED) — this is never
+// written by activate/terminate/close, and setting it never bypasses the
+// closeout approval flow. Nullable: existing/new contracts start unset;
+// the API computes a neutral display default (IN_PROGRESS, or COMPLETED
+// once the contract's real lifecycle status is CLOSED) until a manager
+// explicitly picks a value via PATCH /contracts/:id/schedule-status — see
+// computeEffectiveScheduleStatus() in contracts.service.ts.
+enum ContractScheduleStatus {
+  IN_PROGRESS
+  ON_TRACK
+  DELAYED
+  COMPLETED
+  AHEAD_OF_SCHEDULE
+
+  @@map("contract_schedule_status")
+}
+
 model ContractSequence {
   year    Int @id
   lastSeq Int @default(0) @map("last_seq")
@@ -1012,73 +1051,85 @@ model ContractSequence {
 }
 
 model Contract {
-  id                  String         @id @default(uuid()) @db.Uuid
-  referenceNumber     String         @unique @map("reference_number") @db.VarChar(25)
-  title               String         @db.VarChar(300)
-  description         String?        @db.Text
-  status              ContractStatus @default(DRAFT)
-  version             Int            @default(1)
-  counterpartyName    String         @map("counterparty_name") @db.VarChar(300)
-  counterpartyContact String?        @map("counterparty_contact") @db.VarChar(500)
-  jobOrder            String?        @map("job_order") @db.VarChar(100)
-  contractDate        DateTime?      @map("contract_date") @db.Date
-  quotationNumber     String?        @map("quotation_number") @db.VarChar(100)
-  projectNumber       String?        @map("project_number") @db.VarChar(100)
-  scopeOfWork         Json?          @map("scope_of_work") @db.JsonB
-  paymentTerms        Json?          @map("payment_terms") @db.JsonB
-  contractValue       Decimal?       @map("contract_value") @db.Decimal(18, 3)
-  currency            String?        @db.VarChar(3)
-  startDate           DateTime?      @map("start_date") @db.Date
-  endDate             DateTime?      @map("end_date") @db.Date
-  renewalNoticeDate   DateTime?      @map("renewal_notice_date") @db.Date
-  clientContactName   String?        @map("client_contact_name") @db.VarChar(150)
-  clientContactPhone  String?        @map("client_contact_phone") @db.VarChar(50)
-  forecastCompletionDate    DateTime? @map("forecast_completion_date") @db.Date
-  originalContractValue     Decimal?  @map("original_contract_value") @db.Decimal(18, 3)
-  originalCurrency          String?   @map("original_currency") @db.VarChar(3)
-  projectSiteLocation       String?   @map("project_site_location") @db.VarChar(255)
-  scopeDescription          String?   @map("scope_description") @db.Text
-  scopeExclusions           String?   @map("scope_exclusions") @db.Text
-  deliverables              String?   @db.Text
-  milestones                String?   @db.Text
-  scheduleSummary           String?   @map("schedule_summary") @db.Text
-  quantitiesSpecifications  String?   @map("quantities_specifications") @db.Text
-  craneRequired             String?   @map("crane_required") @db.VarChar(30)
-  craneProvidedBy           String?   @map("crane_provided_by") @db.VarChar(30)
-  estimatedCraneCapacity    String?   @map("estimated_crane_capacity") @db.VarChar(100)
-  ownerUserId         String         @map("owner_user_id") @db.Uuid
-  departmentId        String?        @map("department_id") @db.Uuid
-  plantId             String?        @map("plant_id") @db.Uuid
-  locationId          String?        @map("location_id") @db.Uuid
-  notes               String?        @db.Text
-  createdByUserId     String         @map("created_by_user_id") @db.Uuid
-  activatedAt         DateTime?      @map("activated_at") @db.Timestamptz(3)
-  activatedByUserId   String?        @map("activated_by_user_id") @db.Uuid
-  terminatedAt        DateTime?      @map("terminated_at") @db.Timestamptz(3)
-  terminatedByUserId  String?        @map("terminated_by_user_id") @db.Uuid
-  terminationReason   String?        @map("termination_reason") @db.VarChar(1000)
-  closedAt            DateTime?      @map("closed_at") @db.Timestamptz(3)
-  closedByUserId      String?        @map("closed_by_user_id") @db.Uuid
-  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                       String                  @id @default(uuid()) @db.Uuid
+  referenceNumber          String                  @unique @map("reference_number") @db.VarChar(25)
+  title                    String                  @db.VarChar(300)
+  description              String?                 @db.Text
+  status                   ContractStatus          @default(DRAFT)
+  version                  Int                     @default(1)
+  counterpartyName         String                  @map("counterparty_name") @db.VarChar(300)
+  counterpartyContact      String?                 @map("counterparty_contact") @db.VarChar(500)
+  jobOrder                 String?                 @map("job_order") @db.VarChar(100)
+  contractDate             DateTime?               @map("contract_date") @db.Date
+  quotationNumber          String?                 @map("quotation_number") @db.VarChar(100)
+  projectNumber            String?                 @map("project_number") @db.VarChar(100)
+  scopeOfWork              Json?                   @map("scope_of_work") @db.JsonB
+  paymentTerms             Json?                   @map("payment_terms") @db.JsonB
+  contractValue            Decimal?                @map("contract_value") @db.Decimal(18, 3)
+  currency                 String?                 @db.VarChar(3)
+  startDate                DateTime?               @map("start_date") @db.Date
+  endDate                  DateTime?               @map("end_date") @db.Date
+  renewalNoticeDate        DateTime?               @map("renewal_notice_date") @db.Date
+  clientContactName        String?                 @map("client_contact_name") @db.VarChar(150)
+  clientContactPhone       String?                 @map("client_contact_phone") @db.VarChar(50)
+  forecastCompletionDate   DateTime?               @map("forecast_completion_date") @db.Date
+  originalContractValue    Decimal?                @map("original_contract_value") @db.Decimal(18, 3)
+  originalCurrency         String?                 @map("original_currency") @db.VarChar(3)
+  projectSiteLocation      String?                 @map("project_site_location") @db.VarChar(255)
+  scopeDescription         String?                 @map("scope_description") @db.Text
+  scopeExclusions          String?                 @map("scope_exclusions") @db.Text
+  deliverables             String?                 @db.Text
+  milestones               String?                 @db.Text
+  scheduleSummary          String?                 @map("schedule_summary") @db.Text
+  quantitiesSpecifications String?                 @map("quantities_specifications") @db.Text
+  craneRequired            String?                 @map("crane_required") @db.VarChar(30)
+  craneProvidedBy          String?                 @map("crane_provided_by") @db.VarChar(30)
+  estimatedCraneCapacity   String?                 @map("estimated_crane_capacity") @db.VarChar(100)
+  ownerUserId              String                  @map("owner_user_id") @db.Uuid
+  departmentId             String?                 @map("department_id") @db.Uuid
+  plantId                  String?                 @map("plant_id") @db.Uuid
+  locationId               String?                 @map("location_id") @db.Uuid
+  notes                    String?                 @db.Text
+  createdByUserId          String                  @map("created_by_user_id") @db.Uuid
+  activatedAt              DateTime?               @map("activated_at") @db.Timestamptz(3)
+  activatedByUserId        String?                 @map("activated_by_user_id") @db.Uuid
+  terminatedAt             DateTime?               @map("terminated_at") @db.Timestamptz(3)
+  terminatedByUserId       String?                 @map("terminated_by_user_id") @db.Uuid
+  terminationReason        String?                 @map("termination_reason") @db.VarChar(1000)
+  closedAt                 DateTime?               @map("closed_at") @db.Timestamptz(3)
+  closedByUserId           String?                 @map("closed_by_user_id") @db.Uuid
+  // CM-69A — safe cancel/void flow. Never set alongside terminatedAt/closedAt.
+  cancelledAt              DateTime?               @map("cancelled_at") @db.Timestamptz(3)
+  cancelledByUserId        String?                 @map("cancelled_by_user_id") @db.Uuid
+  cancellationReason       String?                 @map("cancellation_reason") @db.VarChar(1000)
+  // CM-55 — see ContractScheduleStatus above. Additive/nullable; never set
+  // by activate/terminate/close, never read by closeout eligibility checks.
+  scheduleStatus           ContractScheduleStatus? @map("schedule_status")
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   ownerUser        User        @relation("ContractOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   createdByUser    User        @relation("ContractCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   activatedByUser  User?       @relation("ContractActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
   terminatedByUser User?       @relation("ContractTerminatedBy", fields: [terminatedByUserId], references: [id], onDelete: SetNull)
   closedByUser     User?       @relation("ContractClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser  User?       @relation("ContractCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
   location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  comments      ContractComment[]
-  activities    ContractActivity[]
-  boqItems      ContractBoqItem[]
-  payments      ContractPayment[]
-  workflowTasks ContractWorkflowTask[]
-  issues        ContractIssue[]
-  claims        ContractClaim[]
-  closeoutRequests ContractCloseoutRequest[]
+  comments            ContractComment[]
+  activities          ContractActivity[]
+  boqItems            ContractBoqItem[]
+  payments            ContractPayment[]
+  workflowTasks       ContractWorkflowTask[]
+  issues              ContractIssue[]
+  claims              ContractClaim[]
+  variations          ContractVariation[]
+  risks               ContractRisk[]
+  documentObligations ContractDocumentObligation[]
+  closeoutRequests    ContractCloseoutRequest[]
+  scheduleItems       ContractScheduleItem[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1091,32 +1142,85 @@ model Contract {
 }
 
 // BOQ / contract item line details captured during Contract Register.
-// Invoice Qty, P/R, and Remaining Amount are deliberately NOT stored here —
-// those are calculated later from the payment/progress modules (not yet built).
+// Progress/Invoice % and Amount Remaining are deliberately NOT stored here —
+// both are always derived from invoiceQty/totalPrice (see
+// boqProgressPercent()/boqAmountRemaining() in the web app's
+// contract-boq-helpers.ts), never trusted/stored values.
 model ContractBoqItem {
-  id                     String                     @id @default(uuid()) @db.Uuid
-  contractId             String                     @map("contract_id") @db.Uuid
-  sortOrder              Int                        @map("sort_order")
-  itemCode               String?                    @map("item_code") @db.VarChar(100)
-  category               String?                    @db.VarChar(100)
-  description            String                     @db.VarChar(500)
-  drawingReference       String?                    @map("drawing_reference") @db.VarChar(150)
-  specificationReference String?                    @map("specification_reference") @db.VarChar(150)
-  originalEstimatedQty   Decimal?                   @map("original_estimated_qty") @db.Decimal(14, 3)
-  revisedQty             Decimal?                   @map("revised_qty") @db.Decimal(14, 3)
-  unitOfMeasure          String?                    @map("unit_of_measure") @db.VarChar(50)
-  mixDesignType          ContractBoqMixDesignType?  @map("mix_design_type")
-  concreteGrade          String?                    @map("concrete_grade") @db.VarChar(50)
-  unitPrice              Decimal?                   @map("unit_price") @db.Decimal(18, 3)
-  totalPrice             Decimal?                   @map("total_price") @db.Decimal(18, 3)
-  createdAt              DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt              DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                     String                    @id @default(uuid()) @db.Uuid
+  contractId             String                    @map("contract_id") @db.Uuid
+  sortOrder              Int                       @map("sort_order")
+  itemCode               String?                   @map("item_code") @db.VarChar(100)
+  category               String?                   @db.VarChar(100)
+  description            String                    @db.VarChar(500)
+  drawingReference       String?                   @map("drawing_reference") @db.VarChar(150)
+  specificationReference String?                   @map("specification_reference") @db.VarChar(150)
+  originalEstimatedQty   Decimal?                  @map("original_estimated_qty") @db.Decimal(14, 3)
+  revisedQty             Decimal?                  @map("revised_qty") @db.Decimal(14, 3)
+  unitOfMeasure          String?                   @map("unit_of_measure") @db.VarChar(50)
+  mixDesignType          ContractBoqMixDesignType? @map("mix_design_type")
+  concreteGrade          String?                   @map("concrete_grade") @db.VarChar(50)
+  unitPrice              Decimal?                  @map("unit_price") @db.Decimal(18, 3)
+  totalPrice             Decimal?                  @map("total_price") @db.Decimal(18, 3)
+  // CM-56D — "Drawing Qty": quantity confirmed during drawing/calculation
+  // stages, distinct from originalEstimatedQty (the original contract BOQ
+  // qty/area) and revisedQty (which IS used as a Total-Price override via
+  // boqRowQty()). Drawing Qty is deliberately never read by any BOQ
+  // formula — purely informational/technical quantity confirmation.
+  drawingQty             Decimal?                  @map("drawing_qty") @db.Decimal(14, 3)
+  // CM-56 — real, editable "Invoice Qty" (New Contract Register / BOQ table).
+  // Additive/nullable; Progress % and Amount Remaining stay derived, never
+  // stored (see model comment above).
+  invoiceQty             Decimal?                  @map("invoice_qty") @db.Decimal(14, 3)
+  createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  contract         Contract                         @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  productionStatus ContractBoqItemProductionStatus?
 
   @@unique([contractId, itemCode])
   @@index([contractId, sortOrder])
   @@map("contract_boq_items")
+}
+
+// CM-59 — Contract Production Status. Production quantities are manually
+// updated inside Contract Management (no separate Production Module
+// integration exists yet); one optional row per BOQ item, created lazily on
+// first update rather than seeded for every item. onDelete: Cascade because
+// Edit Contract's BOQ save path deletes and recreates ALL of a contract's
+// ContractBoqItem rows whenever the BOQ is replaced (see
+// contracts.service.ts update()) — Restrict would break that existing save
+// flow the moment any item had production tracked. This means editing a
+// contract's BOQ resets production tracking for that contract; documented
+// here and in the CM-59 progress-tracker entry as a known, honest tradeoff
+// rather than hidden. producedQty/deliveredQty are the only stored values —
+// stockNotDelivered/remainingToCast/progressPercent are always derived, never
+// stored (same convention as ContractBoqItem's own invoiceQty/Progress %).
+model ContractBoqItemProductionStatus {
+  id                String                      @id @default(uuid()) @db.Uuid
+  contractBoqItemId String                      @unique @map("contract_boq_item_id") @db.Uuid
+  producedQty       Decimal                     @default(0) @map("produced_qty") @db.Decimal(14, 3)
+  deliveredQty      Decimal                     @default(0) @map("delivered_qty") @db.Decimal(14, 3)
+  status            ContractBoqProductionStatus @default(NOT_STARTED)
+  remarks           String?                     @db.Text
+  updatedByUserId   String?                     @map("updated_by_user_id") @db.Uuid
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contractBoqItem ContractBoqItem @relation(fields: [contractBoqItemId], references: [id], onDelete: Cascade)
+  updatedByUser   User?           @relation("ContractBoqProductionStatusUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@map("contract_boq_item_production_status")
+}
+
+enum ContractBoqProductionStatus {
+  NOT_STARTED
+  IN_PRODUCTION
+  PARTIALLY_DELIVERED
+  COMPLETED
+  DELAYED
+
+  @@map("contract_boq_production_status")
 }
 
 model ContractComment {
@@ -1157,23 +1261,23 @@ model ContractActivity {
 // but unique per contract when provided (same pattern as ContractBoqItem.itemCode).
 // No hard delete: cancellation goes through status = CANCELLED via update.
 model ContractPayment {
-  id               String                @id @default(uuid()) @db.Uuid
-  contractId       String                @map("contract_id") @db.Uuid
-  paymentNo        String?               @map("payment_no") @db.VarChar(50)
-  invoiceNumber    String?               @map("invoice_number") @db.VarChar(100)
-  invoiceDate      DateTime?             @map("invoice_date") @db.Date
-  paymentTerm      String?               @map("payment_term") @db.VarChar(100)
-  submittedAmount  Decimal?              @map("submitted_amount") @db.Decimal(18, 3)
-  certifiedAmount  Decimal?              @map("certified_amount") @db.Decimal(18, 3)
-  paidAmount       Decimal?              @map("paid_amount") @db.Decimal(18, 3)
-  dueDate          DateTime?             @map("due_date") @db.Date
-  paidDate         DateTime?             @map("paid_date") @db.Date
-  status           ContractPaymentStatus @default(DRAFT)
-  remarks          String?               @db.Text
-  createdByUserId  String                @map("created_by_user_id") @db.Uuid
-  updatedByUserId  String?               @map("updated_by_user_id") @db.Uuid
-  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id              String                @id @default(uuid()) @db.Uuid
+  contractId      String                @map("contract_id") @db.Uuid
+  paymentNo       String?               @map("payment_no") @db.VarChar(50)
+  invoiceNumber   String?               @map("invoice_number") @db.VarChar(100)
+  invoiceDate     DateTime?             @map("invoice_date") @db.Date
+  paymentTerm     String?               @map("payment_term") @db.VarChar(100)
+  submittedAmount Decimal?              @map("submitted_amount") @db.Decimal(18, 3)
+  certifiedAmount Decimal?              @map("certified_amount") @db.Decimal(18, 3)
+  paidAmount      Decimal?              @map("paid_amount") @db.Decimal(18, 3)
+  dueDate         DateTime?             @map("due_date") @db.Date
+  paidDate        DateTime?             @map("paid_date") @db.Date
+  status          ContractPaymentStatus @default(DRAFT)
+  remarks         String?               @db.Text
+  createdByUserId String                @map("created_by_user_id") @db.Uuid
+  updatedByUserId String?               @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   contract      Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
   createdByUser User     @relation("ContractPaymentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -1222,34 +1326,34 @@ enum ContractWorkflowTaskPriority {
 // so lazy generation from scopeOfWork is idempotent: generation only inserts
 // taskKeys that don't already exist for the contract, never overwrites.
 model ContractWorkflowTask {
-  id                 String                     @id @default(uuid()) @db.Uuid
-  contractId         String                     @map("contract_id") @db.Uuid
-  team               ContractWorkflowTeam
-  taskKey            String                     @map("task_key") @db.VarChar(100)
-  taskName           String                     @map("task_name") @db.VarChar(200)
-  sortOrder          Int                        @map("sort_order")
-  status             ContractWorkflowTaskStatus @default(NOT_STARTED)
-  priority           ContractWorkflowTaskPriority @default(MEDIUM)
-  delayReason        String?                    @map("delay_reason") @db.Text
-  responsibleUserId  String?                    @map("responsible_user_id") @db.Uuid
-  startDate          DateTime?                  @map("start_date") @db.Date
-  dueDate            DateTime?                  @map("due_date") @db.Date
-  completedDate      DateTime?                  @map("completed_date") @db.Date
-  remarks            String?                    @db.Text
+  id                String                       @id @default(uuid()) @db.Uuid
+  contractId        String                       @map("contract_id") @db.Uuid
+  team              ContractWorkflowTeam
+  taskKey           String                       @map("task_key") @db.VarChar(100)
+  taskName          String                       @map("task_name") @db.VarChar(200)
+  sortOrder         Int                          @map("sort_order")
+  status            ContractWorkflowTaskStatus   @default(NOT_STARTED)
+  priority          ContractWorkflowTaskPriority @default(MEDIUM)
+  delayReason       String?                      @map("delay_reason") @db.Text
+  responsibleUserId String?                      @map("responsible_user_id") @db.Uuid
+  startDate         DateTime?                    @map("start_date") @db.Date
+  dueDate           DateTime?                    @map("due_date") @db.Date
+  completedDate     DateTime?                    @map("completed_date") @db.Date
+  remarks           String?                      @db.Text
   // CM-46B — optional Contract Staff task-intake fields (Receipt Details /
   // Drawing-Task Information / Follow-up notes), never core workflow state.
   // See contract-workflow.service.ts's sanitizeWorkflowTaskFormData().
-  formData           Json?                      @map("form_data") @db.JsonB
-  lastActivityAt     DateTime                   @default(now()) @map("last_activity_at") @db.Timestamptz(3)
-  createdByUserId    String                     @map("created_by_user_id") @db.Uuid
-  updatedByUserId    String?                    @map("updated_by_user_id") @db.Uuid
-  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  formData          Json?                        @map("form_data") @db.JsonB
+  lastActivityAt    DateTime                     @default(now()) @map("last_activity_at") @db.Timestamptz(3)
+  createdByUserId   String                       @map("created_by_user_id") @db.Uuid
+  updatedByUserId   String?                      @map("updated_by_user_id") @db.Uuid
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  responsibleUser User?    @relation("ContractWorkflowTaskResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
-  createdByUser   User     @relation("ContractWorkflowTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  updatedByUser   User?    @relation("ContractWorkflowTaskUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  contract        Contract                         @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  responsibleUser User?                            @relation("ContractWorkflowTaskResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  createdByUser   User                             @relation("ContractWorkflowTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?                            @relation("ContractWorkflowTaskUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   attachments     ContractWorkflowTaskAttachment[]
   comments        ContractWorkflowTaskComment[]
 
@@ -1424,6 +1528,300 @@ model ContractClaim {
   @@map("contract_claims")
 }
 
+enum ContractVariationStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CANCELLED
+
+  @@map("contract_variation_status")
+}
+
+// CM-60 — Variations / Change Orders. "Variation" is the contract/QS term
+// used throughout this model/table (per the task's explicit naming
+// decision — "Change Orders" appears only in the page/tab title, not here).
+// amount is a signed Decimal — a deductive variation is stored as a real
+// negative number (see approved-design screenshot's "-12,000.000" row), never
+// clamped to zero. affectsContractValue defaults to true (most variations do
+// affect value) but can be set false for a variation that only affects
+// completion date or scope, with no value impact. supportingDocumentName/Url
+// are plain optional text/link fields, NOT a file upload — this unit
+// deliberately does not add a new attachment/storage pipeline (see CM-60
+// progress-tracker entry); a manager can name/link an already-existing
+// document (e.g. from Documents & Obligations) but cannot upload one here.
+// Current Contract Value for the Variations page is computed on read as
+// Contract.originalContractValue + sum(APPROVED, affectsContractValue=true) —
+// Contract.contractValue itself is never mutated by this model (that stays
+// BOQ-derived, per contracts.service.ts, untouched by this unit).
+model ContractVariation {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  contractId             String                  @map("contract_id") @db.Uuid
+  variationNo            String?                 @map("variation_no") @db.VarChar(50)
+  description            String                  @db.VarChar(500)
+  amount                 Decimal?                @db.Decimal(18, 3)
+  currency               String                  @default("KWD") @db.VarChar(3)
+  affectsContractValue   Boolean                 @default(true) @map("affects_contract_value")
+  status                 ContractVariationStatus @default(DRAFT)
+  submittedDate          DateTime?               @map("submitted_date") @db.Date
+  approvedDate           DateTime?               @map("approved_date") @db.Date
+  supportingDocumentName String?                 @map("supporting_document_name") @db.VarChar(300)
+  supportingDocumentUrl  String?                 @map("supporting_document_url") @db.VarChar(1000)
+  remarks                String?                 @db.Text
+  createdByUserId        String                  @map("created_by_user_id") @db.Uuid
+  updatedByUserId        String?                 @map("updated_by_user_id") @db.Uuid
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract      Contract                      @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdByUser User                          @relation("ContractVariationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser User?                         @relation("ContractVariationUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments   ContractVariationAttachment[]
+
+  @@unique([contractId, variationNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("contract_variations")
+}
+
+// CM-60C — real uploaded supporting documents for a variation (site
+// instructions, drawing markups, client emails, BOQ/calculation sheets,
+// quotations, engineer approvals). Local-disk storage, structure mirrors
+// ContractWorkflowTaskAttachment/ContractCloseoutAttachment exactly
+// (fileName/fileSize naming kept consistent with those two sibling tables
+// rather than this unit's own "stored_file_name"/"size_bytes" wording — same
+// meaning, matching the established convention). onDelete: Cascade — no
+// delete endpoint exists for a variation today, but if one is ever added its
+// attachments should never become orphaned rows pointing at nothing.
+// supportingDocumentName/supportingDocumentUrl on ContractVariation itself
+// are untouched — real uploads are additive, not a replacement.
+model ContractVariationAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  variationId      String   @map("variation_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  variation      ContractVariation @relation(fields: [variationId], references: [id], onDelete: Cascade)
+  uploadedByUser User              @relation("ContractVariationAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([variationId, createdAt(sort: Desc)])
+  @@map("contract_variation_attachments")
+}
+
+enum ContractRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("contract_risk_level")
+}
+
+enum ContractRiskResponse {
+  MITIGATE
+  ACCEPT
+  AVOID
+  TRANSFER
+
+  @@map("contract_risk_response")
+}
+
+enum ContractRiskStatus {
+  OPEN
+  IN_PROGRESS
+  MITIGATED
+  CLOSED
+  CANCELLED
+
+  @@map("contract_risk_status")
+}
+
+// CM-62 — Contract Risk Assessment. Deliberately NOT an ISO risk-management
+// system: riskEvaluation ("Risk Evaluation" — initial level before response)
+// and residualRisk ("expected level after the response action") are both
+// plain manual dropdowns, never auto-calculated or scored — no numeric risk
+// score is stored anywhere on this model. riskResponse is one of exactly 4
+// values (Mitigate/Accept/Avoid/Transfer); manager examples like
+// "Subcontracting"/"Insurance" are NOT response types — they belong in the
+// free-text riskResponseDescription only (e.g. "Transfer" + "Cover through
+// insurance and subcontractor responsibility clause."). responsibleUserId
+// (not a free-text "responsiblePerson" string) follows the same FK+picker
+// pattern already established for ContractClaim.responsibleUserId — a
+// deliberate deviation from this unit's own literal field-name wording, for
+// consistency with the rest of this codebase.
+model ContractRisk {
+  id                      String               @id @default(uuid()) @db.Uuid
+  contractId              String               @map("contract_id") @db.Uuid
+  riskNo                  String?              @map("risk_no") @db.VarChar(50)
+  description             String               @db.VarChar(500)
+  riskEvaluation          ContractRiskLevel    @default(MEDIUM) @map("risk_evaluation")
+  riskResponse            ContractRiskResponse @default(MITIGATE) @map("risk_response")
+  riskResponseDescription String?              @map("risk_response_description") @db.Text
+  residualRisk            ContractRiskLevel?   @map("residual_risk")
+  status                  ContractRiskStatus   @default(OPEN)
+  responsibleUserId       String?              @map("responsible_user_id") @db.Uuid
+  actionDueDate           DateTime?            @map("action_due_date") @db.Date
+  remarks                 String?              @db.Text
+  createdByUserId         String               @map("created_by_user_id") @db.Uuid
+  updatedByUserId         String?              @map("updated_by_user_id") @db.Uuid
+  createdAt               DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  responsibleUser User?    @relation("ContractRiskResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  createdByUser   User     @relation("ContractRiskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?    @relation("ContractRiskUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, riskNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("contract_risks")
+}
+
+// CM-68A — one row per fixed real business stage (see
+// ContractScheduleStageKey below) for one contract's PLANNED schedule only.
+// "Actual" values are never stored here — they're derived live from real
+// workflow/payment/production/closeout records (see
+// contract-schedule-plan.service.ts). responsibleTeam is a free-text field
+// (not the ContractWorkflowTeam enum) since 4 of the 8 real stages
+// (Contract Sign, Advance Payment, Estimation Sheet, Final Closeout) don't
+// map onto any real workflow team — forcing that enum here would be
+// dishonest for those stages.
+model ContractScheduleItem {
+  id               String                   @id @default(uuid()) @db.Uuid
+  contractId       String                   @map("contract_id") @db.Uuid
+  stageKey         ContractScheduleStageKey @map("stage_key")
+  stageName        String                   @map("stage_name") @db.VarChar(150)
+  responsibleTeam  String?                  @map("responsible_team") @db.VarChar(100)
+  plannedStartDate DateTime?                @map("planned_start_date") @db.Date
+  plannedEndDate   DateTime?                @map("planned_end_date") @db.Date
+  plannedQuantity  Decimal?                 @map("planned_quantity") @db.Decimal(14, 3)
+  plannedMolds     Int?                     @map("planned_molds")
+  remarks          String?                  @db.Text
+  sortOrder        Int                      @map("sort_order")
+  isRequired       Boolean                  @default(true) @map("is_required")
+  createdByUserId  String                   @map("created_by_user_id") @db.Uuid
+  updatedByUserId  String?                  @map("updated_by_user_id") @db.Uuid
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract      Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdByUser User     @relation("ContractScheduleItemCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser User?    @relation("ContractScheduleItemUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, stageKey])
+  @@index([contractId])
+  @@map("contract_schedule_items")
+}
+
+enum ContractScheduleStageKey {
+  CONTRACT_SIGN
+  ADVANCE_PAYMENT
+  DRAWING_APPROVAL
+  ESTIMATION_SHEET
+  CASTING_PRODUCTION
+  DELIVERY
+  ERECTION
+  FINAL_CLOSEOUT
+
+  @@map("contract_schedule_stage_key")
+}
+
+enum ContractDocumentObligationCategory {
+  PERFORMANCE_BOND
+  INSURANCE
+  GUARANTEE
+  TAX_STATUTORY
+  TECHNICAL_SUBMISSION
+  APPROVAL_DOCUMENT
+  HEALTH_SAFETY
+  OTHER
+
+  @@map("contract_document_obligation_category")
+}
+
+enum ContractDocumentObligationStatus {
+  PENDING
+  SUBMITTED
+  EXPIRING_SOON
+  EXPIRED_OVERDUE
+  NOT_REQUIRED
+  CANCELLED
+
+  @@map("contract_document_obligation_status")
+}
+
+// CM-63 — Documents & Obligations: required contract documents, certificates,
+// submissions, guarantees, and approvals with their obligation deadlines
+// (Performance Bond, Insurance, APG, Tax Clearance, Method Statement, Shop
+// Drawings Approval, Environmental Approval, Safety Plan, etc.). `status` is
+// always a plain manual selection — never silently overwritten by date math.
+// Expiring Soon / Expired-Overdue KPI counts are DERIVED at read time from
+// `status` + `submissionOrExpiryDate` (see contract-document-obligations.service.ts
+// computeDocumentObligationSummary()) without ever mutating the stored
+// `status` column, so a manager's own status choice is never second-guessed
+// by the system.
+model ContractDocumentObligation {
+  id                     String                             @id @default(uuid()) @db.Uuid
+  contractId             String                             @map("contract_id") @db.Uuid
+  itemNo                 String?                            @map("item_no") @db.VarChar(50)
+  title                  String                             @db.VarChar(300)
+  category               ContractDocumentObligationCategory @default(OTHER)
+  responsibleParty       String?                            @map("responsible_party") @db.VarChar(150)
+  requiredDate           DateTime?                          @map("required_date") @db.Date
+  /// CM-70E — legacy combined field from before Submission Date and Expiry
+  /// Date were split into their own columns. Never written to by new
+  /// records; kept, unmigrated, so no existing data is lost or guessed at.
+  submissionOrExpiryDate DateTime?                          @map("submission_or_expiry_date") @db.Date
+  /// CM-70E — date the document was submitted/received. Additive, nullable.
+  submissionDate         DateTime?                          @map("submission_date") @db.Date
+  /// CM-70E — date the document expires, if applicable. Additive, nullable.
+  expiryDate             DateTime?                          @map("expiry_date") @db.Date
+  status                 ContractDocumentObligationStatus   @default(PENDING)
+  remarks                String?                            @db.Text
+  createdByUserId        String                             @map("created_by_user_id") @db.Uuid
+  updatedByUserId        String?                            @map("updated_by_user_id") @db.Uuid
+  createdAt              DateTime                           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract      Contract                               @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdByUser User                                   @relation("ContractDocumentObligationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser User?                                  @relation("ContractDocumentObligationUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments   ContractDocumentObligationAttachment[]
+
+  @@unique([contractId, itemNo])
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("contract_document_obligations")
+}
+
+// CM-63 — real uploaded supporting file for one document/obligation item.
+// Structure mirrors ContractVariationAttachment exactly (random stored
+// filename, cascade delete with its parent).
+model ContractDocumentObligationAttachment {
+  id                   String   @id @default(uuid()) @db.Uuid
+  documentObligationId String   @map("document_obligation_id") @db.Uuid
+  fileName             String   @map("file_name") @db.VarChar(255)
+  originalFileName     String   @map("original_file_name") @db.VarChar(255)
+  mimeType             String   @map("mime_type") @db.VarChar(150)
+  fileSize             Int      @map("file_size")
+  storagePath          String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId     String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  documentObligation ContractDocumentObligation @relation(fields: [documentObligationId], references: [id], onDelete: Cascade)
+  uploadedByUser     User                       @relation("ContractDocumentObligationAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([documentObligationId, createdAt(sort: Desc)])
+  @@map("contract_document_obligation_attachments")
+}
+
 enum ContractCloseoutRequestStatus {
   DRAFT
   SUBMITTED
@@ -1447,28 +1845,28 @@ enum ContractCloseoutRequestStatus {
 // it was actioned. No hard delete: rejection/cancellation are status values,
 // not row removal.
 model ContractCloseoutRequest {
-  id                String                         @id @default(uuid()) @db.Uuid
-  contractId        String                         @map("contract_id") @db.Uuid
-  requestNo         String                         @unique @map("request_no") @db.VarChar(60)
-  status            ContractCloseoutRequestStatus  @default(SUBMITTED)
-  requestedByUserId String                         @map("requested_by_user_id") @db.Uuid
-  requestedAt       DateTime                       @default(now()) @map("requested_at") @db.Timestamptz(3)
-  reviewedByUserId  String?                        @map("reviewed_by_user_id") @db.Uuid
-  reviewedAt        DateTime?                      @map("reviewed_at") @db.Timestamptz(3)
-  approvedAt        DateTime?                      @map("approved_at") @db.Timestamptz(3)
-  rejectedAt        DateTime?                      @map("rejected_at") @db.Timestamptz(3)
-  closedAt          DateTime?                      @map("closed_at") @db.Timestamptz(3)
-  closeoutSummary   String?                        @map("closeout_summary") @db.Text
-  requestedRemarks  String?                        @map("requested_remarks") @db.Text
-  reviewRemarks     String?                        @map("review_remarks") @db.Text
-  rejectionReason   String?                        @map("rejection_reason") @db.Text
-  riskSnapshot      Json?                          @map("risk_snapshot") @db.JsonB
-  createdAt         DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                String                        @id @default(uuid()) @db.Uuid
+  contractId        String                        @map("contract_id") @db.Uuid
+  requestNo         String                        @unique @map("request_no") @db.VarChar(60)
+  status            ContractCloseoutRequestStatus @default(SUBMITTED)
+  requestedByUserId String                        @map("requested_by_user_id") @db.Uuid
+  requestedAt       DateTime                      @default(now()) @map("requested_at") @db.Timestamptz(3)
+  reviewedByUserId  String?                       @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt        DateTime?                     @map("reviewed_at") @db.Timestamptz(3)
+  approvedAt        DateTime?                     @map("approved_at") @db.Timestamptz(3)
+  rejectedAt        DateTime?                     @map("rejected_at") @db.Timestamptz(3)
+  closedAt          DateTime?                     @map("closed_at") @db.Timestamptz(3)
+  closeoutSummary   String?                       @map("closeout_summary") @db.Text
+  requestedRemarks  String?                       @map("requested_remarks") @db.Text
+  reviewRemarks     String?                       @map("review_remarks") @db.Text
+  rejectionReason   String?                       @map("rejection_reason") @db.Text
+  riskSnapshot      Json?                         @map("risk_snapshot") @db.JsonB
+  createdAt         DateTime                      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  requestedByUser User     @relation("ContractCloseoutRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  reviewedByUser  User?    @relation("ContractCloseoutRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  contract        Contract                     @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  requestedByUser User                         @relation("ContractCloseoutRequestRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedByUser  User?                        @relation("ContractCloseoutRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   attachments     ContractCloseoutAttachment[]
 
   @@index([contractId, createdAt(sort: Desc)])

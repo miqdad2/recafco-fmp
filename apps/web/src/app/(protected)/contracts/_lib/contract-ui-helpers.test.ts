@@ -6,8 +6,11 @@ import {
   formatContractValue,
   formatScopeSummary,
   getClosureAction,
-  computeCloseoutWarnings,
   computeContractRowActionPlan,
+  scheduleStatusLabel,
+  formatDaysRemainingDisplay,
+  SCHEDULE_STATUS_OPTIONS,
+  formatScopeCompact,
 } from './contract-ui-helpers';
 
 describe('formatScopeSummary', () => {
@@ -26,6 +29,32 @@ describe('formatScopeSummary', () => {
 
   it('ignores non-boolean-true values (e.g. otherDescription string)', () => {
     expect(formatScopeSummary({ other: true, otherDescription: 'Custom scope text' })).toBe('Other');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CM-55C — formatScopeCompact
+// ---------------------------------------------------------------------------
+
+describe('formatScopeCompact', () => {
+  it('returns em-dash display and fullList for null/undefined/empty scope', () => {
+    expect(formatScopeCompact(null)).toEqual({ display: '—', fullList: '—' });
+    expect(formatScopeCompact({ shopDrawing: false })).toEqual({ display: '—', fullList: '—' });
+  });
+
+  it('shows the single label as-is when only one scope is selected', () => {
+    expect(formatScopeCompact({ shopDrawing: true })).toEqual({ display: 'Shop Drawing', fullList: 'Shop Drawing' });
+  });
+
+  it('shows "First Label +N" when more than one scope is selected, keeping fullList complete', () => {
+    const result = formatScopeCompact({ shopDrawing: true, production: true, delivery: true, erection: true, exFactory: true });
+    expect(result.display).toBe('Shop Drawing +4');
+    expect(result.fullList).toBe('Shop Drawing, Production, Delivery, Erection, Ex-Factory');
+  });
+
+  it('never changes formatScopeSummary\'s own behavior — fullList always matches it exactly', () => {
+    const scope = { erection: true, shopDrawing: true };
+    expect(formatScopeCompact(scope).fullList).toBe(formatScopeSummary(scope));
   });
 });
 
@@ -64,7 +93,7 @@ describe('getContractDepartmentBadgeState', () => {
 describe('getVisibleContractTransitions', () => {
   it('shows Activate only for DRAFT contracts with contracts.activate permission', () => {
     const visible = getVisibleContractTransitions('DRAFT', ['contracts.activate']);
-    expect(visible).toEqual({ activate: true, terminate: false, close: false });
+    expect(visible).toEqual({ activate: true, terminate: false, close: false, cancel: false, cancelLabel: null });
   });
 
   it('hides Activate when contracts.activate permission is absent, even for a DRAFT contract', () => {
@@ -79,7 +108,7 @@ describe('getVisibleContractTransitions', () => {
 
   it('shows Terminate only for ACTIVE contracts with contracts.terminate permission', () => {
     const visible = getVisibleContractTransitions('ACTIVE', ['contracts.terminate']);
-    expect(visible).toEqual({ activate: false, terminate: true, close: false });
+    expect(visible).toEqual({ activate: false, terminate: true, close: false, cancel: false, cancelLabel: null });
   });
 
   it('hides Terminate without contracts.terminate permission', () => {
@@ -107,7 +136,41 @@ describe('getVisibleContractTransitions', () => {
       'contracts.terminate',
       'contracts.close',
     ]);
-    expect(visible).toEqual({ activate: false, terminate: true, close: true });
+    expect(visible).toEqual({ activate: false, terminate: true, close: true, cancel: false, cancelLabel: null });
+  });
+
+  it('shows Cancel Contract for an ACTIVE contract when the actor has contracts.update or contracts.manage', () => {
+    expect(getVisibleContractTransitions('ACTIVE', ['contracts.update'])).toMatchObject({
+      cancel: true,
+      cancelLabel: 'Cancel Contract',
+    });
+    expect(getVisibleContractTransitions('ACTIVE', ['contracts.manage'])).toMatchObject({
+      cancel: true,
+      cancelLabel: 'Cancel Contract',
+    });
+  });
+
+  it('shows Remove Draft (not Cancel Contract) for a DRAFT contract', () => {
+    expect(getVisibleContractTransitions('DRAFT', ['contracts.update'])).toMatchObject({
+      cancel: true,
+      cancelLabel: 'Remove Draft',
+    });
+  });
+
+  it('hides Cancel/Remove Draft without contracts.update or contracts.manage', () => {
+    expect(getVisibleContractTransitions('ACTIVE', ['contracts.read']).cancel).toBe(false);
+    expect(getVisibleContractTransitions('DRAFT', ['contracts.read']).cancel).toBe(false);
+  });
+
+  it('hides Cancel/Remove Draft for TERMINATED or CLOSED contracts regardless of permission', () => {
+    expect(getVisibleContractTransitions('TERMINATED', ['contracts.update', 'contracts.manage']).cancel).toBe(false);
+    expect(getVisibleContractTransitions('CLOSED', ['contracts.update', 'contracts.manage']).cancel).toBe(false);
+  });
+
+  it('CM-69E — hides Cancel for an already-CANCELLED contract regardless of permission (no re-cancelling)', () => {
+    const visible = getVisibleContractTransitions('CANCELLED', ['contracts.update', 'contracts.manage']);
+    expect(visible.cancel).toBe(false);
+    expect(visible.cancelLabel).toBeNull();
   });
 
   it('decides visibility purely from the permissions array, not from any role name or code', () => {
@@ -128,12 +191,16 @@ describe('getVisibleContractTransitions', () => {
 
 describe('hasAnyVisibleTransition', () => {
   it('returns false when no transition is visible (component renders nothing)', () => {
-    expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: false })).toBe(false);
+    expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: false, cancel: false, cancelLabel: null })).toBe(false);
   });
 
   it('returns true when at least one transition is visible', () => {
-    expect(hasAnyVisibleTransition({ activate: true, terminate: false, close: false })).toBe(true);
-    expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: true })).toBe(true);
+    expect(hasAnyVisibleTransition({ activate: true, terminate: false, close: false, cancel: false, cancelLabel: null })).toBe(true);
+    expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: true, cancel: false, cancelLabel: null })).toBe(true);
+  });
+
+  it('returns true when only Cancel/Remove Draft is visible', () => {
+    expect(hasAnyVisibleTransition({ activate: false, terminate: false, close: false, cancel: true, cancelLabel: 'Cancel Contract' })).toBe(true);
   });
 });
 
@@ -216,37 +283,6 @@ describe('getClosureAction', () => {
   });
 });
 
-describe('computeCloseoutWarnings', () => {
-  it('returns no warnings when everything is clear and documents exist', () => {
-    expect(computeCloseoutWarnings({
-      workflow: { open: 0, overdue: 0 }, issues: { open: 0 }, claims: { open: 0 },
-      payments: { nonFinalCount: 0 }, documents: { count: 1 },
-    })).toEqual([]);
-  });
-
-  it('returns exactly the spec-worded warnings for each open condition', () => {
-    const warnings = computeCloseoutWarnings({
-      workflow: { open: 2, overdue: 1 }, issues: { open: 1 }, claims: { open: 1 },
-      payments: { nonFinalCount: 1 }, documents: { count: 0 },
-    });
-    expect(warnings).toEqual([
-      'There are open workflow tasks.',
-      'There are overdue workflow tasks.',
-      'There are open issues.',
-      'There are open claims.',
-      'There are outstanding payments.',
-      'No closeout documents uploaded.',
-    ]);
-  });
-
-  it('flags missing documents independently of other conditions', () => {
-    expect(computeCloseoutWarnings({
-      workflow: { open: 0, overdue: 0 }, issues: { open: 0 }, claims: { open: 0 },
-      payments: { nonFinalCount: 0 }, documents: { count: 0 },
-    })).toEqual(['No closeout documents uploaded.']);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // computeContractRowActionPlan (CM-43)
 // covers: Contract List row quick actions — primary slot + More actions menu
@@ -324,5 +360,74 @@ describe('computeContractRowActionPlan', () => {
     expect(plan.primary).toEqual({ type: 'open', label: 'Open', href: '/contracts/c1' });
     expect(plan.moreActions.map((a) => a.key)).toEqual(['workflow', 'payments', 'issues', 'claims', 'schedule', 'closeout']);
     expect(plan.moreActions.some((a) => a.key === 'edit')).toBe(false);
+  });
+
+  it('Cancelled (CM-69A, same fallback branch as Terminated): primary is Open, never Edit or Activate from the list', () => {
+    const plan = computeContractRowActionPlan({ id: 'c1', status: 'CANCELLED' }, MANAGER_PERMS, false);
+    expect(plan.primary).toEqual({ type: 'open', label: 'Open', href: '/contracts/c1' });
+    expect(plan.moreActions.some((a) => a.key === 'edit')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CM-55 — schedule/progress status + days remaining
+// ---------------------------------------------------------------------------
+
+describe('SCHEDULE_STATUS_OPTIONS', () => {
+  it('has exactly the 5 manager-approved statuses in order, no At Risk / On Hold / Terminated', () => {
+    expect(SCHEDULE_STATUS_OPTIONS.map((o) => o.value)).toEqual([
+      'IN_PROGRESS', 'ON_TRACK', 'DELAYED', 'COMPLETED', 'AHEAD_OF_SCHEDULE',
+    ]);
+    expect(SCHEDULE_STATUS_OPTIONS.map((o) => o.label)).toEqual([
+      'In Progress', 'On Track', 'Delayed', 'Completed', 'Ahead of Schedule',
+    ]);
+  });
+});
+
+describe('scheduleStatusLabel', () => {
+  it('maps each value to its label', () => {
+    expect(scheduleStatusLabel('DELAYED')).toBe('Delayed');
+    expect(scheduleStatusLabel('AHEAD_OF_SCHEDULE')).toBe('Ahead of Schedule');
+  });
+
+  it('defaults to "In Progress" for an unknown/undefined value rather than throwing', () => {
+    expect(scheduleStatusLabel(undefined)).toBe('In Progress');
+    expect(scheduleStatusLabel('SOMETHING_ELSE')).toBe('In Progress');
+  });
+});
+
+describe('formatDaysRemainingDisplay', () => {
+  it('returns em-dash with no overdue/dueSoon flags when neither date exists', () => {
+    expect(formatDaysRemainingDisplay(undefined, undefined)).toEqual({ label: '—', overdue: false, dueSoon: false });
+  });
+
+  it('prefers forecastCompletionDate over endDate when both are present', () => {
+    const today = new Date();
+    const forecast = new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const end = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const result = formatDaysRemainingDisplay(forecast, end);
+    expect(result.dueSoon).toBe(true);
+  });
+
+  it('falls back to endDate when forecastCompletionDate is absent', () => {
+    const today = new Date();
+    const end = new Date(today.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const result = formatDaysRemainingDisplay(undefined, end);
+    expect(result.dueSoon).toBe(true);
+    expect(result.overdue).toBe(false);
+  });
+
+  it('marks a past date as overdue', () => {
+    const past = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const result = formatDaysRemainingDisplay(past, undefined);
+    expect(result.overdue).toBe(true);
+    expect(result.label).toContain('overdue');
+  });
+
+  it('does not mark a date more than 30 days out as dueSoon', () => {
+    const future = new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString();
+    const result = formatDaysRemainingDisplay(future, undefined);
+    expect(result.dueSoon).toBe(false);
+    expect(result.overdue).toBe(false);
   });
 });

@@ -1,146 +1,132 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { contractsApi } from '../../../../../../lib/contracts-api';
-import { formatContractValue } from '../../../_lib/contract-ui-helpers';
-import { PaymentStatusBadge } from '../../../payments/_components/payment-status-badge';
+import { getUserPermissions } from '../../../_lib/get-user-permissions';
+import { findNextDuePayment } from '../../../_lib/contract-payment-detail-helpers';
+import { ContractPaymentKpiStrip } from './_components/contract-payment-kpi-strip';
+import { ContractPaymentFilterBar } from './_components/contract-payment-filter-bar';
+import { ContractPaymentTrackerTable } from './_components/contract-payment-tracker-table';
+import { ContractPaymentTermsStrip } from './_components/contract-payment-terms-strip';
+import { InfoBox } from '../../../_components/contract-form-fields';
 
 export const metadata: Metadata = { title: 'Payments — Contract Management — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
+type PageSearchParams = Record<string, string | string[] | undefined>;
+
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<PageSearchParams>;
 }
 
-function formatDate(iso: string | undefined): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+function str(v: string | string[] | undefined): string | undefined {
+  return typeof v === 'string' && v.trim() !== '' ? v : undefined;
 }
 
-const PAYMENT_TRACKER_COLUMNS = [
-  'Payment No.', 'Invoice #', 'Invoice Date', 'Submitted', 'Certified', 'Paid', 'Outstanding', 'Due Date', 'Status',
-];
-
-export default async function ContractPaymentsTab({ params }: PageProps): Promise<React.JSX.Element> {
+/**
+ * CM-58 — Contract Detail Payments tab, rebuilt to match the approved
+ * design. Payments are manual Contract Management entries only — no
+ * external Account/SAP module exists or is referenced anywhere on this
+ * page. Reuses the real PaymentFormModal/cancelPaymentAction (Add/Edit/
+ * Cancel) and the export route (both from ../../payments/_components and
+ * ../../payments/export unchanged) so this tab's data-entry and CSV export
+ * behavior is identical to the module-level register, just scoped to this
+ * one contract and shown with clearer column wording. See
+ * contract-payment-detail-helpers.ts for the manager-friendly status
+ * labels and the real next-due-payment number this page adds — real,
+ * divide-by-zero-safe, never fabricated.
+ * CM-58B — the lower "Payment Statement" card was removed entirely (the
+ * approved screenshot's own "Account Statement (Linked to Account Model)"
+ * has no real backing in this system — payments are manual only, and
+ * duplicating the Payment Tracker's own rows under a second title added no
+ * real information). Payment Tracker is now the page's single, focused
+ * payments table.
+ * CM-58C — Payment Terms moved from a full table card below Payment
+ * Tracker to a compact chip strip between the KPI strip and the filter/
+ * search section (ContractPaymentTermsStrip, replacing the deleted
+ * ContractPaymentTermsSummaryCard) — a manager sees the contract's agreed
+ * terms before scrolling into the payment records, instead of after.
+ */
+export default async function ContractPaymentsTab({ params, searchParams }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
+  const sp = await searchParams;
 
-  const [contract, paymentsResult] = await Promise.all([
+  const search = str(sp['search']);
+  const status = str(sp['status']);
+  const dateFrom = str(sp['dateFrom']);
+  const dateTo = str(sp['dateTo']);
+  const overdueOnly = str(sp['overdueOnly']) === 'true';
+  const hasActiveFilters = Boolean(search || status || dateFrom || dateTo || overdueOnly);
+
+  const [permissions, contract, paymentsResult] = await Promise.all([
+    getUserPermissions(),
     contractsApi.get(id).catch(() => null),
-    contractsApi.listPayments({ contractId: id, pageSize: 100 }).catch(() => null),
+    contractsApi
+      .listPayments({
+        contractId: id,
+        pageSize: 200,
+        ...(search ? { search } : {}),
+        ...(status ? { status } : {}),
+        ...(dateFrom ? { invoiceDateFrom: dateFrom } : {}),
+        ...(dateTo ? { invoiceDateTo: dateTo } : {}),
+        ...(overdueOnly ? { overdueOnly } : {}),
+      })
+      .catch(() => null),
   ]);
   if (!contract) notFound();
 
-  const currentContractValue = contract.contractValue
-    ? formatContractValue(contract.contractValue, contract.currency)
-    : 'Not started';
-
+  const canUpdate = permissions.includes('contracts.update');
   const payments = paymentsResult?.items ?? [];
   const summary = paymentsResult?.summary ?? null;
+  const nextDue = findNextDuePayment(payments);
 
-  const nextDue = payments
-    .filter((p) => p.status !== 'PAID' && p.status !== 'CANCELLED' && p.dueDate)
-    .sort((a, b) => (a.dueDate! < b.dueDate! ? -1 : 1))[0];
-
-  const statusRows: { label: string; value: string }[] = summary
-    ? [
-        { label: 'Total Submitted', value: formatContractValue(summary.totalSubmitted, 'KWD') },
-        { label: 'Total Paid', value: formatContractValue(summary.totalPaid, 'KWD') },
-        { label: 'Outstanding', value: formatContractValue(summary.totalOutstanding, 'KWD') },
-        { label: 'Overdue', value: `${summary.overdueCount} (${formatContractValue(summary.overdueValue, 'KWD')})` },
-        { label: 'Next Due Payment', value: nextDue ? formatDate(nextDue.dueDate) : '—' },
-      ]
-    : [
-        { label: 'Total Submitted', value: 'Unavailable' },
-        { label: 'Total Paid', value: 'Unavailable' },
-        { label: 'Outstanding', value: 'Unavailable' },
-        { label: 'Overdue', value: 'Unavailable' },
-        { label: 'Next Due Payment', value: 'Unavailable' },
-      ];
+  const exportParams = new URLSearchParams({ contractId: id });
+  if (search) exportParams.set('search', search);
+  if (status) exportParams.set('status', status);
+  if (dateFrom) exportParams.set('invoiceDateFrom', dateFrom);
+  if (dateTo) exportParams.set('invoiceDateTo', dateTo);
+  if (overdueOnly) exportParams.set('overdueOnly', 'true');
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-base font-semibold text-text-primary">Payments</h1>
-          <p className="text-xs text-text-secondary mt-0.5">Track submitted, paid, outstanding and overdue payments.</p>
-        </div>
-        <Link
-          href={`/contracts/payments?contractId=${id}`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
-        >
-          Open in Payments Register
-          <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
-        </Link>
-      </div>
+      <ContractPaymentKpiStrip
+        summary={summary}
+        nextDueAmount={nextDue?.outstandingAmount ?? nextDue?.submittedAmount}
+        nextDueDate={nextDue?.dueDate}
+      />
 
-      {/* Payment Status */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Payment Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
-          <div>
-            <dt className="text-xs text-text-muted">Current Contract Value</dt>
-            <dd className="font-medium text-text-primary mt-0.5">{currentContractValue}</dd>
-          </div>
-          {statusRows.map((row) => (
-            <div key={row.label}>
-              <dt className="text-xs text-text-muted">{row.label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      <ContractPaymentTermsStrip paymentTerms={contract.paymentTerms} />
 
-      {/* Payment Tracker */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Payment Tracker</h2>
-          <Link
-            href={`/contracts/payments?contractId=${id}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+      <ContractPaymentFilterBar
+        contractId={id}
+        search={search}
+        status={status}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        overdueOnly={overdueOnly}
+        hasActiveFilters={hasActiveFilters}
+        actions={
+          <a
+            href={`/contracts/payments/export?${exportParams.toString()}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+            title="Export this contract's currently filtered payments as CSV (opens in Excel)"
           >
-            Add Payment
-          </Link>
-        </div>
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead>
-              <tr className="bg-surface-secondary">
-                {PAYMENT_TRACKER_COLUMNS.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-surface">
-              {payments.length === 0 ? (
-                <tr>
-                  <td colSpan={PAYMENT_TRACKER_COLUMNS.length} className="px-3 py-8 text-center text-text-muted">
-                    No payment records tracked yet.
-                  </td>
-                </tr>
-              ) : (
-                payments.map((p) => (
-                  <tr key={p.id}>
-                    <td className="px-3 py-2 font-medium text-text-primary whitespace-nowrap">{p.paymentNo || '—'}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{p.invoiceNumber || '—'}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(p.invoiceDate)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right">{formatContractValue(p.submittedAmount, 'KWD')}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right">{formatContractValue(p.certifiedAmount, 'KWD')}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right">{formatContractValue(p.paidAmount, 'KWD')}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right font-medium">
-                      {p.outstandingAmount ? formatContractValue(p.outstandingAmount, 'KWD') : '—'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(p.dueDate)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap"><PaymentStatusBadge status={p.status} /></td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            <Download className="size-3.5 shrink-0" aria-hidden="true" />
+            Export Excel
+          </a>
+        }
+      />
+
+      <ContractPaymentTrackerTable
+        payments={payments}
+        contract={{ id: contract.id, referenceNumber: contract.referenceNumber, title: contract.title }}
+        canUpdate={canUpdate}
+      />
+
+      <InfoBox variant="subtle">
+        Overdue payments are based on Payment Due Date and Remaining Amount.
+      </InfoBox>
     </div>
   );
 }

@@ -1,4 +1,3 @@
-import { Breadcrumbs } from '../../../_components/breadcrumbs';
 import type { ContractDashboardData, ScheduleItem } from '@/lib/contracts-api';
 import type { MetricStatus } from '../../../_components/metric-card';
 import { DashboardToolbar } from './dashboard-toolbar';
@@ -60,12 +59,8 @@ export function StaffDashboardView({ data, status }: Props): React.JSX.Element {
 
   return (
     <div className="h-full min-h-0 flex flex-col px-4 lg:px-6 py-3 max-w-[1900px] mx-auto w-full gap-2.5">
-      {/* Header row — compact: breadcrumb, title/subtitle, date/scope chips + View My Tasks all close together */}
+      {/* Header row — compact: title/subtitle, date/scope chips + View My Tasks all close together. Breadcrumb now renders at top-header level (CM-66E). */}
       <div className="shrink-0 space-y-1.5">
-        <Breadcrumbs items={[
-          { label: 'Contract Management', href: '/contracts/dashboard' },
-          { label: 'Dashboard' },
-        ]} />
         <div>
           <h1 className="text-2xl font-semibold text-text-primary tracking-tight">My Contract Work Dashboard</h1>
           <p className="mt-0.5 text-sm text-text-secondary max-w-2xl">

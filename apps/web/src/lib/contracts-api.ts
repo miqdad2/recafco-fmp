@@ -6,8 +6,13 @@ const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 // Types
 // ---------------------------------------------------------------------------
 
-export type ContractStatus = 'DRAFT' | 'ACTIVE' | 'TERMINATED' | 'CLOSED';
-export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED';
+export type ContractStatus = 'DRAFT' | 'ACTIVE' | 'TERMINATED' | 'CLOSED' | 'CANCELLED';
+export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED' | 'CANCELLED';
+
+// CM-55 — manager-facing schedule/progress status (Contract List Status
+// column). Deliberately separate from ContractStatus/DerivedLifecycleStatus
+// above — never overwrites the real lifecycle.
+export type ContractScheduleStatus = 'IN_PROGRESS' | 'ON_TRACK' | 'DELAYED' | 'COMPLETED' | 'AHEAD_OF_SCHEDULE';
 
 export type ContractBoqMixDesignType = 'GRAY' | 'WHITE' | 'NOT_APPLICABLE';
 
@@ -26,6 +31,13 @@ export interface ContractBoqItem {
   concreteGrade?: string;
   unitPrice?: string;
   totalPrice?: string;
+  // CM-56D — informational/technical quantity confirmed during
+  // drawing/calculation stages. Never used by any BOQ formula.
+  drawingQty?: string;
+  // CM-56 — real, editable, stored field. Progress % / Amount Remaining are
+  // deliberately NOT part of this shape — both are always derived from
+  // invoiceQty/totalPrice (see contract-boq-helpers.ts).
+  invoiceQty?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,8 +92,19 @@ export interface Contract {
   terminationReason?: string;
   closedAt?: string;
   closedByUser?: { id: string; displayName: string };
+  cancelledAt?: string;
+  cancelledByUser?: { id: string; displayName: string };
+  cancellationReason?: string;
   createdAt: string;
   updatedAt: string;
+  // CM-55 — Contract List only (contractsApi.list()); absent from
+  // contractsApi.get()'s findOne response. See contracts.service.ts's
+  // toListItem()/computeEffectiveScheduleStatus() for how these are derived.
+  scheduleStatus?: ContractScheduleStatus | null;
+  effectiveScheduleStatus?: ContractScheduleStatus;
+  progressPercent?: number;
+  paymentProgressPercent?: number;
+  openClaimsCount?: number;
 }
 
 export interface ContractComment {
@@ -104,13 +127,15 @@ export interface ContractActivity {
   createdAt: string;
 }
 
+// CM-69I — every field here is now scoped to whatever filters the caller
+// passed (same shape as ContractListQuery/ContractListQueryDto) — never a
+// separate, filter-blind global count. See contracts.service.ts's
+// getSummary() for the full reasoning.
 export interface ContractSummary {
-  totalDraft: number;
-  totalActive: number;
-  totalExpiring: number;
-  totalExpired: number;
-  totalTerminated: number;
-  totalClosed: number;
+  totalContracts: number;
+  activeContracts: number;
+  totalContractValue: string;
+  totalOpenClaims: number;
 }
 
 export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
@@ -161,11 +186,57 @@ export interface ManagerDashboardSummary {
   dueThisWeek: number;
 }
 
+// CM-54 — approved-design dashboard insights (financial totals, top-5 lists,
+// claims-by-status). Mirrors ManagerDashboardInsights in
+// apps/api/src/contracts/contract-dashboard.service.ts exactly.
+export interface ManagerDashboardFinancials {
+  contractValueTotal: number;
+  originalContractValueTotal: number;
+  submittedTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  openClaimsValue: number;
+  overduePayments: number;
+}
+
+export interface TopDelayedContract {
+  contractId: string;
+  contractReference: string;
+  jobOrderLabel: string;
+  projectName: string;
+  delayDays: number;
+}
+
+export interface TopValueContract {
+  contractId: string;
+  contractReference: string;
+  jobOrderLabel: string;
+  projectName: string;
+  value: number;
+}
+
+export interface ClaimStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface ManagerDashboardInsights {
+  financials: ManagerDashboardFinancials;
+  criticalProjectContracts: number;
+  overdueWorkflowTasksContracts: number;
+  claimsWithActionDue: number;
+  contractsClosingSoon: number;
+  claimsByStatus: ClaimStatusCount[];
+  topDelayedContracts: TopDelayedContract[];
+  topValueContracts: TopValueContract[];
+}
+
 export interface ManagerDashboardData {
   summary: ManagerDashboardSummary;
   attentionItems: ManagerAttentionItem[];
   workflowOverview: TeamWorkflowOverview[];
   upcomingSchedule: ScheduleItem[];
+  insights: ManagerDashboardInsights;
 }
 
 export interface StaffTaskRow {
@@ -223,6 +294,7 @@ export interface ContractDashboardData {
     totalExpired: number;
     totalTerminated: number;
     totalClosed: number;
+    totalCancelled: number;
   };
   recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   dashboardType: ContractDashboardType;
@@ -400,6 +472,23 @@ export interface ContractWorkflowProgress {
   workflowStatus: WorkflowStatus;
 }
 
+// CM-57 — GET /contracts/:id/workflow-summary. Read-only; never generates tasks.
+// CM-67 — id/taskName/priority/dueDate added for the Closeout tab's Blocking
+// Items table; every existing consumer (Overview) only reads team/status/
+// isOverdue/attachmentsCount, so this is purely additive.
+export interface ContractWorkflowSummaryData {
+  tasks: {
+    id: string;
+    taskName: string;
+    team: ContractWorkflowTeam;
+    status: ContractWorkflowTaskStatus;
+    priority: ContractWorkflowTaskPriority;
+    dueDate: string | null;
+    isOverdue: boolean;
+    attachmentsCount: number;
+  }[];
+}
+
 export interface ContractWorkflowDetail {
   contract: {
     id: string;
@@ -563,6 +652,8 @@ export interface ContractIssueSummary {
   highCriticalIssues: number;
   overdueIssues: number;
   closedIssues: number;
+  waitingResponseIssues: number;
+  resolvedIssues: number;
 }
 
 export interface ContractIssueListResponse extends ListResponse<ContractIssue> {
@@ -629,6 +720,8 @@ export interface ContractClaim {
   closedDate?: string;
   overdueDays: number | null;
   isOverdue: boolean;
+  /** CM-61 — signed days until dueDate (negative once past due); null only when dueDate itself is unset. Never status-gated, unlike overdueDays. */
+  daysToDeadline: number | null;
   remarks?: string;
   createdByUser: { id: string; displayName: string };
   updatedByUser?: { id: string; displayName: string };
@@ -653,6 +746,8 @@ export interface ContractClaimSummary {
   totalOutstandingValue: string;
   overdueClaims: number;
   closedOrSettledClaims: number;
+  totalEotClaimedDays: number;
+  totalEotApprovedDays: number;
 }
 
 export interface ContractClaimListResponse extends ListResponse<ContractClaim> {
@@ -865,9 +960,378 @@ export interface ContractScheduleListQuery {
   upcomingOnly?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// CM-68A — Contract Detail Schedule: real Planned vs Actual, replacing the
+// old CM-34 due-date aggregation for this ONE per-contract tab (the
+// module-level register at /contracts/schedule — ScheduleItem/
+// ScheduleSummary/ContractScheduleListResponse above — is untouched).
+// Planned values are only ever entered by a manager and stored in the real
+// additive ContractScheduleItem table; actual values are never stored —
+// always derived live from real workflow/payment/production/closeout
+// records server-side. See contract-schedule-plan.service.ts.
+// ---------------------------------------------------------------------------
+
+export type ContractScheduleStageKey =
+  | 'CONTRACT_SIGN'
+  | 'ADVANCE_PAYMENT'
+  | 'DRAWING_APPROVAL'
+  | 'ESTIMATION_SHEET'
+  | 'CASTING_PRODUCTION'
+  | 'DELIVERY'
+  | 'ERECTION'
+  | 'FINAL_CLOSEOUT';
+
+export type ContractScheduleStageStatus = 'NOT_PLANNED' | 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' | 'DELAYED' | 'ON_TRACK' | 'AHEAD';
+
+export interface ContractScheduleStageRow {
+  stageKey: ContractScheduleStageKey;
+  stageName: string;
+  responsibleTeam: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  plannedQuantity: number | null;
+  plannedMolds: number | null;
+  remarks: string | null;
+  isRequired: boolean;
+  /** Real, derived only — "—" (null) whenever no real source is safely identifiable. */
+  actualStartDate: string | null;
+  actualEndDate: string | null;
+  producedQuantity: number | null;
+  moldsProduced: number | null;
+  /** e.g. "Contract", "Payments (first received)", "Workflow (Technical)", "Production Status", "Closeout", "Not available", "Not linked yet". */
+  source: string;
+  status: ContractScheduleStageStatus;
+  /** Positive = late, negative = early/ahead, 0 = on time, null = nothing real to show. */
+  delayDays: number | null;
+}
+
+export interface ContractScheduleSummaryData {
+  scheduleStatus: 'Delayed' | 'In Progress' | 'Completed' | 'On Track' | 'Not Planned';
+  plannedCompletionDate: string | null;
+  actualOrForecastCompletionDate: string | null;
+  delayDays: number | null;
+  completedStages: number;
+  pendingStages: number;
+  totalStages: number;
+}
+
 export interface ContractScheduleDetail {
-  items: ScheduleItem[];
-  summary: ScheduleSummary;
+  contractSummary: { contractDate: string | null; activatedAt: string | null; closedAt: string | null; status: string };
+  stages: ContractScheduleStageRow[];
+  hasPlannedSchedule: boolean;
+  summary: ContractScheduleSummaryData;
+}
+
+export interface UpdateContractScheduleStageInput {
+  stageKey: ContractScheduleStageKey;
+  stageName?: string;
+  responsibleTeam?: string;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
+  plannedQuantity?: number;
+  plannedMolds?: number;
+  remarks?: string;
+  isRequired?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// CM-68B — Global Contract Schedule Overview (the sidebar "Schedule" page).
+// Every row reuses CM-68A's real per-contract Planned vs Actual derivation
+// server-side — never a duplicated/simplified re-derivation on the
+// frontend. "—"/"Not Planned"/"No blocker" are real, honest values, never
+// fabricated.
+// ---------------------------------------------------------------------------
+
+export type ContractScheduleOverviewStatus = 'Delayed' | 'On Track' | 'Not Planned' | 'Completed' | 'Attention';
+
+export interface ContractScheduleOverviewRow {
+  contractId: string;
+  contractNumber: string;
+  jobOrderNumber: string | null;
+  projectName: string;
+  clientName: string;
+  contractStatus: string;
+  scheduleStatus: ContractScheduleOverviewStatus;
+  currentStage: string;
+  plannedFinishDate: string | null;
+  actualOrForecastFinishDate: string | null;
+  delayDays: number | null;
+  blockingTeam: string;
+  blockingStage: string;
+  openBlockerCount: number;
+  nextMilestone: string;
+  nextMilestoneDate: string | null;
+  completedStages: number;
+  totalStages: number;
+  actionUrl: string;
+}
+
+export interface ContractScheduleOverviewSummary {
+  totalActiveContracts: number;
+  onTrack: number;
+  delayed: number;
+  notPlanned: number;
+  dueThisWeek: number;
+  completedThisMonth: number;
+}
+
+export interface ContractScheduleOverviewResult {
+  rows: ContractScheduleOverviewRow[];
+  summary: ContractScheduleOverviewSummary;
+}
+
+// ---------------------------------------------------------------------------
+// CM-59 — Contract Production Status. Manually tracked inside Contract
+// Management (no Production Module integration exists) — one row per
+// ContractBoqItem, contract-scoped and unpaginated like ContractScheduleDetail
+// above. totalQty/stockNotDelivered/remainingToCast/progressPercent are all
+// server-computed, never entered directly.
+// ---------------------------------------------------------------------------
+
+export type ContractBoqProductionStatus =
+  | 'NOT_STARTED'
+  | 'IN_PRODUCTION'
+  | 'PARTIALLY_DELIVERED'
+  | 'COMPLETED'
+  | 'DELAYED';
+
+export interface ContractProductionItem {
+  id: string;
+  itemCode: string | null;
+  category: string | null;
+  description: string;
+  unitOfMeasure: string | null;
+  totalQty: number;
+  producedQty: number;
+  deliveredQty: number;
+  stockNotDelivered: number;
+  remainingToCast: number;
+  progressPercent: number;
+  status: ContractBoqProductionStatus;
+  remarks: string | null;
+  updatedByUser: { id: string; displayName: string } | null;
+  updatedAt: string | null;
+}
+
+export interface ContractProductionSummary {
+  totalQty: number;
+  producedQty: number;
+  deliveredQty: number;
+  stockNotDelivered: number;
+  remainingToCast: number;
+  progressPercent: number;
+}
+
+export interface ContractProductionDetail {
+  items: ContractProductionItem[];
+  summary: ContractProductionSummary;
+}
+
+// ---------------------------------------------------------------------------
+// CM-60 — Contract Variations / Change Orders. "Variation" is the real
+// field/table terminology (per this unit's naming decision — "Change
+// Orders" only appears in the page/tab title on the frontend). Contract-
+// scoped and unpaginated like ContractProductionDetail above.
+// computedCurrentValue/originalContractValue are server-computed strings,
+// null when the contract has no originalContractValue — never a fabricated
+// number. Contract.contractValue itself (BOQ-derived) is never written by
+// this unit.
+// ---------------------------------------------------------------------------
+
+export type ContractVariationStatus = 'DRAFT' | 'SUBMITTED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+// CM-60C — a real uploaded supporting document. Additive alongside the
+// original supportingDocumentName/supportingDocumentUrl text/link fields
+// (kept for backwards compatibility, never removed) — a variation can have
+// both, or only the older text reference, or neither.
+export interface ContractVariationAttachment {
+  id: string;
+  variationId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractVariation {
+  id: string;
+  contractId: string;
+  variationNo?: string;
+  description: string;
+  amount?: string;
+  currency: string;
+  affectsContractValue: boolean;
+  status: ContractVariationStatus;
+  submittedDate?: string;
+  approvedDate?: string;
+  supportingDocumentName?: string;
+  supportingDocumentUrl?: string;
+  remarks?: string;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  attachments: ContractVariationAttachment[];
+}
+
+export interface ContractVariationSummary {
+  totalVariations: number;
+  approvedValue: string;
+  pendingValue: string;
+  rejectedCancelledValue: string;
+  netVariationImpact: string;
+}
+
+export interface ContractVariationDetail {
+  items: ContractVariation[];
+  summary: ContractVariationSummary;
+  originalContractValue: string | null;
+  computedCurrentValue: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// CM-60C — Contract Attachments tab: a read-only aggregation across the 3
+// attachment tables that already exist (workflow task, closeout, variation).
+// No upload from this list — each source keeps its own real upload flow.
+// ---------------------------------------------------------------------------
+
+export type ContractAttachmentSource = 'WORKFLOW_TASK' | 'CLOSEOUT' | 'VARIATION' | 'DOCUMENT_OBLIGATION';
+
+export interface ContractAttachment {
+  id: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+  source: ContractAttachmentSource;
+  sourceLabel: string;
+  relatedItemTitle: string;
+  /** Real ContractDocumentObligation category (e.g. "PERFORMANCE_BOND") — only ever set for source === 'DOCUMENT_OBLIGATION'; null for the other 3 sources. */
+  documentObligationCategory: string | null;
+  downloadPath: string;
+}
+
+// ---------------------------------------------------------------------------
+// CM-62 — Contract Risk Assessment. Not an ISO risk-scoring system:
+// riskEvaluation/residualRisk are plain manual dropdown values, never
+// auto-calculated. Contract-scoped and unpaginated, same pattern as
+// ContractVariationDetail above.
+// ---------------------------------------------------------------------------
+
+export type ContractRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type ContractRiskResponse = 'MITIGATE' | 'ACCEPT' | 'AVOID' | 'TRANSFER';
+export type ContractRiskStatus = 'OPEN' | 'IN_PROGRESS' | 'MITIGATED' | 'CLOSED' | 'CANCELLED';
+
+export interface ContractRisk {
+  id: string;
+  contractId: string;
+  riskNo?: string;
+  description: string;
+  riskEvaluation: ContractRiskLevel;
+  riskResponse: ContractRiskResponse;
+  riskResponseDescription?: string;
+  /** Manual only — never auto-calculated from riskEvaluation/riskResponse. */
+  residualRisk?: ContractRiskLevel;
+  status: ContractRiskStatus;
+  responsibleUserId?: string;
+  responsibleUser?: { id: string; displayName: string };
+  actionDueDate?: string;
+  /** Signed days until actionDueDate (negative once past due); undefined only when actionDueDate itself is unset. */
+  daysToDeadline?: number;
+  remarks?: string;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContractRiskSummary {
+  totalRisks: number;
+  highCriticalRisks: number;
+  openRisks: number;
+  mitigatedRisks: number;
+  /** Nearest label for the average of every real (non-null) residualRisk value — null when none is set (never fabricated). */
+  averageResidualRisk: ContractRiskLevel | null;
+  risksDueSoon: number;
+}
+
+export interface ContractRiskDetail {
+  items: ContractRisk[];
+  summary: ContractRiskSummary;
+}
+
+// ---------------------------------------------------------------------------
+// CM-63 — Documents & Obligations. `status` is always a plain manual
+// selection; Expiring Soon / Expired-Overdue KPI counts and daysRemaining
+// are derived at read time from status + submissionOrExpiryDate, never
+// written back to the stored status column. Contract-scoped and
+// unpaginated, same pattern as ContractRiskDetail above.
+// ---------------------------------------------------------------------------
+
+export type ContractDocumentObligationCategory =
+  | 'PERFORMANCE_BOND'
+  | 'INSURANCE'
+  | 'GUARANTEE'
+  | 'TAX_STATUTORY'
+  | 'TECHNICAL_SUBMISSION'
+  | 'APPROVAL_DOCUMENT'
+  | 'HEALTH_SAFETY'
+  | 'OTHER';
+
+export type ContractDocumentObligationStatus =
+  | 'PENDING'
+  | 'SUBMITTED'
+  | 'EXPIRING_SOON'
+  | 'EXPIRED_OVERDUE'
+  | 'NOT_REQUIRED'
+  | 'CANCELLED';
+
+export interface ContractDocumentObligationAttachment {
+  id: string;
+  documentObligationId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractDocumentObligation {
+  id: string;
+  contractId: string;
+  itemNo?: string;
+  title: string;
+  category: ContractDocumentObligationCategory;
+  responsibleParty?: string;
+  requiredDate?: string;
+  /** CM-70E — legacy combined field from before Submission Date/Expiry Date were split. Never written to by the current form; kept only for any pre-existing record's historical value. */
+  submissionOrExpiryDate?: string;
+  submissionDate?: string;
+  expiryDate?: string;
+  status: ContractDocumentObligationStatus;
+  /** Signed days until the item's effective expiry date (expiryDate, falling back to the legacy submissionOrExpiryDate); undefined only when neither date is set. */
+  daysRemaining?: number;
+  remarks?: string;
+  attachments: ContractDocumentObligationAttachment[];
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContractDocumentObligationSummary {
+  totalItems: number;
+  submitted: number;
+  pending: number;
+  expiringSoon: number;
+  expiredOverdue: number;
+}
+
+export interface ContractDocumentObligationDetail {
+  items: ContractDocumentObligation[];
+  summary: ContractDocumentObligationSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +1385,11 @@ interface ContractListQuery {
   pageSize?: number;
   status?: string;
   lifecycleStatus?: string;
+  // CM-55 — Contract List filters. See ContractListQueryDto in the API for
+  // the exact accepted values.
+  scheduleStatus?: string;
+  contractType?: string;
+  daysRemaining?: string;
   search?: string;
   ownerUserId?: string;
   departmentId?: string;
@@ -933,6 +1402,9 @@ function buildQuery(q: ContractListQuery): string {
   if (q.pageSize !== undefined) params.set('pageSize', String(q.pageSize));
   if (q.status) params.set('status', q.status);
   if (q.lifecycleStatus) params.set('lifecycleStatus', q.lifecycleStatus);
+  if (q.scheduleStatus) params.set('scheduleStatus', q.scheduleStatus);
+  if (q.contractType) params.set('contractType', q.contractType);
+  if (q.daysRemaining) params.set('daysRemaining', q.daysRemaining);
   if (q.search) params.set('search', q.search);
   if (q.ownerUserId) params.set('ownerUserId', q.ownerUserId);
   if (q.departmentId) params.set('departmentId', q.departmentId);
@@ -1083,8 +1555,10 @@ export const contractsApi = {
   get: (id: string) =>
     apiFetch<Contract>(`/contracts/${id}`),
 
-  summary: () =>
-    apiFetch<ContractSummary>('/contracts/summary'),
+  // CM-69I — same filter shape as list() so the KPI cards can be requested
+  // with the identical scope as whatever the table is currently showing.
+  summary: (params: ContractListQuery = {}) =>
+    apiFetch<ContractSummary>(`/contracts/summary${buildQuery(params)}`),
 
   dashboard: () =>
     apiFetch<ContractDashboardData>('/contracts/dashboard'),
@@ -1116,6 +1590,11 @@ export const contractsApi = {
   getWorkflow: (contractId: string, options: { myTasksOnly?: boolean } = {}) =>
     apiFetch<ContractWorkflowDetail>(`/contracts/${contractId}/workflow${options.myTasksOnly ? '?myTasksOnly=true' : ''}`),
 
+  // CM-57 — read-only per-team task counts for Contract Detail Overview.
+  // Never triggers getWorkflow()'s lazy first-view task generation.
+  getWorkflowSummary: (contractId: string) =>
+    apiFetch<ContractWorkflowSummaryData>(`/contracts/${contractId}/workflow-summary`),
+
   getAssignmentQueue: (params: ContractWorkflowAssignmentQueueQuery = {}) =>
     apiFetch<WorkflowAssignmentQueueResponse>(`/contracts/workflow/assignment-queue${buildAssignmentQueueQuery(params)}`),
 
@@ -1146,6 +1625,36 @@ export const contractsApi = {
   listSchedule: (params: ContractScheduleListQuery = {}) =>
     apiFetch<ContractScheduleListResponse>(`/contracts/schedule${buildScheduleQuery(params)}`),
 
+  // CM-68B — global sidebar Schedule page. Must be fetched before
+  // listSchedule() below would even be relevant to a UI; kept as a
+  // separate real endpoint (GET /contracts/schedule/overview) rather than
+  // folding into listSchedule()'s own due-date-item shape, which is a
+  // fundamentally different real data shape (due-date items vs. one row
+  // per contract).
+  getContractScheduleOverview: () =>
+    apiFetch<ContractScheduleOverviewResult>('/contracts/schedule/overview'),
+
   getContractSchedule: (contractId: string) =>
     apiFetch<ContractScheduleDetail>(`/contracts/${contractId}/schedule`),
+
+  getContractProduction: (contractId: string) =>
+    apiFetch<ContractProductionDetail>(`/contracts/${contractId}/production`),
+
+  getContractVariations: (contractId: string) =>
+    apiFetch<ContractVariationDetail>(`/contracts/${contractId}/variations`),
+
+  listVariationAttachments: (contractId: string, variationId: string) =>
+    apiFetch<ContractVariationAttachment[]>(`/contracts/${contractId}/variations/${variationId}/attachments`),
+
+  getContractAttachments: (contractId: string) =>
+    apiFetch<ContractAttachment[]>(`/contracts/${contractId}/attachments`),
+
+  getContractRisks: (contractId: string) =>
+    apiFetch<ContractRiskDetail>(`/contracts/${contractId}/risks`),
+
+  getContractDocumentObligations: (contractId: string) =>
+    apiFetch<ContractDocumentObligationDetail>(`/contracts/${contractId}/document-obligations`),
+
+  listDocumentObligationAttachments: (contractId: string, itemId: string) =>
+    apiFetch<ContractDocumentObligationAttachment[]>(`/contracts/${contractId}/document-obligations/${itemId}/attachments`),
 };

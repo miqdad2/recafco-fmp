@@ -1,12 +1,13 @@
-export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED';
+export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED' | 'CANCELLED';
 
-const LABEL_MAP: Record<DerivedLifecycleStatus, string> = {
+export const LIFECYCLE_STATUS_LABEL: Record<DerivedLifecycleStatus, string> = {
   DRAFT: 'Draft',
   ACTIVE: 'Active',
   EXPIRING: 'Expiring Soon',
   EXPIRED: 'Expired',
   TERMINATED: 'Terminated',
   CLOSED: 'Closed',
+  CANCELLED: 'Cancelled',
 };
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
 }
 
 export function ContractLifecycleBadge({ status, className = '' }: Props): React.JSX.Element {
-  const label = LABEL_MAP[status] ?? status;
+  const label = LIFECYCLE_STATUS_LABEL[status] ?? status;
 
   let colorClass: string;
   if (status === 'DRAFT') {

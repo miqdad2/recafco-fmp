@@ -691,6 +691,77 @@ export class ContractWorkflowService {
   }
 
   // ---------------------------------------------------------------------------
+  // CM-57 — Contract Detail Overview's Progress Summary / Production Summary
+  // cards need real per-team task counts, but MUST NOT trigger
+  // getWorkflowForContract()'s lazy first-view task generation (that side
+  // effect is only appropriate when a manager deliberately opens the real
+  // Workflow tab, not merely viewing Overview). Purely additive read: same
+  // permission/department-scope checks as every other read here, but never
+  // writes anything — mirrors the same read-only query shape findAll() (the
+  // module-level Workflow list) already uses per contract.
+  // ---------------------------------------------------------------------------
+
+  async getWorkflowSummaryForContract(
+    contractId: string,
+    actor: AuthUser,
+  ): Promise<{
+    tasks: {
+      id: string;
+      taskName: string;
+      team: string;
+      status: string;
+      priority: string;
+      dueDate: string | null;
+      isOverdue: boolean;
+      attachmentsCount: number;
+    }[];
+  }> {
+    if (!actor.permissions.includes('contracts.read')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
+    }
+
+    const contract = await this.db.getClient().contract.findUnique({
+      where: { id: contractId },
+      select: { id: true, departmentId: true },
+    });
+    if (!contract) {
+      throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
+    }
+    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, contract.departmentId);
+
+    const today = utcToday();
+    const tasks = await this.db.getClient().contractWorkflowTask.findMany({
+      where: { contractId },
+      select: {
+        id: true,
+        taskName: true,
+        team: true,
+        status: true,
+        priority: true,
+        dueDate: true,
+        _count: { select: { attachments: true } },
+      },
+    });
+
+    return {
+      // CM-67 — id/taskName/priority added for the Closeout tab's Blocking
+      // Items table (needs real per-task rows, not just team/status counts).
+      // Still the exact same read-only query shape — no new field triggers
+      // the lazy-generation side effect getWorkflowForContract() has.
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        taskName: t.taskName,
+        team: t.team,
+        status: t.status,
+        priority: t.priority,
+        dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+        isOverdue: computeTaskIsOverdue(t, today),
+        attachmentsCount: t._count.attachments,
+      })),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Regenerate — additive-only sync of missing default tasks. Never touches
   // or removes an existing task, so it's always safe to call.
   // ---------------------------------------------------------------------------

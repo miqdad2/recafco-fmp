@@ -55,6 +55,8 @@ export const ApiEnvSchema = z
     REFRESH_TOKEN_EXPIRES_DAYS: z.string().optional(),
     WORKFLOW_ATTACHMENTS_DIR: z.string().optional(),
     CLOSEOUT_ATTACHMENTS_DIR: z.string().optional(),
+    VARIATION_ATTACHMENTS_DIR: z.string().optional(),
+    DOCUMENT_OBLIGATION_ATTACHMENTS_DIR: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -87,6 +89,9 @@ export const ApiEnvSchema = z
       ),
       workflowAttachmentsDir: raw.WORKFLOW_ATTACHMENTS_DIR ?? './storage/workflow-attachments',
       closeoutAttachmentsDir: raw.CLOSEOUT_ATTACHMENTS_DIR ?? './storage/closeout-attachments',
+      variationAttachmentsDir: raw.VARIATION_ATTACHMENTS_DIR ?? './storage/variation-attachments',
+      documentObligationAttachmentsDir:
+        raw.DOCUMENT_OBLIGATION_ATTACHMENTS_DIR ?? './storage/document-obligation-attachments',
     };
   });
 

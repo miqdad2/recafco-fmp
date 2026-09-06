@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
   ConflictException,
 } from '@nestjs/common';
-import { ContractStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType } from '@recafco/database';
+import { ContractStatus, ContractScheduleStatus, ContractClaimStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsRefService } from './contracts-ref.service';
@@ -16,14 +16,29 @@ import type { UpdateContractDto } from './dto/update-contract.dto';
 import type { ContractListQueryDto, PaginatedResult } from './dto/contract-list-query.dto';
 import type { ActivateContractDto } from './dto/activate-contract.dto';
 import type { TerminateContractDto } from './dto/terminate-contract.dto';
+import type { CancelContractDto } from './dto/cancel-contract.dto';
 import type { CloseContractDto } from './dto/close-contract.dto';
 import type { AddCommentDto } from './dto/add-comment.dto';
+import type { UpdateContractScheduleStatusDto } from './dto/update-contract-schedule-status.dto';
+
+// ---------------------------------------------------------------------------
+// CM-55 — Contract List approved-design rebuild. Same "reuse, don't
+// re-derive" convention as contract-dashboard.service.ts: a local copy of
+// the "final" claim statuses (mirrors contract-claims.service.ts's own
+// FINAL_STATUSES, not exported from there) drives the list's real Open
+// Claims count.
+// ---------------------------------------------------------------------------
+
+const FINAL_CLAIM_STATUSES_FOR_LIST: ContractClaimStatus[] = [
+  ContractClaimStatus.APPROVED, ContractClaimStatus.REJECTED, ContractClaimStatus.SETTLED,
+  ContractClaimStatus.CLOSED, ContractClaimStatus.CANCELLED,
+];
 
 // ---------------------------------------------------------------------------
 // Derived lifecycle status helpers
 // ---------------------------------------------------------------------------
 
-export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED';
+export type DerivedLifecycleStatus = 'DRAFT' | 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED' | 'CLOSED' | 'CANCELLED';
 
 function utcToday(): Date {
   const now = new Date();
@@ -40,6 +55,7 @@ export function getDerivedLifecycleStatus(contract: {
   if (contract.status === ContractStatus.DRAFT) return 'DRAFT';
   if (contract.status === ContractStatus.TERMINATED) return 'TERMINATED';
   if (contract.status === ContractStatus.CLOSED) return 'CLOSED';
+  if (contract.status === ContractStatus.CANCELLED) return 'CANCELLED';
 
   // ACTIVE
   if (contract.endDate !== null && contract.endDate < today) {
@@ -107,6 +123,10 @@ const CONTRACT_SELECT = {
   terminationReason: true,
   closedAt: true,
   closedByUserId: true,
+  cancelledAt: true,
+  cancelledByUserId: true,
+  cancellationReason: true,
+  scheduleStatus: true,
   createdAt: true,
   updatedAt: true,
   ownerUser: { select: { id: true, displayName: true } },
@@ -114,6 +134,7 @@ const CONTRACT_SELECT = {
   activatedByUser: { select: { id: true, displayName: true } },
   terminatedByUser: { select: { id: true, displayName: true } },
   closedByUser: { select: { id: true, displayName: true } },
+  cancelledByUser: { select: { id: true, displayName: true } },
   department: { select: { id: true, name: true } },
   plant: { select: { id: true, name: true } },
   location: { select: { id: true, name: true } },
@@ -133,6 +154,8 @@ const CONTRACT_SELECT = {
       concreteGrade: true,
       unitPrice: true,
       totalPrice: true,
+      drawingQty: true,
+      invoiceQty: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -153,6 +176,87 @@ function withLifecycle(contract: ContractRecord): ContractWithLifecycle {
       status: contract.status as ContractStatus,
       endDate: contract.endDate as Date | null,
       renewalNoticeDate: contract.renewalNoticeDate as Date | null,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CM-55 — Contract List: schedule/progress status default, real per-contract
+// Progress %/Payment Progress %/Open Claims.
+// ---------------------------------------------------------------------------
+
+/**
+ * The stored `scheduleStatus` is nullable — most contracts will never have
+ * had a manager explicitly set one. This computes the value the Contract
+ * List's Status dropdown shows/pre-selects when nothing has been set: a
+ * neutral "IN_PROGRESS" default, or "COMPLETED" once the contract's real
+ * lifecycle status is CLOSED. Never guesses DELAYED/ON_TRACK/AHEAD_OF_SCHEDULE
+ * — those are only ever a manager's explicit choice, never inferred.
+ */
+export function computeEffectiveScheduleStatus(contract: {
+  scheduleStatus: string | null;
+  status: string;
+}): ContractScheduleStatus {
+  if (contract.scheduleStatus) return contract.scheduleStatus as ContractScheduleStatus;
+  return contract.status === ContractStatus.CLOSED ? ContractScheduleStatus.COMPLETED : ContractScheduleStatus.IN_PROGRESS;
+}
+
+/** Prisma Decimal | number | null -> plain number | null. Mirrors the same-name helper in contract-payments.service.ts. */
+function toNum(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'object' && value !== null && 'toNumber' in value) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value);
+}
+
+/** Real workflow-task completion ratio — same completed/total definition CM-37/CM-54's dashboard already uses. 0% (not NaN) when there are no tasks yet. */
+export function computeContractProgressPercent(tasks: { status: string }[]): number {
+  if (tasks.length === 0) return 0;
+  const completed = tasks.filter((t) => t.status === 'COMPLETED').length;
+  return Math.round((completed / tasks.length) * 100);
+}
+
+/** Real total-paid / current-contract-value ratio. 0% when the contract has no value to compare against (never divides by zero). */
+export function computeContractPaymentProgressPercent(payments: { paidAmount: unknown }[], contractValue: unknown): number {
+  const value = toNum(contractValue);
+  if (value === null || value <= 0) return 0;
+  const totalPaid = payments.reduce((sum, p) => sum + (toNum(p.paidAmount) ?? 0), 0);
+  return Math.round((totalPaid / value) * 100);
+}
+
+const CONTRACT_LIST_SELECT = {
+  ...CONTRACT_SELECT,
+  workflowTasks: { select: { status: true } },
+  payments: { select: { paidAmount: true } },
+  _count: { select: { claims: { where: { status: { notIn: FINAL_CLAIM_STATUSES_FOR_LIST } } } } },
+} as const;
+
+type ContractListRecord = ContractRecord & {
+  workflowTasks: { status: string }[];
+  payments: { paidAmount: unknown }[];
+  _count: { claims: number };
+};
+
+export interface ContractListItem extends ContractWithLifecycle {
+  progressPercent: number;
+  paymentProgressPercent: number;
+  openClaimsCount: number;
+  effectiveScheduleStatus: ContractScheduleStatus;
+}
+
+function toListItem(contract: ContractListRecord): ContractListItem {
+  const { workflowTasks, payments, _count, ...rest } = contract;
+  const base = withLifecycle(rest as ContractRecord);
+  return {
+    ...base,
+    progressPercent: computeContractProgressPercent(workflowTasks),
+    paymentProgressPercent: computeContractPaymentProgressPercent(payments, contract.contractValue),
+    openClaimsCount: _count.claims,
+    effectiveScheduleStatus: computeEffectiveScheduleStatus({
+      scheduleStatus: contract.scheduleStatus as string | null,
+      status: contract.status as string,
     }),
   };
 }
@@ -515,6 +619,8 @@ export class ContractsService {
             ...(item.mixDesignType !== undefined ? { mixDesignType: item.mixDesignType as ContractBoqMixDesignType } : {}),
             ...(item.concreteGrade !== undefined ? { concreteGrade: item.concreteGrade } : {}),
             ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
+            ...(item.drawingQty !== undefined ? { drawingQty: item.drawingQty } : {}),
+            ...(item.invoiceQty !== undefined ? { invoiceQty: item.invoiceQty } : {}),
             totalPrice: boqItemTotals[index] ?? null,
           })),
         });
@@ -697,6 +803,8 @@ export class ContractsService {
               ...(item.mixDesignType !== undefined ? { mixDesignType: item.mixDesignType as ContractBoqMixDesignType } : {}),
               ...(item.concreteGrade !== undefined ? { concreteGrade: item.concreteGrade } : {}),
               ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
+              ...(item.drawingQty !== undefined ? { drawingQty: item.drawingQty } : {}),
+              ...(item.invoiceQty !== undefined ? { invoiceQty: item.invoiceQty } : {}),
               totalPrice: boqItemTotals[index] ?? null,
             })),
           });
@@ -732,6 +840,47 @@ export class ContractsService {
       });
 
       return refreshed;
+    });
+
+    return withLifecycle(updated as ContractRecord);
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-55 — manager-facing schedule/progress status. Deliberately independent
+  // of update() above: no DRAFT-only restriction (a manager needs this on
+  // ACTIVE contracts most of all), no lifecycle transition, no version-based
+  // optimistic concurrency (a low-stakes display categorization — last write
+  // wins is an acceptable tradeoff for the simplicity, unlike the real
+  // lifecycle transitions below which all use version). Never touches
+  // Contract.status, never interacts with the closeout approval flow.
+  // ---------------------------------------------------------------------------
+
+  async updateScheduleStatus(
+    id: string,
+    dto: UpdateContractScheduleStatusDto,
+    actor: AuthUser,
+  ): Promise<ContractWithLifecycle> {
+    if (!actor.permissions.includes('contracts.update')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.update' });
+    }
+
+    const contract = await this.findOneOrThrow(id, actor);
+    const previousScheduleStatus = contract.scheduleStatus as string | null;
+
+    const updated = await this.db.getClient().contract.update({
+      where: { id },
+      data: { scheduleStatus: dto.scheduleStatus as ContractScheduleStatus },
+      select: CONTRACT_SELECT,
+    });
+
+    await this.db.getClient().contractActivity.create({
+      data: {
+        contractId: id,
+        actorUserId: actor.id,
+        actorName: actor.displayName,
+        event: 'schedule_status_updated',
+        metadata: { previousScheduleStatus, newScheduleStatus: dto.scheduleStatus },
+      },
     });
 
     return withLifecycle(updated as ContractRecord);
@@ -876,6 +1025,95 @@ export class ContractsService {
   }
 
   // ---------------------------------------------------------------------------
+  // CM-69A — Cancel/Void: DRAFT | ACTIVE → CANCELLED. Safe alternative to hard
+  // deletion — never removes the contract row or any related record (BOQ,
+  // workflow tasks, payments, documents, issues, claims, risks, schedule
+  // items, closeout requests, attachments, activity log all remain, exactly
+  // as every child relation's onDelete: Restrict already guarantees). A
+  // cancelled contract keeps full audit history and is only ever hidden from
+  // "active" counts/lists, never deleted.
+  // ---------------------------------------------------------------------------
+
+  async cancel(id: string, dto: CancelContractDto, actor: AuthUser): Promise<ContractWithLifecycle> {
+    if (!actor.permissions.includes('contracts.update') && !actor.permissions.includes('contracts.manage')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.update or contracts.manage' });
+    }
+
+    // Department scope enforced explicitly here (unlike activate/terminate,
+    // which rely on permission alone) since cancellation is meant to be
+    // reachable by ordinary department-scoped managers, not just holders of
+    // a narrow lifecycle-transition permission.
+    const current = await this.findOneOrThrow(id, actor);
+    if (current.status !== ContractStatus.DRAFT && current.status !== ContractStatus.ACTIVE) {
+      throw new ConflictException({
+        code: 'CONTRACT_NOT_CANCELLABLE',
+        message: 'Only Draft or Active contracts can be cancelled',
+      });
+    }
+    const previousStatus = current.status;
+
+    const now = new Date();
+
+    const updated = await this.db.getClient().$transaction(async (tx) => {
+      const result = await tx.contract.updateMany({
+        where: { id, status: previousStatus, version: dto.version },
+        data: {
+          status: ContractStatus.CANCELLED,
+          cancelledAt: now,
+          cancelledByUserId: actor.id,
+          cancellationReason: dto.reason,
+          version: { increment: 1 },
+        },
+      });
+
+      if (result.count === 0) {
+        const exists = await tx.contract.findUnique({ where: { id }, select: { id: true } });
+        if (!exists) {
+          throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
+        }
+        throw new ConflictException({
+          code: 'CONTRACT_VERSION_CONFLICT',
+          message: 'Contract was modified concurrently; please reload and retry',
+        });
+      }
+
+      const refreshed = await tx.contract.findUniqueOrThrow({ where: { id }, select: CONTRACT_SELECT });
+
+      await tx.contractActivity.create({
+        data: {
+          contractId: id,
+          actorUserId: actor.id,
+          actorName: actor.displayName,
+          event: 'cancelled',
+          previousStatus,
+          newStatus: ContractStatus.CANCELLED,
+          metadata: { reason: dto.reason },
+        },
+      });
+
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'CONTRACT_CANCELLED',
+          userId: refreshed.ownerUserId as string,
+          actorId: actor.id,
+          metadata: {
+            contractId: id,
+            referenceNumber: refreshed.referenceNumber,
+            previousStatus,
+            newStatus: ContractStatus.CANCELLED,
+            departmentId: refreshed.departmentId as string | null,
+            reason: dto.reason,
+          },
+        },
+      });
+
+      return refreshed;
+    });
+
+    return withLifecycle(updated as ContractRecord);
+  }
+
+  // ---------------------------------------------------------------------------
   // Close: ACTIVE | TERMINATED → CLOSED
   // ---------------------------------------------------------------------------
 
@@ -985,7 +1223,7 @@ export class ContractsService {
   async findAll(
     query: ContractListQueryDto,
     actor: AuthUser,
-  ): Promise<PaginatedResult<ContractWithLifecycle>> {
+  ): Promise<PaginatedResult<ContractListItem>> {
     if (!actor.permissions.includes('contracts.read')) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
@@ -1003,7 +1241,7 @@ export class ContractsService {
     const [items, total] = await Promise.all([
       this.db.getClient().contract.findMany({
         where,
-        select: CONTRACT_SELECT,
+        select: CONTRACT_LIST_SELECT,
         orderBy: [{ createdAt: 'desc' }, { referenceNumber: 'desc' }],
         skip,
         take: pageSize,
@@ -1012,7 +1250,7 @@ export class ContractsService {
     ]);
 
     return {
-      items: (items as ContractRecord[]).map(withLifecycle),
+      items: (items as ContractListRecord[]).map(toListItem),
       total,
       page,
       pageSize,
@@ -1024,53 +1262,58 @@ export class ContractsService {
   // Summary metrics
   // ---------------------------------------------------------------------------
 
-  async getSummary(actor: AuthUser): Promise<{
-    totalDraft: number;
-    totalActive: number;
-    totalExpiring: number;
-    totalExpired: number;
-    totalTerminated: number;
-    totalClosed: number;
+  // CM-69I — the Contract List KPI cards must always agree with the table
+  // below them: this now takes the SAME ContractListQueryDto the table's
+  // findAll() takes, resolves it through the SAME buildListWhere() (so
+  // search/lifecycleStatus/status/scheduleStatus/contractType/ownerUserId/
+  // daysRemaining — including CM-69C's default-excludes-CANCELLED and
+  // explicit lifecycleStatus=ALL bypass — all apply identically), and
+  // combines department scope via the exact same pattern findAll() uses.
+  // Previously this counted every status bucket globally (deptWhere only),
+  // which is why cancelled/filtered-out contracts still inflated "Total
+  // Contracts"/"Total Contract Value" while the table itself already hid
+  // them (CM-69C). "Active Contracts" is the count WITHIN the current
+  // filtered scope that is additionally ACTIVE (via a real Prisma `AND`,
+  // never a `{...where, status: ACTIVE}` object-spread — that would
+  // silently clobber an explicit lifecycleStatus=DRAFT/CLOSED/etc. filter's
+  // own `status` condition instead of correctly returning 0 for it).
+  async getSummary(actor: AuthUser, query: ContractListQueryDto = {}): Promise<{
+    totalContracts: number;
+    activeContracts: number;
+    totalContractValue: string;
+    totalOpenClaims: number;
   }> {
     if (!actor.permissions.includes('contracts.read')) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 
-    const today = utcToday();
-
     const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
-    const deptWhere = deptFilter !== null ? { departmentId: deptFilter } : {};
+    const where: Record<string, unknown> = { ...buildListWhere(query) };
+    if (deptFilter !== null) {
+      where['departmentId'] = deptFilter;
+    }
 
-    const [
-      totalDraft,
-      totalActive,
-      totalExpiring,
-      totalExpired,
-      totalTerminated,
-      totalClosed,
-    ] = await Promise.all([
-      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.DRAFT } }),
-      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.ACTIVE } }),
-      this.db.getClient().contract.count({
-        where: {
-          ...deptWhere,
-          status: ContractStatus.ACTIVE,
-          renewalNoticeDate: { lte: today },
-          OR: [{ endDate: null }, { endDate: { gte: today } }],
-        },
+    const [totalContracts, activeContracts, valueAggregate, totalOpenClaims] = await Promise.all([
+      this.db.getClient().contract.count({ where }),
+      this.db.getClient().contract.count({ where: { AND: [where, { status: ContractStatus.ACTIVE }] } }),
+      // CM-55 — Contract List KPI "Total Contract Value". Real sum of every
+      // in-scope (now filter-matching, not just department-matching) contract's
+      // current value.
+      this.db.getClient().contract.aggregate({ where, _sum: { contractValue: true } }),
+      // CM-55 — Contract List KPI "Open Claims". Same "not a final status"
+      // definition as computeClaimSummary/contract-dashboard.service.ts, now
+      // scoped to the same filtered contract set as everything else here.
+      this.db.getClient().contractClaim.count({
+        where: { status: { notIn: FINAL_CLAIM_STATUSES_FOR_LIST }, contract: where },
       }),
-      this.db.getClient().contract.count({
-        where: {
-          ...deptWhere,
-          status: ContractStatus.ACTIVE,
-          endDate: { lt: today },
-        },
-      }),
-      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.TERMINATED } }),
-      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.CLOSED } }),
     ]);
 
-    return { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed };
+    return {
+      totalContracts,
+      activeContracts,
+      totalContractValue: (toNum(valueAggregate._sum.contractValue) ?? 0).toFixed(3),
+      totalOpenClaims,
+    };
   }
 
   async getDashboard(actor: AuthUser): Promise<{
@@ -1082,6 +1325,7 @@ export class ContractsService {
       totalExpired: number;
       totalTerminated: number;
       totalClosed: number;
+      totalCancelled: number;
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
@@ -1114,6 +1358,7 @@ export class ContractsService {
       totalExpired,
       totalTerminated,
       totalClosed,
+      totalCancelled,
       recentRaw,
     ] = await Promise.all([
       this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.DRAFT } }),
@@ -1131,6 +1376,7 @@ export class ContractsService {
       }),
       this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.TERMINATED } }),
       this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.CLOSED } }),
+      this.db.getClient().contract.count({ where: { ...deptWhere, status: ContractStatus.CANCELLED } }),
       this.db.getClient().contract.findMany({
         where: { ...deptWhere },
         take: 8,
@@ -1141,7 +1387,7 @@ export class ContractsService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed },
+      metrics: { totalDraft, totalActive, totalExpiring, totalExpired, totalTerminated, totalClosed, totalCancelled },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,
@@ -1232,9 +1478,12 @@ export class ContractsService {
 
     await this.findOneOrThrow(id, actor);
 
+    // CM-66 — newest first, matching the Activity / Audit History tab's own
+    // "Date & Time sorted newest first" requirement. This is the only real
+    // consumer of listActivities(), so the order change is safe.
     return this.db.getClient().contractActivity.findMany({
       where: { contractId: id },
-      orderBy: [{ createdAt: 'asc' }],
+      orderBy: [{ createdAt: 'desc' }],
     });
   }
 
@@ -1324,50 +1573,122 @@ export class ContractsService {
 // List where builder (exported for tests)
 // ---------------------------------------------------------------------------
 
+// CM-55 — matches computeEffectiveScheduleStatus's own default rule exactly:
+// IN_PROGRESS/COMPLETED also match contracts whose scheduleStatus is still
+// NULL but would display as that value (see the function above). The other
+// 3 values (ON_TRACK/DELAYED/AHEAD_OF_SCHEDULE) are never a computed
+// default, so they only ever match an explicit stored value.
+function buildScheduleStatusCondition(value: string): Record<string, unknown> {
+  if (value === 'IN_PROGRESS') {
+    return { OR: [{ scheduleStatus: 'IN_PROGRESS' }, { AND: [{ scheduleStatus: null }, { status: { not: ContractStatus.CLOSED } }] }] };
+  }
+  if (value === 'COMPLETED') {
+    return { OR: [{ scheduleStatus: 'COMPLETED' }, { AND: [{ scheduleStatus: null }, { status: ContractStatus.CLOSED }] }] };
+  }
+  return { scheduleStatus: value };
+}
+
+// CM-55 — "days remaining" is computed from forecastCompletionDate, falling
+// back to endDate only when forecastCompletionDate is unset — same fallback
+// order the Contract List's own Days Remaining column uses.
+function buildDaysRemainingCondition(value: string, today: Date): Record<string, unknown> {
+  const addDays = (days: number): Date => new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+
+  if (value === 'OVERDUE') {
+    return {
+      OR: [
+        { forecastCompletionDate: { lt: today } },
+        { AND: [{ forecastCompletionDate: null }, { endDate: { lt: today } }] },
+      ],
+    };
+  }
+
+  const windowEnd = addDays(value === 'DUE_60' ? 60 : 30);
+  return {
+    OR: [
+      { forecastCompletionDate: { gte: today, lte: windowEnd } },
+      { AND: [{ forecastCompletionDate: null }, { endDate: { gte: today, lte: windowEnd } }] },
+    ],
+  };
+}
+
 export function buildListWhere(query: ContractListQueryDto): Record<string, unknown> {
   const where: Record<string, unknown> = {};
+  const and: Record<string, unknown>[] = [];
   const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
 
-  // Lifecycle status filter takes precedence over plain status filter
-  if (query.lifecycleStatus) {
-    switch (query.lifecycleStatus) {
-      case 'EXPIRING':
-        where['status'] = ContractStatus.ACTIVE;
-        where['renewalNoticeDate'] = { lte: today };
-        where['OR'] = [{ endDate: null }, { endDate: { gte: today } }];
-        break;
-      case 'EXPIRED':
-        where['status'] = ContractStatus.ACTIVE;
-        where['endDate'] = { lt: today };
-        break;
-      case 'ACTIVE':
-        where['status'] = ContractStatus.ACTIVE;
-        // No additional date filters — include all ACTIVE regardless of derived status
-        break;
-      case 'DRAFT':
-        where['status'] = ContractStatus.DRAFT;
-        break;
-      case 'TERMINATED':
-        where['status'] = ContractStatus.TERMINATED;
-        break;
-      case 'CLOSED':
-        where['status'] = ContractStatus.CLOSED;
-        break;
+  // CM-69C — 'ALL' (either param) is an explicit, deliberate request to see
+  // every real status including CANCELLED, for audit — bypasses every branch
+  // below, including the new default-excludes-CANCELLED one.
+  const explicitAllStatuses = query.lifecycleStatus === 'ALL' || query.status === 'ALL';
+
+  if (!explicitAllStatuses) {
+    // Lifecycle status filter takes precedence over plain status filter
+    if (query.lifecycleStatus) {
+      switch (query.lifecycleStatus) {
+        case 'EXPIRING':
+          where['status'] = ContractStatus.ACTIVE;
+          where['renewalNoticeDate'] = { lte: today };
+          and.push({ OR: [{ endDate: null }, { endDate: { gte: today } }] });
+          break;
+        case 'EXPIRED':
+          where['status'] = ContractStatus.ACTIVE;
+          where['endDate'] = { lt: today };
+          break;
+        case 'ACTIVE':
+          where['status'] = ContractStatus.ACTIVE;
+          // No additional date filters — include all ACTIVE regardless of derived status
+          break;
+        case 'DRAFT':
+          where['status'] = ContractStatus.DRAFT;
+          break;
+        case 'TERMINATED':
+          where['status'] = ContractStatus.TERMINATED;
+          break;
+        case 'CLOSED':
+          where['status'] = ContractStatus.CLOSED;
+          break;
+        case 'CANCELLED':
+          where['status'] = ContractStatus.CANCELLED;
+          break;
+      }
+    } else if (query.status) {
+      where['status'] = query.status;
+    } else {
+      // CM-69C — true default (no status/lifecycleStatus filter supplied at
+      // all, e.g. a fresh page load): exclude CANCELLED so voided/test
+      // contracts don't clutter the normal working list. Every other real
+      // status (DRAFT/ACTIVE/TERMINATED/CLOSED) still shows, exactly as
+      // before this unit — only CANCELLED changes from "always included" to
+      // "hidden unless explicitly asked for".
+      where['status'] = { not: ContractStatus.CANCELLED };
     }
-  } else if (query.status) {
-    where['status'] = query.status;
   }
 
   if (query.ownerUserId) where['ownerUserId'] = query.ownerUserId;
   if (query.departmentId) where['departmentId'] = query.departmentId;
   if (query.plantId) where['plantId'] = query.plantId;
 
-  if (query.search?.trim()) {
-    where['OR'] = [
-      { title: { contains: query.search.trim(), mode: 'insensitive' } },
-      { referenceNumber: { contains: query.search.trim(), mode: 'insensitive' } },
-    ];
+  // CM-55 — real scopeOfWork JSONB flag, not an invented "contract type" column.
+  if (query.contractType) {
+    where['scopeOfWork'] = { path: [query.contractType], equals: true };
   }
 
+  if (query.scheduleStatus) and.push(buildScheduleStatusCondition(query.scheduleStatus));
+  if (query.daysRemaining) and.push(buildDaysRemainingCondition(query.daysRemaining, today));
+
+  if (query.search?.trim()) {
+    const s = query.search.trim();
+    and.push({
+      OR: [
+        { title: { contains: s, mode: 'insensitive' } },
+        { referenceNumber: { contains: s, mode: 'insensitive' } },
+        { jobOrder: { contains: s, mode: 'insensitive' } },
+        { counterpartyName: { contains: s, mode: 'insensitive' } },
+      ],
+    });
+  }
+
+  if (and.length > 0) where['AND'] = and;
   return where;
 }

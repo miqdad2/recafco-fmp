@@ -1,12 +1,22 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { ActionResult } from '../../actions';
 import { createPaymentAction, updatePaymentAction } from '../../actions';
-import type { ContractPayment } from '@/lib/contracts-api';
+import type { ContractPayment, ContractPaymentStatus } from '@/lib/contracts-api';
 import { inputCls, labelCls, gridCls3 } from '../../_components/contract-form-fields';
+import {
+  PAYMENT_STATUS_LABELS,
+  PAYMENT_TERM_OPTIONS,
+  PAYMENT_TERM_OTHER,
+  resolvePaymentTermSelection,
+  resolvePaymentTermValue,
+  computeRemainingAmount,
+  suggestPaymentStatus,
+  validatePaymentFormValues,
+} from '../../_lib/contract-payment-detail-helpers';
 
 interface ContractOption {
   id: string;
@@ -19,23 +29,82 @@ interface Props {
   contracts?: ContractOption[];
   payment?: ContractPayment;
   onClose: () => void;
+  /**
+   * CM-58B — 'register' (default) is the module-level register's exact
+   * original behavior: a Contract picker in Add mode, and the Certified
+   * Amount field. 'contractDetail' is for the Contract Detail Payments tab,
+   * which is always scoped to one already-known contract: no Contract
+   * picker (the single contract is submitted as a hidden field and shown
+   * as a read-only "Adding payment for" / project name / reference number
+   * block instead — CM-58C), no Certified Amount field (that concept isn't
+   * part of this unit's approved design), and four labels renamed to match
+   * this page's own column wording (Invoice Amount / Payment Due Date /
+   * Received On / Received Amount). The underlying field `name`
+   * attributes — and therefore the create/update payload — never change
+   * between variants; only what's shown and how it's labeled does.
+   */
+  variant?: 'register' | 'contractDetail';
 }
 
-const STATUS_OPTIONS = [
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'SUBMITTED', label: 'Submitted' },
-  { value: 'CERTIFIED', label: 'Certified' },
-  { value: 'PARTIALLY_PAID', label: 'Partially Paid' },
-  { value: 'PAID', label: 'Paid' },
-  { value: 'OVERDUE', label: 'Overdue' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-];
+// CM-58C — reuses the same manager-friendly labels already established for
+// the Payments tab's own status badges/filter (contract-payment-detail-helpers.ts)
+// instead of showing the raw backend enum ("Draft") — DRAFT was confusing
+// to managers, since a payment in that state simply hasn't been submitted
+// yet ("Pending"). CERTIFIED is kept (existing records can still have that
+// status) but moved to the end of the list, after the six status values
+// this task lists as preferred, so it reads as the least prominent option
+// without being hidden or renamed.
+const STATUS_OPTIONS = (
+  ['DRAFT', 'SUBMITTED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED', 'CERTIFIED'] as const
+).map((value) => ({ value, label: PAYMENT_STATUS_LABELS[value] }));
 
-export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): React.JSX.Element {
+// CM-70A — read-only calculated field, same established pattern as the BOQ
+// register's own "Calculated: ..." cells (contract-boq-register-table.tsx) —
+// a plain styled <div>, never a disabled <input>, so it can never be
+// mistaken for an editable/submittable form control.
+const readOnlyCalcCls = 'rounded-md bg-surface-secondary px-3 py-2 text-sm text-right tabular-nums font-medium text-text-secondary';
+const sectionLabelCls = 'text-[11px] font-semibold uppercase tracking-wide text-text-muted pt-1';
+
+export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 'register' }: Props): React.JSX.Element {
+  const isContractDetail = variant === 'contractDetail';
+  const amountLabel = isContractDetail ? 'Invoice Amount' : 'Submitted Amount';
+  const dueDateLabel = isContractDetail ? 'Payment Due Date' : 'Due Date';
+  const paidDateLabel = isContractDetail ? 'Received On' : 'Paid Date';
+  const paidAmountLabel = isContractDetail ? 'Received Amount' : 'Paid Amount';
+  // CM-58C — the single known contract for the contract-detail variant,
+  // shown as a small read-only context block instead of plain text.
+  const contractContext = isContractDetail ? (mode === 'add' ? contracts?.[0] : payment?.contract) : undefined;
   const router = useRouter();
   const action = mode === 'edit' && payment ? updatePaymentAction.bind(null, payment.id) : createPaymentAction;
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
   const submittedRef = useRef(false);
+
+  // CM-70A — controlled only where live reactivity is genuinely needed
+  // (Remaining Amount preview + auto-suggested Status + the Payment Term
+  // dropdown/"Other" split). Invoice Number/Invoice Date/Payment Due
+  // Date/Received On/Payment No./Remarks stay plain uncontrolled fields
+  // (defaultValue) — their values are only ever needed at submit time,
+  // read directly from the real FormData, exactly like every other field
+  // in this app's many other server-action forms.
+  const [submittedAmount, setSubmittedAmount] = useState(payment?.submittedAmount ?? '');
+  const [paidAmount, setPaidAmount] = useState(payment?.paidAmount ?? '');
+  const [status, setStatus] = useState<ContractPaymentStatus>(payment?.status ?? 'DRAFT');
+  const initialTerm = resolvePaymentTermSelection(payment?.paymentTerm);
+  const [paymentTermChoice, setPaymentTermChoice] = useState<string>(initialTerm.choice);
+  const [otherPaymentTerm, setOtherPaymentTerm] = useState(initialTerm.other);
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  const invoiceAmountNum = submittedAmount.trim() ? Number(submittedAmount) : null;
+  const receivedAmountNum = paidAmount.trim() ? Number(paidAmount) : null;
+  // CM-70A — the live preview always uses Invoice Amount vs Received Amount
+  // only (never Certified Amount, even in the register variant) — this
+  // matches the task's own literal "Remaining Amount = Invoice Amount −
+  // Received Amount" formula exactly, is never saved/submitted anywhere
+  // (the backend keeps computing its own real outstandingAmount, which may
+  // legitimately differ once a payment is certified), and never risks
+  // looking inconsistent with what the user just typed into these two
+  // specific fields.
+  const remainingAmount = computeRemainingAmount(invoiceAmountNum, receivedAmountNum);
 
   useEffect(() => {
     if (submittedRef.current && !isPending && !state.error) {
@@ -45,9 +114,49 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
     }
   }, [state, isPending, onClose, router]);
 
-  function handleSubmit(): void {
+  // CM-70A — auto-set the suggested status whenever either amount changes
+  // (per this unit's own "Preferred: Auto-set status when amounts change"),
+  // using the just-typed value directly rather than the not-yet-updated
+  // state, so the suggestion is always based on the real, current pair of
+  // numbers. A manual status the user picks afterward (SUBMITTED/CERTIFIED/
+  // OVERDUE/CANCELLED — none of which are derivable from amounts alone)
+  // survives until the next amount edit, exactly matching "allow manual
+  // override only if existing business logic requires it".
+  function handleInvoiceAmountChange(value: string): void {
+    setSubmittedAmount(value);
+    const invoice = value.trim() ? Number(value) : null;
+    const suggested = suggestPaymentStatus(invoice, receivedAmountNum);
+    if (suggested) setStatus(suggested);
+  }
+
+  function handleReceivedAmountChange(value: string): void {
+    setPaidAmount(value);
+    const received = value.trim() ? Number(value) : null;
+    const suggested = suggestPaymentStatus(invoiceAmountNum, received);
+    if (suggested) setStatus(suggested);
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+    const formData = new FormData(e.currentTarget);
+    const errors = validatePaymentFormValues({
+      invoiceNumber: (formData.get('invoiceNumber') as string | null) ?? '',
+      invoiceDate: (formData.get('invoiceDate') as string | null) ?? '',
+      dueDate: (formData.get('dueDate') as string | null) ?? '',
+      paidDate: (formData.get('paidDate') as string | null) ?? '',
+      invoiceAmount: submittedAmount,
+      receivedAmount: paidAmount,
+      status,
+    });
+    if (errors.length > 0) {
+      e.preventDefault();
+      setClientError(errors.join(' '));
+      return;
+    }
+    setClientError(null);
     submittedRef.current = true;
   }
+
+  const finalPaymentTerm = resolvePaymentTermValue(paymentTermChoice, otherPaymentTerm);
 
   return (
     <div
@@ -72,16 +181,25 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
         </div>
 
         <form id="payment-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {state.error && (
-            <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-              {state.error}
+          {(clientError ?? state.error) && (
+            <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+              {clientError ?? state.error}
             </div>
           )}
 
-          {mode === 'add' ? (
+          {contractContext && (
+            <div className="rounded-md border border-border bg-surface-secondary/50 px-3 py-2.5">
+              <p className="text-xs text-text-muted">{mode === 'add' ? 'Adding payment for' : 'Payment for'}</p>
+              <p className="text-sm font-medium text-text-primary mt-0.5">{contractContext.title}</p>
+              <p className="text-xs text-text-muted font-mono mt-0.5">{contractContext.referenceNumber}</p>
+              {mode === 'add' && <input type="hidden" name="contractId" value={contractContext.id} />}
+            </div>
+          )}
+
+          {mode === 'add' && !isContractDetail && (
             <div>
               <label htmlFor="contractId" className={labelCls}>
-                Contract <span className="text-danger">*</span>
+                Contract <span className="text-error">*</span>
               </label>
               <select id="contractId" name="contractId" required defaultValue="" className={inputCls}>
                 <option value="" disabled>Select a contract…</option>
@@ -90,7 +208,9 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
                 ))}
               </select>
             </div>
-          ) : (
+          )}
+
+          {mode === 'edit' && !isContractDetail && (
             <div>
               <span className={labelCls}>Contract</span>
               <p className="text-sm text-text-primary">
@@ -99,6 +219,8 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
             </div>
           )}
 
+          {/* Payment identity */}
+          <p className={sectionLabelCls}>Payment Identity</p>
           <div className={gridCls3}>
             <div>
               <label htmlFor="paymentNo" className={labelCls}>Payment No.</label>
@@ -108,24 +230,67 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
                 type="text"
                 maxLength={50}
                 defaultValue={payment?.paymentNo ?? ''}
-                placeholder="e.g. PAY-001"
+                placeholder="e.g. PAY-GRM-001"
                 className={inputCls}
               />
             </div>
             <div>
-              <label htmlFor="invoiceNumber" className={labelCls}>Invoice Number</label>
+              <label htmlFor="invoiceNumber" className={labelCls}>
+                Invoice Number <span className="text-error">*</span>
+              </label>
               <input
                 id="invoiceNumber"
                 name="invoiceNumber"
                 type="text"
                 maxLength={100}
                 defaultValue={payment?.invoiceNumber ?? ''}
-                placeholder="e.g. INV-001"
+                placeholder="e.g. INV-GRM-ADV-001"
                 className={inputCls}
               />
             </div>
             <div>
-              <label htmlFor="invoiceDate" className={labelCls}>Invoice Date</label>
+              <label htmlFor="paymentTermChoice" className={labelCls}>Payment Term</label>
+              <select
+                id="paymentTermChoice"
+                value={paymentTermChoice}
+                onChange={(e) => setPaymentTermChoice(e.target.value)}
+                className={inputCls}
+              >
+                <option value="" disabled>Select payment term</option>
+                {PAYMENT_TERM_OPTIONS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+                <option value={PAYMENT_TERM_OTHER}>{PAYMENT_TERM_OTHER}</option>
+              </select>
+              {/* CM-70A — one clean string is always what gets submitted as
+                  `paymentTerm`, whichever fixed option or free-text "Other"
+                  value the user actually chose — the backend's real,
+                  unchanged text column never sees the two-part UI. */}
+              <input type="hidden" name="paymentTerm" value={finalPaymentTerm} />
+            </div>
+            {paymentTermChoice === PAYMENT_TERM_OTHER && (
+              <div className="sm:col-span-2 lg:col-span-1">
+                <label htmlFor="otherPaymentTerm" className={labelCls}>Other payment term</label>
+                <input
+                  id="otherPaymentTerm"
+                  type="text"
+                  maxLength={100}
+                  value={otherPaymentTerm}
+                  onChange={(e) => setOtherPaymentTerm(e.target.value)}
+                  placeholder="Describe the payment term"
+                  className={inputCls}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Dates */}
+          <p className={sectionLabelCls}>Dates</p>
+          <div className={gridCls3}>
+            <div>
+              <label htmlFor="invoiceDate" className={labelCls}>
+                Invoice Date <span className="text-error">*</span>
+              </label>
               <input
                 id="invoiceDate"
                 name="invoiceDate"
@@ -135,19 +300,9 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
               />
             </div>
             <div>
-              <label htmlFor="paymentTerm" className={labelCls}>Payment Term</label>
-              <input
-                id="paymentTerm"
-                name="paymentTerm"
-                type="text"
-                maxLength={100}
-                defaultValue={payment?.paymentTerm ?? ''}
-                placeholder="e.g. Net 30"
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label htmlFor="dueDate" className={labelCls}>Due Date</label>
+              <label htmlFor="dueDate" className={labelCls}>
+                {dueDateLabel} <span className="text-error">*</span>
+              </label>
               <input
                 id="dueDate"
                 name="dueDate"
@@ -157,7 +312,10 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
               />
             </div>
             <div>
-              <label htmlFor="paidDate" className={labelCls}>Paid Date</label>
+              <label htmlFor="paidDate" className={labelCls}>
+                {paidDateLabel}
+                {(receivedAmountNum !== null && receivedAmountNum > 0) && <span className="text-error"> *</span>}
+              </label>
               <input
                 id="paidDate"
                 name="paidDate"
@@ -167,55 +325,87 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
               />
             </div>
           </div>
+          <p className="text-xs text-text-muted -mt-2">Use the calendar picker to avoid date format mistakes.</p>
 
-          <div className={gridCls3}>
+          {/* Amounts */}
+          <p className={sectionLabelCls}>Amounts</p>
+          <div className={isContractDetail ? 'grid grid-cols-1 sm:grid-cols-3 gap-4' : gridCls3}>
             <div>
-              <label htmlFor="submittedAmount" className={labelCls}>Submitted Amount</label>
+              <label htmlFor="submittedAmount" className={labelCls}>
+                {amountLabel} <span className="text-error">*</span>
+              </label>
               <input
                 id="submittedAmount"
                 name="submittedAmount"
                 type="number"
                 min="0"
                 step="0.001"
-                defaultValue={payment?.submittedAmount ?? ''}
+                value={submittedAmount}
+                onChange={(e) => handleInvoiceAmountChange(e.target.value)}
+                placeholder="e.g. 8500.000"
                 className={inputCls}
               />
             </div>
+            {!isContractDetail && (
+              <div>
+                <label htmlFor="certifiedAmount" className={labelCls}>Certified Amount</label>
+                <input
+                  id="certifiedAmount"
+                  name="certifiedAmount"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  defaultValue={payment?.certifiedAmount ?? ''}
+                  className={inputCls}
+                />
+              </div>
+            )}
             <div>
-              <label htmlFor="certifiedAmount" className={labelCls}>Certified Amount</label>
-              <input
-                id="certifiedAmount"
-                name="certifiedAmount"
-                type="number"
-                min="0"
-                step="0.001"
-                defaultValue={payment?.certifiedAmount ?? ''}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label htmlFor="paidAmount" className={labelCls}>Paid Amount</label>
+              <label htmlFor="paidAmount" className={labelCls}>
+                {paidAmountLabel} <span className="text-error">*</span>
+              </label>
               <input
                 id="paidAmount"
                 name="paidAmount"
                 type="number"
                 min="0"
                 step="0.001"
-                defaultValue={payment?.paidAmount ?? ''}
+                value={paidAmount}
+                onChange={(e) => handleReceivedAmountChange(e.target.value)}
+                placeholder="e.g. 8500.000"
                 className={inputCls}
               />
             </div>
+            <div>
+              <span className={labelCls}>Remaining Amount</span>
+              <div className={readOnlyCalcCls} title="Calculated: Invoice Amount − Received Amount">
+                {remainingAmount !== null ? remainingAmount.toFixed(3) : '—'}
+              </div>
+            </div>
           </div>
 
+          {/* Status */}
+          <p className={sectionLabelCls}>Status</p>
           <div>
             <label htmlFor="status" className={labelCls}>Status</label>
-            <select id="status" name="status" defaultValue={payment?.status ?? 'DRAFT'} className={inputCls}>
+            <select
+              id="status"
+              name="status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as ContractPaymentStatus)}
+              className={inputCls}
+            >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            <p className="text-xs text-text-muted mt-1">
+              Suggested automatically from Invoice Amount and Received Amount — change it manually only for Submitted, Certified, Overdue, or Cancelled.
+            </p>
           </div>
 
+          {/* Remarks */}
+          <p className={sectionLabelCls}>Remarks</p>
           <div>
             <label htmlFor="remarks" className={labelCls}>Remarks</label>
             <textarea
@@ -224,6 +414,7 @@ export function PaymentFormModal({ mode, contracts, payment, onClose }: Props): 
               rows={3}
               maxLength={5000}
               defaultValue={payment?.remarks ?? ''}
+              placeholder="Add payment notes, client reference, or follow-up details."
               className={`${inputCls} resize-y`}
             />
           </div>

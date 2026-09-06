@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
@@ -506,7 +506,11 @@ export function computeScheduleSummary(items: ScheduleItem[], today: Date = utcT
 // ---------------------------------------------------------------------------
 
 export function buildScheduleContractWhere(query: ContractScheduleListQueryDto): Record<string, unknown> {
-  const where: Record<string, unknown> = {};
+  // CM-69A — a cancelled/voided contract is never a scheduling concern; it
+  // is unconditionally excluded here (this old register has no
+  // cancelled-status filter of its own), same as the newer global schedule
+  // overview (contract-schedule-overview.service.ts).
+  const where: Record<string, unknown> = { status: { not: 'CANCELLED' } };
   const and: Record<string, unknown>[] = [];
 
   if (query.contractId) where['id'] = query.contractId;
@@ -715,27 +719,11 @@ export class ContractScheduleService {
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Single-contract schedule — all items, no pagination.
-  // ---------------------------------------------------------------------------
-
-  async findAllForContract(contractId: string, actor: AuthUser): Promise<{ items: ScheduleItem[]; summary: ScheduleSummary }> {
-    if (!actor.permissions.includes('contracts.read')) {
-      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
-    }
-
-    const contract = await this.db.getClient().contract.findUnique({
-      where: { id: contractId },
-      select: CONTRACT_SCHEDULE_SELECT,
-    });
-    if (!contract) {
-      throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
-    }
-    await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, contract.departmentId);
-
-    const today = utcToday();
-    const items = sortScheduleItems(await this.buildItemsForContracts([contract], today));
-
-    return { items, summary: computeScheduleSummary(items, today) };
-  }
+  // CM-68A — the old single-contract due-date aggregation (findAllForContract)
+  // was removed: audit confirmed its ONLY consumer was the per-contract
+  // Schedule tab (GET :id/schedule), which now calls
+  // ContractSchedulePlanService.getScheduleDetail() instead (the real
+  // Planned vs Actual view). buildItemsForContracts()/findAll() above are
+  // UNCHANGED — the module-level register (GET /contracts/schedule) still
+  // uses them and was not touched.
 }

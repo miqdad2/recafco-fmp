@@ -1,81 +1,72 @@
+import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Info, ArrowUpRight } from 'lucide-react';
+import { contractsApi } from '../../../../../../lib/contracts-api';
+import { getUserPermissions } from '../../../_lib/get-user-permissions';
+import { ContractProductionKpiStrip } from './_components/contract-production-kpi-strip';
+import { ContractProductionPanel } from './_components/contract-production-panel';
 
 export const metadata: Metadata = { title: 'Production Status — Contract Management — RECAFCO FMP' };
+export const dynamic = 'force-dynamic';
 
-const PRODUCTION_TRACKING_ROWS = ['Total Qty', 'Casted / Produced', 'Delivered', 'Remaining to Cast', 'Production Progress'];
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
 
-const PRODUCTION_COLUMNS = ['Item Description', 'Unit', 'Total Qty', 'Casted / Produced', 'Delivered', 'Remaining to Cast', 'Status', 'Action'];
+/**
+ * CM-59 — Contract Detail Production Status, approved-design rebuild.
+ * Production is manually tracked inside Contract Management — no Production
+ * Module integration exists (the "Open Production Module" link below is
+ * real navigation to the actual, separately-built Production module at
+ * /production, but the two are not data-linked; this page's own numbers are
+ * never sourced from there). Every KPI/table value comes from
+ * contractsApi.getContractProduction() — real BOQ items joined with their
+ * (optional) production tracking rows, server-computed and divide-by-zero
+ * safe (contract-boq-production.service.ts). A contract with no BOQ items
+ * shows the real empty state, never fabricated rows.
+ * CM-59B — info bar reworded: the old "Future release: Automatically linked
+ * with Production Module" read as if a sync already existed. Now states
+ * plainly that integration "can be added in a future phase" — a possibility,
+ * not a promise or an implication that today's numbers are already synced.
+ * Button relabeled "Open Production Module" (was "View") since it only
+ * navigates to the separate module, never opens a synced view of this
+ * contract's data. Kept (not omitted) because the route is real and working
+ * — verified live in CM-59 and unchanged since.
+ */
+export default async function ContractProductionStatusTab({ params }: PageProps): Promise<React.JSX.Element> {
+  const { id } = await params;
 
-export default function ContractProductionStatusTab(): React.JSX.Element {
+  const [permissions, detail] = await Promise.all([
+    getUserPermissions(),
+    contractsApi.getContractProduction(id).catch(() => null),
+  ]);
+  if (!permissions.includes('contracts.read') || !detail) notFound();
+
+  const canUpdate = permissions.includes('contracts.update');
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-base font-semibold text-text-primary">Production Status</h1>
-        <p className="text-xs text-text-secondary mt-0.5">Track casting, delivery and remaining production.</p>
-      </div>
-
-      {/* Production Tracking Status */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Production Tracking Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
-          {PRODUCTION_TRACKING_ROWS.map((label) => (
-            <div key={label}>
-              <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-text-muted">
-          Production tracking will be enabled after the Production backend unit. Future release: this can be linked with the Production module.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-info/20 bg-info-light px-4 py-2.5">
+        <div className="flex items-center gap-2 text-xs text-info">
+          <Info className="size-3.5 shrink-0" aria-hidden="true" />
+          <p>
+            <span className="font-medium">This data is manually updated in Contract Management.</span>{' '}
+            Production module integration can be added in a future phase.
+          </p>
+        </div>
         <Link
           href="/production"
-          className="shrink-0 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-secondary hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+          className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-info/30 bg-surface px-3 py-1.5 text-xs font-medium text-info hover:bg-info-light focus:outline-none focus:ring-2 focus:ring-focus"
         >
-          View Production Module
+          Open Production Module
+          <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
         </Link>
       </div>
 
-      {/* Production Status table */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Production Status</h2>
-          <button
-            type="button"
-            disabled
-            title="Production backend is not implemented yet."
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-secondary px-3 py-1.5 text-xs font-medium text-text-muted cursor-not-allowed"
-          >
-            <Plus className="size-3.5 shrink-0" aria-hidden="true" />
-            Add / Update Production
-          </button>
-        </div>
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead>
-              <tr className="bg-surface-secondary">
-                {PRODUCTION_COLUMNS.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-surface">
-              <tr>
-                <td colSpan={PRODUCTION_COLUMNS.length} className="px-3 py-8 text-center text-text-muted">
-                  No production records tracked yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <ContractProductionKpiStrip summary={detail.summary} />
+
+      <ContractProductionPanel contractId={id} items={detail.items} canUpdate={canUpdate} />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { Breadcrumbs } from '../../_components/breadcrumbs';
 import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { contractsApi } from '../../../../lib/contracts-api';
 import { getUserPermissions } from '../_lib/get-user-permissions';
@@ -106,10 +105,6 @@ export default async function ContractClaimsPage({ searchParams }: PageProps): P
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-6 print:px-0 print:py-0">
-      <Breadcrumbs
-        items={[{ label: 'Contract Management', href: '/contracts/dashboard' }, { label: 'Claim Log' }]}
-      />
-
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Claim Log</h1>

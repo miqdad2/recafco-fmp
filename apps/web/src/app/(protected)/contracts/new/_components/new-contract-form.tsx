@@ -2,72 +2,62 @@
 
 import { useActionState, useState } from 'react';
 import Link from 'next/link';
+import { HandCoins, Shield, ShieldCheck, Umbrella, Receipt, Landmark } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { ActionResult } from '../../actions';
 import { createContractAction } from '../../actions';
-import { ContractBoqTable } from '../../_components/contract-boq-table';
+import { ContractBoqRegisterTable } from '../../_components/contract-boq-register-table';
 import {
   InfoBox,
   inputCls,
   labelCls,
   gridCls3,
-  ClientContactFields,
+  ScopeOfWorkFieldset,
   ContractDatesFields,
   ContractValueFields,
-  ProjectSiteFields,
-  ScopeOfWorkFieldset,
-  CraneFields,
 } from '../../_components/contract-form-fields';
 import { PAYMENT_TERM_OPTIONS, formatContractValue } from '../../_lib/contract-ui-helpers';
 import {
   type BoqRow,
-  emptyBoqRow,
+  emptyRegisterBoqRow,
   boqLineTotal,
   validateBoqRows,
   toBoqApiItems,
 } from '../../_lib/contract-boq-helpers';
 
-interface OrgItem {
-  id: string;
-  code: string;
-  name: string;
-}
-
-interface PersonItem {
-  id: string;
-  displayName: string;
-}
-
-interface LocationItem {
-  id: string;
-  name: string;
-  code: string;
-}
-
 interface Props {
-  depts: OrgItem[];
-  plantsData: OrgItem[];
-  locations?: LocationItem[];
-  people: PersonItem[];
   /** Current user's Contract Management department-access scope, used to explain department assignment on create. */
   scope?: { type: 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS'; departmentNames: string[] } | undefined;
-  /** When provided, Cancel calls this instead of navigating (used inside the modal). */
-  onCancel?: () => void;
-  /** 'modal' fills its container height with an internally scrolling body and a pinned footer. Defaults to 'page' (natural document flow, used by /contracts/new). */
-  layout?: 'page' | 'modal';
 }
 
-function SectionCard({
-  badge,
-  title,
-  children,
-}: {
-  badge: string;
-  title: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
+// CM-56 — the New Contract Register form has its own <form id> so the page
+// header's top Cancel/Save Draft buttons (apps/web/.../new/page.tsx,
+// outside this client component) can submit/cancel via the standard HTML
+// `form` attribute — no cross-component state sharing needed, no fake
+// buttons: the top Save Draft really submits this exact form.
+export const NEW_CONTRACT_FORM_ID = 'new-contract-register-form';
+
+// CM-56 — Scope of Work options this register omits entirely, matching the
+// approved design's 5-option scope section (Shop Drawing / Production /
+// Delivery / Erection / Ex-Factory only). ScopeOfWorkFieldset is shared with
+// Edit Contract, which passes no excludeKeys and is completely unaffected —
+// an existing contract's Design Production flag (if ever set) stays fully
+// visible/editable there.
+const NEW_REGISTER_EXCLUDED_SCOPE_KEYS = ['designProduction', 'other', 'notApplicable'];
+
+const PAYMENT_TERM_ICONS: Record<string, LucideIcon> = {
+  advance: HandCoins,
+  retention: Shield,
+  performanceBond: ShieldCheck,
+  insurance: Umbrella,
+  interimPayment: Receipt,
+  taxClearance: Landmark,
+};
+
+function SectionCard({ badge, title, children }: { badge: string; title: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <div className="rounded-lg border border-border bg-surface p-5 sm:p-6">
-      <div className="flex items-center gap-3 mb-4 pb-3 border-b border-border">
+    <div className="rounded-lg border border-border bg-surface shadow-sm p-5">
+      <div className="flex items-center gap-3 mb-3 pb-3 border-b border-border">
         <span className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-accent text-white text-xs font-semibold">
           {badge}
         </span>
@@ -78,11 +68,18 @@ function SectionCard({
   );
 }
 
+// CM-56B — approved-design 2-column checkbox grid for Scope of Work's
+// narrower ~40% column (the shared `gridCls3` used everywhere else is
+// 3-column, sized for a full-width card — too cramped/wide here).
+const SCOPE_GRID_CLS = 'grid grid-cols-2 gap-3';
+
 function formatKwd(amount: number): string {
   return formatContractValue(amount.toString(), 'KWD');
 }
 
-export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }: Props): React.JSX.Element {
+const INITIAL_BOQ_ROW_COUNT = 5;
+
+export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(
     createContractAction,
     { error: null },
@@ -90,17 +87,15 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
   const [exFactory, setExFactory] = useState(false);
   const [scope, setScope] = useState<Record<string, boolean>>({});
   const [otherDescription, setOtherDescription] = useState('');
-  const [boqRows, setBoqRows] = useState<BoqRow[]>(() => [emptyBoqRow()]);
+  const [boqRows, setBoqRows] = useState<BoqRow[]>(() => Array.from({ length: INITIAL_BOQ_ROW_COUNT }, () => emptyRegisterBoqRow()));
   const [boqError, setBoqError] = useState<string | null>(null);
-  // Save Draft and Create Draft Contract submit the same <form> to the same
+  // Save Draft and Register Contract submit the same <form> to the same
   // createContractAction — there is no separate draft/register backend status
   // (ContractsService.create() always writes ContractStatus.DRAFT), so both
   // buttons produce an identical Draft contract today. clickedAction only
   // drives which button shows its own pending label; it has no effect on
-  // what gets submitted.
+  // what gets submitted. The footer note below says this plainly.
   const [clickedAction, setClickedAction] = useState<'save' | 'create' | null>(null);
-
-  const erectionSelected = !exFactory && scope['erection'] === true && scope['notApplicable'] !== true;
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     const validationError = validateBoqRows(boqRows);
@@ -114,7 +109,7 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
   const boqItemsPayload = toBoqApiItems(boqRows);
 
   const errorBanner = (state.error || boqError) && (
-    <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+    <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
       {boqError ?? state.error}
     </div>
   );
@@ -123,253 +118,165 @@ export function NewContractForm({ scope: deptScope, onCancel, layout = 'page' }:
   const departmentBanner =
     deptScope?.type === 'OWN_DEPARTMENT' ? (
       ownDepartmentName ? (
-        <InfoBox>This contract will be created under your department.</InfoBox>
+        <InfoBox variant="subtle">This contract will be created under your department.</InfoBox>
       ) : (
-        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+        <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
           Your user is not assigned to a department. Please contact administrator.
         </div>
       )
     ) : null;
 
-  const actions = (
-    <div className="flex items-center justify-end gap-3">
-      {onCancel ? (
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
-        >
-          Cancel
-        </button>
-      ) : (
-        <Link
-          href="/contracts"
-          className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
-        >
-          Cancel
-        </Link>
-      )}
-      <button
-        type="submit"
-        onClick={() => setClickedAction('save')}
-        disabled={isPending}
-        className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
-      >
-        {isPending && clickedAction === 'save' ? 'Saving…' : 'Save Draft'}
-      </button>
-      <button
-        type="submit"
-        onClick={() => setClickedAction('create')}
-        disabled={isPending}
-        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
-      >
-        {isPending && clickedAction === 'create' ? 'Creating…' : 'Create Draft Contract'}
-      </button>
-    </div>
-  );
-
-  const footerNote = (
-    <InfoBox>
-      Save Draft or Create Draft Contract will keep the contract in Draft status. Use Activate Contract from
-      the contract page when the contract is ready.
-    </InfoBox>
-  );
-
-  const sections = (
-    <>
-      {/* Section 1 — Basic Contract Details */}
-      <SectionCard badge="1" title="Basic Contract Details">
-        <div className={gridCls3}>
-          <div>
-            <label htmlFor="jobOrder" className={labelCls}>Job Order</label>
-            <input
-              id="jobOrder"
-              name="jobOrder"
-              type="text"
-              maxLength={100}
-              placeholder="Enter job order number"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="contractDate" className={labelCls}>Date</label>
-            <input
-              id="contractDate"
-              name="contractDate"
-              type="date"
-              placeholder="Select contract date"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="quotationNumber" className={labelCls}>Quotation #</label>
-            <input
-              id="quotationNumber"
-              name="quotationNumber"
-              type="text"
-              maxLength={100}
-              placeholder="Enter quotation number"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="counterpartyName" className={labelCls}>
-              Company Name <span className="text-danger">*</span>
-            </label>
-            <input
-              id="counterpartyName"
-              name="counterpartyName"
-              type="text"
-              required
-              maxLength={300}
-              placeholder="Client, employer, vendor…"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="title" className={labelCls}>
-              Project Name <span className="text-danger">*</span>
-            </label>
-            <input
-              id="title"
-              name="title"
-              type="text"
-              required
-              maxLength={300}
-              placeholder="Project or contract name"
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="projectNumber" className={labelCls}>Project Number</label>
-            <input
-              id="projectNumber"
-              name="projectNumber"
-              type="text"
-              maxLength={100}
-              placeholder="Enter project number"
-              className={inputCls}
-            />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* Section 2 — Client Contact */}
-      <SectionCard badge="2" title="Client Contact">
-        <ClientContactFields />
-      </SectionCard>
-
-      {/* Section 3 — Contract Dates */}
-      <SectionCard badge="3" title="Contract Dates">
-        <ContractDatesFields />
-      </SectionCard>
-
-      {/* Section 4 — Contract Value */}
-      <SectionCard badge="4" title="Contract Value">
-        <ContractValueFields />
-      </SectionCard>
-
-      {/* Section 5 — Project / Site Details */}
-      <SectionCard badge="5" title="Project / Site Details">
-        <ProjectSiteFields />
-      </SectionCard>
-
-      {/* Section 6 — Scope of Work */}
-      <SectionCard badge="6" title="Scope of Work">
-        <ScopeOfWorkFieldset
-          scope={scope}
-          onScopeChange={setScope}
-          exFactory={exFactory}
-          onExFactoryChange={setExFactory}
-          otherDescription={otherDescription}
-          onOtherDescriptionChange={setOtherDescription}
-        />
-      </SectionCard>
-
-      {/* Section 7 — Payment Terms */}
-      <SectionCard badge="7" title="Payment Terms">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {PAYMENT_TERM_OPTIONS.map((opt) => (
-            <label
-              key={opt.key}
-              className="flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm font-medium text-text-primary text-center cursor-pointer transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent/5 hover:border-border-strong"
-            >
-              <input
-                type="checkbox"
-                name={`paymentTerm_${opt.key}`}
-                className="rounded border-border text-accent focus:ring-accent"
-              />
-              {opt.label}
-            </label>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* Section 8 — Erection / Crane Information (only when Erection is selected) */}
-      {erectionSelected && (
-        <SectionCard badge="8" title="Erection / Crane Information">
-          <CraneFields />
-        </SectionCard>
-      )}
-
-      {/* Section 9 — Contract BOQ / Items */}
-      <SectionCard badge="9" title="Contract BOQ / Items">
-        <ContractBoqTable rows={boqRows} onRowsChange={setBoqRows} formatTotal={formatKwd} />
-
-        <div className="mt-4">
-          <InfoBox>
-            Basic details, scope, payment terms, BOQ line items, and total amount will all be saved to the
-            contract record.
-          </InfoBox>
-        </div>
-
-        <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(3) : ''} />
-        <input type="hidden" name="currency" value={totalAmount > 0 ? 'KWD' : ''} />
-        <input type="hidden" name="boqItems" value={boqItemsPayload.length > 0 ? JSON.stringify(boqItemsPayload) : ''} />
-      </SectionCard>
-
-      {/* Section 10 — Actions (page layout only; modal layout uses a sticky footer instead) */}
-      {layout === 'page' && (
-        <SectionCard badge="10" title="Actions">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
-            {footerNote}
-            <div className="shrink-0">{actions}</div>
-          </div>
-        </SectionCard>
-      )}
-    </>
-  );
-
-  if (layout === 'modal') {
-    return (
-      <form action={formAction} onSubmit={handleSubmit} className="flex flex-1 min-h-0 flex-col">
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 sm:px-8 py-6 space-y-5">
-          {errorBanner}
-          {departmentBanner}
-          {sections}
-        </div>
-        <div className="shrink-0 border-t border-border bg-surface px-6 sm:px-8 py-4 space-y-3">
-          {errorBanner}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3 justify-between">
-            {footerNote}
-            <div className="shrink-0">{actions}</div>
-          </div>
-        </div>
-      </form>
-    );
-  }
-
   return (
     <>
       {errorBanner && <div className="mb-6">{errorBanner}</div>}
       {departmentBanner && <div className="mb-6">{departmentBanner}</div>}
-      <form action={formAction} onSubmit={handleSubmit} className="space-y-5">
-        {sections}
+
+      <form id={NEW_CONTRACT_FORM_ID} action={formAction} onSubmit={handleSubmit} className="space-y-4">
+        {/* Row 1 — Basic Contract Details (~60%) and Scope of Work (~40%) side by side on desktop */}
+        <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-start">
+          {/* Section 1 — Basic Contract Details */}
+          <SectionCard badge="1" title="Basic Contract Details">
+            <div className={gridCls3}>
+              <div>
+                <label htmlFor="jobOrder" className={labelCls}>Job Order</label>
+                <input id="jobOrder" name="jobOrder" type="text" maxLength={100} placeholder="Enter job order" className={inputCls} />
+              </div>
+
+              <div>
+                <label htmlFor="contractDate" className={labelCls}>Date</label>
+                <input id="contractDate" name="contractDate" type="date" className={inputCls} />
+              </div>
+
+              <div>
+                <label htmlFor="quotationNumber" className={labelCls}>Quotation #</label>
+                <input id="quotationNumber" name="quotationNumber" type="text" maxLength={100} placeholder="Enter quotation number" className={inputCls} />
+              </div>
+
+              <div>
+                <label htmlFor="counterpartyName" className={labelCls}>
+                  Company Name <span className="text-error">*</span>
+                </label>
+                <input
+                  id="counterpartyName" name="counterpartyName" type="text" required maxLength={300}
+                  placeholder="Enter company name" className={inputCls}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="title" className={labelCls}>
+                  Project Name <span className="text-error">*</span>
+                </label>
+                <input id="title" name="title" type="text" required maxLength={300} placeholder="Enter project name" className={inputCls} />
+              </div>
+
+              <div>
+                <label htmlFor="projectNumber" className={labelCls}>Project Number</label>
+                <input id="projectNumber" name="projectNumber" type="text" maxLength={100} placeholder="Enter project number" className={inputCls} />
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Section 2 — Scope of Work */}
+          <SectionCard badge="2" title="Scope of Work">
+            <ScopeOfWorkFieldset
+              scope={scope}
+              onScopeChange={setScope}
+              exFactory={exFactory}
+              onExFactoryChange={setExFactory}
+              otherDescription={otherDescription}
+              onOtherDescriptionChange={setOtherDescription}
+              excludeKeys={NEW_REGISTER_EXCLUDED_SCOPE_KEYS}
+              gridClassName={SCOPE_GRID_CLS}
+              infoBoxVariant="subtle"
+            />
+          </SectionCard>
+        </div>
+
+        {/* Row 2 — Contract Dates (left) and Contract Value (right) side by side on desktop */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {/* Section 3 — Contract Dates */}
+          <SectionCard badge="3" title="Contract Dates">
+            <ContractDatesFields />
+          </SectionCard>
+
+          {/* Section 4 — Contract Value */}
+          <SectionCard badge="4" title="Contract Value">
+            <ContractValueFields defaults={{ originalCurrency: 'KWD' }} />
+          </SectionCard>
+        </div>
+
+        {/* Section 5 — Payment Terms */}
+        <SectionCard badge="5" title="Payment Terms">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            {PAYMENT_TERM_OPTIONS.map((opt) => {
+              const Icon = PAYMENT_TERM_ICONS[opt.key];
+              return (
+                <label
+                  key={opt.key}
+                  className="flex items-center justify-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-5 text-sm font-medium text-text-primary text-center cursor-pointer transition-colors has-checked:border-accent has-checked:bg-accent/5 hover:border-border-strong"
+                >
+                  <input
+                    type="checkbox"
+                    name={`paymentTerm_${opt.key}`}
+                    className="rounded border-border text-accent focus:ring-accent"
+                  />
+                  {Icon && <Icon className="size-5 text-text-secondary shrink-0" aria-hidden="true" />}
+                  {opt.label}
+                </label>
+              );
+            })}
+          </div>
+        </SectionCard>
+
+        {/* Section 6 — Contract BOQ / Items */}
+        <SectionCard badge="6" title="Contract BOQ / Items">
+          <ContractBoqRegisterTable rows={boqRows} onRowsChange={setBoqRows} formatTotal={formatKwd} />
+
+          <div className="mt-3">
+            <InfoBox variant="subtle">
+              BOQ Qty / Area is the original contract quantity. Drawing Qty can be updated when drawing/calculation
+              quantity is confirmed. Progress / Invoice % is calculated from Invoice Qty against BOQ Qty / Area.
+            </InfoBox>
+          </div>
+
+          <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(3) : ''} />
+          <input type="hidden" name="currency" value={totalAmount > 0 ? 'KWD' : ''} />
+          <input type="hidden" name="boqItems" value={boqItemsPayload.length > 0 ? JSON.stringify(boqItemsPayload) : ''} />
+        </SectionCard>
+
+        {/* Section 7 — Actions */}
+        <SectionCard badge="7" title="Actions">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+            <InfoBox variant="subtle">
+              Register Contract saves the contract in the list as Draft. Use Activate Contract from the
+              contract page once all terms are confirmed and it is ready to move forward.
+            </InfoBox>
+            <div className="shrink-0 flex items-center justify-end gap-3">
+              <Link
+                href="/contracts"
+                className="inline-flex items-center h-11 px-5 rounded-md border border-border bg-surface text-sm font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+              >
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                onClick={() => setClickedAction('save')}
+                disabled={isPending}
+                className="inline-flex items-center h-11 px-5 rounded-md border border-accent/30 bg-accent/5 text-sm font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+              >
+                {isPending && clickedAction === 'save' ? 'Saving…' : 'Save Draft'}
+              </button>
+              <button
+                type="submit"
+                onClick={() => setClickedAction('create')}
+                disabled={isPending}
+                className="inline-flex items-center h-11 px-5 rounded-md bg-success text-sm font-medium text-white hover:bg-success/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+              >
+                {isPending && clickedAction === 'create' ? 'Registering…' : 'Register Contract'}
+              </button>
+            </div>
+          </div>
+        </SectionCard>
       </form>
     </>
   );

@@ -9,7 +9,26 @@ export const labelCls = 'block text-sm font-medium text-text-primary mb-1';
 export const gridCls3 = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
 const textareaCls = `${inputCls} resize-y`;
 
-export function InfoBox({ children }: { children: React.ReactNode }): React.JSX.Element {
+export interface InfoBoxProps {
+  children: React.ReactNode;
+  /**
+   * CM-56D — 'subtle' is a lighter, shorter rendering for pages that show
+   * several helper notes close together (New Contract Register). Defaults
+   * to 'default' (the original look) so every other existing InfoBox
+   * consumer, including Edit Contract, is completely unaffected.
+   */
+  variant?: 'default' | 'subtle';
+}
+
+export function InfoBox({ children, variant = 'default' }: InfoBoxProps): React.JSX.Element {
+  if (variant === 'subtle') {
+    return (
+      <div className="flex items-start gap-1.5 rounded-md bg-info-light/60 px-2.5 py-1.5 text-[11px] leading-snug text-text-secondary">
+        <Info className="size-3 shrink-0 mt-0.5 text-info/70" aria-hidden="true" />
+        <p>{children}</p>
+      </div>
+    );
+  }
   return (
     <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info-light px-3 py-2.5 text-xs text-info">
       <Info className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
@@ -260,6 +279,25 @@ export interface ScopeOfWorkFieldsetProps {
   onExFactoryChange: (value: boolean) => void;
   otherDescription: string;
   onOtherDescriptionChange: (value: string) => void;
+  /**
+   * CM-56 — option keys to omit from the rendered checkbox grid (New
+   * Contract Register drops 'designProduction'/'other'/'notApplicable' to
+   * match the approved design's 5-option scope section). Defaults to none
+   * — Edit Contract passes nothing, so its behavior is completely
+   * unchanged: every real scope option (including one an existing contract
+   * may already have stored) stays visible and editable there.
+   */
+  excludeKeys?: string[];
+  /**
+   * CM-56B — layout-only override for the checkbox grid's className.
+   * Defaults to the shared 3-column `gridCls3` (Edit Contract passes
+   * nothing, so its layout is unchanged). New Contract Register passes a
+   * 2-column grid so the fieldset reads well in its narrower ~40% column
+   * next to Basic Contract Details.
+   */
+  gridClassName?: string;
+  /** CM-56D — forwarded to this fieldset's own InfoBox. Defaults to 'default'; Edit Contract passes nothing. */
+  infoBoxVariant?: 'default' | 'subtle';
 }
 
 const NORMAL_SCOPE_KEYS = ['shopDrawing', 'designProduction', 'production', 'delivery', 'erection'];
@@ -271,9 +309,15 @@ export function ScopeOfWorkFieldset({
   onExFactoryChange,
   otherDescription,
   onOtherDescriptionChange,
+  excludeKeys = [],
+  gridClassName = gridCls3,
+  infoBoxVariant = 'default',
 }: ScopeOfWorkFieldsetProps): React.JSX.Element {
-  const notApplicable = scope['notApplicable'] === true;
-  const other = scope['other'] === true;
+  const excluded = new Set(excludeKeys);
+  const showOther = !excluded.has('other');
+  const showNotApplicable = !excluded.has('notApplicable');
+  const notApplicable = showNotApplicable && scope['notApplicable'] === true;
+  const other = showOther && scope['other'] === true;
   const anyActiveSelected =
     exFactory || other || NORMAL_SCOPE_KEYS.some((k) => scope[k] === true);
 
@@ -307,8 +351,8 @@ export function ScopeOfWorkFieldset({
 
   return (
     <div className="space-y-4">
-      <div className={gridCls3}>
-        {SCOPE_OF_WORK_OPTIONS.filter((opt) => !['exFactory', 'other', 'notApplicable'].includes(opt.key)).map((opt) => {
+      <div className={gridClassName}>
+        {SCOPE_OF_WORK_OPTIONS.filter((opt) => !['exFactory', 'other', 'notApplicable'].includes(opt.key) && !excluded.has(opt.key)).map((opt) => {
           const disabled = (exFactory && (opt.key === 'delivery' || opt.key === 'erection')) || notApplicable;
           return (
             <label
@@ -342,33 +386,37 @@ export function ScopeOfWorkFieldset({
           Ex-Factory
         </label>
 
-        <label
-          className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm ${notApplicable ? 'opacity-50 cursor-not-allowed bg-surface-secondary' : 'text-text-primary'}`}
-        >
-          <input
-            type="checkbox"
-            name="scope_other"
-            disabled={notApplicable}
-            checked={notApplicable ? false : other}
-            onChange={(e) => toggleOther(e.target.checked)}
-            className="rounded border-border text-accent focus:ring-accent"
-          />
-          Other
-        </label>
+        {showOther && (
+          <label
+            className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm ${notApplicable ? 'opacity-50 cursor-not-allowed bg-surface-secondary' : 'text-text-primary'}`}
+          >
+            <input
+              type="checkbox"
+              name="scope_other"
+              disabled={notApplicable}
+              checked={notApplicable ? false : other}
+              onChange={(e) => toggleOther(e.target.checked)}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            Other
+          </label>
+        )}
 
-        <label
-          className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm ${anyActiveSelected ? 'opacity-50 cursor-not-allowed bg-surface-secondary' : 'text-text-primary bg-surface-secondary'}`}
-        >
-          <input
-            type="checkbox"
-            name="scope_notApplicable"
-            disabled={anyActiveSelected}
-            checked={anyActiveSelected ? false : notApplicable}
-            onChange={(e) => toggleNotApplicable(e.target.checked)}
-            className="rounded border-border text-accent focus:ring-accent"
-          />
-          Not Applicable
-        </label>
+        {showNotApplicable && (
+          <label
+            className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm ${anyActiveSelected ? 'opacity-50 cursor-not-allowed bg-surface-secondary' : 'text-text-primary bg-surface-secondary'}`}
+          >
+            <input
+              type="checkbox"
+              name="scope_notApplicable"
+              disabled={anyActiveSelected}
+              checked={anyActiveSelected ? false : notApplicable}
+              onChange={(e) => toggleNotApplicable(e.target.checked)}
+              className="rounded border-border text-accent focus:ring-accent"
+            />
+            Not Applicable
+          </label>
+        )}
       </div>
 
       {other && !notApplicable && (
@@ -390,9 +438,9 @@ export function ScopeOfWorkFieldset({
         </div>
       )}
 
-      <InfoBox>
-        If &ldquo;Ex-Factory&rdquo; is selected, Delivery and Erection will be disabled. &ldquo;Not
-        Applicable&rdquo; cannot be combined with any other scope option.
+      <InfoBox variant={infoBoxVariant}>
+        If &ldquo;Ex-Factory&rdquo; is selected, Delivery and Erection will be disabled.
+        {showNotApplicable && ' "Not Applicable" cannot be combined with any other scope option.'}
       </InfoBox>
     </div>
   );

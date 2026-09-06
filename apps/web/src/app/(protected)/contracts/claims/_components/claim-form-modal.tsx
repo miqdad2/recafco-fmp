@@ -1,13 +1,19 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { ActionResult } from '../../actions';
 import { createClaimAction, updateClaimAction } from '../../actions';
-import type { ContractClaim, ContractPerson } from '@/lib/contracts-api';
+import type { ContractClaim, ContractClaimType, ContractClaimStatus, ContractPerson } from '@/lib/contracts-api';
 import { CONTRACT_CLAIM_TYPE_OPTIONS, CONTRACT_CLAIM_STATUS_OPTIONS } from '../../_lib/contract-ui-helpers';
-import { inputCls, labelCls, gridCls3 } from '../../_components/contract-form-fields';
+import { inputCls, labelCls, gridCls3, InfoBox } from '../../_components/contract-form-fields';
+import {
+  formatClaimContractContext,
+  getClaimTypeGuidance,
+  CLAIM_TYPE_GUIDANCE_TEXT,
+  validateClaimFormValues,
+} from '../../_lib/contract-claim-detail-helpers';
 
 interface ContractOption {
   id: string;
@@ -15,21 +21,47 @@ interface ContractOption {
   title: string;
 }
 
+/** Minimal readable identity for the one contract a "fixed contract" Add flow (the per-contract Claims tab) targets — never just a bare UUID. */
+interface FixedContractContext {
+  referenceNumber: string;
+  title: string;
+  counterpartyName?: string;
+}
+
 interface Props {
   mode: 'add' | 'edit';
   contracts?: ContractOption[];
   fixedContractId?: string;
+  /** Readable contract identity for the fixed-contract Add flow, fetched by the caller (the per-contract Claims tab page) since it isn't derivable from `contracts` (never passed there) or from any claim record when the contract has no claims yet. */
+  fixedContract?: FixedContractContext;
   claim?: ContractClaim;
   people: ContractPerson[];
   onClose: () => void;
 }
 
-export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people, onClose }: Props): React.JSX.Element {
+const sectionLabelCls = 'text-[11px] font-semibold uppercase tracking-wide text-text-muted pt-1';
+
+/**
+ * CM-70C — Add / Edit Claim modal, organized into 4 clear sections (Claim
+ * Identity, Financial / EOT Claim, Dates & Responsibility, Next Action &
+ * Remarks) with field-level helper text, status-aware validation, and a
+ * readable "REF · Title · Client" contract display in place of a raw
+ * contract UUID. Claim Type/Status remain normal editable selects — no field
+ * is ever hidden, only extra guidance copy changes with the selected type.
+ * All validation is frontend-only (validateClaimFormValues, see
+ * contract-claim-detail-helpers.ts); computeClaimSummary() on the backend
+ * and both claim DTOs are unchanged.
+ */
+export function ClaimFormModal({ mode, contracts, fixedContractId, fixedContract, claim, people, onClose }: Props): React.JSX.Element {
   const router = useRouter();
   const contractId = fixedContractId ?? claim?.contractId;
   const action = mode === 'edit' && claim ? updateClaimAction.bind(null, claim.id, claim.contractId) : createClaimAction;
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
   const submittedRef = useRef(false);
+
+  const [claimType, setClaimType] = useState<ContractClaimType>(claim?.claimType ?? 'OTHER');
+  const [status, setStatus] = useState<ContractClaimStatus>(claim?.status ?? 'DRAFT');
+  const [clientError, setClientError] = useState<string | null>(null);
 
   useEffect(() => {
     if (submittedRef.current && !isPending && !state.error) {
@@ -39,7 +71,27 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
     }
   }, [state, isPending, onClose, router]);
 
-  function handleSubmit(): void {
+  const typeGuidance = getClaimTypeGuidance(claimType);
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+    const formData = new FormData(e.currentTarget);
+    const errors = validateClaimFormValues({
+      claimTitle: String(formData.get('claimTitle') ?? ''),
+      status,
+      submittedValue: String(formData.get('submittedValue') ?? ''),
+      approvedValue: String(formData.get('approvedValue') ?? ''),
+      eotClaimedDays: String(formData.get('eotClaimedDays') ?? ''),
+      eotApprovedDays: String(formData.get('eotApprovedDays') ?? ''),
+      eventDate: String(formData.get('eventDate') ?? ''),
+      claimDate: String(formData.get('claimDate') ?? ''),
+      dueDate: String(formData.get('dueDate') ?? ''),
+    });
+    if (errors.length > 0) {
+      e.preventDefault();
+      setClientError(errors.join(' '));
+      return;
+    }
+    setClientError(null);
     submittedRef.current = true;
   }
 
@@ -66,16 +118,18 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
         </div>
 
         <form id="claim-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {state.error && (
-            <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-              {state.error}
+          {(clientError ?? state.error) && (
+            <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+              {clientError ?? state.error}
             </div>
           )}
+
+          <p className={sectionLabelCls}>Claim Identity</p>
 
           {mode === 'add' && !fixedContractId ? (
             <div>
               <label htmlFor="contractId" className={labelCls}>
-                Contract <span className="text-danger">*</span>
+                Contract <span className="text-error">*</span>
               </label>
               <select id="contractId" name="contractId" required defaultValue="" className={inputCls}>
                 <option value="" disabled>Select a contract…</option>
@@ -91,16 +145,18 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 <div>
                   <span className={labelCls}>Contract</span>
                   <p className="text-sm text-text-primary">
-                    {contracts?.find((c) => c.id === fixedContractId)?.referenceNumber ?? fixedContractId}
+                    {fixedContract
+                      ? formatClaimContractContext(fixedContract)
+                      : contracts?.find((c) => c.id === fixedContractId)
+                        ? formatClaimContractContext(contracts.find((c) => c.id === fixedContractId)!)
+                        : 'Loading contract…'}
                   </p>
                 </div>
               )}
-              {mode === 'edit' && (
+              {mode === 'edit' && claim && (
                 <div>
                   <span className={labelCls}>Contract</span>
-                  <p className="text-sm text-text-primary">
-                    {claim?.contract.referenceNumber} — {claim?.contract.title}
-                  </p>
+                  <p className="text-sm text-text-primary">{formatClaimContractContext(claim.contract)}</p>
                 </div>
               )}
             </>
@@ -108,13 +164,12 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
 
           <div>
             <label htmlFor="claimTitle" className={labelCls}>
-              Claim Title <span className="text-danger">*</span>
+              Claim Title <span className="text-error">*</span>
             </label>
             <input
               id="claimTitle"
               name="claimTitle"
               type="text"
-              required
               maxLength={300}
               defaultValue={claim?.claimTitle ?? ''}
               placeholder="Short description of the claim"
@@ -134,10 +189,17 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 placeholder="e.g. CLM-001"
                 className={inputCls}
               />
+              <p className="text-[11px] text-text-muted mt-1">Recommended — helps track this claim in reports and correspondence.</p>
             </div>
             <div>
               <label htmlFor="claimType" className={labelCls}>Claim Type</label>
-              <select id="claimType" name="claimType" defaultValue={claim?.claimType ?? 'OTHER'} className={inputCls}>
+              <select
+                id="claimType"
+                name="claimType"
+                value={claimType}
+                onChange={(e) => setClaimType(e.target.value as ContractClaimType)}
+                className={inputCls}
+              >
                 {CONTRACT_CLAIM_TYPE_OPTIONS.map((o) => (
                   <option key={o.key} value={o.key}>{o.label}</option>
                 ))}
@@ -145,13 +207,23 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
             </div>
             <div>
               <label htmlFor="status" className={labelCls}>Status</label>
-              <select id="status" name="status" defaultValue={claim?.status ?? 'DRAFT'} className={inputCls}>
+              <select
+                id="status"
+                name="status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as ContractClaimStatus)}
+                className={inputCls}
+              >
                 {CONTRACT_CLAIM_STATUS_OPTIONS.map((o) => (
                   <option key={o.key} value={o.key}>{o.label}</option>
                 ))}
               </select>
+              <p className="text-[11px] text-text-muted mt-1">Use Submitted when claim has been submitted to client. Use Approved only when client approval is confirmed.</p>
             </div>
           </div>
+
+          <p className={sectionLabelCls}>Financial / EOT Claim</p>
+          <InfoBox variant="subtle">{CLAIM_TYPE_GUIDANCE_TEXT[typeGuidance]}</InfoBox>
 
           <div className={gridCls3}>
             <div>
@@ -161,10 +233,10 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 name="submittedValue"
                 type="number"
                 step="0.001"
-                min="0"
                 defaultValue={claim?.submittedValue ?? ''}
                 className={inputCls}
               />
+              <p className="text-[11px] text-text-muted mt-1">Amount claimed from the client.</p>
             </div>
             <div>
               <label htmlFor="approvedValue" className={labelCls}>Approved Value</label>
@@ -173,19 +245,10 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 name="approvedValue"
                 type="number"
                 step="0.001"
-                min="0"
                 defaultValue={claim?.approvedValue ?? ''}
                 className={inputCls}
               />
-            </div>
-            <div>
-              <label htmlFor="responsibleUserId" className={labelCls}>Responsible Person</label>
-              <select id="responsibleUserId" name="responsibleUserId" defaultValue={claim?.responsibleUserId ?? ''} className={inputCls}>
-                <option value="">— Unassigned —</option>
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>{p.displayName}</option>
-                ))}
-              </select>
+              <p className="text-[11px] text-text-muted mt-1">Amount approved by the client.</p>
             </div>
           </div>
 
@@ -197,10 +260,10 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 name="eotClaimedDays"
                 type="number"
                 step="1"
-                min="0"
                 defaultValue={claim?.eotClaimedDays ?? ''}
                 className={inputCls}
               />
+              <p className="text-[11px] text-text-muted mt-1">Extension of time days requested.</p>
             </div>
             <div>
               <label htmlFor="eotApprovedDays" className={labelCls}>EOT Approved (days)</label>
@@ -209,27 +272,49 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, claim, people
                 name="eotApprovedDays"
                 type="number"
                 step="1"
-                min="0"
                 defaultValue={claim?.eotApprovedDays ?? ''}
                 className={inputCls}
               />
-            </div>
-            <div>
-              <label htmlFor="dueDate" className={labelCls}>Due Date</label>
-              <input id="dueDate" name="dueDate" type="date" defaultValue={claim?.dueDate ?? ''} className={inputCls} />
+              <p className="text-[11px] text-text-muted mt-1">Extension of time days approved.</p>
             </div>
           </div>
+
+          <p className={sectionLabelCls}>Dates &amp; Responsibility</p>
 
           <div className={gridCls3}>
             <div>
               <label htmlFor="eventDate" className={labelCls}>Event Date</label>
               <input id="eventDate" name="eventDate" type="date" defaultValue={claim?.eventDate ?? ''} className={inputCls} />
+              <p className="text-[11px] text-text-muted mt-1">Date the issue or delay happened.</p>
             </div>
-            <div className="sm:col-span-2">
-              <label htmlFor="claimDate" className={labelCls}>Claim Date</label>
+            <div>
+              <label htmlFor="claimDate" className={labelCls}>
+                Claim Date {status === 'APPROVED' && <span className="text-error">*</span>}
+              </label>
               <input id="claimDate" name="claimDate" type="date" defaultValue={claim?.claimDate ?? ''} className={inputCls} />
+              <p className="text-[11px] text-text-muted mt-1">Date the claim was registered/submitted.</p>
+            </div>
+            <div>
+              <label htmlFor="dueDate" className={labelCls}>Due Date</label>
+              <input id="dueDate" name="dueDate" type="date" defaultValue={claim?.dueDate ?? ''} className={inputCls} />
+              <p className="text-[11px] text-text-muted mt-1">Date by which follow-up or response is expected.</p>
             </div>
           </div>
+
+          <div>
+            <label htmlFor="responsibleUserId" className={labelCls}>Responsible Person</label>
+            <select id="responsibleUserId" name="responsibleUserId" defaultValue={claim?.responsibleUserId ?? ''} className={inputCls}>
+              <option value="">— Unassigned —</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.displayName}</option>
+              ))}
+            </select>
+            {people.length === 0 && (
+              <p className="text-[11px] text-text-muted mt-1">No eligible users found.</p>
+            )}
+          </div>
+
+          <p className={sectionLabelCls}>Next Action &amp; Remarks</p>
 
           <div>
             <label htmlFor="nextAction" className={labelCls}>Next Action</label>

@@ -19,6 +19,7 @@ function makeClaim(overrides: Partial<ContractClaim> = {}): ContractClaim {
     dueDate: '2026-08-10',
     overdueDays: 10,
     isOverdue: true,
+    daysToDeadline: -10,
     createdByUser: { id: 'user-1', displayName: 'Manager' },
     createdAt: '2026-08-01T00:00:00Z',
     updatedAt: '2026-08-01T00:00:00Z',

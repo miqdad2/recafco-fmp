@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import {
   ContractScheduleService,
   contractToScheduleItems,
@@ -383,12 +383,15 @@ describe('computeScheduleSummary', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildScheduleContractWhere', () => {
-  it('returns an empty where for no filters', () => {
-    expect(buildScheduleContractWhere({})).toEqual({});
+  it('excludes CANCELLED contracts even with no other filters', () => {
+    expect(buildScheduleContractWhere({})).toEqual({ status: { not: 'CANCELLED' } });
   });
 
-  it('filters by contractId directly (via id)', () => {
-    expect(buildScheduleContractWhere({ contractId: 'contract-1' })).toEqual({ id: 'contract-1' });
+  it('filters by contractId directly (via id), still excluding CANCELLED', () => {
+    expect(buildScheduleContractWhere({ contractId: 'contract-1' })).toEqual({
+      status: { not: 'CANCELLED' },
+      id: 'contract-1',
+    });
   });
 
   it('filters by departmentId/ownerUserId via AND', () => {
@@ -464,41 +467,8 @@ describe('ContractScheduleService.findAll', () => {
   });
 });
 
-describe('ContractScheduleService.findAllForContract', () => {
-  it('rejects actors without contracts.read', async () => {
-    const noReadActor: AuthUser = { ...ACTOR_READ_ONLY, permissions: [] };
-    await expect(service.findAllForContract('contract-1', noReadActor)).rejects.toThrow(ForbiddenException);
-  });
-
-  it('rejects when the contract does not exist', async () => {
-    mockContractFindUnique.mockResolvedValue(null);
-    await expect(service.findAllForContract('missing', ACTOR_READ_ONLY)).rejects.toThrow(NotFoundException);
-  });
-
-  it('asserts department access using the contract department', async () => {
-    mockContractFindUnique.mockResolvedValue(makeContract({ departmentId: 'dept-1' }));
-    mockWorkflowTaskFindMany.mockResolvedValue([]);
-    mockIssueFindMany.mockResolvedValue([]);
-    mockClaimFindMany.mockResolvedValue([]);
-    mockPaymentFindMany.mockResolvedValue([]);
-    mockCloseoutRequestFindMany.mockResolvedValue([]);
-
-    await service.findAllForContract('contract-1', ACTOR_READ_ONLY);
-
-    expect(mockAssertCanAccessDepartment).toHaveBeenCalledWith(ACTOR_READ_ONLY, expect.anything(), 'dept-1');
-  });
-
-  it('returns an empty, safe result for an old contract with no dates and no related records (Scenario K)', async () => {
-    mockContractFindUnique.mockResolvedValue(makeContract());
-    mockWorkflowTaskFindMany.mockResolvedValue([]);
-    mockIssueFindMany.mockResolvedValue([]);
-    mockClaimFindMany.mockResolvedValue([]);
-    mockPaymentFindMany.mockResolvedValue([]);
-    mockCloseoutRequestFindMany.mockResolvedValue([]);
-
-    const result = await service.findAllForContract('contract-1', ACTOR_READ_ONLY);
-
-    expect(result.items).toEqual([]);
-    expect(result.summary.totalItems).toBe(0);
-  });
-});
+// CM-68A — the old ContractScheduleService.findAllForContract() tests were
+// removed along with the method itself (see contract-schedule.service.ts) —
+// its only real consumer (GET :id/schedule) now uses
+// ContractSchedulePlanService.getScheduleDetail() instead. findAll()'s own
+// tests above are unchanged.

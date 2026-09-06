@@ -6,6 +6,7 @@ import {
   computeOutstandingValue,
   computeClaimOverdueDays,
   computeClaimIsOverdue,
+  computeClaimDaysToDeadline,
   computeClaimSummary,
   assertClaimValuesValid,
   assertClaimDatesValid,
@@ -26,6 +27,7 @@ const mockClaimCreate = vi.fn();
 const mockClaimUpdate = vi.fn();
 const mockContractFindUnique = vi.fn();
 const mockUserFindUnique = vi.fn();
+const mockActivityCreate = vi.fn().mockResolvedValue({ id: 'activity-1' });
 
 const mockClient = {
   contractClaim: {
@@ -37,6 +39,7 @@ const mockClient = {
   },
   contract: { findUnique: mockContractFindUnique },
   user: { findUnique: mockUserFindUnique },
+  contractActivity: { create: mockActivityCreate },
 };
 
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
@@ -217,7 +220,85 @@ describe('computeClaimSummary', () => {
       totalOutstandingValue: '0.000',
       overdueClaims: 0,
       closedOrSettledClaims: 0,
+      totalEotClaimedDays: 0,
+      totalEotApprovedDays: 0,
     });
+  });
+
+  // CM-61 — REJECTED/CANCELLED excluded from the aggregate Outstanding Value.
+  it('excludes REJECTED claims from totalOutstandingValue', () => {
+    const today = new Date('2026-08-20T00:00:00Z');
+    const rows = [
+      { status: 'SUBMITTED', submittedValue: 1000, approvedValue: 0, dueDate: null },
+      { status: 'REJECTED', submittedValue: 8000, approvedValue: 0, dueDate: null },
+    ];
+    const summary = computeClaimSummary(rows, today);
+    expect(summary.totalOutstandingValue).toBe('1000.000'); // the REJECTED claim's 8000 is excluded
+  });
+
+  it('excludes CANCELLED claims from totalOutstandingValue', () => {
+    const today = new Date('2026-08-20T00:00:00Z');
+    const rows = [
+      { status: 'SUBMITTED', submittedValue: 1000, approvedValue: 0, dueDate: null },
+      { status: 'CANCELLED', submittedValue: 5000, approvedValue: 1000, dueDate: null },
+    ];
+    const summary = computeClaimSummary(rows, today);
+    expect(summary.totalOutstandingValue).toBe('1000.000');
+  });
+
+  it('still includes SETTLED/CLOSED claims in totalOutstandingValue (only REJECTED/CANCELLED are excluded)', () => {
+    const today = new Date('2026-08-20T00:00:00Z');
+    const rows = [
+      { status: 'SETTLED', submittedValue: 1000, approvedValue: 600, dueDate: null },
+    ];
+    const summary = computeClaimSummary(rows, today);
+    expect(summary.totalOutstandingValue).toBe('400.000');
+  });
+
+  // CM-61 — EOT day totals for the "EOT Claimed (Days)"/"EOT Approved (Days)" KPI cards.
+  it('sums eotClaimedDays and eotApprovedDays across all rows', () => {
+    const today = new Date('2026-08-20T00:00:00Z');
+    const rows = [
+      { status: 'SUBMITTED', submittedValue: 0, approvedValue: 0, dueDate: null, eotClaimedDays: 20, eotApprovedDays: 10 },
+      { status: 'APPROVED', submittedValue: 0, approvedValue: 0, dueDate: null, eotClaimedDays: 15, eotApprovedDays: 10 },
+      { status: 'DRAFT', submittedValue: 0, approvedValue: 0, dueDate: null, eotClaimedDays: null, eotApprovedDays: null },
+    ];
+    const summary = computeClaimSummary(rows, today);
+    expect(summary.totalEotClaimedDays).toBe(35);
+    expect(summary.totalEotApprovedDays).toBe(20);
+  });
+
+  it('treats a missing eotClaimedDays/eotApprovedDays field as 0 (never throws, never fabricates)', () => {
+    const today = new Date('2026-08-20T00:00:00Z');
+    const rows = [{ status: 'SUBMITTED', submittedValue: 0, approvedValue: 0, dueDate: null }];
+    const summary = computeClaimSummary(rows, today);
+    expect(summary.totalEotClaimedDays).toBe(0);
+    expect(summary.totalEotApprovedDays).toBe(0);
+  });
+});
+
+describe('computeClaimDaysToDeadline', () => {
+  const today = new Date('2026-08-20T00:00:00Z');
+
+  it('returns a negative number of days once past the due date', () => {
+    expect(computeClaimDaysToDeadline({ dueDate: new Date('2026-08-17') }, today)).toBe(-3);
+  });
+
+  it('returns a positive number of days before the due date', () => {
+    expect(computeClaimDaysToDeadline({ dueDate: new Date('2026-08-27') }, today)).toBe(7);
+  });
+
+  it('returns 0 on the due date itself', () => {
+    expect(computeClaimDaysToDeadline({ dueDate: new Date('2026-08-20') }, today)).toBe(0);
+  });
+
+  it('returns null when dueDate is unset (never a fabricated number)', () => {
+    expect(computeClaimDaysToDeadline({ dueDate: null }, today)).toBeNull();
+  });
+
+  it('is never gated by status — even a CLOSED claim with a real dueDate gets a real value', () => {
+    // computeClaimDaysToDeadline() takes no status field at all, unlike computeClaimOverdueDays().
+    expect(computeClaimDaysToDeadline({ dueDate: new Date('2026-08-10') }, today)).toBe(-10);
   });
 });
 
@@ -495,6 +576,20 @@ describe('ContractClaimsService.create', () => {
     expect(callArgs.data.contractId).toBe('contract-1');
     expect(callArgs.data.status).toBeUndefined(); // left to the DB default (DRAFT) when not provided
   });
+
+  it('logs a claim_created contract activity entry (CM-66)', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: null });
+    mockClaimFindUnique.mockResolvedValue(null);
+    mockClaimCreate.mockResolvedValue(makeClaimRow());
+
+    await service.create('contract-1', { claimTitle: 'x' } as never, ACTOR_UPDATE);
+
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'claim_created' }),
+      }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -548,6 +643,11 @@ describe('ContractClaimsService.update', () => {
     expect(result.outstandingValue).toBe('700.000');
     const callArgs = mockClaimUpdate.mock.calls[0]![0];
     expect(callArgs.data.updatedByUserId).toBe(ACTOR_UPDATE.id);
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'claim_updated' }),
+      }),
+    );
   });
 
   it('rejects an updated approvedValue that exceeds the existing submittedValue', async () => {

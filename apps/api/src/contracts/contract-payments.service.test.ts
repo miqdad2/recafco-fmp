@@ -22,6 +22,7 @@ const mockPaymentFindUnique = vi.fn();
 const mockPaymentCreate = vi.fn();
 const mockPaymentUpdate = vi.fn();
 const mockContractFindUnique = vi.fn();
+const mockActivityCreate = vi.fn().mockResolvedValue({ id: 'activity-1' });
 
 const mockClient = {
   contractPayment: {
@@ -32,6 +33,7 @@ const mockClient = {
     update: mockPaymentUpdate,
   },
   contract: { findUnique: mockContractFindUnique },
+  contractActivity: { create: mockActivityCreate },
 };
 
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
@@ -278,7 +280,7 @@ describe('buildPaymentListWhere', () => {
     ]);
   });
 
-  it('search matches paymentNo, invoiceNumber, contract reference, or contract title', () => {
+  it('search matches paymentNo, invoiceNumber, contract reference, contract title, or remarks', () => {
     const where = buildPaymentListWhere({ search: 'PAY-001' });
     expect(where['AND']).toEqual([
       {
@@ -287,6 +289,7 @@ describe('buildPaymentListWhere', () => {
           { invoiceNumber: { contains: 'PAY-001', mode: 'insensitive' } },
           { contract: { referenceNumber: { contains: 'PAY-001', mode: 'insensitive' } } },
           { contract: { title: { contains: 'PAY-001', mode: 'insensitive' } } },
+          { remarks: { contains: 'PAY-001', mode: 'insensitive' } },
         ],
       },
     ]);
@@ -392,6 +395,20 @@ describe('ContractPaymentsService.create', () => {
     expect(callArgs.data.createdByUserId).toBe(ACTOR_UPDATE.id);
     expect(callArgs.data.contractId).toBe('contract-1');
   });
+
+  it('logs a payment_created contract activity entry (CM-66)', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: null });
+    mockPaymentFindUnique.mockResolvedValue(null);
+    mockPaymentCreate.mockResolvedValue(makePaymentRow());
+
+    await service.create('contract-1', { paymentNo: 'PAY-001' }, ACTOR_UPDATE);
+
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'payment_created' }),
+      }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -442,6 +459,11 @@ describe('ContractPaymentsService.update', () => {
     const callArgs = mockPaymentUpdate.mock.calls[0]![0];
     expect(callArgs.data.status).toBe('CANCELLED');
     expect(callArgs.data.updatedByUserId).toBe(ACTOR_UPDATE.id);
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'payment_updated' }),
+      }),
+    );
   });
 
   it('rejects renaming paymentNo to one already used by another payment on the same contract', async () => {

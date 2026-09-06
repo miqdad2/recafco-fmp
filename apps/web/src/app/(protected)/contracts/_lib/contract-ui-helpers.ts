@@ -27,6 +27,10 @@ export interface VisibleContractTransitions {
   activate: boolean;
   terminate: boolean;
   close: boolean;
+  /** CM-69A — safe cancel/void, never a hard delete. Visible for DRAFT or ACTIVE only. */
+  cancel: boolean;
+  /** "Remove Draft" for a DRAFT contract, "Cancel Contract" for ACTIVE, null when `cancel` is false. */
+  cancelLabel: 'Remove Draft' | 'Cancel Contract' | null;
 }
 
 export function getVisibleContractTransitions(
@@ -36,16 +40,19 @@ export function getVisibleContractTransitions(
   const isDraft = status === 'DRAFT';
   const isActive = status === 'ACTIVE';
   const isTerminated = status === 'TERMINATED';
+  const canCancel = (isDraft || isActive) && (permissions.includes('contracts.update') || permissions.includes('contracts.manage'));
 
   return {
     activate: isDraft && permissions.includes('contracts.activate'),
     terminate: isActive && permissions.includes('contracts.terminate'),
     close: (isActive || isTerminated) && permissions.includes('contracts.close'),
+    cancel: canCancel,
+    cancelLabel: canCancel ? (isDraft ? 'Remove Draft' : 'Cancel Contract') : null,
   };
 }
 
 export function hasAnyVisibleTransition(visible: VisibleContractTransitions): boolean {
-  return visible.activate || visible.terminate || visible.close;
+  return visible.activate || visible.terminate || visible.close || visible.cancel;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,31 +110,6 @@ export function getClosureAction(
     showCloseContract: false,
     showClosedState: false,
   };
-}
-
-// ---------------------------------------------------------------------------
-// CM-33 — closeout readiness warnings, computed from the checks endpoint.
-// Documents are intentionally NOT a blocking condition (no fake document
-// rules invented) — only surfaced as an informational warning.
-// ---------------------------------------------------------------------------
-
-export interface CloseoutChecksLike {
-  workflow: { open: number; overdue: number };
-  issues: { open: number };
-  claims: { open: number };
-  payments: { nonFinalCount: number };
-  documents: { count: number };
-}
-
-export function computeCloseoutWarnings(checks: CloseoutChecksLike): string[] {
-  const warnings: string[] = [];
-  if (checks.workflow.open > 0) warnings.push('There are open workflow tasks.');
-  if (checks.workflow.overdue > 0) warnings.push('There are overdue workflow tasks.');
-  if (checks.issues.open > 0) warnings.push('There are open issues.');
-  if (checks.claims.open > 0) warnings.push('There are open claims.');
-  if (checks.payments.nonFinalCount > 0) warnings.push('There are outstanding payments.');
-  if (checks.documents.count === 0) warnings.push('No closeout documents uploaded.');
-  return warnings;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +189,30 @@ export function formatScopeSummary(scope: Record<string, boolean | string> | nul
   if (!scope) return '—';
   const selected = SCOPE_OF_WORK_OPTIONS.filter((o) => scope[o.key] === true).map((o) => o.label);
   return selected.length > 0 ? selected.join(', ') : '—';
+}
+
+export interface CompactScopeSummary {
+  /** One-line "Shop Drawing +4" (or just the single label, or "—") — safe to render with whitespace-nowrap. */
+  display: string;
+  /** The full comma-joined list — same value formatScopeSummary() returns — for a `title` tooltip. */
+  fullList: string;
+}
+
+// CM-55C — Contract List table row-height fix: formatScopeSummary()'s full
+// comma-joined list (used elsewhere — workflow-contract-header.tsx,
+// contracts-needing-setup-section.tsx — where the full list is exactly what's
+// wanted) wraps across several lines in a narrow table cell. This is a
+// SEPARATE function, not a behavior change to formatScopeSummary() itself:
+// one selected scope shows as-is, more than one shows "First Label +N", and
+// the full list is always still available via the `fullList` field for a
+// `title` tooltip.
+export function formatScopeCompact(scope: Record<string, boolean | string> | null | undefined): CompactScopeSummary {
+  const fullList = formatScopeSummary(scope);
+  if (!scope) return { display: '—', fullList };
+  const selected = SCOPE_OF_WORK_OPTIONS.filter((o) => scope[o.key] === true).map((o) => o.label);
+  if (selected.length === 0) return { display: '—', fullList };
+  if (selected.length === 1) return { display: selected[0]!, fullList };
+  return { display: `${selected[0]} +${selected.length - 1}`, fullList };
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +305,89 @@ export interface ContractRowActionPlan {
   moreActions: ContractRowMoreAction[];
 }
 
+// ---------------------------------------------------------------------------
+// CM-55 — Contract List approved-design rebuild: manager-facing
+// schedule/progress status, Contract Type filter (reuses SCOPE_OF_WORK_OPTIONS
+// above — no separate "contract type" field exists), and Days Remaining.
+// ---------------------------------------------------------------------------
+
+export type ContractScheduleStatusValue = 'IN_PROGRESS' | 'ON_TRACK' | 'DELAYED' | 'COMPLETED' | 'AHEAD_OF_SCHEDULE';
+
+export const SCHEDULE_STATUS_OPTIONS: { value: ContractScheduleStatusValue; label: string }[] = [
+  { value: 'IN_PROGRESS', label: 'In Progress' },
+  { value: 'ON_TRACK', label: 'On Track' },
+  { value: 'DELAYED', label: 'Delayed' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'AHEAD_OF_SCHEDULE', label: 'Ahead of Schedule' },
+];
+
+/** Blue / green / red / teal / purple, per the approved-design color spec — never a raw hex, always an existing semantic token. */
+export const SCHEDULE_STATUS_BADGE_CLASSES: Record<ContractScheduleStatusValue, string> = {
+  IN_PROGRESS: 'bg-info/10 text-info border border-info/30',
+  ON_TRACK: 'bg-success/10 text-success border border-success/30',
+  DELAYED: 'bg-error/10 text-error border border-error/30',
+  COMPLETED: 'bg-teal/10 text-teal border border-teal/30',
+  AHEAD_OF_SCHEDULE: 'bg-team-production/10 text-team-production border border-team-production/30',
+};
+
+export function scheduleStatusLabel(value: string | undefined): string {
+  return SCHEDULE_STATUS_OPTIONS.find((o) => o.value === value)?.label ?? 'In Progress';
+}
+
+export const DAYS_REMAINING_FILTER_OPTIONS: OptionDef[] = [
+  { key: 'DUE_30', label: 'Due in 30 days' },
+  { key: 'DUE_60', label: 'Due in 60 days' },
+  { key: 'OVERDUE', label: 'Overdue' },
+];
+
+// CM-69C — the real lifecycle status (DRAFT/ACTIVE/.../CANCELLED), distinct
+// from the "Contract Status" dropdown above (which is the manager-facing
+// SCHEDULE status). Wired to the existing `lifecycleStatus` query param —
+// already fully plumbed end-to-end (page.tsx, contracts-api.ts,
+// buildListWhere()) via the Dashboard's deep-links, just never exposed as a
+// dropdown here before now. The blank default (no value in this list) means
+// "the normal working view" — server-side that excludes CANCELLED; 'ALL' is
+// a separate, explicit value that means literally every status, CANCELLED
+// included, for audit.
+export const LIFECYCLE_STATUS_FILTER_OPTIONS: OptionDef[] = [
+  { key: 'ALL', label: 'All Statuses (Include Cancelled)' },
+  { key: 'ACTIVE', label: 'Active' },
+  { key: 'DRAFT', label: 'Draft' },
+  { key: 'EXPIRING', label: 'Expiring Soon' },
+  { key: 'EXPIRED', label: 'Expired' },
+  { key: 'TERMINATED', label: 'Terminated' },
+  { key: 'CLOSED', label: 'Closed' },
+  { key: 'CANCELLED', label: 'Cancelled' },
+];
+
+export interface DaysRemainingDisplay {
+  label: string;
+  overdue: boolean;
+  dueSoon: boolean;
+}
+
+/**
+ * Contract List "Days Remaining" column — forecastCompletionDate first,
+ * falling back to endDate only when no forecast date is recorded (same
+ * fallback order the backend's daysRemaining filter uses). "—" when neither
+ * date exists — never a fabricated number.
+ */
+export function formatDaysRemainingDisplay(
+  forecastCompletionDate: string | undefined,
+  endDate: string | undefined,
+): DaysRemainingDisplay {
+  const effective = forecastCompletionDate ?? endDate;
+  if (!effective) return { label: '—', overdue: false, dueSoon: false };
+
+  const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const target = new Date(effective);
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) return { label: `${Math.abs(diffDays)}d overdue`, overdue: true, dueSoon: false };
+  if (diffDays <= 30) return { label: `${diffDays}d`, overdue: false, dueSoon: true };
+  return { label: `${diffDays}d`, overdue: false, dueSoon: false };
+}
+
 export function computeContractRowActionPlan(
   contract: { id: string; status: string },
   permissions: string[],
@@ -367,11 +456,13 @@ export function computeContractRowActionPlan(
     };
   }
 
-  // Fallback for any other status (in practice, only TERMINATED — the
-  // ContractStatus enum has exactly 4 values). Edit is deliberately omitted
-  // here even though the actor may hold contracts.update: the edit route
-  // itself 404s for any non-DRAFT contract, so offering it here would be a
-  // dead link, not a real capability.
+  // Fallback for any other status (in practice, TERMINATED or CANCELLED —
+  // CM-69A added CANCELLED as a 5th real status). Edit is deliberately
+  // omitted here even though the actor may hold contracts.update: the edit
+  // route itself 404s for any non-DRAFT contract, so offering it here would
+  // be a dead link, not a real capability. Cancel/Remove Draft is also never
+  // offered here — it's a contract-detail-page action only, and a status
+  // already in this fallback branch can't be cancelled again anyway.
   return {
     primary: { type: 'open', label: 'Open', href: openHref },
     moreActions: [workflowAction, paymentsAction, issuesAction, claimsAction, scheduleAction, closeoutAction],

@@ -24,6 +24,7 @@ const mockIssueCreate = vi.fn();
 const mockIssueUpdate = vi.fn();
 const mockContractFindUnique = vi.fn();
 const mockUserFindUnique = vi.fn();
+const mockActivityCreate = vi.fn().mockResolvedValue({ id: 'activity-1' });
 
 const mockClient = {
   contractIssue: {
@@ -35,6 +36,7 @@ const mockClient = {
   },
   contract: { findUnique: mockContractFindUnique },
   user: { findUnique: mockUserFindUnique },
+  contractActivity: { create: mockActivityCreate },
 };
 
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
@@ -162,21 +164,25 @@ describe('computeIssueIsOverdue', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeIssueSummary', () => {
-  it('aggregates totals, open, in-progress, high/critical, overdue, closed', () => {
+  it('aggregates totals, open, in-progress, high/critical, overdue, closed, waiting-response, resolved', () => {
     const today = new Date('2026-08-20T00:00:00Z');
     const rows = [
       { status: 'OPEN', priority: 'HIGH', dueDate: new Date('2026-08-01') },
       { status: 'IN_PROGRESS', priority: 'CRITICAL', dueDate: new Date('2099-01-01') },
       { status: 'CLOSED', priority: 'LOW', dueDate: new Date('2026-08-01') },
       { status: 'OPEN', priority: 'MEDIUM', dueDate: null },
+      { status: 'WAITING_RESPONSE', priority: 'MEDIUM', dueDate: null },
+      { status: 'RESOLVED', priority: 'LOW', dueDate: new Date('2026-08-01') },
     ];
     const summary = computeIssueSummary(rows, today);
-    expect(summary.totalIssues).toBe(4);
+    expect(summary.totalIssues).toBe(6);
     expect(summary.openIssues).toBe(2);
     expect(summary.inProgressIssues).toBe(1);
     expect(summary.highCriticalIssues).toBe(2);
-    expect(summary.overdueIssues).toBe(1); // only the OPEN one with a past dueDate
+    expect(summary.overdueIssues).toBe(1); // only the OPEN one with a past dueDate — RESOLVED is excluded from overdue by CLOSED_LIKE_STATUSES
     expect(summary.closedIssues).toBe(1);
+    expect(summary.waitingResponseIssues).toBe(1);
+    expect(summary.resolvedIssues).toBe(1);
   });
 
   it('returns all-zero summary for an empty result set', () => {
@@ -187,6 +193,8 @@ describe('computeIssueSummary', () => {
       highCriticalIssues: 0,
       overdueIssues: 0,
       closedIssues: 0,
+      waitingResponseIssues: 0,
+      resolvedIssues: 0,
     });
   });
 });
@@ -428,6 +436,20 @@ describe('ContractIssuesService.create', () => {
     expect(callArgs.data.createdByUserId).toBe(ACTOR_UPDATE.id);
     expect(callArgs.data.contractId).toBe('contract-1');
   });
+
+  it('logs an issue_created contract activity entry (CM-66)', async () => {
+    mockContractFindUnique.mockResolvedValue({ id: 'contract-1', departmentId: null });
+    mockIssueFindUnique.mockResolvedValue(null);
+    mockIssueCreate.mockResolvedValue(makeIssueRow());
+
+    await service.create('contract-1', { title: 'x' } as never, ACTOR_UPDATE);
+
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'issue_created' }),
+      }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -476,6 +498,11 @@ describe('ContractIssuesService.update', () => {
     expect(result.responsibleUserId).toBe('user-2');
     const callArgs = mockIssueUpdate.mock.calls[0]![0];
     expect(callArgs.data.updatedByUserId).toBe(ACTOR_UPDATE.id);
+    expect(mockActivityCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contractId: 'contract-1', actorUserId: ACTOR_UPDATE.id, event: 'issue_updated' }),
+      }),
+    );
   });
 
   it('auto-sets closedDate when status changes to CLOSED without an explicit closedDate', async () => {

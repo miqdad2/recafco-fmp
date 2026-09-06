@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { Breadcrumbs } from '../../../_components/breadcrumbs';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { WorkflowModeTabs } from './workflow-mode-tabs';
 import { StaffTaskCard } from './staff-task-card';
@@ -92,11 +91,6 @@ export async function StaffMyTasksView({ mode, taskId, currentUserId }: Props): 
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1400px] mx-auto space-y-5">
-      <Breadcrumbs items={[
-        { label: 'Contract Management', href: '/contracts/dashboard' },
-        { label: mode === 'overdue' ? 'Overdue Tasks' : 'My Tasks' },
-      ]} />
-
       <div>
         <h1 className="text-3xl font-semibold text-text-primary tracking-tight">
           {mode === 'overdue' ? 'Overdue Tasks' : 'My Tasks'}

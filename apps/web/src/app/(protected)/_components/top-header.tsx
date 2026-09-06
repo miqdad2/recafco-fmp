@@ -1,5 +1,16 @@
+'use client';
+
 import { Menu } from 'lucide-react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { logoutAction } from '../actions';
+import { Breadcrumbs } from './breadcrumbs';
+import type { BreadcrumbItem } from './breadcrumbs';
+import {
+  isContractWorkspaceDetailPath,
+  contractModuleBreadcrumbItems,
+  contractWorkflowBreadcrumbItems,
+} from '../_lib/contract-workspace-breadcrumb';
+import { isContractStaffOnlyAccess } from '../_lib/module-visibility';
 import type { ShellUser } from './app-shell';
 
 interface TopHeaderProps {
@@ -7,17 +18,46 @@ interface TopHeaderProps {
   onMenuOpen: (trigger: HTMLElement) => void;
 }
 
+// CM-66D/CM-66E/CM-66F — Contract Management pages show their breadcrumb
+// here, at header level beside Manager / Sign out, instead of repeating it
+// in the page body: the Contract Detail workspace (Overview + tabs,
+// CM-66D), the module's other STATIC list/register pages (Dashboard,
+// Contract List, New Register, Schedule, Payments, Issue Log, Claim Log,
+// Closeout Requests, CM-66E), and /contracts/workflow's 3 query-param-
+// dependent variants (CM-66F) — each of those pages no longer renders its
+// own copy. /contracts/[id]/edit is deliberately NOT covered — its
+// breadcrumb includes the real contract reference number, which can't be
+// derived from the URL alone. Every other protected page (Production,
+// Safety, Incidents, Maintenance, Administration, Factory Tasks, etc.)
+// keeps rendering its own Breadcrumbs in the page body exactly as before —
+// this header slot is empty for them.
+const WORKSPACE_DETAIL_BREADCRUMB: BreadcrumbItem[] = [
+  { label: 'Contract Management', href: '/contracts/dashboard' },
+  { label: 'Contract List', href: '/contracts' },
+  { label: 'Contract Detail' },
+];
+
 export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Element {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isStaffOnly = isContractStaffOnlyAccess(user.permissions);
+  const breadcrumbItems =
+    contractModuleBreadcrumbItems(pathname) ??
+    contractWorkflowBreadcrumbItems(pathname, searchParams, isStaffOnly) ??
+    (isContractWorkspaceDetailPath(pathname) ? WORKSPACE_DETAIL_BREADCRUMB : undefined);
+
   return (
-    <header className="flex items-center justify-between h-14 px-4 bg-surface border-b border-border shrink-0">
+    <header className="flex items-center justify-between h-14 px-4 bg-surface border-b border-border shrink-0 gap-3">
       {/* Mobile hamburger */}
       <MobileMenuButton onMenuOpen={onMenuOpen} />
 
-      {/* Desktop: empty left (sidebar provides branding) */}
-      <div className="hidden md:block" />
+      {/* Desktop: contract module/workspace breadcrumb when applicable, otherwise empty (sidebar provides branding) */}
+      <div className="hidden md:block min-w-0 flex-1">
+        {breadcrumbItems && <Breadcrumbs items={breadcrumbItems} className="mb-0" />}
+      </div>
 
       {/* Right: user info + logout */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         <div className="text-right hidden sm:block">
           <p className="text-sm font-medium text-text-primary leading-tight">{user.displayName}</p>
           <p className="text-xs text-text-muted leading-tight">{user.roleName}</p>

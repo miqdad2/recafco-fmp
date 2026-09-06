@@ -1,18 +1,18 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { Download, LayoutDashboard } from 'lucide-react';
-import { Breadcrumbs } from '../_components/breadcrumbs';
 import { DashboardScopeBadge } from '../_components/dashboard-scope-badge';
 import { ContractSummaryCards } from './_components/contract-summary-cards';
 import { ContractFilterBar } from './_components/contract-filter-bar';
 import { ContractListTable } from './_components/contract-list-table';
-import { NewContractRegisterModal } from './_components/new-contract-register-modal';
 import { contractsApi } from '../../../lib/contracts-api';
 import { getUserPermissions } from './_lib/get-user-permissions';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
 export const metadata: Metadata = { title: 'Contract List — RECAFCO FMP' };
+
+const PAGE_SIZE = 25;
 
 interface PageProps {
   searchParams: Promise<PageSearchParams>;
@@ -23,29 +23,41 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const permissions = await getUserPermissions();
   const canCreate = permissions.includes('contracts.create');
 
+  // CM-55 — approved-design manager-facing filters. `lifecycleStatus` has no
+  // corresponding field in the new filter bar (the approved design shows
+  // only one "Contract Status" dropdown, driven by the manager-facing
+  // schedule status below) but is still read/passed through here — the
+  // Contract Manager Dashboard (CM-54) and the root dashboard both deep-link
+  // to `/contracts?lifecycleStatus=ACTIVE`, and that must keep working.
   const lifecycleFilter = typeof params['lifecycleStatus'] === 'string' ? params['lifecycleStatus'] : undefined;
-  const departmentFilter = typeof params['departmentId'] === 'string' ? params['departmentId'] : undefined;
+  const scheduleStatusFilter = typeof params['scheduleStatus'] === 'string' ? params['scheduleStatus'] : undefined;
+  const contractTypeFilter = typeof params['contractType'] === 'string' ? params['contractType'] : undefined;
+  const daysRemainingFilter = typeof params['daysRemaining'] === 'string' ? params['daysRemaining'] : undefined;
   const ownerFilter = typeof params['ownerUserId'] === 'string' ? params['ownerUserId'] : undefined;
   const search = typeof params['search'] === 'string' ? params['search'] : undefined;
   const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
 
-  const hasActiveFilters = Boolean(lifecycleFilter ?? departmentFilter ?? ownerFilter ?? search);
+  const hasActiveFilters = Boolean(
+    lifecycleFilter ?? scheduleStatusFilter ?? contractTypeFilter ?? daysRemainingFilter ?? ownerFilter ?? search,
+  );
 
-  const [listRes, summaryRes, dashboardRes, deptsRes, peopleRes, plantsRes, locationsRes, closeoutsRes] = await Promise.allSettled([
-    contractsApi.list({
-      page,
-      pageSize: 25,
-      ...(lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
-      ...(departmentFilter ? { departmentId: departmentFilter } : {}),
-      ...(ownerFilter ? { ownerUserId: ownerFilter } : {}),
-      ...(search ? { search } : {}),
-    }),
-    contractsApi.summary(),
+  // CM-69I — the exact same filter scope passed to both list() (the table)
+  // and summary() (the KPI cards), so the two can never disagree about what
+  // "currently visible" means — no separate global/filter-blind KPI query.
+  const filterParams = {
+    ...(lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
+    ...(scheduleStatusFilter ? { scheduleStatus: scheduleStatusFilter } : {}),
+    ...(contractTypeFilter ? { contractType: contractTypeFilter } : {}),
+    ...(daysRemainingFilter ? { daysRemaining: daysRemainingFilter } : {}),
+    ...(ownerFilter ? { ownerUserId: ownerFilter } : {}),
+    ...(search ? { search } : {}),
+  };
+
+  const [listRes, summaryRes, dashboardRes, peopleRes, closeoutsRes] = await Promise.allSettled([
+    contractsApi.list({ page, pageSize: PAGE_SIZE, ...filterParams }),
+    contractsApi.summary(filterParams),
     contractsApi.dashboard(),
-    contractsApi.departments(),
     contractsApi.people(),
-    contractsApi.plants(),
-    contractsApi.locations(),
     // CM-43 — reuses the existing CM-38 closeout register (pendingOnly) purely
     // to know which contracts have a request awaiting review, so the row's
     // primary action can become "Review Closeout" — no new backend endpoint.
@@ -60,10 +72,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
   const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : null;
   const scope = dashboardRes.status === 'fulfilled' ? dashboardRes.value.scope : undefined;
-  const departments = deptsRes.status === 'fulfilled' ? deptsRes.value : [];
   const people = peopleRes.status === 'fulfilled' ? peopleRes.value : [];
-  const plants = plantsRes.status === 'fulfilled' ? plantsRes.value : [];
-  const locations = locationsRes.status === 'fulfilled' ? locationsRes.value : [];
   const contracts = result?.items ?? [];
   const total = result?.total ?? 0;
   const totalPages = result?.totalPages ?? 1;
@@ -75,7 +84,9 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
     const q = new URLSearchParams();
     const merged = {
       lifecycleStatus: lifecycleFilter,
-      departmentId: departmentFilter,
+      scheduleStatus: scheduleStatusFilter,
+      contractType: contractTypeFilter,
+      daysRemaining: daysRemainingFilter,
       ownerUserId: ownerFilter,
       search,
       page: page > 1 ? String(page) : undefined,
@@ -90,8 +101,6 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-6">
-      <Breadcrumbs items={[{ label: 'Contract Management', href: '/contracts/dashboard' }, { label: 'Contract List' }]} />
-
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract List</h1>
@@ -100,15 +109,13 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
         <div className="flex items-center gap-3">
           <DashboardScopeBadge scope={scope} />
           {canCreate && (
-            <NewContractRegisterModal depts={departments} plantsData={plants} locations={locations} people={people} scope={scope} />
+            <Link
+              href="/contracts/new"
+              className="inline-flex items-center h-10 px-5 rounded-md bg-accent text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              + New Contract Register
+            </Link>
           )}
-          <Link
-            href="/contracts/dashboard"
-            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
-          >
-            <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
-            Open Dashboard
-          </Link>
           <button
             type="button"
             disabled
@@ -118,6 +125,13 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
             <Download className="size-3.5 shrink-0" aria-hidden="true" />
             Export Excel
           </button>
+          <Link
+            href="/contracts/dashboard"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
+            Open Dashboard
+          </Link>
         </div>
       </div>
 
@@ -125,16 +139,17 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
       <ContractFilterBar
         search={search}
-        lifecycleStatus={lifecycleFilter}
-        departmentId={departmentFilter}
+        scheduleStatus={scheduleStatusFilter}
+        contractType={contractTypeFilter}
         ownerUserId={ownerFilter}
-        departments={departments}
+        daysRemaining={daysRemainingFilter}
+        lifecycleStatus={lifecycleFilter}
         people={people}
         hasActiveFilters={hasActiveFilters}
       />
 
       {error && (
-        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+        <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
           {error}
         </div>
       )}
@@ -155,11 +170,19 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
         </div>
       ) : (
         <>
-          <ContractListTable contracts={contracts} permissions={permissions} pendingCloseoutContractIds={pendingCloseoutContractIds} />
+          <ContractListTable
+            contracts={contracts}
+            permissions={permissions}
+            pendingCloseoutContractIds={pendingCloseoutContractIds}
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+          />
 
+          {/* CM-55D — the accurate "Showing X to Y of Z contracts" count now lives in
+              ContractListTable's own top row; this block is Previous/Next navigation only. */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-text-secondary">
-              <span>Showing {contracts.length} of {total}</span>
+            <div className="flex items-center justify-end">
               <div className="flex gap-2">
                 {page > 1 && (
                   <Link

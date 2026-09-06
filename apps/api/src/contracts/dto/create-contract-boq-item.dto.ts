@@ -1,10 +1,13 @@
 import { IsString, IsNotEmpty, IsOptional, MaxLength, IsNumber, IsIn, Min } from 'class-validator';
 
-export const CONTRACT_BOQ_UNIT_OPTIONS = ['m²', 'm³', 'lm', 'nos', 'ton', 'kg', 'set', 'lot', 'other'] as const;
+export const CONTRACT_BOQ_UNIT_OPTIONS = ['m²', 'm³', 'lm', 'nos', 'ton', 'kg', 'set', 'lot', 'ls', 'other'] as const;
 export const CONTRACT_BOQ_MIX_DESIGN_TYPES = ['GRAY', 'WHITE', 'NOT_APPLICABLE'] as const;
 
-// Deliberately has no invoiceQty / p/r / remainingAmount fields — those are
-// calculated later from the payment/progress modules, never entered at registration.
+// CM-56 — invoiceQty is a real, editable, stored field (New Contract
+// Register's "Invoice Qty" column). Progress / Invoice % and Amount
+// Remaining are still deliberately NOT fields here — both are always
+// derived from invoiceQty/totalPrice (contract-boq-helpers.ts), never
+// trusted/stored values.
 export class CreateContractBoqItemDto {
   @IsOptional()
   @IsString()
@@ -59,4 +62,16 @@ export class CreateContractBoqItemDto {
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   unitPrice?: number;
+
+  // CM-56D — informational/technical quantity confirmed during
+  // drawing/calculation stages. Deliberately never read by any BOQ formula.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  drawingQty?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  invoiceQty?: number;
 }

@@ -1,72 +1,55 @@
+import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { Plus } from 'lucide-react';
+import { Info } from 'lucide-react';
+import { contractsApi } from '../../../../../../lib/contracts-api';
+import { getUserPermissions } from '../../../_lib/get-user-permissions';
+import { ContractRiskKpiStrip } from './_components/contract-risk-kpi-strip';
+import { ContractRiskPanel } from './_components/contract-risk-panel';
 
 export const metadata: Metadata = { title: 'Risk Assessment — Contract Management — RECAFCO FMP' };
+export const dynamic = 'force-dynamic';
 
-const RISK_STATUS_ROWS = ['Total Risks', 'High / Critical Risks', 'Open Risks', 'Mitigated Risks'];
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
 
-const RISK_COLUMNS = ['Risk ID', 'Risk Description', 'Risk Level', 'Response', 'Status', 'Responsible', 'Due Date', 'Action'];
+/**
+ * CM-62 — Contract Detail Risk Assessment, approved-design build. Tracks
+ * delivery/cost/schedule/production/erection/materials/client-approval/
+ * subcontractor/insurance/contract-execution risk — not an ISO
+ * risk-scoring system. Risk Evaluation and Residual Risk are both plain
+ * manual dropdowns (LOW/MEDIUM/HIGH/CRITICAL); Residual Risk is never
+ * auto-calculated from Risk Evaluation or Risk Response — see
+ * contract-risks.service.ts.
+ * CM-62B — info note shortened to a single plain sentence (no ISO/SAP
+ * wording, no exhaustive risk-category list) — the same information is
+ * already conveyed by the KPI strip and the Risk Evaluation/Risk Response
+ * filter options themselves. Wording-only change.
+ */
+export default async function ContractRisksTab({ params }: PageProps): Promise<React.JSX.Element> {
+  const { id } = await params;
 
-export default function ContractRisksTab(): React.JSX.Element {
+  const [permissions, detail, people] = await Promise.all([
+    getUserPermissions(),
+    contractsApi.getContractRisks(id).catch(() => null),
+    contractsApi.people().catch(() => []),
+  ]);
+  if (!permissions.includes('contracts.read') || !detail) notFound();
+
+  const canUpdate = permissions.includes('contracts.update');
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-base font-semibold text-text-primary">Risk Assessment</h1>
-        <p className="text-xs text-text-secondary mt-0.5">Track contract risks, response actions and due dates.</p>
+      <div className="flex items-start gap-2 rounded-lg border border-info/20 bg-info-light px-4 py-2.5 text-xs text-info">
+        <Info className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+        <p>
+          Track contract risks, response actions, residual risk, and action due dates.
+        </p>
       </div>
 
-      {/* Risk Status */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Risk Status</h2>
-        <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-          {RISK_STATUS_ROWS.map((label) => (
-            <div key={label}>
-              <dt className="text-xs text-text-muted">{label}</dt>
-              <dd className="font-medium text-text-primary mt-0.5">Not started</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      <ContractRiskKpiStrip summary={detail.summary} />
 
-      <p className="text-xs text-text-muted">
-        Risk tracking will be enabled after the Risk Assessment backend unit.
-      </p>
-
-      {/* Risk Register table */}
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Risk Register</h2>
-          <button
-            type="button"
-            disabled
-            title="Risk Assessment backend is not implemented yet."
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-secondary px-3 py-1.5 text-xs font-medium text-text-muted cursor-not-allowed"
-          >
-            <Plus className="size-3.5 shrink-0" aria-hidden="true" />
-            Add Risk
-          </button>
-        </div>
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="min-w-full divide-y divide-border text-xs">
-            <thead>
-              <tr className="bg-surface-secondary">
-                {RISK_COLUMNS.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border bg-surface">
-              <tr>
-                <td colSpan={RISK_COLUMNS.length} className="px-3 py-8 text-center text-text-muted">
-                  No risks tracked yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <ContractRiskPanel contractId={id} risks={detail.items} people={people} canUpdate={canUpdate} />
     </div>
   );
 }

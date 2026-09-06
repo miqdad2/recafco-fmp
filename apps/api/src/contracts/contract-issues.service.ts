@@ -12,6 +12,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractIssueDto } from './dto/create-contract-issue.dto';
 import type { UpdateContractIssueDto } from './dto/update-contract-issue.dto';
 import type { ContractIssueListQueryDto } from './dto/contract-issue-list-query.dto';
+import { logContractActivity } from './contract-activity-log';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -169,6 +170,10 @@ export interface IssueSummary {
   highCriticalIssues: number;
   overdueIssues: number;
   closedIssues: number;
+  /** CM-65 — status === 'WAITING_RESPONSE', for the Contract Detail Issue Log tab's "Waiting" KPI card. */
+  waitingResponseIssues: number;
+  /** CM-65 — status === 'RESOLVED' (distinct from CLOSED — a resolved issue may not yet be formally closed), for the same tab's "Resolved" KPI card. */
+  resolvedIssues: number;
 }
 
 export function computeIssueSummary(rows: (OverdueFields & { priority: string })[], today: Date = utcToday()): IssueSummary {
@@ -177,12 +182,16 @@ export function computeIssueSummary(rows: (OverdueFields & { priority: string })
   let highCriticalIssues = 0;
   let overdueIssues = 0;
   let closedIssues = 0;
+  let waitingResponseIssues = 0;
+  let resolvedIssues = 0;
 
   for (const row of rows) {
     if (row.status === 'OPEN') openIssues += 1;
     if (row.status === 'IN_PROGRESS') inProgressIssues += 1;
     if (row.priority === 'HIGH' || row.priority === 'CRITICAL') highCriticalIssues += 1;
     if (row.status === 'CLOSED') closedIssues += 1;
+    if (row.status === 'WAITING_RESPONSE') waitingResponseIssues += 1;
+    if (row.status === 'RESOLVED') resolvedIssues += 1;
     if (computeIssueIsOverdue(row, today)) overdueIssues += 1;
   }
 
@@ -193,6 +202,8 @@ export function computeIssueSummary(rows: (OverdueFields & { priority: string })
     highCriticalIssues,
     overdueIssues,
     closedIssues,
+    waitingResponseIssues,
+    resolvedIssues,
   };
 }
 
@@ -378,6 +389,11 @@ export class ContractIssuesService {
       select: ISSUE_SELECT,
     });
 
+    await logContractActivity(this.db, contractId, actor, 'issue_created', {
+      issueId: created.id,
+      issueNo: created.issueNo ?? null,
+    });
+
     return withDerivedFields(created, utcToday());
   }
 
@@ -464,6 +480,11 @@ export class ContractIssuesService {
         ...(dto.remarks !== undefined ? { remarks: dto.remarks } : {}),
       },
       select: ISSUE_SELECT,
+    });
+
+    await logContractActivity(this.db, existing.contractId, actor, 'issue_updated', {
+      issueId: updated.id,
+      issueNo: updated.issueNo ?? null,
     });
 
     return withDerivedFields(updated, utcToday());

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
 import { ContractStatus, DepartmentAccessScope } from '@recafco/database';
-import { ContractsService, getDerivedLifecycleStatus, buildListWhere } from './contracts.service';
+import {
+  ContractsService, getDerivedLifecycleStatus, buildListWhere,
+  computeEffectiveScheduleStatus, computeContractProgressPercent, computeContractPaymentProgressPercent,
+} from './contracts.service';
 import type { DatabaseService } from '../database/database.service';
 import type { ContractsRefService } from './contracts-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
@@ -41,6 +44,10 @@ const mockTx = {
 const mockContractFindUnique = vi.fn();
 const mockContractFindMany = vi.fn();
 const mockContractCount = vi.fn();
+const mockContractAggregate = vi.fn();
+const mockContractUpdate = vi.fn();
+const mockContractClaimCount = vi.fn();
+const mockActivityCreate = vi.fn();
 const mockCommentFindMany = vi.fn();
 const mockActivityFindMany = vi.fn();
 const mockUserFindMany = vi.fn();
@@ -56,9 +63,12 @@ const mockClient = {
     findUnique: mockContractFindUnique,
     findMany: mockContractFindMany,
     count: mockContractCount,
+    aggregate: mockContractAggregate,
+    update: mockContractUpdate,
   },
+  contractClaim: { count: mockContractClaimCount },
   contractComment: { findMany: mockCommentFindMany },
-  contractActivity: { findMany: mockActivityFindMany },
+  contractActivity: { findMany: mockActivityFindMany, create: mockActivityCreate },
   contractCloseoutRequest: { findFirst: mockCloseoutRequestFindFirst },
   user: { findMany: mockUserFindMany },
   department: { findMany: mockDepartmentFindMany },
@@ -212,6 +222,11 @@ beforeEach(() => {
   // activity logging, etc., not the approval gate) keep passing unmodified.
   // The one test that specifically covers the gate overrides this to null.
   mockCloseoutRequestFindFirst.mockResolvedValue({ id: 'closeout-request-1' });
+  // CM-55 — getSummary()'s two new aggregates; default to "no value/no claims"
+  // so pre-existing getSummary tests that don't care about these new fields
+  // keep passing unmodified.
+  mockContractAggregate.mockResolvedValue({ _sum: { contractValue: null } });
+  mockContractClaimCount.mockResolvedValue(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -269,9 +284,24 @@ describe('getDerivedLifecycleStatus', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildListWhere', () => {
-  it('empty query returns empty where', () => {
+  it('CM-69C — empty query (a fresh page load) excludes CANCELLED by default', () => {
     const where = buildListWhere({});
-    expect(where).toEqual({});
+    expect(where).toEqual({ status: { not: ContractStatus.CANCELLED } });
+  });
+
+  it('CM-69C — lifecycleStatus=ALL is an explicit request for every status, CANCELLED included (no status filter at all)', () => {
+    const where = buildListWhere({ lifecycleStatus: 'ALL' });
+    expect(where['status']).toBeUndefined();
+  });
+
+  it('CM-69C — status=ALL is also an explicit request for every status, CANCELLED included', () => {
+    const where = buildListWhere({ status: 'ALL' });
+    expect(where['status']).toBeUndefined();
+  });
+
+  it('CM-69C — lifecycleStatus=CANCELLED shows only CANCELLED contracts', () => {
+    const where = buildListWhere({ lifecycleStatus: 'CANCELLED' });
+    expect(where['status']).toBe(ContractStatus.CANCELLED);
   });
 
   it('status filter sets status', () => {
@@ -283,7 +313,8 @@ describe('buildListWhere', () => {
     const where = buildListWhere({ lifecycleStatus: 'EXPIRING' });
     expect(where['status']).toBe(ContractStatus.ACTIVE);
     expect(where['renewalNoticeDate']).toBeDefined();
-    expect(where['OR']).toBeDefined();
+    expect(where['AND']).toBeDefined();
+    expect((where['AND'] as Record<string, unknown>[])[0]!['OR']).toBeDefined();
   });
 
   it('lifecycleStatus=EXPIRED translates to endDate < today', () => {
@@ -297,9 +328,75 @@ describe('buildListWhere', () => {
     expect(where['status']).toBe(ContractStatus.ACTIVE); // lifecycleStatus wins
   });
 
-  it('search adds OR ilike on title and referenceNumber', () => {
+  it('search adds OR ilike on title, referenceNumber, jobOrder, counterpartyName', () => {
     const where = buildListWhere({ search: 'foo' });
-    expect(Array.isArray(where['OR'])).toBe(true);
+    const and = where['AND'] as Record<string, unknown>[];
+    expect(Array.isArray(and)).toBe(true);
+    const searchOr = and[0]!['OR'] as Record<string, unknown>[];
+    expect(Array.isArray(searchOr)).toBe(true);
+    const fields = searchOr.map((c) => Object.keys(c)[0]);
+    expect(fields).toEqual(['title', 'referenceNumber', 'jobOrder', 'counterpartyName']);
+  });
+
+  it('CM-69C — search alone (no explicit status filter) still excludes CANCELLED by default', () => {
+    const where = buildListWhere({ search: 'test project' });
+    expect(where['status']).toEqual({ not: ContractStatus.CANCELLED });
+  });
+
+  it('CM-69C — search combined with an explicit ALL status filter does include CANCELLED', () => {
+    const where = buildListWhere({ search: 'test project', lifecycleStatus: 'ALL' });
+    expect(where['status']).toBeUndefined();
+  });
+
+  it('lifecycleStatus=EXPIRING and search combine without clobbering each other', () => {
+    const where = buildListWhere({ lifecycleStatus: 'EXPIRING', search: 'foo' });
+    const and = where['AND'] as Record<string, unknown>[];
+    expect(and).toHaveLength(2);
+    expect(and[0]!['OR']).toBeDefined();
+    expect(and[1]!['OR']).toBeDefined();
+  });
+
+  it('contractType filters on the real scopeOfWork JSONB flag', () => {
+    const where = buildListWhere({ contractType: 'erection' });
+    expect(where['scopeOfWork']).toEqual({ path: ['erection'], equals: true });
+  });
+
+  it('scheduleStatus=DELAYED matches only the explicit stored value (no null fallback)', () => {
+    const where = buildListWhere({ scheduleStatus: 'DELAYED' });
+    const and = where['AND'] as Record<string, unknown>[];
+    expect(and[0]).toEqual({ scheduleStatus: 'DELAYED' });
+  });
+
+  it('scheduleStatus=IN_PROGRESS also matches contracts with scheduleStatus null and status not CLOSED', () => {
+    const where = buildListWhere({ scheduleStatus: 'IN_PROGRESS' });
+    const and = where['AND'] as Record<string, unknown>[];
+    const or = and[0]!['OR'] as Record<string, unknown>[];
+    expect(or).toContainEqual({ scheduleStatus: 'IN_PROGRESS' });
+    expect(or).toContainEqual({ AND: [{ scheduleStatus: null }, { status: { not: ContractStatus.CLOSED } }] });
+  });
+
+  it('scheduleStatus=COMPLETED also matches contracts with scheduleStatus null and status CLOSED', () => {
+    const where = buildListWhere({ scheduleStatus: 'COMPLETED' });
+    const and = where['AND'] as Record<string, unknown>[];
+    const or = and[0]!['OR'] as Record<string, unknown>[];
+    expect(or).toContainEqual({ scheduleStatus: 'COMPLETED' });
+    expect(or).toContainEqual({ AND: [{ scheduleStatus: null }, { status: ContractStatus.CLOSED }] });
+  });
+
+  it('daysRemaining=OVERDUE matches forecastCompletionDate < today, falling back to endDate when forecast is unset', () => {
+    const where = buildListWhere({ daysRemaining: 'OVERDUE' });
+    const and = where['AND'] as Record<string, unknown>[];
+    const or = and[0]!['OR'] as Record<string, unknown>[];
+    expect(or[0]).toHaveProperty('forecastCompletionDate');
+    expect(or[1]).toEqual({ AND: [{ forecastCompletionDate: null }, { endDate: expect.objectContaining({ lt: expect.any(Date) }) }] });
+  });
+
+  it('daysRemaining=DUE_30 vs DUE_60 use different window widths', () => {
+    const where30 = buildListWhere({ daysRemaining: 'DUE_30' });
+    const where60 = buildListWhere({ daysRemaining: 'DUE_60' });
+    const lte30 = ((where30['AND'] as Record<string, unknown>[])[0]!['OR'] as Record<string, unknown>[])[0]!['forecastCompletionDate'] as { lte: Date };
+    const lte60 = ((where60['AND'] as Record<string, unknown>[])[0]!['OR'] as Record<string, unknown>[])[0]!['forecastCompletionDate'] as { lte: Date };
+    expect(lte60.lte.getTime()).toBeGreaterThan(lte30.lte.getTime());
   });
 
   it('ownerUserId filter', () => {
@@ -310,6 +407,64 @@ describe('buildListWhere', () => {
   it('departmentId filter', () => {
     const where = buildListWhere({ departmentId: 'dept-1' });
     expect(where['departmentId']).toBe('dept-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CM-55 — computeEffectiveScheduleStatus / computeContractProgressPercent /
+// computeContractPaymentProgressPercent (pure functions)
+// ---------------------------------------------------------------------------
+
+describe('computeEffectiveScheduleStatus', () => {
+  it('returns the stored value when set, regardless of lifecycle status', () => {
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: 'DELAYED', status: ContractStatus.ACTIVE })).toBe('DELAYED');
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: 'AHEAD_OF_SCHEDULE', status: ContractStatus.CLOSED })).toBe('AHEAD_OF_SCHEDULE');
+  });
+
+  it('defaults to IN_PROGRESS when unset and status is not CLOSED', () => {
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: null, status: ContractStatus.ACTIVE })).toBe('IN_PROGRESS');
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: null, status: ContractStatus.DRAFT })).toBe('IN_PROGRESS');
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: null, status: ContractStatus.TERMINATED })).toBe('IN_PROGRESS');
+  });
+
+  it('defaults to COMPLETED when unset and status is CLOSED', () => {
+    expect(computeEffectiveScheduleStatus({ scheduleStatus: null, status: ContractStatus.CLOSED })).toBe('COMPLETED');
+  });
+
+  it('never infers DELAYED/ON_TRACK/AHEAD_OF_SCHEDULE from lifecycle alone', () => {
+    for (const status of [ContractStatus.DRAFT, ContractStatus.ACTIVE, ContractStatus.TERMINATED, ContractStatus.CLOSED]) {
+      const result = computeEffectiveScheduleStatus({ scheduleStatus: null, status });
+      expect(['DELAYED', 'ON_TRACK', 'AHEAD_OF_SCHEDULE']).not.toContain(result);
+    }
+  });
+});
+
+describe('computeContractProgressPercent', () => {
+  it('returns 0 for no tasks (not NaN)', () => {
+    expect(computeContractProgressPercent([])).toBe(0);
+  });
+
+  it('computes completed/total as a rounded percent', () => {
+    expect(computeContractProgressPercent([{ status: 'COMPLETED' }, { status: 'IN_PROGRESS' }, { status: 'NOT_STARTED' }, { status: 'COMPLETED' }])).toBe(50);
+  });
+
+  it('returns 100 when every task is completed', () => {
+    expect(computeContractProgressPercent([{ status: 'COMPLETED' }, { status: 'COMPLETED' }])).toBe(100);
+  });
+});
+
+describe('computeContractPaymentProgressPercent', () => {
+  it('returns 0 when contractValue is null or zero (never divides by zero)', () => {
+    expect(computeContractPaymentProgressPercent([{ paidAmount: '500.000' }], null)).toBe(0);
+    expect(computeContractPaymentProgressPercent([{ paidAmount: '500.000' }], '0.000')).toBe(0);
+  });
+
+  it('computes total paid / current value as a rounded percent', () => {
+    expect(computeContractPaymentProgressPercent([{ paidAmount: '250.000' }, { paidAmount: '250.000' }], '1000.000')).toBe(50);
+  });
+
+  it('returns 0 for a contract with a value but no payments yet', () => {
+    expect(computeContractPaymentProgressPercent([], '1000.000')).toBe(0);
   });
 });
 
@@ -528,6 +683,72 @@ describe('ContractsService.create', () => {
     expect(boqCall.data[0]!['sortOrder']).toBe(1);
     expect(boqCall.data[0]!['itemCode']).toBe('PC-001');
     expect(boqCall.data[0]!['totalPrice']).toBe(2550);
+  });
+
+  it('CM-56 — persists invoiceQty on a BOQ item, and totalPrice is unaffected by it', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        boqItems: [
+          { description: 'Precast concrete panels', originalEstimatedQty: 100, unitPrice: 25.5, invoiceQty: 40 },
+        ],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data[0]!['invoiceQty']).toBe(40);
+    expect(boqCall.data[0]!['totalPrice']).toBe(2550);
+  });
+
+  it('CM-56 — omits invoiceQty from the create payload when not provided (stays unset, not forced to 0)', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      { title: 'T', counterpartyName: 'V', boqItems: [{ description: 'No invoice qty yet', unitPrice: 5 }] },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect('invoiceQty' in boqCall.data[0]!).toBe(false);
+  });
+
+  it('CM-56D — persists drawingQty on a BOQ item, and totalPrice is unaffected by it', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        boqItems: [
+          { description: 'Precast concrete panels', originalEstimatedQty: 100, unitPrice: 25.5, drawingQty: 90 },
+        ],
+      },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(boqCall.data[0]!['drawingQty']).toBe(90);
+    expect(boqCall.data[0]!['totalPrice']).toBe(2550);
+  });
+
+  it('CM-56D — omits drawingQty from the create payload when not provided (stays unset, not forced to 0)', async () => {
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      { title: 'T', counterpartyName: 'V', boqItems: [{ description: 'No drawing qty yet', unitPrice: 5 }] },
+      ACTOR_VIEWER,
+    );
+
+    const boqCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect('drawingQty' in boqCall.data[0]!).toBe(false);
   });
 
   it('uses revisedQty over originalEstimatedQty for totalPrice when both provided', async () => {
@@ -995,6 +1216,38 @@ describe('ContractsService.update', () => {
     expect(createCall.data[0]!['totalPrice']).toBe(50);
   });
 
+  it('CM-56 — persists invoiceQty when replacing the BOQ item set on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      { version: 1, boqItems: [{ description: 'New item', originalEstimatedQty: 10, unitPrice: 5, invoiceQty: 3 }] },
+      ACTOR_ADMIN,
+    );
+
+    const createCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(createCall.data[0]!['invoiceQty']).toBe(3);
+  });
+
+  it('CM-56D — persists drawingQty when replacing the BOQ item set on update', async () => {
+    const draftContract = makeContract();
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.update(
+      'id-1',
+      { version: 1, boqItems: [{ description: 'New item', originalEstimatedQty: 10, unitPrice: 5, drawingQty: 9 }] },
+      ACTOR_ADMIN,
+    );
+
+    const createCall = mockTxBoqItemCreateMany.mock.calls[0]![0] as { data: Record<string, unknown>[] };
+    expect(createCall.data[0]!['drawingQty']).toBe(9);
+  });
+
   it('clears BOQ items when boqItems is an explicit empty array, preserving manual contractValue', async () => {
     const draftContract = makeContract();
     mockContractFindUnique.mockResolvedValue(draftContract);
@@ -1192,6 +1445,69 @@ describe('ContractsService.update', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CM-55 — updateScheduleStatus (manager-facing schedule/progress status)
+// ---------------------------------------------------------------------------
+
+describe('ContractsService.updateScheduleStatus', () => {
+  it('throws ForbiddenException without contracts.update', async () => {
+    const noUpdate: AuthUser = { ...ACTOR_VIEWER, permissions: ['contracts.read'] };
+    await expect(service.updateScheduleStatus('id-1', { scheduleStatus: 'DELAYED' }, noUpdate)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('throws NotFoundException when the contract does not exist', async () => {
+    mockContractFindUnique.mockResolvedValue(null);
+    await expect(service.updateScheduleStatus('missing', { scheduleStatus: 'DELAYED' }, ACTOR_ADMIN)).rejects.toThrow(NotFoundException);
+  });
+
+  it('enforces department access scope via findOneOrThrow', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ departmentId: 'dept-other' }));
+    (mockDeptAccess.assertCanAccessDepartment as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ForbiddenException('scope'));
+
+    await expect(service.updateScheduleStatus('id-1', { scheduleStatus: 'DELAYED' }, ACTOR_OWN_DEPT)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('updates only scheduleStatus — never Contract.status/lifecycle', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE }));
+    mockContractUpdate.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, scheduleStatus: 'DELAYED' }));
+
+    await service.updateScheduleStatus('id-1', { scheduleStatus: 'DELAYED' }, ACTOR_ADMIN);
+
+    const call = mockContractUpdate.mock.calls[0]![0] as { where: Record<string, unknown>; data: Record<string, unknown> };
+    expect(call.where).toEqual({ id: 'id-1' });
+    expect(call.data).toEqual({ scheduleStatus: 'DELAYED' });
+  });
+
+  it('does not require a version and never calls updateMany (no optimistic-concurrency coupling to lifecycle transitions)', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract());
+    mockContractUpdate.mockResolvedValue(makeContract({ scheduleStatus: 'ON_TRACK' }));
+
+    await service.updateScheduleStatus('id-1', { scheduleStatus: 'ON_TRACK' }, ACTOR_ADMIN);
+
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+    expect(mockContractUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a contractActivity entry with the previous and new schedule status', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ scheduleStatus: 'ON_TRACK' }));
+    mockContractUpdate.mockResolvedValue(makeContract({ scheduleStatus: 'DELAYED' }));
+
+    await service.updateScheduleStatus('id-1', { scheduleStatus: 'DELAYED' }, ACTOR_ADMIN);
+
+    const activityCall = mockActivityCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(activityCall.data['event']).toBe('schedule_status_updated');
+    expect(activityCall.data['metadata']).toEqual({ previousScheduleStatus: 'ON_TRACK', newScheduleStatus: 'DELAYED' });
+  });
+
+  it('returns the updated contract with lifecycleStatus attached', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract());
+    mockContractUpdate.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, scheduleStatus: 'AHEAD_OF_SCHEDULE' }));
+
+    const result = await service.updateScheduleStatus('id-1', { scheduleStatus: 'AHEAD_OF_SCHEDULE' }, ACTOR_ADMIN);
+    expect(result.lifecycleStatus).toBe('ACTIVE');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // activate
 // ---------------------------------------------------------------------------
 
@@ -1325,6 +1641,169 @@ describe('ContractsService.terminate', () => {
       newStatus: ContractStatus.TERMINATED,
       reason: 'Budget cut',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CM-69A — cancel (safe void, never a hard delete)
+// ---------------------------------------------------------------------------
+
+describe('ContractsService.cancel', () => {
+  it('throws ForbiddenException without contracts.update or contracts.manage', async () => {
+    const noPerm: AuthUser = { ...ACTOR_VIEWER, permissions: ['contracts.read'] };
+    await expect(service.cancel('id-1', { reason: 'r', version: 1 }, noPerm)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('allows an actor with only contracts.update (no contracts.manage)', async () => {
+    const draftContract = makeContract({ status: ContractStatus.DRAFT });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED, cancellationReason: 'Created for UAT testing', version: 2 });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    const updateOnlyActor: AuthUser = { ...ACTOR_VIEWER, permissions: ['contracts.read', 'contracts.update'] };
+    const result = await service.cancel('id-1', { reason: 'Created for UAT testing', version: 1 }, updateOnlyActor);
+    expect(result.status).toBe(ContractStatus.CANCELLED);
+  });
+
+  it('enforces department scope via assertCanAccessDepartment before cancelling', async () => {
+    const draftContract = makeContract({ status: ContractStatus.DRAFT, departmentId: 'dept-other' });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    (mockDeptAccess.assertCanAccessDepartment as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ForbiddenException('scope'));
+
+    await expect(service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN)).rejects.toThrow(ForbiddenException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('transitions DRAFT → CANCELLED on correct version', async () => {
+    const draftContract = makeContract({ status: ContractStatus.DRAFT });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED, version: 2 });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    const result = await service.cancel('id-1', { reason: 'Wrong test draft', version: 1 }, ACTOR_ADMIN);
+    expect(result.status).toBe(ContractStatus.CANCELLED);
+  });
+
+  it('transitions ACTIVE → CANCELLED on correct version', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED, version: 2 });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    const result = await service.cancel('id-1', { reason: 'Wrongly activated', version: 1 }, ACTOR_ADMIN);
+    expect(result.status).toBe(ContractStatus.CANCELLED);
+  });
+
+  it('rejects cancelling a TERMINATED contract (only DRAFT/ACTIVE are cancellable)', async () => {
+    const terminatedContract = makeContract({ status: ContractStatus.TERMINATED });
+    mockContractFindUnique.mockResolvedValue(terminatedContract);
+
+    await expect(service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects cancelling a CLOSED contract (only DRAFT/ACTIVE are cancellable)', async () => {
+    const closedContract = makeContract({ status: ContractStatus.CLOSED });
+    mockContractFindUnique.mockResolvedValue(closedContract);
+
+    await expect(service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects cancelling an already-CANCELLED contract', async () => {
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED });
+    mockContractFindUnique.mockResolvedValue(cancelledContract);
+
+    await expect(service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('throws ConflictException on version mismatch', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 0 });
+    mockTxContractFindUnique.mockResolvedValue({ id: 'id-1' });
+
+    await expect(service.cancel('id-1', { reason: 'r', version: 99 }, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+  });
+
+  it('throws NotFoundException when the contract does not exist', async () => {
+    mockContractFindUnique.mockResolvedValue(null);
+
+    await expect(service.cancel('missing-id', { reason: 'r', version: 1 }, ACTOR_ADMIN)).rejects.toThrow(NotFoundException);
+  });
+
+  it('stores cancellationReason, cancelledAt, and cancelledByUserId in updateMany data', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.cancel('id-1', { reason: 'Created for UAT testing', version: 1 }, ACTOR_ADMIN);
+
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['cancellationReason']).toBe('Created for UAT testing');
+    expect(updateCall.data['cancelledByUserId']).toBe(ACTOR_ADMIN.id);
+    expect(updateCall.data['cancelledAt']).toBeInstanceOf(Date);
+  });
+
+  it('creates an activity record with the real previousStatus and newStatus=CANCELLED', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN);
+
+    const activityCall = mockTxActivityCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(activityCall.data['event']).toBe('cancelled');
+    expect(activityCall.data['previousStatus']).toBe(ContractStatus.ACTIVE);
+    expect(activityCall.data['newStatus']).toBe(ContractStatus.CANCELLED);
+  });
+
+  it('writes a CONTRACT_CANCELLED security audit event including the reason', async () => {
+    const draftContract = makeContract({ status: ContractStatus.DRAFT });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED });
+    mockContractFindUnique.mockResolvedValue(draftContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.cancel('id-1', { reason: 'Created for UAT testing', version: 1 }, ACTOR_ADMIN);
+
+    expect(mockTxSecurityAuditEventCreate).toHaveBeenCalledTimes(1);
+    const auditCall = mockTxSecurityAuditEventCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(auditCall.data['event']).toBe('CONTRACT_CANCELLED');
+    expect(auditCall.data['metadata']).toMatchObject({
+      previousStatus: ContractStatus.DRAFT,
+      newStatus: ContractStatus.CANCELLED,
+      reason: 'Created for UAT testing',
+    });
+  });
+
+  it('only ever updates the contract row itself — no delete, no related-record mutation', async () => {
+    const activeContract = makeContract({ status: ContractStatus.ACTIVE });
+    const cancelledContract = makeContract({ status: ContractStatus.CANCELLED });
+    mockContractFindUnique.mockResolvedValue(activeContract);
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(cancelledContract);
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.cancel('id-1', { reason: 'r', version: 1 }, ACTOR_ADMIN);
+
+    expect(mockTxContractUpdateMany).toHaveBeenCalledTimes(1);
+    const updateCall = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(updateCall.data['status']).toBe(ContractStatus.CANCELLED);
   });
 });
 
@@ -1469,7 +1948,10 @@ describe('ContractsService.findAll', () => {
   });
 
   it('returns paginated results with lifecycleStatus on each item', async () => {
-    const contracts = [makeContract({ status: ContractStatus.DRAFT }), makeContract({ id: 'c-2', status: ContractStatus.ACTIVE })];
+    const contracts = [
+      makeContract({ status: ContractStatus.DRAFT, workflowTasks: [], payments: [], _count: { claims: 0 } }),
+      makeContract({ id: 'c-2', status: ContractStatus.ACTIVE, workflowTasks: [], payments: [], _count: { claims: 0 } }),
+    ];
     mockContractFindMany.mockResolvedValue(contracts);
     mockContractCount.mockResolvedValue(2);
 
@@ -1479,6 +1961,37 @@ describe('ContractsService.findAll', () => {
     expect(result.items[1]!.lifecycleStatus).toBe('ACTIVE');
     expect(result.total).toBe(2);
     expect(result.totalPages).toBe(1);
+  });
+
+  it('computes progressPercent/paymentProgressPercent/openClaimsCount per row and strips the raw relations', async () => {
+    const contracts = [
+      makeContract({
+        contractValue: '1000.000',
+        workflowTasks: [{ status: 'COMPLETED' }, { status: 'IN_PROGRESS' }],
+        payments: [{ paidAmount: '250.000' }],
+        _count: { claims: 3 },
+      }),
+    ];
+    mockContractFindMany.mockResolvedValue(contracts);
+    mockContractCount.mockResolvedValue(1);
+
+    const result = await service.findAll({}, ACTOR_VIEWER);
+    const item = result.items[0]! as unknown as Record<string, unknown>;
+    expect(item['progressPercent']).toBe(50);
+    expect(item['paymentProgressPercent']).toBe(25);
+    expect(item['openClaimsCount']).toBe(3);
+    expect(item['workflowTasks']).toBeUndefined();
+    expect(item['payments']).toBeUndefined();
+    expect(item['_count']).toBeUndefined();
+  });
+
+  it('effectiveScheduleStatus defaults to IN_PROGRESS when unset and status is not CLOSED', async () => {
+    const contracts = [makeContract({ status: ContractStatus.ACTIVE, scheduleStatus: null, workflowTasks: [], payments: [], _count: { claims: 0 } })];
+    mockContractFindMany.mockResolvedValue(contracts);
+    mockContractCount.mockResolvedValue(1);
+
+    const result = await service.findAll({}, ACTOR_VIEWER);
+    expect((result.items[0] as unknown as Record<string, unknown>)['effectiveScheduleStatus']).toBe('IN_PROGRESS');
   });
 
   it('computes totalPages correctly', async () => {
@@ -1509,22 +2022,69 @@ describe('ContractsService.getSummary', () => {
     await expect(service.getSummary(noRead)).rejects.toThrow(ForbiddenException);
   });
 
-  it('returns all 6 counts', async () => {
+  it('CM-69I — returns totalContracts/activeContracts scoped to the same default (CANCELLED-excluding) where as the table', async () => {
     mockContractCount
-      .mockResolvedValueOnce(5)   // DRAFT
-      .mockResolvedValueOnce(10)  // ACTIVE
-      .mockResolvedValueOnce(2)   // EXPIRING
-      .mockResolvedValueOnce(1)   // EXPIRED
-      .mockResolvedValueOnce(3)   // TERMINATED
-      .mockResolvedValueOnce(7);  // CLOSED
+      .mockResolvedValueOnce(5)  // totalContracts
+      .mockResolvedValueOnce(3); // activeContracts
 
     const result = await service.getSummary(ACTOR_VIEWER);
-    expect(result.totalDraft).toBe(5);
-    expect(result.totalActive).toBe(10);
-    expect(result.totalExpiring).toBe(2);
-    expect(result.totalExpired).toBe(1);
-    expect(result.totalTerminated).toBe(3);
-    expect(result.totalClosed).toBe(7);
+    expect(result.totalContracts).toBe(5);
+    expect(result.activeContracts).toBe(3);
+
+    const totalCountArgs = mockContractCount.mock.calls[0]![0];
+    expect(totalCountArgs.where).toEqual({ status: { not: 'CANCELLED' } });
+  });
+
+  it('CM-69I — activeContracts ANDs an ACTIVE condition onto the current filtered scope, never clobbering an explicit lifecycleStatus filter', async () => {
+    mockContractCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    await service.getSummary(ACTOR_VIEWER, { lifecycleStatus: 'DRAFT' });
+
+    const activeCountArgs = mockContractCount.mock.calls[1]![0];
+    expect(activeCountArgs.where).toEqual({ AND: [{ status: 'DRAFT' }, { status: 'ACTIVE' }] });
+  });
+
+  it('CM-69I — lifecycleStatus=ALL includes CANCELLED (no status filter at all)', async () => {
+    mockContractCount.mockResolvedValueOnce(9).mockResolvedValueOnce(2);
+
+    await service.getSummary(ACTOR_VIEWER, { lifecycleStatus: 'ALL' });
+
+    const totalCountArgs = mockContractCount.mock.calls[0]![0];
+    expect(totalCountArgs.where).toEqual({});
+  });
+
+  it('CM-69I — passes search through to the same buildListWhere() the table uses', async () => {
+    mockContractCount.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+
+    await service.getSummary(ACTOR_VIEWER, { search: 'Acme' });
+
+    const totalCountArgs = mockContractCount.mock.calls[0]![0];
+    expect(totalCountArgs.where.AND?.[0]?.OR).toBeDefined();
+  });
+
+  it('returns totalContractValue as a 3-decimal string sum, and totalOpenClaims', async () => {
+    mockContractAggregate.mockResolvedValue({ _sum: { contractValue: '125000.500' } });
+    mockContractClaimCount.mockResolvedValue(4);
+
+    const result = await service.getSummary(ACTOR_VIEWER);
+    expect(result.totalContractValue).toBe('125000.500');
+    expect(result.totalOpenClaims).toBe(4);
+  });
+
+  it('totalContractValue defaults to "0.000" when the sum is null (no contracts have a value)', async () => {
+    mockContractAggregate.mockResolvedValue({ _sum: { contractValue: null } });
+
+    const result = await service.getSummary(ACTOR_VIEWER);
+    expect(result.totalContractValue).toBe('0.000');
+  });
+
+  it('scopes totalOpenClaims to the same filtered+department where as everything else', async () => {
+    (mockDeptAccess.buildDeptFilter as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ in: ['dept-1'] });
+
+    await service.getSummary(ACTOR_OWN_DEPT);
+
+    const claimCountArgs = mockContractClaimCount.mock.calls[0]![0];
+    expect(claimCountArgs.where.contract).toEqual({ status: { not: 'CANCELLED' }, departmentId: { in: ['dept-1'] } });
   });
 });
 
@@ -1638,7 +2198,7 @@ describe('ContractsService.listActivities', () => {
     await expect(service.listActivities('missing', ACTOR_VIEWER)).rejects.toThrow(NotFoundException);
   });
 
-  it('returns activities ordered ascending', async () => {
+  it('returns activities ordered newest first (CM-66 — Activity / Audit History tab requirement)', async () => {
     mockContractFindUnique.mockResolvedValue(makeContract());
     const activities = [{ id: 'a1', event: 'created' }];
     mockActivityFindMany.mockResolvedValue(activities);
@@ -1646,7 +2206,7 @@ describe('ContractsService.listActivities', () => {
     const result = await service.listActivities('id-1', ACTOR_VIEWER);
     expect(result).toHaveLength(1);
     expect(mockActivityFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: [{ createdAt: 'asc' }] }),
+      expect.objectContaining({ orderBy: [{ createdAt: 'desc' }] }),
     );
   });
 });
@@ -1768,7 +2328,8 @@ describe('ContractsService.getDashboard', () => {
       .mockResolvedValueOnce(2)  // totalExpiring
       .mockResolvedValueOnce(1)  // totalExpired
       .mockResolvedValueOnce(4)  // totalTerminated
-      .mockResolvedValueOnce(5); // totalClosed
+      .mockResolvedValueOnce(5)  // totalClosed
+      .mockResolvedValueOnce(6); // totalCancelled
     mockContractFindMany.mockResolvedValueOnce([
       { id: 'c-r1', referenceNumber: 'CONTRACT-001', title: 'Vendor A', status: 'ACTIVE', updatedAt: new Date('2026-07-01T07:00:00Z') },
     ]);
@@ -1783,6 +2344,7 @@ describe('ContractsService.getDashboard', () => {
     expect(result.metrics.totalExpired).toBe(1);
     expect(result.metrics.totalTerminated).toBe(4);
     expect(result.metrics.totalClosed).toBe(5);
+    expect(result.metrics.totalCancelled).toBe(6);
     expect(result.recent).toHaveLength(1);
     expect(result.recent[0]?.referenceNumber).toBe('CONTRACT-001');
     expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

@@ -2,19 +2,17 @@ import type { Metadata } from 'next';
 import { contractsApi } from '@/lib/contracts-api';
 import type { ContractDashboardData } from '@/lib/contracts-api';
 import { getUserPermissions } from '../_lib/get-user-permissions';
-import { Breadcrumbs } from '../../_components/breadcrumbs';
 import { DashboardToolbar } from './_components/dashboard-toolbar';
 import { ContractKpiGrid } from './_components/contract-kpi-grid';
 import { TopContractsPanels } from './_components/top-contracts-panels';
-import { DashboardRecentTable } from '../../_components/dashboard-recent-table';
-import { ManagerSummaryCards, SecondaryMetricsStrip } from './_components/manager-summary-cards';
-import { TodaysFocusPanel } from './_components/todays-focus-panel';
-import { ManagerAttentionTable } from './_components/manager-attention-table';
-import { buildAttentionRows } from '../_lib/contract-dashboard-attention';
-import { ManagerSecondaryTabs } from './_components/manager-secondary-tabs';
-import { WorkflowOverviewPanel } from './_components/workflow-overview-panel';
-import { UpcomingScheduleList } from './_components/upcoming-schedule-list';
+import { ManagerKpiGrid } from './_components/manager-kpi-grid';
+import { DisciplineProgressPanel } from './_components/discipline-progress-panel';
+import { FinancialPerformanceChart } from './_components/financial-performance-chart';
+import { DonutChart } from './_components/donut-chart';
+import { ManagementAttentionRequiredPanel } from './_components/management-attention-required-panel';
+import { TopContractsTable } from './_components/top-contracts-table';
 import { StaffDashboardView } from './_components/staff-dashboard-view';
+import { buildContractsByStatusSegments, buildClaimsStatusSegments, formatKwdCompact } from './_lib/dashboard-insights-helpers';
 
 export const metadata: Metadata = { title: 'Contract Management Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -38,24 +36,19 @@ export default async function ContractsDashboardPage(): Promise<React.JSX.Elemen
     return <StaffDashboardView data={data} status={status} />;
   }
 
-  const title = 'Contract Manager Dashboard';
-  const subtitle = 'Create contracts, assign work, monitor risks and close contracts.';
-  const needsAction = data?.manager?.attentionItems?.length;
-  const attentionRows = buildAttentionRows(
-    data?.manager?.attentionItems ?? [],
-    data?.manager?.summary,
-    data?.manager?.workflowOverview ?? [],
-  );
+  // CM-54 — approved design: title/subtitle apply to this route regardless
+  // of dashboardType (the fallback branch below is dead code for real
+  // actors — computeContractDashboardType always resolves MANAGER or STAFF
+  // — so this header text is effectively manager-only in practice).
+  const title = 'Contract Management Dashboard';
+  const subtitle = 'Real-time overview of all contracts, progress, financials and key alerts.';
+
+  const insights = data?.manager?.insights;
+  const contractsByStatus = data?.metrics ? buildContractsByStatusSegments(data.metrics) : [];
+  const claimsByStatus = insights ? buildClaimsStatusSegments(insights.claimsByStatus) : [];
 
   return (
     <div className="px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-8">
-      <Breadcrumbs
-        items={[
-          { label: 'Contract Management', href: '/contracts/dashboard' },
-          { label: 'Dashboard' },
-        ]}
-      />
-
       {/* Page title */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -75,41 +68,50 @@ export default async function ContractsDashboardPage(): Promise<React.JSX.Elemen
 
       {dashboardType === 'MANAGER' && (
         <div className="space-y-5">
-          <TodaysFocusPanel summary={data?.manager?.summary} />
-
-          <section aria-labelledby="manager-summary-heading">
-            <h2 id="manager-summary-heading" className="sr-only">
+          <section aria-labelledby="manager-kpi-heading">
+            <h2 id="manager-kpi-heading" className="sr-only">
               Contract Summary
             </h2>
-            <ManagerSummaryCards summary={data?.manager?.summary} needsAction={needsAction} status={status} />
-            <SecondaryMetricsStrip summary={data?.manager?.summary} />
+            <ManagerKpiGrid data={data} status={status} />
           </section>
 
-          <section id="priority-actions" aria-labelledby="attention-heading">
-            <h2 id="attention-heading" className="text-base font-semibold text-text-primary">
-              Priority Actions
-            </h2>
-            <p className="text-xs text-text-muted mb-2">Top items requiring manager review or follow-up.</p>
-            <ManagerAttentionTable rows={attentionRows} />
-          </section>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <DisciplineProgressPanel overview={data?.manager?.workflowOverview ?? []} />
+            <FinancialPerformanceChart financials={insights?.financials} />
+            <div className="space-y-1.5">
+              <DonutChart title="Contracts by Status" segments={contractsByStatus} emptyMessage="No active working contracts found." />
+              {/* CM-69H — a simple, optional audit note (not a full card, per
+                  this unit's own "only if simple and not confusing" caution)
+                  so cancelled contracts stay visible/known without being
+                  counted into the working chart/totals above. */}
+              {data?.metrics && data.metrics.totalCancelled > 0 && (
+                <p className="text-xs text-text-muted px-1">
+                  Cancelled Contracts: {data.metrics.totalCancelled} (excluded from working totals — view via Contract List, Lifecycle Status = Cancelled)
+                </p>
+              )}
+            </div>
+          </div>
 
-          <ManagerSecondaryTabs
-            workflowLoad={<WorkflowOverviewPanel overview={data?.manager?.workflowOverview ?? []} />}
-            upcoming={
-              <UpcomingScheduleList
-                items={data?.manager?.upcomingSchedule ?? []}
-                emptyTitle="No upcoming schedule items in the selected period."
-                emptyDescription="Workflow, payment, issue, claim and contract dates will appear here as they come due."
-              />
-            }
-            recent={
-              <DashboardRecentTable
-                items={data?.recent.slice(0, 5) ?? []}
-                baseHref="/contracts"
-                emptyMessage="No contracts in scope."
-              />
-            }
-          />
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-5">
+            <ManagementAttentionRequiredPanel summary={data?.manager?.summary} insights={insights} />
+            <TopContractsTable
+              title="Top 5 Delayed Contracts"
+              metricColumnLabel="Delay (Days)"
+              rows={(insights?.topDelayedContracts ?? []).map((r) => ({
+                contractId: r.contractId, jobOrderLabel: r.jobOrderLabel, projectName: r.projectName, metricDisplay: String(r.delayDays),
+              }))}
+              emptyMessage="No delayed contracts in scope."
+            />
+            <TopContractsTable
+              title="Top 5 Contracts by Value"
+              metricColumnLabel="Value (KWD)"
+              rows={(insights?.topValueContracts ?? []).map((r) => ({
+                contractId: r.contractId, jobOrderLabel: r.jobOrderLabel, projectName: r.projectName, metricDisplay: formatKwdCompact(r.value, false),
+              }))}
+              emptyMessage="No contracts with a recorded value in scope."
+            />
+            <DonutChart title="Claims Status Overview" segments={claimsByStatus} emptyMessage="No claims in scope." />
+          </div>
         </div>
       )}
 

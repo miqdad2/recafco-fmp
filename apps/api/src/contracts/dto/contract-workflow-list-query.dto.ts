@@ -1,7 +1,7 @@
 import { IsOptional, IsInt, Min, Max, IsString, IsUUID, IsIn, IsBoolean } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
-const CONTRACT_STATUSES = ['DRAFT', 'ACTIVE', 'TERMINATED', 'CLOSED'];
+const CONTRACT_STATUSES = ['DRAFT', 'ACTIVE', 'TERMINATED', 'CLOSED', 'CANCELLED'];
 const WORKFLOW_TEAMS = ['TECHNICAL', 'PRODUCTION', 'ERECTION', 'QS_COMMERCIAL'];
 /** Derived, contract-level summary status — distinct from the per-task ContractWorkflowTaskStatus enum. */
 const WORKFLOW_STATUSES = ['NOT_GENERATED', 'NOT_STARTED', 'IN_PROGRESS', 'COMPLETED'];

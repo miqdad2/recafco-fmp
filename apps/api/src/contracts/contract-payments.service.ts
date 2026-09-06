@@ -12,6 +12,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractPaymentDto } from './dto/create-contract-payment.dto';
 import type { UpdateContractPaymentDto } from './dto/update-contract-payment.dto';
 import type { ContractPaymentListQueryDto } from './dto/contract-payment-list-query.dto';
+import { logContractActivity } from './contract-activity-log';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -166,6 +167,12 @@ export function buildPaymentListWhere(query: ContractPaymentListQueryDto, today:
         { invoiceNumber: { contains: s, mode: 'insensitive' } },
         { contract: { referenceNumber: { contains: s, mode: 'insensitive' } } },
         { contract: { title: { contains: s, mode: 'insensitive' } } },
+        // CM-58 — Contract Detail Payments tab's search box is labeled
+        // "Search by payment no., invoice, remarks..."; remarks was
+        // previously unsearchable even though it's already a real, stored
+        // free-text field. Purely additive to the existing OR — no schema
+        // change, same department-scope AND clause applies regardless.
+        { remarks: { contains: s, mode: 'insensitive' } },
       ],
     });
   }
@@ -379,6 +386,11 @@ export class ContractPaymentsService {
       select: PAYMENT_SELECT,
     });
 
+    await logContractActivity(this.db, contractId, actor, 'payment_created', {
+      paymentId: created.id,
+      paymentNo: created.paymentNo ?? null,
+    });
+
     return withDerivedFields(created, utcToday());
   }
 
@@ -449,6 +461,11 @@ export class ContractPaymentsService {
         ...(dto.remarks !== undefined ? { remarks: dto.remarks } : {}),
       },
       select: PAYMENT_SELECT,
+    });
+
+    await logContractActivity(this.db, existing.contractId, actor, 'payment_updated', {
+      paymentId: updated.id,
+      paymentNo: updated.paymentNo ?? null,
     });
 
     return withDerivedFields(updated, utcToday());

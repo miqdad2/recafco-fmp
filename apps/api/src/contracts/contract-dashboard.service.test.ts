@@ -7,10 +7,16 @@ import {
   buildManagerAttentionItems,
   sortAttentionItems,
   computeManagerSummary,
+  computeManagerFinancials,
+  buildTopDelayedContracts,
+  buildTopValueContracts,
+  countClaimsByStatus,
+  computeManagerInsights,
   computeStaffSummary,
   buildStaffTaskRows,
   buildStaffRecentUpdates,
   type DashboardContractRow,
+  type ManagerAttentionItem,
   type DashboardTaskRow,
   type DashboardIssueRow,
   type DashboardClaimRow,
@@ -35,6 +41,9 @@ function makeContract(overrides: Partial<DashboardContractRow> = {}): DashboardC
     endDate: null,
     forecastCompletionDate: null,
     counterpartyName: 'Acme Co',
+    jobOrder: null,
+    contractValue: null,
+    originalContractValue: null,
     ...overrides,
   };
 }
@@ -326,6 +335,163 @@ describe('computeManagerSummary', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CM-54 — computeManagerFinancials / top-5 lists / claims-by-status / insights
+// ---------------------------------------------------------------------------
+
+function makeAttentionItem(overrides: Partial<ManagerAttentionItem> = {}): ManagerAttentionItem {
+  return {
+    key: 'k1', priority: 'HIGH', actionType: 'OVERDUE_TASK', contractId: 'contract-1',
+    contractReference: 'CONTRACT-2026-000001', contractTitle: 'Test Contract',
+    description: 'desc', date: null, isOverdue: false, overdueDays: null,
+    actionUrl: '/contracts/contract-1', actionLabel: 'View',
+    ...overrides,
+  };
+}
+
+describe('computeManagerFinancials', () => {
+  it('sums contractValue/originalContractValue across contracts, treating missing values as 0', () => {
+    const f = computeManagerFinancials({
+      contracts: [
+        makeContract({ id: 'c1', contractValue: '1000.000', originalContractValue: '900.000' }),
+        makeContract({ id: 'c2', contractValue: '500.000', originalContractValue: null }),
+      ],
+      payments: [], claims: [], today: TODAY,
+    });
+    expect(f.contractValueTotal).toBe(1500);
+    expect(f.originalContractValueTotal).toBe(900);
+  });
+
+  it('reuses computePaymentSummary for submitted/paid/outstanding/overduePayments', () => {
+    const f = computeManagerFinancials({
+      contracts: [],
+      payments: [
+        makePayment({ id: 'p1', submittedAmount: '1000.000', paidAmount: '400.000', status: 'SUBMITTED', dueDate: new Date('2026-08-01') }),
+      ],
+      claims: [], today: TODAY,
+    });
+    expect(f.submittedTotal).toBe(1000);
+    expect(f.paidTotal).toBe(400);
+    expect(f.outstandingTotal).toBe(600);
+    expect(f.overduePayments).toBe(1);
+  });
+
+  it('openClaimsValue only counts non-final claims, excluding APPROVED/REJECTED/SETTLED/CLOSED/CANCELLED', () => {
+    const f = computeManagerFinancials({
+      contracts: [],
+      payments: [],
+      claims: [
+        makeClaim({ id: 'cl1', status: 'SUBMITTED', submittedValue: '1000.000', approvedValue: null }),
+        makeClaim({ id: 'cl2', status: 'SETTLED', submittedValue: '5000.000', approvedValue: '5000.000' }),
+      ],
+      today: TODAY,
+    });
+    expect(f.openClaimsValue).toBe(1000);
+  });
+});
+
+describe('buildTopDelayedContracts', () => {
+  it('ranks contracts by the largest overdueDays among their overdue attention items', () => {
+    const contracts = [makeContract({ id: 'c1' }), makeContract({ id: 'c2', referenceNumber: 'CONTRACT-2026-000002', title: 'Second' })];
+    const items = [
+      makeAttentionItem({ contractId: 'c1', isOverdue: true, overdueDays: 5 }),
+      makeAttentionItem({ contractId: 'c1', isOverdue: true, overdueDays: 12 }),
+      makeAttentionItem({ contractId: 'c2', isOverdue: true, overdueDays: 20 }),
+      makeAttentionItem({ contractId: 'c2', isOverdue: false, overdueDays: null }),
+    ];
+    const result = buildTopDelayedContracts(items, contracts);
+    expect(result).toEqual([
+      { contractId: 'c2', contractReference: 'CONTRACT-2026-000002', jobOrderLabel: 'CONTRACT-2026-000002', projectName: 'Second', delayDays: 20 },
+      { contractId: 'c1', contractReference: 'CONTRACT-2026-000001', jobOrderLabel: 'CONTRACT-2026-000001', projectName: 'Test Contract', delayDays: 12 },
+    ]);
+  });
+
+  it('falls back to referenceNumber for jobOrderLabel when jobOrder is null, uses jobOrder when set', () => {
+    const contracts = [makeContract({ id: 'c1', jobOrder: 'JO-100' })];
+    const items = [makeAttentionItem({ contractId: 'c1', isOverdue: true, overdueDays: 3 })];
+    expect(buildTopDelayedContracts(items, contracts)[0]!.jobOrderLabel).toBe('JO-100');
+  });
+
+  it('excludes contracts with no overdue attention items', () => {
+    const contracts = [makeContract({ id: 'c1' })];
+    const items = [makeAttentionItem({ contractId: 'c1', isOverdue: false, overdueDays: null })];
+    expect(buildTopDelayedContracts(items, contracts)).toEqual([]);
+  });
+});
+
+describe('buildTopValueContracts', () => {
+  it('sorts by contractValue descending and excludes contracts with no value', () => {
+    const contracts = [
+      makeContract({ id: 'c1', contractValue: '500.000' }),
+      makeContract({ id: 'c2', contractValue: '2000.000', referenceNumber: 'CONTRACT-2026-000002', title: 'Big' }),
+      makeContract({ id: 'c3', contractValue: null }),
+    ];
+    const result = buildTopValueContracts(contracts);
+    expect(result.map((r) => r.contractId)).toEqual(['c2', 'c1']);
+    expect(result[0]).toEqual({ contractId: 'c2', contractReference: 'CONTRACT-2026-000002', jobOrderLabel: 'CONTRACT-2026-000002', projectName: 'Big', value: 2000 });
+  });
+
+  it('caps at 5 results', () => {
+    const contracts = Array.from({ length: 8 }, (_, i) => makeContract({ id: `c${i}`, contractValue: `${i + 1}.000` }));
+    expect(buildTopValueContracts(contracts)).toHaveLength(5);
+  });
+});
+
+describe('countClaimsByStatus', () => {
+  it('excludes PARTIALLY_APPROVED but keeps every other real status', () => {
+    const claims = [
+      makeClaim({ id: 'cl1', status: 'DRAFT' }),
+      makeClaim({ id: 'cl2', status: 'PARTIALLY_APPROVED' }),
+      makeClaim({ id: 'cl3', status: 'SETTLED' }),
+      makeClaim({ id: 'cl4', status: 'SETTLED' }),
+    ];
+    const result = countClaimsByStatus(claims);
+    expect(result).toContainEqual({ status: 'DRAFT', count: 1 });
+    expect(result).toContainEqual({ status: 'SETTLED', count: 2 });
+    expect(result.find((r) => r.status === 'PARTIALLY_APPROVED')).toBeUndefined();
+  });
+});
+
+describe('computeManagerInsights', () => {
+  it('counts criticalProjectContracts as distinct contracts with a HIGH priority attention item', () => {
+    const contracts = [makeContract({ id: 'c1' }), makeContract({ id: 'c2', referenceNumber: 'CONTRACT-2026-000002' })];
+    const items = [
+      makeAttentionItem({ contractId: 'c1', priority: 'HIGH' }),
+      makeAttentionItem({ contractId: 'c1', priority: 'HIGH', key: 'k2' }),
+      makeAttentionItem({ contractId: 'c2', priority: 'MEDIUM', key: 'k3' }),
+    ];
+    const insights = computeManagerInsights({ contracts, tasks: [], claims: [], payments: [], sortedAttentionItems: items, today: TODAY });
+    expect(insights.criticalProjectContracts).toBe(1);
+  });
+
+  it('counts overdueWorkflowTasksContracts as distinct contracts, not distinct tasks', () => {
+    const contracts = [makeContract({ id: 'c1' })];
+    const tasks = [
+      makeTask({ id: 't1', contractId: 'c1', dueDate: new Date('2026-08-01') }),
+      makeTask({ id: 't2', contractId: 'c1', dueDate: new Date('2026-08-02') }),
+    ];
+    const insights = computeManagerInsights({ contracts, tasks, claims: [], payments: [], sortedAttentionItems: [], today: TODAY });
+    expect(insights.overdueWorkflowTasksContracts).toBe(1);
+  });
+
+  it('contractsClosingSoon only counts ACTIVE contracts with end/forecast date within the next 60 days', () => {
+    const contracts = [
+      makeContract({ id: 'c1', status: 'ACTIVE', endDate: new Date('2026-09-10') }), // 17 days out
+      makeContract({ id: 'c2', status: 'ACTIVE', endDate: new Date('2026-12-01') }), // too far
+      makeContract({ id: 'c3', status: 'ACTIVE', endDate: new Date('2026-08-01') }), // already past
+      makeContract({ id: 'c4', status: 'DRAFT', endDate: new Date('2026-09-10') }), // not active
+    ];
+    const insights = computeManagerInsights({ contracts, tasks: [], claims: [], payments: [], sortedAttentionItems: [], today: TODAY });
+    expect(insights.contractsClosingSoon).toBe(1);
+  });
+
+  it('claimsWithActionDue reuses computeClaimSummary.overdueClaims', () => {
+    const claims = [makeClaim({ id: 'cl1', status: 'SUBMITTED', dueDate: new Date('2026-08-01') })];
+    const insights = computeManagerInsights({ contracts: [], tasks: [], claims, payments: [], sortedAttentionItems: [], today: TODAY });
+    expect(insights.claimsWithActionDue).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // computeStaffSummary / buildStaffTaskRows
 // ---------------------------------------------------------------------------
 
@@ -437,7 +603,7 @@ const mockDeptAccess = { buildDeptFilter: mockBuildDeptFilter } as unknown as De
 
 const BASE_DASHBOARD = {
   scope: { type: 'ALL_DEPARTMENTS', departmentNames: [] },
-  metrics: { totalDraft: 0, totalActive: 0, totalExpiring: 0, totalExpired: 0, totalTerminated: 0, totalClosed: 0 },
+  metrics: { totalDraft: 0, totalActive: 0, totalExpiring: 0, totalExpired: 0, totalTerminated: 0, totalClosed: 0, totalCancelled: 0 },
   recent: [],
 };
 const mockGetBaseDashboard = vi.fn().mockResolvedValue(BASE_DASHBOARD);
@@ -507,6 +673,25 @@ describe('ContractDashboardService.getDashboard', () => {
     expect(result.manager!.summary.dueThisWeek).toBe(2);
   });
 
+  it('populates manager.insights with real financial totals end-to-end', async () => {
+    mockContractFindMany.mockResolvedValue([makeContract({ contractValue: '10000.000', originalContractValue: '9000.000' })]);
+    mockWorkflowTaskFindMany.mockResolvedValue([]);
+    mockIssueFindMany.mockResolvedValue([]);
+    mockClaimFindMany.mockResolvedValue([]);
+    mockPaymentFindMany.mockResolvedValue([
+      makePayment({ submittedAmount: '2000.000', paidAmount: '500.000' }),
+    ]);
+    mockCloseoutRequestFindMany.mockResolvedValue([]);
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    expect(result.manager!.insights.financials.contractValueTotal).toBe(10000);
+    expect(result.manager!.insights.financials.originalContractValueTotal).toBe(9000);
+    expect(result.manager!.insights.financials.submittedTotal).toBe(2000);
+    expect(result.manager!.insights.financials.paidTotal).toBe(500);
+    expect(result.manager!.insights.topValueContracts).toHaveLength(1);
+  });
+
   it('returns dashboardType STAFF with a staff payload for a staff actor', async () => {
     mockContractFindMany.mockResolvedValue([makeContract()]);
     mockWorkflowTaskFindMany.mockResolvedValue([makeTask({ responsibleUserId: ACTOR_STAFF.id })]);
@@ -525,7 +710,16 @@ describe('ContractDashboardService.getDashboard', () => {
     await service.getDashboard(ACTOR_MANAGER);
 
     const callArgs = mockContractFindMany.mock.calls[0]![0];
-    expect(callArgs.where).toEqual({ departmentId: { in: ['dept-1'] } });
+    expect(callArgs.where).toEqual({ status: { not: 'CANCELLED' }, departmentId: { in: ['dept-1'] } });
+  });
+
+  it('CM-69H — excludes CANCELLED contracts from the candidate-contract query even with no department filter', async () => {
+    mockContractFindMany.mockResolvedValue([]);
+
+    await service.getDashboard(ACTOR_MANAGER);
+
+    const callArgs = mockContractFindMany.mock.calls[0]![0];
+    expect(callArgs.where).toEqual({ status: { not: 'CANCELLED' } });
   });
 
   it('staff query filters workflow tasks to contractId in candidates AND responsibleUserId = actor.id', async () => {

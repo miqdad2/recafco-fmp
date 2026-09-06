@@ -344,6 +344,55 @@ export async function updateContractAction(
 }
 
 // ---------------------------------------------------------------------------
+// CM-55 — manager-facing schedule/progress status (Contract List Status
+// dropdown). Deliberately its own endpoint/action — see
+// PATCH /contracts/:id/schedule-status in the API: no version required, no
+// lifecycle change, never bypasses closeout.
+// ---------------------------------------------------------------------------
+
+export async function updateContractScheduleStatusAction(id: string, scheduleStatus: string): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${id}/schedule-status`, 'PATCH', { scheduleStatus });
+  if (!result.ok) return { error: result.message ?? 'Failed to update status' };
+
+  revalidatePath('/contracts');
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// CM-68A — Contract Detail Schedule (Planned vs Actual). A genuinely
+// different concept from the manager-facing scheduleStatus dropdown above —
+// this saves the real PLANNED milestone dates for one contract's fixed
+// 8-stage schedule (ContractScheduleItem). Takes a plain typed array
+// argument (not FormData) since the Edit Planned Schedule drawer collects
+// several rows at once — same "direct typed args" shape already established
+// by updateContractScheduleStatusAction/activateContractAction above, just
+// with a structured array payload. Actual values are never sent from here —
+// the backend always derives them live, this endpoint only ever writes
+// planned fields.
+// ---------------------------------------------------------------------------
+
+export async function updateContractSchedulePlanAction(
+  contractId: string,
+  items: {
+    stageKey: string;
+    stageName?: string | undefined;
+    responsibleTeam?: string | undefined;
+    plannedStartDate?: string | undefined;
+    plannedEndDate?: string | undefined;
+    plannedQuantity?: number | undefined;
+    plannedMolds?: number | undefined;
+    remarks?: string | undefined;
+    isRequired?: boolean | undefined;
+  }[],
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/schedule/planned`, 'PATCH', { items });
+  if (!result.ok) return { error: result.message ?? 'Planned schedule could not be saved.' };
+
+  revalidatePath(`/contracts/${contractId}/schedule`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
 // Activate contract
 // ---------------------------------------------------------------------------
 
@@ -372,6 +421,34 @@ export async function terminateContractAction(
   if (!result.ok) return { error: result.message ?? 'Failed to terminate contract' };
 
   revalidatePath('/contracts');
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// CM-69A — Cancel/Void contract (safe alternative to hard deletion). Same
+// required-reason/version pattern as terminateContractAction above; the
+// label shown to the user is "Cancel Contract" (ACTIVE) or "Remove Draft"
+// (DRAFT) depending on the contract's current status, but both call this
+// same endpoint/action — there is no separate hard-delete path anywhere.
+// ---------------------------------------------------------------------------
+
+export async function cancelContractAction(id: string, version: number, reason: string): Promise<ActionResult> {
+  const trimmed = reason.trim();
+  if (!trimmed) return { error: 'Cancellation reason is required' };
+
+  const result = await actionFetch(`/contracts/${id}/cancel`, 'POST', { reason: trimmed, version });
+  if (!result.ok) return { error: result.message ?? 'Failed to cancel contract' };
+
+  // CM-69H — a cancelled contract must stop counting toward every page that
+  // shows "active/working" data, not just the List it's redirected back to.
+  // Cache invalidation is the actual fix here — there is no real-time
+  // websocket dashboard in this app, so a stale cached render (Next.js
+  // Data Cache/Router Cache) is the only way old numbers could persist past
+  // a real redirect/refresh.
+  revalidatePath('/contracts');
+  revalidatePath('/contracts/dashboard');
+  revalidatePath('/contracts/schedule');
+  revalidatePath(`/contracts/${id}`);
   return { error: null };
 }
 
@@ -472,6 +549,254 @@ export async function cancelPaymentAction(paymentId: string): Promise<ActionResu
   if (!result.ok) return { error: result.message ?? 'Failed to cancel payment' };
 
   revalidatePath('/contracts/payments');
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Production Status (CM-59 — contract-scoped, per-BOQ-item upsert)
+// ---------------------------------------------------------------------------
+
+function readProductionFields(formData: FormData): Record<string, unknown> {
+  const producedQtyRaw = (formData.get('producedQty') as string | null)?.trim();
+  const producedQty = producedQtyRaw ? parseFloat(producedQtyRaw) : undefined;
+  const deliveredQtyRaw = (formData.get('deliveredQty') as string | null)?.trim();
+  const deliveredQty = deliveredQtyRaw ? parseFloat(deliveredQtyRaw) : undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(producedQty !== undefined && !isNaN(producedQty) ? { producedQty } : {}),
+    ...(deliveredQty !== undefined && !isNaN(deliveredQty) ? { deliveredQty } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function updateProductionAction(
+  itemId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/production/${itemId}`, 'PATCH', readProductionFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Production could not be updated.' };
+
+  revalidatePath(`/contracts/${contractId}/production`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Variations / Change Orders (CM-60 — contract-scoped)
+// ---------------------------------------------------------------------------
+
+function readVariationFields(formData: FormData): Record<string, unknown> {
+  const variationNo = (formData.get('variationNo') as string | null)?.trim() || undefined;
+  const description = (formData.get('description') as string | null)?.trim();
+  const amountRaw = (formData.get('amount') as string | null)?.trim();
+  const amount = amountRaw ? parseFloat(amountRaw) : undefined;
+  // Real checkbox, always rendered — its presence in FormData IS the value
+  // (checked vs unchecked), so this is always sent explicitly, never
+  // conditionally omitted like the optional text fields below.
+  const affectsContractValue = formData.get('affectsContractValue') === 'true';
+  const status = (formData.get('status') as string | null) || undefined;
+  const submittedDate = (formData.get('submittedDate') as string | null) || undefined;
+  const approvedDate = (formData.get('approvedDate') as string | null) || undefined;
+  const supportingDocumentName = (formData.get('supportingDocumentName') as string | null)?.trim() || undefined;
+  const supportingDocumentUrl = (formData.get('supportingDocumentUrl') as string | null)?.trim() || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(variationNo !== undefined ? { variationNo } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(amount !== undefined && !isNaN(amount) ? { amount } : {}),
+    affectsContractValue,
+    ...(status !== undefined ? { status } : {}),
+    ...(submittedDate !== undefined ? { submittedDate } : {}),
+    ...(approvedDate !== undefined ? { approvedDate } : {}),
+    ...(supportingDocumentName !== undefined ? { supportingDocumentName } : {}),
+    ...(supportingDocumentUrl !== undefined ? { supportingDocumentUrl } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createVariationAction(
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/variations`, 'POST', readVariationFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Variation could not be created.' };
+
+  revalidatePath(`/contracts/${contractId}/variations`);
+  return { error: null };
+}
+
+export async function updateVariationAction(
+  variationId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/variations/${variationId}`, 'PATCH', readVariationFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Variation could not be updated.' };
+
+  revalidatePath(`/contracts/${contractId}/variations`);
+  return { error: null };
+}
+
+// CM-60C — real supporting-document upload. Only meaningful once the
+// variation already exists (contractId/variationId both required), matching
+// this unit's own "create the variation first, then attach files in Edit"
+// decision — see contract-variation-form-modal.tsx.
+export async function uploadVariationAttachmentAction(
+  contractId: string,
+  variationId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/variations/${variationId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/variations`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Risk Assessment (CM-62 — contract-scoped)
+// ---------------------------------------------------------------------------
+
+function readRiskFields(formData: FormData): Record<string, unknown> {
+  const riskNo = (formData.get('riskNo') as string | null)?.trim() || undefined;
+  const description = (formData.get('description') as string | null)?.trim();
+  const riskEvaluation = (formData.get('riskEvaluation') as string | null) || undefined;
+  const riskResponse = (formData.get('riskResponse') as string | null) || undefined;
+  const riskResponseDescription = (formData.get('riskResponseDescription') as string | null)?.trim() || undefined;
+  // Manual only — never derived here from riskEvaluation/riskResponse.
+  const residualRisk = (formData.get('residualRisk') as string | null) || undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const responsibleUserId = (formData.get('responsibleUserId') as string | null) || undefined;
+  const actionDueDate = (formData.get('actionDueDate') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(riskNo !== undefined ? { riskNo } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(riskEvaluation !== undefined ? { riskEvaluation } : {}),
+    ...(riskResponse !== undefined ? { riskResponse } : {}),
+    ...(riskResponseDescription !== undefined ? { riskResponseDescription } : {}),
+    ...(residualRisk !== undefined ? { residualRisk } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(responsibleUserId !== undefined ? { responsibleUserId } : {}),
+    ...(actionDueDate !== undefined ? { actionDueDate } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createRiskAction(
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/risks`, 'POST', readRiskFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Risk could not be created.' };
+
+  revalidatePath(`/contracts/${contractId}/risks`);
+  return { error: null };
+}
+
+export async function updateRiskAction(
+  riskId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/risks/${riskId}`, 'PATCH', readRiskFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Risk could not be updated.' };
+
+  revalidatePath(`/contracts/${contractId}/risks`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Contract Documents & Obligations (CM-63 — contract-scoped)
+// ---------------------------------------------------------------------------
+
+function readDocumentObligationFields(formData: FormData): Record<string, unknown> {
+  const itemNo = (formData.get('itemNo') as string | null)?.trim() || undefined;
+  const title = (formData.get('title') as string | null)?.trim();
+  const category = (formData.get('category') as string | null) || undefined;
+  const responsibleParty = (formData.get('responsibleParty') as string | null)?.trim() || undefined;
+  const requiredDate = (formData.get('requiredDate') as string | null) || undefined;
+  const submissionOrExpiryDate = (formData.get('submissionOrExpiryDate') as string | null) || undefined;
+  const submissionDate = (formData.get('submissionDate') as string | null) || undefined;
+  const expiryDate = (formData.get('expiryDate') as string | null) || undefined;
+  const status = (formData.get('status') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() || undefined;
+
+  return {
+    ...(itemNo !== undefined ? { itemNo } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(category !== undefined ? { category } : {}),
+    ...(responsibleParty !== undefined ? { responsibleParty } : {}),
+    ...(requiredDate !== undefined ? { requiredDate } : {}),
+    ...(submissionOrExpiryDate !== undefined ? { submissionOrExpiryDate } : {}),
+    ...(submissionDate !== undefined ? { submissionDate } : {}),
+    ...(expiryDate !== undefined ? { expiryDate } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(remarks !== undefined ? { remarks } : {}),
+  };
+}
+
+export async function createDocumentObligationAction(
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/document-obligations`, 'POST', readDocumentObligationFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Document / obligation could not be created.' };
+
+  revalidatePath(`/contracts/${contractId}/documents`);
+  return { error: null };
+}
+
+export async function updateDocumentObligationAction(
+  itemId: string,
+  contractId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/document-obligations/${itemId}`, 'PATCH', readDocumentObligationFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Document / obligation could not be updated.' };
+
+  revalidatePath(`/contracts/${contractId}/documents`);
+  return { error: null };
+}
+
+// CM-63 — real supporting-document upload. Only meaningful once the item
+// already exists (contractId/itemId both required) — see the Add mode
+// honest note in contract-document-form-modal.tsx.
+export async function uploadDocumentObligationAttachmentAction(
+  contractId: string,
+  itemId: string,
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file before uploading.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/document-obligations/${itemId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/documents`);
   return { error: null };
 }
 

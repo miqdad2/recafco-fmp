@@ -8,7 +8,7 @@ import { Transform } from 'class-transformer';
 // new, task-level filters specific to the unassigned-task list.
 // ---------------------------------------------------------------------------
 
-const CONTRACT_STATUSES = ['DRAFT', 'ACTIVE', 'TERMINATED', 'CLOSED'];
+const CONTRACT_STATUSES = ['DRAFT', 'ACTIVE', 'TERMINATED', 'CLOSED', 'CANCELLED'];
 const WORKFLOW_TEAMS = ['TECHNICAL', 'PRODUCTION', 'ERECTION', 'QS_COMMERCIAL'];
 const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 

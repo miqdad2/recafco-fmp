@@ -19,6 +19,21 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { ContractsService } from './contracts.service';
 import { ContractPaymentsService } from './contract-payments.service';
+import { ContractBoqProductionService } from './contract-boq-production.service';
+import { ContractVariationsService } from './contract-variations.service';
+import { ContractRisksService } from './contract-risks.service';
+import {
+  VariationAttachmentStorageService,
+  VARIATION_ATTACHMENT_MAX_BYTES,
+  VARIATION_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './variation-attachment-storage.service';
+import { ContractDocumentObligationsService } from './contract-document-obligations.service';
+import {
+  DocumentObligationAttachmentStorageService,
+  DOCUMENT_OBLIGATION_ATTACHMENT_MAX_BYTES,
+  DOCUMENT_OBLIGATION_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './document-obligation-attachment-storage.service';
+import { ContractAttachmentsService } from './contract-attachments.service';
 import { ContractWorkflowService } from './contract-workflow.service';
 import {
   WorkflowAttachmentStorageService,
@@ -34,17 +49,28 @@ import {
   CLOSEOUT_ATTACHMENT_ALLOWED_MIME_TYPES,
 } from './closeout-attachment-storage.service';
 import { ContractScheduleService } from './contract-schedule.service';
+import { ContractSchedulePlanService } from './contract-schedule-plan.service';
+import { ContractScheduleOverviewService } from './contract-schedule-overview.service';
 import { ContractDashboardService } from './contract-dashboard.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractListQueryDto } from './dto/contract-list-query.dto';
 import { ActivateContractDto } from './dto/activate-contract.dto';
 import { TerminateContractDto } from './dto/terminate-contract.dto';
+import { CancelContractDto } from './dto/cancel-contract.dto';
 import { CloseContractDto } from './dto/close-contract.dto';
 import { AddCommentDto } from './dto/add-comment.dto';
+import { UpdateContractScheduleStatusDto } from './dto/update-contract-schedule-status.dto';
 import { CreateContractPaymentDto } from './dto/create-contract-payment.dto';
 import { UpdateContractPaymentDto } from './dto/update-contract-payment.dto';
 import { ContractPaymentListQueryDto } from './dto/contract-payment-list-query.dto';
+import { UpdateContractBoqItemProductionDto } from './dto/update-contract-boq-item-production.dto';
+import { CreateContractVariationDto } from './dto/create-contract-variation.dto';
+import { UpdateContractVariationDto } from './dto/update-contract-variation.dto';
+import { CreateContractRiskDto } from './dto/create-contract-risk.dto';
+import { UpdateContractRiskDto } from './dto/update-contract-risk.dto';
+import { CreateContractDocumentObligationDto } from './dto/create-contract-document-obligation.dto';
+import { UpdateContractDocumentObligationDto } from './dto/update-contract-document-obligation.dto';
 import { UpdateContractWorkflowTaskDto } from './dto/update-contract-workflow-task.dto';
 import { ContractWorkflowListQueryDto } from './dto/contract-workflow-list-query.dto';
 import { ContractWorkflowAssignmentQueueQueryDto } from './dto/contract-workflow-assignment-queue-query.dto';
@@ -62,6 +88,7 @@ import { UpdateContractCloseoutRequestDto } from './dto/update-contract-closeout
 import { ReviewContractCloseoutRequestDto } from './dto/review-contract-closeout-request.dto';
 import { RejectContractCloseoutRequestDto } from './dto/reject-contract-closeout-request.dto';
 import { ContractScheduleListQueryDto } from './dto/contract-schedule-list-query.dto';
+import { UpdateContractSchedulePlanDto } from './dto/update-contract-schedule-plan.dto';
 import { ContractCloseoutListQueryDto } from './dto/contract-closeout-list-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
@@ -91,6 +118,13 @@ export class ContractsController {
   constructor(
     private readonly contractsService: ContractsService,
     private readonly contractPaymentsService: ContractPaymentsService,
+    private readonly contractBoqProductionService: ContractBoqProductionService,
+    private readonly contractVariationsService: ContractVariationsService,
+    private readonly contractRisksService: ContractRisksService,
+    private readonly variationAttachmentStorage: VariationAttachmentStorageService,
+    private readonly contractDocumentObligationsService: ContractDocumentObligationsService,
+    private readonly documentObligationAttachmentStorage: DocumentObligationAttachmentStorageService,
+    private readonly contractAttachmentsService: ContractAttachmentsService,
     private readonly contractWorkflowService: ContractWorkflowService,
     private readonly contractIssuesService: ContractIssuesService,
     private readonly contractClaimsService: ContractClaimsService,
@@ -98,6 +132,8 @@ export class ContractsController {
     private readonly contractCloseoutService: ContractCloseoutService,
     private readonly closeoutAttachmentStorage: CloseoutAttachmentStorageService,
     private readonly contractScheduleService: ContractScheduleService,
+    private readonly contractSchedulePlanService: ContractSchedulePlanService,
+    private readonly contractScheduleOverviewService: ContractScheduleOverviewService,
     private readonly contractDashboardService: ContractDashboardService,
   ) {}
 
@@ -106,9 +142,12 @@ export class ContractsController {
   @Get('summary')
   @Permissions('contracts.read')
   async summary(
+    @Query() query: ContractListQueryDto,
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const data = await this.contractsService.getSummary(actor);
+    // CM-69I — same query shape as the list() route below, so the KPI cards
+    // are always computed over the identical filtered scope as the table.
+    const data = await this.contractsService.getSummary(actor, query);
     return { data, meta: meta(), error: null };
   }
 
@@ -249,6 +288,19 @@ export class ContractsController {
     return { data: result, meta: meta(), error: null };
   }
 
+  // CM-68B — schedule/overview MUST be declared before both 'schedule' and
+  // /:id (same route-conflict reason as summary/people/payments/workflow/
+  // issues/claims/schedule below) — the global, all-contract Planned vs
+  // Actual overview (reuses CM-68A's per-contract derivation, computed for
+  // every department-scoped contract), distinct from BOTH the due-date
+  // register below and a single contract's own schedule tab.
+  @Get('schedule/overview')
+  @Permissions('contracts.read')
+  async getContractScheduleOverview(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractScheduleOverviewService.getOverview(actor);
+    return { data, meta: meta(), error: null };
+  }
+
   // schedule MUST be declared before /:id to avoid route conflict (same
   // reason summary/people/payments/workflow/issues/claims are declared
   // above) — this is the module-level, read-only schedule aggregation (all
@@ -300,6 +352,20 @@ export class ContractsController {
     return { data: contract, meta: meta(), error: null };
   }
 
+  // CM-55 — manager-facing schedule/progress status (Contract List Status
+  // column). Independent of update() above: no DRAFT-only gate, never
+  // touches Contract.status/lifecycle, never interacts with closeout.
+  @Patch(':id/schedule-status')
+  @Permissions('contracts.update')
+  async updateScheduleStatus(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: UpdateContractScheduleStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const contract = await this.contractsService.updateScheduleStatus(id, dto, actor);
+    return { data: contract, meta: meta(), error: null };
+  }
+
   @Post(':id/activate')
   @HttpCode(200)
   @Permissions('contracts.activate')
@@ -321,6 +387,18 @@ export class ContractsController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
     const contract = await this.contractsService.terminate(id, dto, actor);
+    return { data: contract, meta: meta(), error: null };
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @AnyPermission('contracts.update', 'contracts.manage')
+  async cancel(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CancelContractDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const contract = await this.contractsService.cancel(id, dto, actor);
     return { data: contract, meta: meta(), error: null };
   }
 
@@ -404,14 +482,344 @@ export class ContractsController {
     return { data, meta: meta(), error: null };
   }
 
+  // CM-57 — read-only per-team task counts for the Contract Detail Overview's
+  // Progress/Production summary cards. Deliberately a separate endpoint from
+  // GET :id/workflow above, which lazily generates the default task set on
+  // first view — Overview must never trigger that as a side effect of simply
+  // being opened.
+  @Get(':id/workflow-summary')
+  @Permissions('contracts.read')
+  async getWorkflowSummary(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractWorkflowService.getWorkflowSummaryForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-68A — replaces the old CM-34 due-date aggregation for the per-contract
+  // tab (findAllForContract below is now unused/removed — this was its only
+  // real consumer, confirmed via audit) with the real Planned vs Actual
+  // schedule detail. The module-level register (GET /contracts/schedule,
+  // findAll() below) is untouched — a separate CM-68B unit's concern.
   @Get(':id/schedule')
   @Permissions('contracts.read')
   async getContractSchedule(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
-    const data = await this.contractScheduleService.findAllForContract(id, actor);
+    const data = await this.contractSchedulePlanService.getScheduleDetail(id, actor);
     return { data, meta: meta(), error: null };
+  }
+
+  @Patch(':id/schedule/planned')
+  @Permissions('contracts.update')
+  async updateContractSchedulePlan(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: UpdateContractSchedulePlanDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractSchedulePlanService.updatePlan(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-59 — Production Status is manually tracked inside Contract Management
+  // (no Production Module integration exists); one contract-scoped, read-only
+  // list of BOQ items + their production tracking, mirroring the `:id/schedule`
+  // pattern above (unpaginated, contract-scoped, no query DTO needed).
+  @Get(':id/production')
+  @Permissions('contracts.read')
+  async getContractProduction(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractBoqProductionService.findAllForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 path segments (production/:itemId) — cannot collide with the 1-segment
+  // ':id' pattern above regardless of declaration order, same reasoning as
+  // 'payments/:paymentId'. :itemId is a ContractBoqItem id, not a contract id
+  // — production tracking is upserted per BOQ item.
+  @Patch('production/:itemId')
+  @Permissions('contracts.update')
+  async updateContractProduction(
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @Body() dto: UpdateContractBoqItemProductionDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractBoqProductionService.upsertForItem(itemId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-60 — Variations / Change Orders. Contract-scoped, unpaginated, same
+  // pattern as :id/schedule and :id/production above — no module-level
+  // Variations register exists (or is requested) in this unit.
+  @Get(':id/variations')
+  @Permissions('contracts.read')
+  async getContractVariations(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractVariationsService.findAllForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/variations')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createContractVariation(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractVariationDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractVariationsService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 path segments (variations/:variationId) — cannot collide with the
+  // 1-segment ':id' pattern above, same reasoning as 'payments/:paymentId'
+  // and 'production/:itemId'.
+  @Patch('variations/:variationId')
+  @Permissions('contracts.update')
+  async updateContractVariation(
+    @Param('variationId', new ParseUUIDPipe({ version: '4' })) variationId: string,
+    @Body() dto: UpdateContractVariationDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractVariationsService.update(variationId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-60C — Variation supporting documents. Nested under :id (contract) AND
+  // :variationId so the service can verify the variation actually belongs to
+  // that exact contract, not just that variationId resolves to some
+  // variation — see ContractVariationsService.loadVariationForContract().
+  @Get(':id/variations/:variationId/attachments')
+  @Permissions('contracts.read')
+  async listVariationAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('variationId', new ParseUUIDPipe({ version: '4' })) variationId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractVariationsService.listAttachments(id, variationId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/variations/:variationId/attachments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: VARIATION_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(VARIATION_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_VARIATION_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadVariationAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('variationId', new ParseUUIDPipe({ version: '4' })) variationId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractVariationsService.createAttachment(id, variationId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 6 path segments — cannot collide with any shorter route regardless of
+  // declaration order, same reasoning as the workflow task attachment routes.
+  @Get(':id/variations/:variationId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadVariationAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('variationId', new ParseUUIDPipe({ version: '4' })) variationId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractVariationsService.getAttachmentForDownload(
+      id,
+      variationId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.variationAttachmentStorage.createReadStream(storagePath));
+  }
+
+  // CM-60C — read-only aggregation across the 3 existing attachment tables
+  // (workflow task, closeout, variation) for the contract's own Attachments
+  // tab. No new upload path — each source keeps its own real upload flow;
+  // this only lists what already exists with a real download link into that
+  // source's own already-scoped download endpoint.
+  @Get(':id/attachments')
+  @Permissions('contracts.read')
+  async getContractAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractAttachmentsService.listAllForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-62 — Risk Assessment. Contract-scoped, unpaginated, same pattern as
+  // :id/schedule, :id/production, :id/variations above — no module-level
+  // Risk register exists (or is requested) in this unit.
+  @Get(':id/risks')
+  @Permissions('contracts.read')
+  async getContractRisks(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractRisksService.findAllForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/risks')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createContractRisk(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractRiskDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractRisksService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 path segments (risks/:riskId) — cannot collide with the 1-segment
+  // ':id' pattern above, same reasoning as 'variations/:variationId'.
+  @Patch('risks/:riskId')
+  @Permissions('contracts.update')
+  async updateContractRisk(
+    @Param('riskId', new ParseUUIDPipe({ version: '4' })) riskId: string,
+    @Body() dto: UpdateContractRiskDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractRisksService.update(riskId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-63 — Documents & Obligations. Contract-scoped, unpaginated, same
+  // pattern as :id/risks/:id/variations above — no module-level register
+  // exists (or is requested) in this unit.
+  @Get(':id/document-obligations')
+  @Permissions('contracts.read')
+  async getContractDocumentObligations(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractDocumentObligationsService.findAllForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/document-obligations')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createContractDocumentObligation(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractDocumentObligationDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractDocumentObligationsService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 path segments (document-obligations/:itemId) — cannot collide with the
+  // 1-segment ':id' pattern above, same reasoning as 'risks/:riskId'.
+  @Patch('document-obligations/:itemId')
+  @Permissions('contracts.update')
+  async updateContractDocumentObligation(
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @Body() dto: UpdateContractDocumentObligationDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractDocumentObligationsService.update(itemId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-63 — Documents & Obligations supporting files. Nested under :id
+  // (contract) AND :itemId so the service can verify the item actually
+  // belongs to that exact contract, same reasoning as the variation
+  // attachment routes above.
+  @Get(':id/document-obligations/:itemId/attachments')
+  @Permissions('contracts.read')
+  async listDocumentObligationAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractDocumentObligationsService.listAttachments(id, itemId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/document-obligations/:itemId/attachments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: DOCUMENT_OBLIGATION_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(DOCUMENT_OBLIGATION_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_DOCUMENT_OBLIGATION_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadDocumentObligationAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractDocumentObligationsService.createAttachment(id, itemId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 6 path segments — cannot collide with any shorter route regardless of
+  // declaration order, same reasoning as the variation attachment routes.
+  @Get(':id/document-obligations/:itemId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadDocumentObligationAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('itemId', new ParseUUIDPipe({ version: '4' })) itemId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractDocumentObligationsService.getAttachmentForDownload(
+      id,
+      itemId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.documentObligationAttachmentStorage.createReadStream(storagePath));
   }
 
   @Post(':id/workflow/regenerate')
