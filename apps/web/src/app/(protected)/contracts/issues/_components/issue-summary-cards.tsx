@@ -43,7 +43,7 @@ export function IssueSummaryCards({ summary }: Props): React.JSX.Element {
         label="Overdue Issues"
         value={summary?.overdueIssues}
         icon={Clock}
-        iconColor="text-danger"
+        iconColor="text-error"
         status={status}
       />
       <MetricCard

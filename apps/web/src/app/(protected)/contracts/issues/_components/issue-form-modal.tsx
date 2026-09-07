@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { ActionResult } from '../../actions';
 import { createIssueAction, updateIssueAction } from '../../actions';
 import type { ContractIssue, ContractIssueStatus, ContractPerson } from '@/lib/contracts-api';
 import { CONTRACT_ISSUE_CATEGORIES } from '../../_lib/contract-ui-helpers';
@@ -81,21 +80,14 @@ function todayIso(): string {
 export function IssueFormModal({ mode, contracts, fixedContractId, fixedContract, issue, people, onClose }: Props): React.JSX.Element {
   const router = useRouter();
   const contractId = fixedContractId ?? issue?.contractId;
-  const action = mode === 'edit' && issue ? updateIssueAction.bind(null, issue.id, issue.contractId) : createIssueAction;
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
   const [status, setStatus] = useState<ContractIssueStatus>(issue?.status ?? 'OPEN');
   const [clientError, setClientError] = useState<string | null>(null);
-  const submittedRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     const formData = new FormData(e.currentTarget);
     const errors = validateIssueFormValues({
       title: String(formData.get('title') ?? ''),
@@ -107,12 +99,32 @@ export function IssueFormModal({ mode, contracts, fixedContractId, fixedContract
       remarks: String(formData.get('remarks') ?? ''),
     });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+    setIsSaving(true);
+    try {
+      const result =
+        mode === 'edit' && issue
+          ? await updateIssueAction(issue.id, issue.contractId, { error: null }, formData)
+          : await createIssueAction({ error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      onClose();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Issue saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save issue:', err);
+      setClientError('Failed to save issue. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const showResolution = RESOLUTION_STATUSES.includes(status);
@@ -142,10 +154,10 @@ export function IssueFormModal({ mode, contracts, fixedContractId, fixedContract
           </button>
         </div>
 
-        <form id="issue-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="issue-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -358,10 +370,10 @@ export function IssueFormModal({ mode, contracts, fixedContractId, fixedContract
           <button
             type="submit"
             form="issue-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Issue' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Issue' : 'Save Changes'}
           </button>
         </div>
       </div>

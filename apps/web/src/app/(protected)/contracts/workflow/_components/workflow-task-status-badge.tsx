@@ -6,7 +6,7 @@ const STATUS_STYLES: Record<ContractWorkflowTaskStatus, string> = {
   SUBMITTED: 'bg-info-light text-info',
   UNDER_REVIEW: 'bg-warning-light text-warning',
   APPROVED: 'bg-success-light text-success',
-  REJECTED: 'bg-danger-light text-danger',
+  REJECTED: 'bg-error-light text-error',
   COMPLETED: 'bg-success-light text-success',
   ON_HOLD: 'bg-surface-secondary text-text-muted',
 };

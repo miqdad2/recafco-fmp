@@ -44,7 +44,7 @@ export function PaymentSummaryCards({ summary }: Props): React.JSX.Element {
         label="Overdue Payments"
         value={summary ? `${summary.overdueCount} (${formatContractValue(summary.overdueValue, 'KWD')})` : undefined}
         icon={AlertTriangle}
-        iconColor="text-danger"
+        iconColor="text-error"
         status={status}
       />
     </div>

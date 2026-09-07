@@ -1848,6 +1848,67 @@ Pure frontend UI/UX unit — no backend, DTO, service, or schema changes. Simpli
 - The tabs are a Server-Components-as-props-into-a-Client-Component pattern: `page.tsx` (a Server Component) renders all three panels' JSX and passes them to `ManagerSecondaryTabs` (`'use client'`), which only toggles which one is visible via `useState` — no additional client-side data fetching, no new API calls, keeping the "prefer no backend change" and performance characteristics identical to CM-37.
 - No live API scripting was needed/run since the backend response shape is provably unchanged (not touched) — verification relied on rendered SSR HTML plus the full existing automated test suites (both unchanged in count, confirming no regressions).
 
+## CM-70J — Contract Management: Fix All Remaining Modal/Form "Saving…" Stuck and Silent Save Issues (Completed 2026-09-07)
+
+### Summary
+
+Broad Contract Management audit/fix unit, continuing directly from CM-70H (Payment modal) and CM-70I (Contract Edit page), which each independently found and fixed the same underlying bug class: an `useActionState` + `submittedRef` + `useEffect`-based "detect success, then close/refresh" pattern that has no independent safety net — if the effect fails to re-fire (root cause still not pinned down with full certainty, suspected React-internals/timing related, possibly recurring independently per-modal), the Save button stays permanently on its "Saving…"/pending label with the modal open even though the backend write already succeeded. User specifically reported this reproduced on Add Claim. Audited every Contract Management modal/form for the same signature and rewrote every one found fragile to a robust, explicit pattern: a plain `useState<boolean>` (`isSaving`)/`async function handleSubmit(e)` that always `e.preventDefault()`s, guards against double-submit, calls the server action directly (no `action={formAction}` prop needed — Next.js server actions are callable as plain async functions from client code), and wraps the call in `try/catch/finally` — `onClose()`/navigation happens unconditionally on success *before* `router.refresh()`, which is itself wrapped in its own try/catch (a refresh failure is logged via `console.warn` but never blocks the already-successful close, and never leaves the button stuck). Also swept a second, independent bug class: three more Server Actions (`closeContractAction`, `addContractCommentAction`, plus `activateContractAction`/`terminateContractAction` fixed earlier this same investigation) only called `revalidatePath('/contracts')` and never the specific Contract Detail route (`/contracts/${id}`) they're actually invoked from — "the Payments bug" pattern from CM-70H, recurring.
+
+### Root Cause Per Form (all confirmed via the same fragile `useActionState`/`submittedRef`/`useEffect` signature)
+
+| Form/Modal | Root cause | Fix |
+|---|---|---|
+| Add/Edit Claim (`claim-form-modal.tsx`) | Fragile close-detection effect | Rewritten to `isSaving` pattern — **the user-reported bug** |
+| Add/Edit Issue (`issue-form-modal.tsx`) | Fragile close-detection effect | Rewritten to `isSaving` pattern |
+| Add/Edit Variation (`contract-variation-form-modal.tsx`) | Fragile close-detection effect on the main form; **plus** its `SupportingDocumentsSection` upload control was a `<form>` nested inside the outer `<form id="variation-form">` — invalid HTML (same bug class as CM-70G's Documents fix) that can prevent the inner Upload button from reliably reaching its own action | Main form rewritten to `isSaving` pattern; upload section converted to a `<div>` with a `type="button"` Upload button calling the upload dispatcher directly with a manually-built `FormData` |
+| Add/Edit Risk (`contract-risk-form-modal.tsx`) | Fragile close-detection effect | Rewritten to `isSaving` pattern |
+| Add/Edit Document/Obligation (`contract-document-form-modal.tsx`) | Fragile close-detection effect on the main form (its `AttachmentsSection` nested-form bug was already fixed in CM-70G and was left as-is — confirmed still correct) | Main form rewritten to `isSaving` pattern |
+| Add/Update Production Status (`contract-production-form-modal.tsx`) | Fragile close-detection effect | Rewritten to `isSaving` pattern |
+| Assign Task modal (`assign-task-modal.tsx`) | Fragile close-detection effect | Rewritten to `isSaving` pattern (preserves its original `onAssigned()` callback — this modal never called `onClose()` on success, only refresh + notify parent) |
+| Closeout Request form (`contract-closeout-request-form.tsx`) | Fragile close-detection effect (inline form, not a modal — no `onClose`) | Rewritten to `isSaving` pattern; added a real `form.reset()` on success (previously the form fields were never cleared after a successful submit) |
+| Closeout Review/Approve/Reject/Close Contract (`contract-closeout-approval-panel.tsx`) | A local `useSimpleAction()` hook wrapping the same fragile pattern, reused by 3 actions, plus a 4th separate fragile `useActionState` instance for Close Contract | `useSimpleAction()` hook itself rewritten to the `isSaving` pattern (fixes all 4 actions in one place) |
+| Closeout Request Attachments upload (`contract-closeout-request-attachments.tsx`) | Fragile close-detection effect; also used a mutated `useRef` as a React `key` (does not reliably force a remount) | Rewritten to `isSaving` pattern with a real `useState` form-reset key |
+| Workflow Task Drawer — Manager Update / Add Comment / Upload Attachment (`workflow-task-drawer.tsx`) | 3 separate fragile close-detection effects | All 3 rewritten to the `isSaving` pattern |
+| Staff Task Update Panel — Save Draft/Save Update/Submit/Send Back/Reject/Mark Complete, Add Progress Update, Upload Work Document (`staff-task-update-panel.tsx`) | 3 separate fragile close-detection effects, plus a `pendingStatusSubmit`/`formRef.current?.requestSubmit()` mechanism (sets `status` state, waits for it to flush into the DOM `<select>`, then programmatically submits) that depended on the same fragile pattern for its actual save | All 3 rewritten to the `isSaving` pattern; the `requestSubmit()`/`pendingStatusSubmit` mechanism itself is unchanged and still works correctly, since `requestSubmit()` fires the form's native `submit` event regardless of whether the form has an `action` prop — it now invokes the new plain `onSubmit={handleUpdateSubmit}` handler exactly as before |
+
+**Confirmed NOT fragile, left unchanged**: `contract-schedule-edit-drawer.tsx` (Schedule Planned modal) already used `useTransition`+`startTransition` directly, inherently safe since `isPending` is tied to the transition's own promise with close/refresh inline in the same callback — no separate detection effect to fail. `edit-contract-form.tsx` (Contract Edit page, CM-70I) and `new-contract-form.tsx` (New Contract Register, out of scope) use `useActionState` but with **no** `submittedRef`/`useEffect` close-detection — `isPending` is shown directly and is reliable on its own since it's native to the hook; only the *external effect* layered on top was ever the actual failure mode. File-upload sub-sections inside already-fixed modals (Variation/Document `SupportingDocumentsSection`/`AttachmentsSection`, kept on `useActionState`) are likewise safe by the same reasoning — their `isUploading` can never get stuck, only the cosmetic "reload the attachment list" side effect could silently no-op, which is not the reported bug class.
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/actions.ts` — `cancelPaymentAction` now accepts optional `contractId` and revalidates `/contracts/${contractId}/payments`; `activateContractAction`, `terminateContractAction`, `closeContractAction`, `addContractCommentAction` now also revalidate `/contracts/${id}` (previously module-level only)
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/payments/_components/contract-payment-tracker-table.tsx` — passes `contract.id` to `cancelPaymentAction`
+- `apps/web/src/app/(protected)/contracts/claims/_components/claim-form-modal.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/issues/_components/issue-form-modal.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/variations/_components/contract-variation-form-modal.tsx` — `isSaving` rewrite + nested-form upload fix
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/risks/_components/contract-risk-form-modal.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/documents/_components/contract-document-form-modal.tsx` — `isSaving` rewrite (main form only)
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/production/_components/contract-production-form-modal.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assign-task-modal.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/closeout/_components/contract-closeout-request-form.tsx` — `isSaving` rewrite + form reset
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/closeout/_components/contract-closeout-approval-panel.tsx` — `useSimpleAction()` hook + Close Contract action rewritten
+- `apps/web/src/app/(protected)/contracts/[id]/(workspace)/closeout/_components/contract-closeout-request-attachments.tsx` — `isSaving` rewrite
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-drawer.tsx` — all 3 forms rewritten
+- `apps/web/src/app/(protected)/contracts/workflow/_components/staff-task-update-panel.tsx` — all 3 forms rewritten, `requestSubmit()` mechanism preserved
+
+### Verification Results (2026-09-07)
+
+| Command | Result |
+|---|---|
+| `npx eslint` (contracts tree, direct — `next lint` no longer exists in Next.js 16) | ✓ 0 errors, 0 warnings |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 tests |
+| `pnpm --filter @recafco/api test --run` | ✓ 1446/1446 tests (unchanged — no backend touched) |
+| `pnpm build` | ✓ 8/8 tasks, 79 routes, no errors |
+| `pnpm db:migrate:status` | ✓ 38 migrations, up to date — **no migration created** |
+| Dev server smoke test (claims/issues/payments/schedule/workflow/closeouts/dashboard/new routes) | ✓ all return clean 307 (auth redirect), no 500s |
+
+### Key Implementation Notes
+
+- No genuine `bg-danger`/`text-danger`/`border-danger` occurrences were found remaining anywhere in the Contract Management tree at the start of this unit — a prior sweep this same investigation had already replaced all 71 real occurrences across 44 files (3 files' historical documentation comments about the bug were correctly left untouched).
+- The Grep tool can render forward slashes as backslashes for template-literal URL strings in its content-mode output on Windows paths — a false alarm hit twice this investigation (`cancelPaymentAction`, `closeClaimAction`); always verify via the Read tool before concluding a URL string has a formatting bug.
+- `revalidatePath` discipline established/reinforced: any Server Action invoked from a Contract Detail tab route (`/contracts/{id}/{tab}`) must revalidate both the module-level list path and the specific detail-tab path — omitting the latter silently leaves the Contract Detail page showing stale data after a successful save, with no visible error.
+
 ## CM-70I — Fix Contract Edit Page Save Changes Not Persisting (Completed 2026-09-07)
 
 ### Summary

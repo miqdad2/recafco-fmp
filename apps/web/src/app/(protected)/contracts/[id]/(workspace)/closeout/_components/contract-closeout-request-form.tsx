@@ -1,8 +1,7 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { ActionResult } from '../../../../actions';
 import { createCloseoutRequestAction } from '../../../../actions';
 import { inputCls, labelCls } from '../../../../_components/contract-form-fields';
 
@@ -19,28 +18,48 @@ interface Props {
  */
 export function ContractCloseoutRequestForm({ contractId }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = createCloseoutRequestAction.bind(null, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      router.refresh();
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    setClientError(null);
+    setIsSaving(true);
+    try {
+      const result = await createCloseoutRequestAction(contractId, { error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      form.reset();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Closeout request submitted but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to submit closeout request:', err);
+      setClientError('Failed to submit closeout request. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-  }, [state, isPending, router]);
+  }
 
   return (
-    <form action={formAction} onSubmit={() => { submittedRef.current = true; }} className="space-y-4">
-      {state.error && (
-        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-          {state.error}
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {clientError && (
+        <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+          {clientError}
         </div>
       )}
 
       <div>
         <label htmlFor="closeoutSummary" className={labelCls}>
-          Closeout Summary <span className="text-danger">*</span>
+          Closeout Summary <span className="text-error">*</span>
         </label>
         <textarea
           id="closeoutSummary"
@@ -67,10 +86,10 @@ export function ContractCloseoutRequestForm({ contractId }: Props): React.JSX.El
 
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isSaving}
         className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
       >
-        {isPending ? 'Submitting…' : 'Submit Closeout Review'}
+        {isSaving ? 'Submitting…' : 'Submit Closeout Review'}
       </button>
     </form>
   );

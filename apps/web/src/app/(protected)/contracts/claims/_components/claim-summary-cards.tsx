@@ -44,7 +44,7 @@ export function ClaimSummaryCards({ summary }: Props): React.JSX.Element {
         label="Overdue Claims"
         value={summary?.overdueClaims}
         icon={Clock}
-        iconColor="text-danger"
+        iconColor="text-error"
         status={status}
       />
       <MetricCard

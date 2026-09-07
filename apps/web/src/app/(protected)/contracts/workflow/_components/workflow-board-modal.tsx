@@ -121,7 +121,7 @@ export function WorkflowBoardModal({
               <div>
                 <dt className="text-xs text-text-muted">Overdue</dt>
                 <dd className="text-sm font-medium mt-0.5">
-                  {progress.overdue > 0 ? <span className="text-danger">{progress.overdue}</span> : progress.overdue}
+                  {progress.overdue > 0 ? <span className="text-error">{progress.overdue}</span> : progress.overdue}
                 </dd>
               </div>
               <div>

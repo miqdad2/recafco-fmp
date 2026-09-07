@@ -69,7 +69,7 @@ export function ContractPaymentTrackerTable({ payments, contract, canUpdate }: P
     if (!window.confirm('Cancel this payment? This keeps it in the register but marks it Cancelled.')) return;
     setCancellingId(paymentId);
     startTransition(async () => {
-      await cancelPaymentAction(paymentId);
+      await cancelPaymentAction(paymentId, contract.id);
       setCancellingId(null);
       router.refresh();
     });

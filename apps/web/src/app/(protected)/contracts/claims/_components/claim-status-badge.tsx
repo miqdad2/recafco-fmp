@@ -7,7 +7,7 @@ const STATUS_STYLES: Record<ContractClaimStatus, string> = {
   UNDER_NEGOTIATION: 'bg-warning-light text-warning',
   APPROVED: 'bg-success-light text-success',
   PARTIALLY_APPROVED: 'bg-warning-light text-warning',
-  REJECTED: 'bg-danger-light text-danger',
+  REJECTED: 'bg-error-light text-error',
   SETTLED: 'bg-success-light text-success',
   CLOSED: 'bg-success-light text-success',
   CANCELLED: 'bg-surface-secondary text-text-muted line-through',

@@ -170,7 +170,7 @@ export function ContractBoqTable({ rows, onRowsChange, formatTotal }: Props): Re
                     <button
                       type="button"
                       onClick={() => removeRow(row.id)}
-                      className="text-text-muted hover:text-danger focus:outline-none focus:ring-2 focus:ring-focus rounded"
+                      className="text-text-muted hover:text-error focus:outline-none focus:ring-2 focus:ring-focus rounded"
                       title="Remove row"
                     >
                       <Trash2 className="size-3.5" aria-hidden="true" />

@@ -47,7 +47,7 @@ export function WorkflowContractHeader({ detail }: Props): React.JSX.Element {
           <Field label="Total Tasks" value={progress.total} />
           <Field label="Completed" value={progress.completed} />
           <Field label="In Progress" value={progress.inProgress} />
-          <Field label="Overdue" value={progress.overdue > 0 ? <span className="text-danger">{progress.overdue}</span> : 0} />
+          <Field label="Overdue" value={progress.overdue > 0 ? <span className="text-error">{progress.overdue}</span> : 0} />
         </dl>
       )}
     </section>

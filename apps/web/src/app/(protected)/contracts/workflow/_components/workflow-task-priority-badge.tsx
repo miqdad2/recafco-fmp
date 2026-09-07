@@ -4,7 +4,7 @@ const PRIORITY_STYLES: Record<ContractWorkflowTaskPriority, string> = {
   LOW: 'bg-surface-secondary text-text-secondary',
   MEDIUM: 'bg-info-light text-info',
   HIGH: 'bg-warning-light text-warning',
-  CRITICAL: 'bg-danger-light text-danger',
+  CRITICAL: 'bg-error-light text-error',
 };
 
 const PRIORITY_LABELS: Record<ContractWorkflowTaskPriority, string> = {

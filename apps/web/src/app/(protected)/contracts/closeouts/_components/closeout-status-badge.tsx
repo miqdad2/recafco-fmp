@@ -5,7 +5,7 @@ const STATUS_STYLES: Record<ContractCloseoutRequestStatus, string> = {
   SUBMITTED: 'bg-info-light text-info',
   UNDER_REVIEW: 'bg-warning-light text-warning',
   APPROVED: 'bg-success-light text-success',
-  REJECTED: 'bg-danger-light text-danger',
+  REJECTED: 'bg-error-light text-error',
   CLOSED: 'bg-surface-secondary text-text-secondary',
   CANCELLED: 'bg-surface-secondary text-text-muted',
 };

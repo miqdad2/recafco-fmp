@@ -53,7 +53,7 @@ export function StaffTaskTable({ tasks, todayIso, limit }: Props): React.JSX.Ele
             key={t.id}
             className={[
               'flex flex-wrap items-center justify-between gap-2 rounded-md border p-2.5',
-              t.isOverdue ? 'border-danger/40 bg-danger-light/20' : isDueToday ? 'border-warning/40 bg-warning-light/20' : 'border-border bg-surface',
+              t.isOverdue ? 'border-error/40 bg-error-light/20' : isDueToday ? 'border-warning/40 bg-warning-light/20' : 'border-border bg-surface',
             ].join(' ')}
           >
             <div className="min-w-0 flex-1">
@@ -68,11 +68,11 @@ export function StaffTaskTable({ tasks, todayIso, limit }: Props): React.JSX.Ele
               <StaffTaskStatusBadge status={t.status} />
               <StaffTaskPriorityBadge priority={t.priority} />
               {highlighted && (
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${t.isOverdue ? 'bg-danger text-white' : 'bg-warning text-white'}`}>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${t.isOverdue ? 'bg-error text-white' : 'bg-warning text-white'}`}>
                   {t.isOverdue ? 'Overdue' : 'Due Today'}
                 </span>
               )}
-              <span className={`text-xs whitespace-nowrap ${t.isOverdue ? 'text-danger font-medium' : isHighPriority ? 'text-warning font-medium' : 'text-text-secondary'}`}>
+              <span className={`text-xs whitespace-nowrap ${t.isOverdue ? 'text-error font-medium' : isHighPriority ? 'text-warning font-medium' : 'text-text-secondary'}`}>
                 {formatDate(t.dueDate)}
               </span>
               <Link

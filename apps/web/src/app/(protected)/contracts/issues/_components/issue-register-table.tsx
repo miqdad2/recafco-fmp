@@ -110,7 +110,7 @@ export function IssueRegisterTable({ issues, contracts, people, canUpdate, fixed
                   <td className="px-3 py-2 whitespace-nowrap">{formatDate(issue.dueDate)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {issue.overdueDays !== null ? (
-                      <span className="text-danger font-medium">{issue.overdueDays}d</span>
+                      <span className="text-error font-medium">{issue.overdueDays}d</span>
                     ) : '—'}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap"><IssueStatusBadge status={issue.status} /></td>

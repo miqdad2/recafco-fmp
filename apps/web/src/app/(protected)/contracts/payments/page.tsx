@@ -146,7 +146,7 @@ export default async function ContractPaymentsPage({ searchParams }: PageProps):
       />
 
       {error && (
-        <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+        <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
           {error}
         </div>
       )}

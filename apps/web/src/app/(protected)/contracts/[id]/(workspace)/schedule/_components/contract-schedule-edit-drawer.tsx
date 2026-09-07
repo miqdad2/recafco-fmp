@@ -110,7 +110,7 @@ export function ContractScheduleEditButton({ contractId, stages, hasPlannedSched
             </div>
 
             <div className="overflow-y-auto px-5 py-4 space-y-4">
-              {error && <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">{error}</div>}
+              {error && <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">{error}</div>}
               <p className="text-xs text-text-muted">
                 Enter the planned dates for each contract stage. Actual dates are read-only and will appear automatically when teams update workflow, payments, production, delivery/erection, and closeout.
               </p>

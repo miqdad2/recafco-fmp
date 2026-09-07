@@ -82,7 +82,7 @@ export function WorkflowTaskCard({ task, onOpen }: Props): React.JSX.Element {
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs font-medium text-text-primary">{task.taskName}</span>
         {task.isOverdue && (
-          <span className="shrink-0 inline-flex items-center gap-0.5 text-danger" title="Overdue">
+          <span className="shrink-0 inline-flex items-center gap-0.5 text-error" title="Overdue">
             <AlertTriangle className="size-3.5" aria-hidden="true" />
           </span>
         )}

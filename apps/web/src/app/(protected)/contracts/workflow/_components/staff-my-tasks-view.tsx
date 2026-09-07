@@ -163,7 +163,7 @@ function MyTasksBuckets({ tasks }: { tasks: StaffFlatTask[] }): React.JSX.Elemen
           <section key={bucket.key} aria-labelledby={`bucket-${bucket.key}`}>
             <h2
               id={`bucket-${bucket.key}`}
-              className={`text-sm font-semibold mb-2 ${bucket.key === 'overdue' ? 'text-danger' : 'text-text-primary'}`}
+              className={`text-sm font-semibold mb-2 ${bucket.key === 'overdue' ? 'text-error' : 'text-text-primary'}`}
             >
               {bucket.label} ({bucket.tasks.length})
             </h2>

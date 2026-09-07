@@ -42,11 +42,19 @@ function formatUploadedDate(iso: string): string {
  * (through a client-fetchable JSON proxy route) after each successful
  * upload, so multiple uploads in one modal session all show up immediately
  * without closing/reopening.
+ * (unnumbered) — root cause of "Upload does nothing": this section's own
+ * upload `<form>` was nested inside the outer variation `<form
+ * id="variation-form">`, invalid HTML that prevents the inner submit
+ * button from reliably reaching its own action. Fixed the same way as the
+ * Documents modal's AttachmentsSection (CM-70G): converted to a plain
+ * `<div>` with a `type="button"` Upload button calling the upload
+ * dispatcher directly with a manually-built FormData.
  */
 function SupportingDocumentsSection({ contractId, variation }: { contractId: string; variation: ContractVariation }): React.JSX.Element {
   const [attachments, setAttachments] = useState<ContractVariationAttachment[]>(variation.attachments);
   const uploadAction = uploadVariationAttachmentAction.bind(null, contractId, variation.id);
   const [uploadState, uploadFormAction, isUploading] = useActionState<ActionResult, FormData>(uploadAction, { error: null });
+  const [uploadClientError, setUploadClientError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadSubmittedRef = useRef(false);
 
@@ -62,6 +70,19 @@ function SupportingDocumentsSection({ contractId, variation }: { contractId: str
         .catch(() => undefined);
     }
   }, [uploadState, isUploading, contractId, variation.id]);
+
+  function handleUploadClick(): void {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setUploadClientError('Please choose a file before uploading.');
+      return;
+    }
+    setUploadClientError(null);
+    uploadSubmittedRef.current = true;
+    const formData = new FormData();
+    formData.set('file', file);
+    uploadFormAction(formData);
+  }
 
   return (
     <div className="rounded-md border border-border p-3 space-y-3">
@@ -94,28 +115,26 @@ function SupportingDocumentsSection({ contractId, variation }: { contractId: str
         <p className="text-xs text-text-muted">No supporting documents uploaded yet.</p>
       )}
 
-      <form
-        action={uploadFormAction}
-        onSubmit={() => { uploadSubmittedRef.current = true; }}
-        className="flex flex-wrap items-center gap-2"
-      >
+      <div className="flex flex-wrap items-center gap-2">
         <input
           ref={fileInputRef}
           type="file"
           name="file"
           accept=".pdf,.png,.jpg,.jpeg,.xlsx,.docx"
+          onChange={() => setUploadClientError(null)}
           className="flex-1 min-w-40 text-xs text-text-secondary file:mr-2 file:rounded-md file:border file:border-border file:bg-surface file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-text-primary hover:file:bg-surface-secondary"
         />
         <button
-          type="submit"
+          type="button"
+          onClick={handleUploadClick}
           disabled={isUploading}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
         >
           <UploadCloud className="size-3.5 shrink-0" aria-hidden="true" />
           {isUploading ? 'Uploading…' : 'Upload'}
         </button>
-      </form>
-      {uploadState.error && <p className="text-xs text-error">{uploadState.error}</p>}
+      </div>
+      {(uploadClientError ?? uploadState.error) && <p className="text-xs text-error">{uploadClientError ?? uploadState.error}</p>}
       <p className="text-[11px] text-text-muted">Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx). Max 10MB.</p>
     </div>
   );
@@ -146,21 +165,11 @@ function SupportingDocumentsSection({ contractId, variation }: { contractId: str
  */
 export function ContractVariationFormModal({ contractId, mode, variation, onClose }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = mode === 'edit' && variation ? updateVariationAction.bind(null, variation.id, contractId) : createVariationAction.bind(null, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
 
   const [status, setStatus] = useState<ContractVariationStatus>(variation?.status ?? 'DRAFT');
   const [approvedDate, setApprovedDate] = useState(variation?.approvedDate ?? '');
   const [clientError, setClientError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
+  const [isSaving, setIsSaving] = useState(false);
 
   const submittedDateRequired = isSubmittedDateRequired(status);
   const approvedDateRequired = isApprovedDateRequired(status);
@@ -170,7 +179,10 @@ export function ContractVariationFormModal({ contractId, mode, variation, onClos
   // Pending Approval if a real case calls for it.
   const approvedDateDeemphasized = !approvedDateRequired && !approvedDate.trim();
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
     const formData = new FormData(e.currentTarget);
     const errors = validateVariationFormValues({
       status,
@@ -181,12 +193,32 @@ export function ContractVariationFormModal({ contractId, mode, variation, onClos
       approvedDate,
     });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+    setIsSaving(true);
+    try {
+      const result =
+        mode === 'edit' && variation
+          ? await updateVariationAction(variation.id, contractId, { error: null }, formData)
+          : await createVariationAction(contractId, { error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      onClose();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Variation saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save variation:', err);
+      setClientError('Failed to save variation. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -211,10 +243,10 @@ export function ContractVariationFormModal({ contractId, mode, variation, onClos
           </button>
         </div>
 
-        <form id="variation-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="variation-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -392,10 +424,10 @@ export function ContractVariationFormModal({ contractId, mode, variation, onClos
           <button
             type="submit"
             form="variation-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Variation' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Variation' : 'Save Changes'}
           </button>
         </div>
       </div>

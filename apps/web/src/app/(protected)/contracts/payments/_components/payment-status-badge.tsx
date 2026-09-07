@@ -6,7 +6,7 @@ const STATUS_STYLES: Record<ContractPaymentStatus, string> = {
   CERTIFIED: 'bg-info-light text-info',
   PARTIALLY_PAID: 'bg-warning-light text-warning',
   PAID: 'bg-success-light text-success',
-  OVERDUE: 'bg-danger-light text-danger',
+  OVERDUE: 'bg-error-light text-error',
   CANCELLED: 'bg-surface-secondary text-text-muted line-through',
 };
 

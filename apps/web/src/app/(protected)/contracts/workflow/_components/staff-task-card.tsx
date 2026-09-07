@@ -66,7 +66,7 @@ export function StaffTaskCard({ task, updateHref }: Props): React.JSX.Element {
       <div className="flex flex-wrap items-center gap-2 shrink-0">
         <WorkflowTaskStatusBadge status={task.status} />
         <WorkflowTaskPriorityBadge priority={task.priority} />
-        <span className={`text-xs whitespace-nowrap ${task.isOverdue ? 'text-danger font-medium' : 'text-text-secondary'}`}>
+        <span className={`text-xs whitespace-nowrap ${task.isOverdue ? 'text-error font-medium' : 'text-text-secondary'}`}>
           {task.isOverdue && task.dueDate
             ? `${formatDate(task.dueDate)} · ${daysOverdue(task.dueDate)} day${daysOverdue(task.dueDate) === 1 ? '' : 's'} overdue`
             : formatDate(task.dueDate)}

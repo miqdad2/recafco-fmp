@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Gavel, CheckCircle2 } from 'lucide-react';
 import type { ActionResult } from '../../../../actions';
@@ -34,21 +34,48 @@ function Field({ label, value }: { label: string; value: React.ReactNode }): Rea
   );
 }
 
+/**
+ * (unnumbered) — replaces the old useActionState/submittedRef/useEffect
+ * "close detection" with a plain isSaving state tied directly to the async
+ * call's own promise: never stuck on "Saving…" if the effect fails to
+ * re-fire, since there is no separate effect to fail. router.refresh()
+ * failures are logged but never leave the button stuck, since the request
+ * itself already succeeded by that point.
+ */
 function useSimpleAction(
-  action: (prev: ActionResult, formData: FormData) => Promise<ActionResult>,
-): [ActionResult, (formData: FormData) => void, boolean] {
+  call: (formData: FormData) => Promise<ActionResult>,
+): [string | null, (e: React.FormEvent<HTMLFormElement>) => Promise<void>, boolean] {
   const router = useRouter();
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      router.refresh();
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setError(null);
+    setIsSaving(true);
+    try {
+      const result = await call(formData);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Action saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Closeout action failed:', err);
+      setError('Action failed. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-  }, [state, isPending, router]);
+  }
 
-  return [state, (fd: FormData) => { submittedRef.current = true; formAction(fd); }, isPending];
+  return [error, handleSubmit, isSaving];
 }
 
 /**
@@ -66,29 +93,18 @@ function useSimpleAction(
  * is byte-identical to before.
  */
 export function ContractCloseoutApprovalPanel({ contractId, request, canReview }: Props): React.JSX.Element {
-  const router = useRouter();
-
-  const [reviewState, reviewAction, reviewPending] = useSimpleAction(
-    reviewCloseoutRequestAction.bind(null, request.id, contractId),
+  const [reviewError, submitReview, reviewSaving] = useSimpleAction(
+    () => reviewCloseoutRequestAction(request.id, contractId),
   );
-  const [approveState, approveAction, approvePending] = useSimpleAction(
-    approveCloseoutRequestAction.bind(null, request.id, contractId),
+  const [approveError, submitApprove, approveSaving] = useSimpleAction(
+    (fd) => approveCloseoutRequestAction(request.id, contractId, { error: null }, fd),
   );
-  const [rejectState, rejectAction, rejectPending] = useSimpleAction(
-    rejectCloseoutRequestAction.bind(null, request.id, contractId),
+  const [rejectError, submitReject, rejectSaving] = useSimpleAction(
+    (fd) => rejectCloseoutRequestAction(request.id, contractId, { error: null }, fd),
   );
-
-  const closeSubmittedRef = useRef(false);
-  const [closeState, closeFormAction, closePending] = useActionState<ActionResult, FormData>(
-    closeContractFromCloseoutAction.bind(null, request.id, contractId),
-    { error: null },
+  const [closeError, submitClose, closeSaving] = useSimpleAction(
+    () => closeContractFromCloseoutAction(request.id, contractId),
   );
-  useEffect(() => {
-    if (closeSubmittedRef.current && !closePending && !closeState.error) {
-      closeSubmittedRef.current = false;
-      router.refresh();
-    }
-  }, [closeState, closePending, router]);
 
   const status = request.status as ClosureStatus;
 
@@ -137,14 +153,14 @@ export function ContractCloseoutApprovalPanel({ contractId, request, canReview }
 
       {canReview && request.status === 'SUBMITTED' && (
         <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-border">
-          {reviewState.error && <p className="text-xs text-danger">{reviewState.error}</p>}
-          <form action={reviewAction}>
+          {reviewError && <p className="text-xs text-error">{reviewError}</p>}
+          <form onSubmit={submitReview}>
             <button
               type="submit"
-              disabled={reviewPending}
+              disabled={reviewSaving}
               className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {reviewPending ? 'Starting…' : 'Start Review'}
+              {reviewSaving ? 'Starting…' : 'Start Review'}
             </button>
           </form>
         </div>
@@ -152,31 +168,31 @@ export function ContractCloseoutApprovalPanel({ contractId, request, canReview }
 
       {canReview && ['SUBMITTED', 'UNDER_REVIEW'].includes(request.status) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-border">
-          <form action={approveAction} className="space-y-2">
-            {approveState.error && <p className="text-xs text-danger">{approveState.error}</p>}
+          <form onSubmit={submitApprove} className="space-y-2">
+            {approveError && <p className="text-xs text-error">{approveError}</p>}
             <label htmlFor="approveRemarks" className={labelCls}>Approve with remarks (optional)</label>
             <textarea id="approveRemarks" name="reviewRemarks" rows={2} maxLength={5000} className={`${inputCls} resize-y`} />
             <button
               type="submit"
-              disabled={approvePending}
+              disabled={approveSaving}
               className="rounded-md bg-success px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-success/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {approvePending ? 'Approving…' : 'Approve Closeout'}
+              {approveSaving ? 'Approving…' : 'Approve Closeout'}
             </button>
           </form>
 
-          <form action={rejectAction} className="space-y-2">
-            {rejectState.error && <p className="text-xs text-danger">{rejectState.error}</p>}
+          <form onSubmit={submitReject} className="space-y-2">
+            {rejectError && <p className="text-xs text-error">{rejectError}</p>}
             <label htmlFor="rejectionReason" className={labelCls}>
-              Rejection Reason <span className="text-danger">*</span>
+              Rejection Reason <span className="text-error">*</span>
             </label>
             <textarea id="rejectionReason" name="rejectionReason" rows={2} required maxLength={5000} className={`${inputCls} resize-y`} />
             <button
               type="submit"
-              disabled={rejectPending}
+              disabled={rejectSaving}
               className="rounded-md bg-error px-3 py-1.5 text-xs font-medium text-white hover:bg-error/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {rejectPending ? 'Rejecting…' : 'Reject Closeout'}
+              {rejectSaving ? 'Rejecting…' : 'Reject Closeout'}
             </button>
           </form>
         </div>
@@ -184,17 +200,17 @@ export function ContractCloseoutApprovalPanel({ contractId, request, canReview }
 
       {canReview && request.status === 'APPROVED' && (
         <div className="rounded-md border border-success/40 bg-success-light/40 p-3 pt-3">
-          {closeState.error && <p className="text-xs text-danger mb-2">{closeState.error}</p>}
+          {closeError && <p className="text-xs text-error mb-2">{closeError}</p>}
           <p className="text-xs text-success font-medium mb-2">Closeout has been approved — this contract is ready to close.</p>
-          <form action={closeFormAction} onSubmit={() => { closeSubmittedRef.current = true; }}>
+          <form onSubmit={submitClose}>
             <button
               type="submit"
-              disabled={closePending}
+              disabled={closeSaving}
               className="inline-flex items-center gap-2 rounded-md bg-success px-6 py-3 text-base font-bold text-white shadow-sm hover:bg-success/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
               title="Closeout request has been approved"
             >
               <CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />
-              {closePending ? 'Closing…' : 'Close Contract'}
+              {closeSaving ? 'Closing…' : 'Close Contract'}
             </button>
           </form>
         </div>

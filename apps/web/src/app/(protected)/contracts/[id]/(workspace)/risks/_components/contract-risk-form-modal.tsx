@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { ActionResult } from '../../../../actions';
 import { createRiskAction, updateRiskAction } from '../../../../actions';
 import type { ContractRisk, ContractPerson } from '@/lib/contracts-api';
 import { inputCls, labelCls, InfoBox } from '../../../../_components/contract-form-fields';
@@ -30,20 +29,37 @@ interface Props {
  */
 export function ContractRiskFormModal({ contractId, mode, risk, people, onClose }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = mode === 'edit' && risk ? updateRiskAction.bind(null, risk.id, contractId) : createRiskAction.bind(null, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setClientError(null);
+    setIsSaving(true);
+    try {
+      const result =
+        mode === 'edit' && risk
+          ? await updateRiskAction(risk.id, contractId, { error: null }, formData)
+          : await createRiskAction(contractId, { error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
       onClose();
-      router.refresh();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Risk saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save risk:', err);
+      setClientError('Failed to save risk. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-  }, [state, isPending, onClose, router]);
-
-  function handleSubmit(): void {
-    submittedRef.current = true;
   }
 
   return (
@@ -68,10 +84,10 @@ export function ContractRiskFormModal({ contractId, mode, risk, people, onClose 
           </button>
         </div>
 
-        <form id="risk-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {state.error && (
-            <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-              {state.error}
+        <form id="risk-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
+            <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+              {clientError}
             </div>
           )}
 
@@ -100,7 +116,7 @@ export function ContractRiskFormModal({ contractId, mode, risk, people, onClose 
 
           <div>
             <label htmlFor="description" className={labelCls}>
-              Risk Clause / Description <span className="text-danger">*</span>
+              Risk Clause / Description <span className="text-error">*</span>
             </label>
             <textarea
               id="description"
@@ -208,10 +224,10 @@ export function ContractRiskFormModal({ contractId, mode, risk, people, onClose 
           <button
             type="submit"
             form="risk-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Risk' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Risk' : 'Save Changes'}
           </button>
         </div>
       </div>

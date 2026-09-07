@@ -45,7 +45,7 @@ export function UpcomingScheduleList({ items, emptyTitle, emptyDescription, limi
             <span className="text-xs text-text-muted whitespace-nowrap">{item.contractReference}</span>
           </div>
           {item.isOverdue && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-danger-light px-2 py-0.5 text-[11px] font-medium text-danger shrink-0">
+            <span className="inline-flex items-center gap-1 rounded-full bg-error-light px-2 py-0.5 text-[11px] font-medium text-error shrink-0">
               <AlertTriangle className="size-3" aria-hidden="true" />
               Overdue{item.overdueDays !== null ? ` ${item.overdueDays}d` : ''}
             </span>

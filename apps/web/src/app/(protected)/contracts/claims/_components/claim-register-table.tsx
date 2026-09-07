@@ -117,7 +117,7 @@ export function ClaimRegisterTable({ claims, contracts, people, canUpdate, fixed
                   <td className="px-3 py-2 whitespace-nowrap">{formatDate(claim.dueDate)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {claim.overdueDays !== null ? (
-                      <span className="text-danger font-medium">{claim.overdueDays}d</span>
+                      <span className="text-error font-medium">{claim.overdueDays}d</span>
                     ) : '—'}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap"><ClaimStatusBadge status={claim.status} /></td>

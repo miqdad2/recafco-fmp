@@ -414,7 +414,12 @@ export async function activateContractAction(id: string, version: number): Promi
   const result = await actionFetch(`/contracts/${id}/activate`, 'POST', { version });
   if (!result.ok) return { error: result.message ?? 'Failed to activate contract' };
 
+  // Bug fix: this is invoked from the Contract Detail page's own Actions
+  // menu (contract-detail-actions-menu.tsx), which stays on /contracts/${id}
+  // after the call — only revalidating the module list left that page
+  // showing a stale status badge until a manual refresh.
   revalidatePath('/contracts');
+  revalidatePath(`/contracts/${id}`);
   return { error: null };
 }
 
@@ -434,7 +439,10 @@ export async function terminateContractAction(
   const result = await actionFetch(`/contracts/${id}/terminate`, 'POST', { reason, version });
   if (!result.ok) return { error: result.message ?? 'Failed to terminate contract' };
 
+  // Bug fix: same as activateContractAction above — invoked from the
+  // Contract Detail page's own Actions menu, which stays on this page.
   revalidatePath('/contracts');
+  revalidatePath(`/contracts/${id}`);
   return { error: null };
 }
 
@@ -474,7 +482,10 @@ export async function closeContractAction(id: string, version: number): Promise<
   const result = await actionFetch(`/contracts/${id}/close`, 'POST', { version });
   if (!result.ok) return { error: result.message ?? 'Failed to close contract' };
 
+  // Bug fix: same as activateContractAction above — invoked from the
+  // Contract Detail page's own Actions menu, which stays on this page.
   revalidatePath('/contracts');
+  revalidatePath(`/contracts/${id}`);
   return { error: null };
 }
 
@@ -493,7 +504,10 @@ export async function addContractCommentAction(
   const result = await actionFetch(`/contracts/${contractId}/comments`, 'POST', { body });
   if (!result.ok) return { error: result.message ?? 'Failed to add comment' };
 
+  // Bug fix: same as activateContractAction above — invoked from the
+  // Contract Detail page's own Actions/Comments panel, which stays on this page.
   revalidatePath('/contracts');
+  revalidatePath(`/contracts/${contractId}`);
   return { error: null };
 }
 
@@ -566,11 +580,19 @@ export async function updatePaymentAction(
   return { error: null };
 }
 
-export async function cancelPaymentAction(paymentId: string): Promise<ActionResult> {
+// Bug fix: this previously only revalidated the module-level register path,
+// never the Contract Detail Payments tab's own real route — cancelling a
+// payment from that tab saved correctly but never showed the Cancelled
+// status without a manual browser refresh, same root cause already fixed
+// for create/update in CM-70H. contractId is optional so the module-level
+// register's own call site (which doesn't have it handy) keeps working
+// unchanged.
+export async function cancelPaymentAction(paymentId: string, contractId?: string): Promise<ActionResult> {
   const result = await actionFetch(`/contracts/payments/${paymentId}`, 'PATCH', { status: 'CANCELLED' });
   if (!result.ok) return { error: result.message ?? 'Failed to cancel payment' };
 
   revalidatePath('/contracts/payments');
+  if (contractId) revalidatePath(`/contracts/${contractId}/payments`);
   return { error: null };
 }
 

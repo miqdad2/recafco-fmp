@@ -195,21 +195,14 @@ function AttachmentsSection({ contractId, item }: { contractId: string; item: Co
  */
 export function ContractDocumentFormModal({ contractId, mode, item, onClose }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = mode === 'edit' && item ? updateDocumentObligationAction.bind(null, item.id, contractId) : createDocumentObligationAction.bind(null, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
   const [status, setStatus] = useState(item?.status ?? 'PENDING');
   const [clientError, setClientError] = useState<string | null>(null);
-  const submittedRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     const formData = new FormData(e.currentTarget);
     const errors = validateDocumentObligationFormValues({
       title: String(formData.get('title') ?? ''),
@@ -217,12 +210,32 @@ export function ContractDocumentFormModal({ contractId, mode, item, onClose }: P
       expiryDate: String(formData.get('expiryDate') ?? ''),
     });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+    setIsSaving(true);
+    try {
+      const result =
+        mode === 'edit' && item
+          ? await updateDocumentObligationAction(item.id, contractId, { error: null }, formData)
+          : await createDocumentObligationAction(contractId, { error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      onClose();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Document saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save document:', err);
+      setClientError('Failed to save document. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const recommendSubmissionDate = status === 'SUBMITTED' && !item?.submissionDate;
@@ -249,10 +262,10 @@ export function ContractDocumentFormModal({ contractId, mode, item, onClose }: P
           </button>
         </div>
 
-        <form id="document-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="document-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -405,10 +418,10 @@ export function ContractDocumentFormModal({ contractId, mode, item, onClose }: P
           <button
             type="submit"
             form="document-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Document' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Document' : 'Save Changes'}
           </button>
         </div>
       </div>

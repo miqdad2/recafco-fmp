@@ -84,7 +84,7 @@ export default async function ContractWorkflowTab({ params, searchParams }: Page
           <div>
             <dt className="text-xs text-text-muted">Overdue</dt>
             <dd className="font-medium text-text-primary mt-0.5">
-              {progress.overdue > 0 ? <span className="text-danger">{progress.overdue}</span> : 0}
+              {progress.overdue > 0 ? <span className="text-error">{progress.overdue}</span> : 0}
             </dd>
           </div>
         </dl>

@@ -196,7 +196,7 @@ export function ContractBoqRegisterTable({ rows, onRowsChange, formatTotal }: Pr
                       onClick={() => removeRow(row.id)}
                       disabled={rows.length <= 1}
                       title={rows.length <= 1 ? 'At least one BOQ row is required' : 'Remove row'}
-                      className="text-text-muted hover:text-danger focus:outline-none focus:ring-2 focus:ring-focus rounded disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-text-muted"
+                      className="text-text-muted hover:text-error focus:outline-none focus:ring-2 focus:ring-focus rounded disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-text-muted"
                     >
                       <Trash2 className="size-3.5" aria-hidden="true" />
                     </button>

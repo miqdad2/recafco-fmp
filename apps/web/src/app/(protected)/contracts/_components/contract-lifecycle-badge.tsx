@@ -26,9 +26,9 @@ export function ContractLifecycleBadge({ status, className = '' }: Props): React
   } else if (status === 'EXPIRING') {
     colorClass = 'bg-warning/10 text-warning border border-warning/30';
   } else if (status === 'EXPIRED') {
-    colorClass = 'bg-danger/10 text-danger border border-danger/30';
+    colorClass = 'bg-error/10 text-error border border-error/30';
   } else if (status === 'TERMINATED') {
-    colorClass = 'bg-danger/10 text-danger border border-danger/30';
+    colorClass = 'bg-error/10 text-error border border-error/30';
   } else {
     colorClass = 'bg-surface-secondary text-text-muted border border-border';
   }

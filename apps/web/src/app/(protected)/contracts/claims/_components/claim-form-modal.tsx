@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { ActionResult } from '../../actions';
 import { createClaimAction, updateClaimAction } from '../../actions';
 import type { ContractClaim, ContractClaimType, ContractClaimStatus, ContractPerson } from '@/lib/contracts-api';
 import { CONTRACT_CLAIM_TYPE_OPTIONS, CONTRACT_CLAIM_STATUS_OPTIONS } from '../../_lib/contract-ui-helpers';
@@ -55,25 +54,18 @@ const sectionLabelCls = 'text-[11px] font-semibold uppercase tracking-wide text-
 export function ClaimFormModal({ mode, contracts, fixedContractId, fixedContract, claim, people, onClose }: Props): React.JSX.Element {
   const router = useRouter();
   const contractId = fixedContractId ?? claim?.contractId;
-  const action = mode === 'edit' && claim ? updateClaimAction.bind(null, claim.id, claim.contractId) : createClaimAction;
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
 
   const [claimType, setClaimType] = useState<ContractClaimType>(claim?.claimType ?? 'OTHER');
   const [status, setStatus] = useState<ContractClaimStatus>(claim?.status ?? 'DRAFT');
   const [clientError, setClientError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
+  const [isSaving, setIsSaving] = useState(false);
 
   const typeGuidance = getClaimTypeGuidance(claimType);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
     const formData = new FormData(e.currentTarget);
     const errors = validateClaimFormValues({
       claimTitle: String(formData.get('claimTitle') ?? ''),
@@ -87,12 +79,32 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, fixedContract
       dueDate: String(formData.get('dueDate') ?? ''),
     });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+    setIsSaving(true);
+    try {
+      const result =
+        mode === 'edit' && claim
+          ? await updateClaimAction(claim.id, claim.contractId, { error: null }, formData)
+          : await createClaimAction({ error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      onClose();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Claim saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save claim:', err);
+      setClientError('Failed to save claim. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -117,10 +129,10 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, fixedContract
           </button>
         </div>
 
-        <form id="claim-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="claim-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -353,10 +365,10 @@ export function ClaimFormModal({ mode, contracts, fixedContractId, fixedContract
           <button
             type="submit"
             form="claim-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Claim' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Claim' : 'Save Changes'}
           </button>
         </div>
       </div>

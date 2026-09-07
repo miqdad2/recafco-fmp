@@ -1,10 +1,9 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Paperclip, Download, Loader2, Check, Circle, Info } from 'lucide-react';
-import type { ActionResult } from '../../actions';
 import { updateWorkflowTaskAction, addWorkflowTaskCommentAction, uploadWorkflowTaskAttachmentAction } from '../../actions';
 import type { ContractWorkflowTaskComment, ContractWorkflowTaskAttachment } from '@/lib/contracts-api';
 import type { StaffFlatTask } from '../../_lib/staff-task-grouping';
@@ -170,32 +169,53 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
 
   // --- Task fields form (Status + task-specific optional fields + Remarks) ---
   const formRef = useRef<HTMLFormElement>(null);
-  const updateAction = updateWorkflowTaskAction.bind(null, task.id, task.contractId);
-  const [updateState, updateFormAction, updatePending] = useActionState<ActionResult, FormData>(updateAction, { error: null });
-  const updateSubmittedRef = useRef(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateSaving, setUpdateSaving] = useState(false);
   const submitIntentRef = useRef<SubmitIntent>('save');
   // CM-49 — generalized from CM-46's boolean pendingComplete so both Mark
   // Complete and SD's Submit button can reuse the same "set status, wait
   // for the state update to land, then submit the form" flow.
   const [pendingStatusSubmit, setPendingStatusSubmit] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (updateSubmittedRef.current && !updatePending && !updateState.error) {
-      updateSubmittedRef.current = false;
+  async function handleUpdateSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (updateSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setUpdateError(null);
+    setUpdateSaving(true);
+    try {
+      const result = await updateWorkflowTaskAction(task.id, task.contractId, { error: null }, formData);
+      if (result.error) {
+        setUpdateError(result.error);
+        return;
+      }
       if (submitIntentRef.current === 'draft') {
         // Save Draft — stay on this screen so saved optional values are visible immediately.
-        router.refresh();
+        try {
+          router.refresh();
+        } catch (refreshErr) {
+          console.warn('Draft saved but router.refresh() failed:', refreshErr);
+        }
       } else {
         router.push(backHref);
-        router.refresh();
+        try {
+          router.refresh();
+        } catch (refreshErr) {
+          console.warn('Task update saved but router.refresh() failed:', refreshErr);
+        }
       }
+    } catch (err) {
+      console.error('Failed to save task update:', err);
+      setUpdateError('Failed to save task update. Please try again.');
+    } finally {
+      setUpdateSaving(false);
     }
-  }, [updateState, updatePending, router, backHref]);
+  }
 
   useEffect(() => {
     if (pendingStatusSubmit !== null && status === pendingStatusSubmit) {
       setPendingStatusSubmit(null);
-      updateSubmittedRef.current = true;
       formRef.current?.requestSubmit();
     }
   }, [pendingStatusSubmit, status]);
@@ -234,9 +254,8 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
   const [comments, setComments] = useState<ContractWorkflowTaskComment[] | null>(null);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentFormKey, setCommentFormKey] = useState(0);
-  const addCommentAction = addWorkflowTaskCommentAction.bind(null, task.id, task.contractId);
-  const [commentState, commentFormAction, commentPending] = useActionState<ActionResult, FormData>(addCommentAction, { error: null });
-  const commentSubmittedRef = useRef(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [commentSaving, setCommentSaving] = useState(false);
 
   async function loadComments(): Promise<void> {
     try {
@@ -254,21 +273,35 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
     void loadComments();
   }, [task.id]);
 
-  useEffect(() => {
-    if (commentSubmittedRef.current && !commentPending && !commentState.error) {
-      commentSubmittedRef.current = false;
+  async function handleCommentSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (commentSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setCommentError(null);
+    setCommentSaving(true);
+    try {
+      const result = await addWorkflowTaskCommentAction(task.id, task.contractId, { error: null }, formData);
+      if (result.error) {
+        setCommentError(result.error);
+        return;
+      }
       setCommentFormKey((k) => k + 1);
       void loadComments();
+    } catch (err) {
+      console.error('Failed to add progress update:', err);
+      setCommentError('Failed to add progress update. Please try again.');
+    } finally {
+      setCommentSaving(false);
     }
-  }, [commentState, commentPending]);
+  }
 
   // --- Attachments ---------------------------------------------------------
   const [attachments, setAttachments] = useState<ContractWorkflowTaskAttachment[] | null>(null);
   const [attachmentsError, setAttachmentsError] = useState<string | null>(null);
   const [attachmentFormKey, setAttachmentFormKey] = useState(0);
-  const uploadAction = uploadWorkflowTaskAttachmentAction.bind(null, task.id, task.contractId);
-  const [uploadState, uploadFormAction, uploadPending] = useActionState<ActionResult, FormData>(uploadAction, { error: null });
-  const uploadSubmittedRef = useRef(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSaving, setUploadSaving] = useState(false);
 
   async function loadAttachments(): Promise<void> {
     try {
@@ -286,13 +319,28 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
     void loadAttachments();
   }, [task.id]);
 
-  useEffect(() => {
-    if (uploadSubmittedRef.current && !uploadPending && !uploadState.error) {
-      uploadSubmittedRef.current = false;
+  async function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (uploadSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setUploadError(null);
+    setUploadSaving(true);
+    try {
+      const result = await uploadWorkflowTaskAttachmentAction(task.id, task.contractId, { error: null }, formData);
+      if (result.error) {
+        setUploadError(result.error);
+        return;
+      }
       setAttachmentFormKey((k) => k + 1);
       void loadAttachments();
+    } catch (err) {
+      console.error('Failed to upload work document:', err);
+      setUploadError('Failed to upload work document. Please try again.');
+    } finally {
+      setUploadSaving(false);
     }
-  }, [uploadState, uploadPending]);
+  }
 
   const showDelayReason = DELAY_REASON_STATUSES.includes(status);
   const canSubmit = (isSdCalculation || isFdIssuance) && !ALREADY_SUBMITTED_STATUSES.includes(status);
@@ -384,7 +432,7 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
       <h3 className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide mb-1.5">
         Progress Updates {comments ? `(${comments.length})` : ''}
       </h3>
-      {commentsError && <p className="text-xs text-danger">{commentsError}</p>}
+      {commentsError && <p className="text-xs text-error">{commentsError}</p>}
       {comments === null && !commentsError && <p className="text-xs text-text-muted">Loading…</p>}
       {comments && comments.length === 0 && <p className="text-xs text-text-muted">No progress updates yet.</p>}
       <div className="space-y-1 max-h-20 overflow-y-auto mb-1.5">
@@ -398,8 +446,8 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           </div>
         ))}
       </div>
-      <form key={commentFormKey} action={commentFormAction} onSubmit={() => { commentSubmittedRef.current = true; }} className="space-y-1.5">
-        {commentState.error && <p className="text-xs text-danger">{commentState.error}</p>}
+      <form key={commentFormKey} onSubmit={handleCommentSubmit} className="space-y-1.5">
+        {commentError && <p className="text-xs text-error">{commentError}</p>}
         <textarea
           name="comment"
           rows={1}
@@ -410,10 +458,10 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
         />
         <button
           type="submit"
-          disabled={commentPending}
+          disabled={commentSaving}
           className="rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
         >
-          {commentPending ? 'Adding…' : 'Add Progress Update'}
+          {commentSaving ? 'Adding…' : 'Add Progress Update'}
         </button>
       </form>
     </div>
@@ -430,7 +478,7 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
         {title} {attachments ? `(${attachments.length})` : ''}
       </h2>
 
-      {attachmentsError && <p className="text-xs text-danger">{attachmentsError}</p>}
+      {attachmentsError && <p className="text-xs text-error">{attachmentsError}</p>}
       {attachments === null && !attachmentsError && <p className="text-xs text-text-muted">Loading…</p>}
       {attachments && attachments.length === 0 && <p className="text-xs text-text-muted">No work documents uploaded yet.</p>}
 
@@ -455,8 +503,8 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
         ))}
       </div>
 
-      <form key={attachmentFormKey} action={uploadFormAction} onSubmit={() => { uploadSubmittedRef.current = true; }} className="space-y-1.5">
-        {uploadState.error && <p className="text-xs text-danger">{uploadState.error}</p>}
+      <form key={attachmentFormKey} onSubmit={handleUploadSubmit} className="space-y-1.5">
+        {uploadError && <p className="text-xs text-error">{uploadError}</p>}
         <input
           type="file"
           name="file"
@@ -467,11 +515,11 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
         <p className="text-[10px] text-text-muted">PDF, PNG, JPEG, Excel or Word — up to 10MB.</p>
         <button
           type="submit"
-          disabled={uploadPending}
+          disabled={uploadSaving}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
         >
-          {uploadPending && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
-          {uploadPending ? 'Uploading…' : 'Upload Work Document'}
+          {uploadSaving && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
+          {uploadSaving ? 'Uploading…' : 'Upload Work Document'}
         </button>
       </form>
     </section>
@@ -571,7 +619,7 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           <div className="flex flex-wrap items-center gap-1.5 shrink-0">
             <WorkflowTaskStatusBadge status={task.status} />
             <WorkflowTaskPriorityBadge priority={task.priority} />
-            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${task.isOverdue ? 'bg-danger-light text-danger' : 'bg-surface-secondary text-text-secondary'}`}>
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${task.isOverdue ? 'bg-error-light text-error' : 'bg-surface-secondary text-text-secondary'}`}>
               {task.isOverdue && task.dueDate
                 ? `Overdue by ${daysOverdue(task.dueDate)} day${daysOverdue(task.dueDate) === 1 ? '' : 's'}`
                 : `Due ${formatDate(task.dueDate)}`}
@@ -671,12 +719,12 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr] gap-2.5 items-start">
             {/* Main content — FD Issuance Information (wide), Final Drawing Attachments, Progress Updates */}
             <div className="lg:col-span-2 flex flex-col gap-2.5 min-w-0">
-              <form id={UPDATE_FORM_ID} ref={formRef} action={updateFormAction} onSubmit={() => { updateSubmittedRef.current = true; }}>
+              <form id={UPDATE_FORM_ID} ref={formRef} onSubmit={handleUpdateSubmit}>
                 <input type="hidden" name="hasTaskFormFields" value="true" />
 
-                {updateState.error && (
-                  <div role="alert" className="mb-2.5 rounded-md border border-danger bg-danger-light px-3 py-2 text-xs text-danger">
-                    {updateState.error}
+                {updateError && (
+                  <div role="alert" className="mb-2.5 rounded-md border border-error bg-error-light px-3 py-2 text-xs text-error">
+                    {updateError}
                   </div>
                 )}
 
@@ -831,12 +879,12 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr] gap-2.5 items-start">
             {/* Main content — Approval Information (wide), Approval Attachments, Progress Updates */}
             <div className="lg:col-span-2 flex flex-col gap-2.5 min-w-0">
-              <form id={UPDATE_FORM_ID} ref={formRef} action={updateFormAction} onSubmit={() => { updateSubmittedRef.current = true; }}>
+              <form id={UPDATE_FORM_ID} ref={formRef} onSubmit={handleUpdateSubmit}>
                 <input type="hidden" name="hasTaskFormFields" value="true" />
 
-                {updateState.error && (
-                  <div role="alert" className="mb-2.5 rounded-md border border-danger bg-danger-light px-3 py-2 text-xs text-danger">
-                    {updateState.error}
+                {updateError && (
+                  <div role="alert" className="mb-2.5 rounded-md border border-error bg-error-light px-3 py-2 text-xs text-error">
+                    {updateError}
                   </div>
                 )}
 
@@ -965,12 +1013,12 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr] gap-2.5 items-start">
             {/* Main content — Submission Information (wide), Attachments, Progress Updates */}
             <div className="lg:col-span-2 flex flex-col gap-2.5 min-w-0">
-              <form id={UPDATE_FORM_ID} ref={formRef} action={updateFormAction} onSubmit={() => { updateSubmittedRef.current = true; }}>
+              <form id={UPDATE_FORM_ID} ref={formRef} onSubmit={handleUpdateSubmit}>
                 <input type="hidden" name="hasTaskFormFields" value="true" />
 
-                {updateState.error && (
-                  <div role="alert" className="mb-2.5 rounded-md border border-danger bg-danger-light px-3 py-2 text-xs text-danger">
-                    {updateState.error}
+                {updateError && (
+                  <div role="alert" className="mb-2.5 rounded-md border border-error bg-error-light px-3 py-2 text-xs text-error">
+                    {updateError}
                   </div>
                 )}
 
@@ -1096,12 +1144,12 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_2fr_1fr] gap-2.5 items-start">
             {/* Left column — A. Receipt Details, C. Attachments */}
             <div className="flex flex-col gap-2.5 min-w-0">
-              <form id={UPDATE_FORM_ID} ref={formRef} action={updateFormAction} onSubmit={() => { updateSubmittedRef.current = true; }}>
+              <form id={UPDATE_FORM_ID} ref={formRef} onSubmit={handleUpdateSubmit}>
                 <input type="hidden" name="hasTaskFormFields" value="true" />
 
-                {updateState.error && (
-                  <div role="alert" className="mb-2.5 rounded-md border border-danger bg-danger-light px-3 py-2 text-xs text-danger">
-                    {updateState.error}
+                {updateError && (
+                  <div role="alert" className="mb-2.5 rounded-md border border-error bg-error-light px-3 py-2 text-xs text-error">
+                    {updateError}
                   </div>
                 )}
 
@@ -1308,10 +1356,10 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
             type="submit"
             form={UPDATE_FORM_ID}
             onClick={() => { submitIntentRef.current = 'draft'; }}
-            disabled={updatePending}
+            disabled={updateSaving}
             className="rounded-md border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {updatePending && submitIntentRef.current === 'draft' ? 'Saving Draft…' : 'Save Draft'}
+            {updateSaving && submitIntentRef.current === 'draft' ? 'Saving Draft…' : 'Save Draft'}
           </button>
           <Link
             href={backHref}
@@ -1325,37 +1373,37 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
             <button
               type="button"
               onClick={handleSubmitForReview}
-              disabled={updatePending}
+              disabled={updateSaving}
               className="rounded-md border border-accent bg-accent/10 px-3.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/20 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {updatePending && submitIntentRef.current === 'submit' ? 'Submitting…' : 'Submit'}
+              {updateSaving && submitIntentRef.current === 'submit' ? 'Submitting…' : 'Submit'}
             </button>
           )}
           {canSendBack && (
             <button
               type="button"
               onClick={handleSendBackForChanges}
-              disabled={updatePending}
+              disabled={updateSaving}
               className="rounded-md border border-warning bg-warning-light px-3.5 py-1.5 text-xs font-medium text-warning hover:bg-warning-light/70 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {updatePending && submitIntentRef.current === 'sendback' ? 'Sending Back…' : 'Send Back for Changes'}
+              {updateSaving && submitIntentRef.current === 'sendback' ? 'Sending Back…' : 'Send Back for Changes'}
             </button>
           )}
           {canReject && (
             <button
               type="button"
               onClick={handleReject}
-              disabled={updatePending}
-              className="rounded-md border border-danger bg-danger-light px-3.5 py-1.5 text-xs font-medium text-danger hover:bg-danger-light/70 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+              disabled={updateSaving}
+              className="rounded-md border border-error bg-error-light px-3.5 py-1.5 text-xs font-medium text-error hover:bg-error-light/70 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
-              {updatePending && submitIntentRef.current === 'reject' ? 'Rejecting…' : 'Reject'}
+              {updateSaving && submitIntentRef.current === 'reject' ? 'Rejecting…' : 'Reject'}
             </button>
           )}
           {status !== 'COMPLETED' && (
             <button
               type="button"
               onClick={handleMarkComplete}
-              disabled={updatePending}
+              disabled={updateSaving}
               className="rounded-md border border-success bg-success-light px-3.5 py-1.5 text-xs font-medium text-success hover:bg-success-light/70 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
             >
               {isGettingApproval ? 'Approve & Continue' : isFdIssuance ? 'Mark Complete & Continue' : 'Mark Complete'}
@@ -1365,10 +1413,10 @@ export function StaffTaskUpdatePanel({ task, backHref, backLabel = 'Back to My T
             type="submit"
             form={UPDATE_FORM_ID}
             onClick={() => { submitIntentRef.current = 'save'; }}
-            disabled={updatePending}
+            disabled={updateSaving}
             className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {updatePending && submitIntentRef.current === 'save' ? 'Saving Update…' : 'Save Update'}
+            {updateSaving && submitIntentRef.current === 'save' ? 'Saving Update…' : 'Save Update'}
           </button>
         </div>
       </div>

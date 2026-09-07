@@ -15,7 +15,7 @@ const STATUS_STYLES: Record<string, string> = {
   SUBMITTED: 'bg-info-light text-info',
   UNDER_REVIEW: 'bg-warning-light text-warning',
   APPROVED: 'bg-success-light text-success',
-  REJECTED: 'bg-danger-light text-danger',
+  REJECTED: 'bg-error-light text-error',
   COMPLETED: 'bg-success-light text-success',
   ON_HOLD: 'bg-surface-secondary text-text-secondary',
 };
@@ -24,7 +24,7 @@ const PRIORITY_STYLES: Record<string, string> = {
   LOW: 'bg-surface-secondary text-text-muted',
   MEDIUM: 'bg-surface-secondary text-text-secondary',
   HIGH: 'bg-warning-light text-warning',
-  CRITICAL: 'bg-danger-light text-danger',
+  CRITICAL: 'bg-error-light text-error',
 };
 
 export function StaffTaskStatusBadge({ status }: { status: string }): React.JSX.Element {

@@ -53,7 +53,7 @@ export function WorkflowContractTable({ items, selectedContractId, buildHref }: 
                 <td className="px-3 py-2 whitespace-nowrap text-right">{item.openTasks}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-right">
                   {item.overdueTasks > 0 ? (
-                    <span className="text-danger font-medium">{item.overdueTasks}</span>
+                    <span className="text-error font-medium">{item.overdueTasks}</span>
                   ) : item.overdueTasks}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap">{formatDate(item.lastUpdated)}</td>

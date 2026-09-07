@@ -15,7 +15,7 @@ export function CloseoutSummaryCards({ summary }: Props): React.JSX.Element {
       <MetricCard label="Submitted" value={summary?.submitted} icon={FileInput} iconColor="text-info" status={status} />
       <MetricCard label="Under Review" value={summary?.underReview} icon={Hourglass} iconColor="text-warning" status={status} />
       <MetricCard label="Approved" value={summary?.approved} icon={CheckCircle2} iconColor="text-success" status={status} />
-      <MetricCard label="Rejected" value={summary?.rejected} icon={XCircle} iconColor="text-danger" status={status} />
+      <MetricCard label="Rejected" value={summary?.rejected} icon={XCircle} iconColor="text-error" status={status} />
       <MetricCard label="Closed" value={summary?.closed} icon={Archive} iconColor="text-text-muted" status={status} />
       <MetricCard label="Pending Review" value={summary?.pendingReview} icon={ClipboardCheck} iconColor="text-warning" status={status} source="Submitted + Under Review" />
     </div>

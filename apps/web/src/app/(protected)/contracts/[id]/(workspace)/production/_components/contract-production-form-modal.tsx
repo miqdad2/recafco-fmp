@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { ActionResult } from '../../../../actions';
 import { updateProductionAction } from '../../../../actions';
 import type { ContractProductionItem, ContractBoqProductionStatus } from '@/lib/contracts-api';
 import { inputCls, labelCls, InfoBox } from '../../../../_components/contract-form-fields';
@@ -55,22 +54,12 @@ function toInputValue(value: number): string {
  */
 export function ContractProductionFormModal({ contractId, item, onClose }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = updateProductionAction.bind(null, item.id, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
 
   const [producedQty, setProducedQty] = useState(toInputValue(item.producedQty));
   const [deliveredQty, setDeliveredQty] = useState(toInputValue(item.deliveredQty));
   const [status, setStatus] = useState<ContractBoqProductionStatus>(item.status);
   const [clientError, setClientError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // CM-70B — auto-set the suggested status whenever either quantity changes
   // (mirrors CM-70A's Payment modal exactly), using the just-typed value
@@ -94,15 +83,36 @@ export function ContractProductionFormModal({ contractId, item, onClose }: Props
     if (suggested) setStatus(suggested);
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
     const errors = validateProductionFormValues({ totalQty: item.totalQty, producedQty, deliveredQty });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+    setIsSaving(true);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const result = await updateProductionAction(item.id, contractId, { error: null }, formData);
+      if (result.error) {
+        setClientError(result.error);
+        return;
+      }
+      onClose();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Production saved but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save production:', err);
+      setClientError('Failed to save production. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const producedPreview = parseFloat(producedQty);
@@ -133,10 +143,10 @@ export function ContractProductionFormModal({ contractId, item, onClose }: Props
           </button>
         </div>
 
-        <form id="production-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="production-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -244,10 +254,10 @@ export function ContractProductionFormModal({ contractId, item, onClose }: Props
           <button
             type="submit"
             form="production-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : 'Save Changes'}
+            {isSaving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>

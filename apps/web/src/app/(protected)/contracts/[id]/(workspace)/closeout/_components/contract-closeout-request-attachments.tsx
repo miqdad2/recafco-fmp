@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Loader2, Paperclip } from 'lucide-react';
-import type { ActionResult } from '../../../../actions';
 import { uploadCloseoutAttachmentAction } from '../../../../actions';
 import type { ContractCloseoutAttachment } from '@/lib/contracts-api';
 
@@ -33,18 +32,36 @@ function formatBytes(bytes: number): string {
  */
 export function ContractCloseoutRequestAttachments({ contractId, requestId, attachments, canUpload }: Props): React.JSX.Element {
   const router = useRouter();
-  const action = uploadCloseoutAttachmentAction.bind(null, requestId, contractId);
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
-  const formKeyRef = useRef(0);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formKey, setFormKey] = useState(0);
 
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      formKeyRef.current += 1;
-      router.refresh();
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setError(null);
+    setIsSaving(true);
+    try {
+      const result = await uploadCloseoutAttachmentAction(requestId, contractId, { error: null }, formData);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setFormKey((k) => k + 1);
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Attachment uploaded but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to upload closeout attachment:', err);
+      setError('Failed to upload attachment. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-  }, [state, isPending, router]);
+  }
 
   return (
     <div className="pt-3 mt-3 border-t border-border">
@@ -77,12 +94,11 @@ export function ContractCloseoutRequestAttachments({ contractId, requestId, atta
 
       {canUpload && (
         <form
-          key={formKeyRef.current}
-          action={formAction}
-          onSubmit={() => { submittedRef.current = true; }}
+          key={formKey}
+          onSubmit={handleSubmit}
           className="space-y-2"
         >
-          {state.error && <p className="text-xs text-danger">{state.error}</p>}
+          {error && <p className="text-xs text-error">{error}</p>}
           <input
             type="file"
             name="file"
@@ -93,11 +109,11 @@ export function ContractCloseoutRequestAttachments({ contractId, requestId, atta
           <p className="text-[11px] text-text-muted">PDF, PNG, JPEG, Excel or Word — up to 10MB.</p>
           <button
             type="submit"
-            disabled={isPending}
+            disabled={isSaving}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
-            {isPending ? 'Uploading…' : 'Attach File'}
+            {isSaving && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+            {isSaving ? 'Uploading…' : 'Attach File'}
           </button>
         </form>
       )}

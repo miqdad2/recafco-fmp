@@ -47,7 +47,7 @@ export function StaffSummaryCards({ summary, focused, status }: Props): React.JS
           label="Overdue"
           value={summary?.myOverdueTasks}
           icon={AlertTriangle}
-          iconColor="text-danger"
+          iconColor="text-error"
           href="/contracts/workflow?mode=overdue"
           status={status}
           dense

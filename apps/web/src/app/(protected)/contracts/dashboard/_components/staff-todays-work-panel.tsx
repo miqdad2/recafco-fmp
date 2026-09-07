@@ -34,7 +34,7 @@ export function StaffTodaysWorkPanel({ task }: Props): React.JSX.Element {
   }
 
   return (
-    <div className={`rounded-lg border p-3 shrink-0 ${task.isOverdue ? 'border-danger/40 bg-danger-light/30' : 'border-border bg-surface'}`}>
+    <div className={`rounded-lg border p-3 shrink-0 ${task.isOverdue ? 'border-error/40 bg-error-light/30' : 'border-border bg-surface'}`}>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">
         {task.isOverdue ? 'Overdue — Today\'s Work' : "Today's Work"}
       </p>
@@ -47,7 +47,7 @@ export function StaffTodaysWorkPanel({ task }: Props): React.JSX.Element {
           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             <StaffTaskStatusBadge status={task.status} />
             <StaffTaskPriorityBadge priority={task.priority} />
-            <span className={`text-xs font-medium ${task.isOverdue ? 'text-danger' : 'text-text-secondary'}`}>
+            <span className={`text-xs font-medium ${task.isOverdue ? 'text-error' : 'text-text-secondary'}`}>
               Due {formatDate(task.dueDate)}
             </span>
           </div>

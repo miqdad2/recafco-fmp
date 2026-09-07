@@ -104,7 +104,7 @@ export function PaymentRegisterTable({ payments, contracts, canUpdate }: Props):
                   <td className="px-3 py-2 whitespace-nowrap">{formatDate(p.dueDate)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {p.overdueDays !== null ? (
-                      <span className="text-danger font-medium">{p.overdueDays}d</span>
+                      <span className="text-error font-medium">{p.overdueDays}d</span>
                     ) : '—'}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap"><PaymentStatusBadge status={p.status} /></td>
@@ -127,7 +127,7 @@ export function PaymentRegisterTable({ payments, contracts, canUpdate }: Props):
                             type="button"
                             onClick={() => handleCancel(p.id)}
                             disabled={isPending && cancellingId === p.id}
-                            className="text-text-muted hover:text-danger focus:outline-none focus:ring-2 focus:ring-focus rounded disabled:opacity-50"
+                            className="text-text-muted hover:text-error focus:outline-none focus:ring-2 focus:ring-focus rounded disabled:opacity-50"
                             title="Cancel Payment"
                           >
                             <Ban className="size-3.5" aria-hidden="true" />

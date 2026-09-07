@@ -1,9 +1,8 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Paperclip, Download, Loader2 } from 'lucide-react';
-import type { ActionResult } from '../../actions';
 import { updateWorkflowTaskAction, addWorkflowTaskCommentAction, uploadWorkflowTaskAttachmentAction } from '../../actions';
 import type {
   ContractWorkflowTask,
@@ -154,24 +153,40 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
   const [status, setStatus] = useState<string>(task.status);
 
   // --- Task fields form ------------------------------------------------
-  const updateAction = updateWorkflowTaskAction.bind(null, task.id, contractId);
-  const [updateState, updateFormAction, updatePending] = useActionState<ActionResult, FormData>(updateAction, { error: null });
-  const updateSubmittedRef = useRef(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateSaving, setUpdateSaving] = useState(false);
 
-  useEffect(() => {
-    if (updateSubmittedRef.current && !updatePending && !updateState.error) {
-      updateSubmittedRef.current = false;
-      router.refresh();
+  async function handleUpdateSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (updateSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setUpdateError(null);
+    setUpdateSaving(true);
+    try {
+      const result = await updateWorkflowTaskAction(task.id, contractId, { error: null }, formData);
+      if (result.error) {
+        setUpdateError(result.error);
+        return;
+      }
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Task updated but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to save task update:', err);
+      setUpdateError('Failed to save task update. Please try again.');
+    } finally {
+      setUpdateSaving(false);
     }
-  }, [updateState, updatePending, router]);
+  }
 
   // --- Comments ----------------------------------------------------------
   const [comments, setComments] = useState<ContractWorkflowTaskComment[] | null>(null);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentFormKey, setCommentFormKey] = useState(0);
-  const addCommentAction = addWorkflowTaskCommentAction.bind(null, task.id, contractId);
-  const [commentState, commentFormAction, commentPending] = useActionState<ActionResult, FormData>(addCommentAction, { error: null });
-  const commentSubmittedRef = useRef(false);
+  const [commentSaving, setCommentSaving] = useState(false);
 
   async function loadComments(): Promise<void> {
     try {
@@ -189,22 +204,42 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
     void loadComments();
   }, [task.id]);
 
-  useEffect(() => {
-    if (commentSubmittedRef.current && !commentPending && !commentState.error) {
-      commentSubmittedRef.current = false;
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  async function handleCommentSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (commentSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setCommentError(null);
+    setCommentSaving(true);
+    try {
+      const result = await addWorkflowTaskCommentAction(task.id, contractId, { error: null }, formData);
+      if (result.error) {
+        setCommentError(result.error);
+        return;
+      }
       setCommentFormKey((k) => k + 1);
       void loadComments();
-      router.refresh();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Comment added but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+      setCommentError('Failed to add comment. Please try again.');
+    } finally {
+      setCommentSaving(false);
     }
-  }, [commentState, commentPending]);
+  }
 
   // --- Attachments ---------------------------------------------------------
   const [attachments, setAttachments] = useState<ContractWorkflowTaskAttachment[] | null>(null);
   const [attachmentsError, setAttachmentsError] = useState<string | null>(null);
   const [attachmentFormKey, setAttachmentFormKey] = useState(0);
-  const uploadAction = uploadWorkflowTaskAttachmentAction.bind(null, task.id, contractId);
-  const [uploadState, uploadFormAction, uploadPending] = useActionState<ActionResult, FormData>(uploadAction, { error: null });
-  const uploadSubmittedRef = useRef(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSaving, setUploadSaving] = useState(false);
 
   async function loadAttachments(): Promise<void> {
     try {
@@ -222,14 +257,33 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
     void loadAttachments();
   }, [task.id]);
 
-  useEffect(() => {
-    if (uploadSubmittedRef.current && !uploadPending && !uploadState.error) {
-      uploadSubmittedRef.current = false;
+  async function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (uploadSaving) return;
+
+    const formData = new FormData(e.currentTarget);
+    setUploadError(null);
+    setUploadSaving(true);
+    try {
+      const result = await uploadWorkflowTaskAttachmentAction(task.id, contractId, { error: null }, formData);
+      if (result.error) {
+        setUploadError(result.error);
+        return;
+      }
       setAttachmentFormKey((k) => k + 1);
       void loadAttachments();
-      router.refresh();
+      try {
+        router.refresh();
+      } catch (refreshErr) {
+        console.warn('Attachment uploaded but router.refresh() failed:', refreshErr);
+      }
+    } catch (err) {
+      console.error('Failed to upload attachment:', err);
+      setUploadError('Failed to upload attachment. Please try again.');
+    } finally {
+      setUploadSaving(false);
     }
-  }, [uploadState, uploadPending]);
+  }
 
   // --- Recent Activity (CM-53) --------------------------------------------
   // Not a formal audit trail — this project has no task-history table. Merges
@@ -399,7 +453,7 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
               Uploaded Documents {attachments ? `(${attachments.length})` : ''}
             </h3>
 
-            {attachmentsError && <p className="text-xs text-danger">{attachmentsError}</p>}
+            {attachmentsError && <p className="text-xs text-error">{attachmentsError}</p>}
             {attachments === null && !attachmentsError && <p className="text-xs text-text-muted">Loading…</p>}
             {attachments && attachments.length === 0 && <p className="text-xs text-text-muted">No documents uploaded yet.</p>}
 
@@ -427,11 +481,10 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
             {canEdit && (
               <form
                 key={attachmentFormKey}
-                action={uploadFormAction}
-                onSubmit={() => { uploadSubmittedRef.current = true; }}
+                onSubmit={handleUploadSubmit}
                 className="space-y-2"
               >
-                {uploadState.error && <p className="text-xs text-danger">{uploadState.error}</p>}
+                {uploadError && <p className="text-xs text-error">{uploadError}</p>}
                 <input
                   type="file"
                   name="file"
@@ -442,11 +495,11 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
                 <p className="text-[11px] text-text-muted">PDF, PNG, JPEG, Excel or Word — up to 10MB.</p>
                 <button
                   type="submit"
-                  disabled={uploadPending}
+                  disabled={uploadSaving}
                   className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
                 >
-                  {uploadPending && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
-                  {uploadPending ? 'Uploading…' : 'Upload Attachment'}
+                  {uploadSaving && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+                  {uploadSaving ? 'Uploading…' : 'Upload Attachment'}
                 </button>
               </form>
             )}
@@ -458,7 +511,7 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
               Progress Comments {comments ? `(${comments.length})` : ''}
             </h3>
 
-            {commentsError && <p className="text-xs text-danger">{commentsError}</p>}
+            {commentsError && <p className="text-xs text-error">{commentsError}</p>}
             {comments === null && !commentsError && <p className="text-xs text-text-muted">Loading…</p>}
             {comments && comments.length === 0 && <p className="text-xs text-text-muted">No comments yet.</p>}
 
@@ -477,11 +530,10 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
             {canEdit && (
               <form
                 key={commentFormKey}
-                action={commentFormAction}
-                onSubmit={() => { commentSubmittedRef.current = true; }}
+                onSubmit={handleCommentSubmit}
                 className="space-y-2"
               >
-                {commentState.error && <p className="text-xs text-danger">{commentState.error}</p>}
+                {commentError && <p className="text-xs text-error">{commentError}</p>}
                 <textarea
                   name="comment"
                   rows={2}
@@ -492,10 +544,10 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
                 />
                 <button
                   type="submit"
-                  disabled={commentPending}
+                  disabled={commentSaving}
                   className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
                 >
-                  {commentPending ? 'Posting…' : 'Add Comment'}
+                  {commentSaving ? 'Posting…' : 'Add Comment'}
                 </button>
               </form>
             )}
@@ -506,13 +558,12 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
             <h3 className={`${sectionHeadingCls} mb-3`}>Manager Update</h3>
             <form
               id="workflow-task-drawer-form"
-              action={updateFormAction}
-              onSubmit={() => { updateSubmittedRef.current = true; }}
+              onSubmit={handleUpdateSubmit}
               className="space-y-4"
             >
-              {updateState.error && (
-                <div className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-                  {updateState.error}
+              {updateError && (
+                <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+                  {updateError}
                 </div>
               )}
 
@@ -614,10 +665,10 @@ export function WorkflowTaskDrawer({ task, contractId, people, canManage, canEdi
               {canEdit && (
                 <button
                   type="submit"
-                  disabled={updatePending}
+                  disabled={updateSaving}
                   className="w-full rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
                 >
-                  {updatePending ? 'Saving…' : 'Save Task Update'}
+                  {updateSaving ? 'Saving…' : 'Save Task Update'}
                 </button>
               )}
             </form>

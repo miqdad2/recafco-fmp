@@ -43,7 +43,7 @@ export function WorkflowSummaryCards({ summary }: Props): React.JSX.Element {
         label="Overdue Tasks"
         value={summary?.tasksOverdue}
         icon={AlertTriangle}
-        iconColor="text-danger"
+        iconColor="text-error"
         status={status}
       />
       <MetricCard
