@@ -422,7 +422,7 @@ export function ScopeOfWorkFieldset({
       {other && !notApplicable && (
         <div>
           <label htmlFor="scope_otherDescription" className={labelCls}>
-            Other Description <span className="text-danger">*</span>
+            Other Description <span className="text-error">*</span>
           </label>
           <input
             id="scope_otherDescription"

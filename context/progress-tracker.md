@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** CM-70G — Fix Documents & Obligations Nested Form Upload Bug (2026-09-06)
+- **Last completed:** CM-70I — Fix Contract Edit Page Save Changes Not Persisting (2026-09-07)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -1847,6 +1847,102 @@ Pure frontend UI/UX unit — no backend, DTO, service, or schema changes. Simpli
 - "Needs Action" is computed client-side from `data.manager.attentionItems.length` — the same array already returned by the (untouched) API, capped at 30 server-side since CM-37. On the rare contract portfolio with more than 30 simultaneous attention items, this undercounts; adding an uncapped total would need a one-line backend addition, deliberately skipped per this unit's "prefer no backend change unless absolutely needed" instruction. Documented here for future reference.
 - The tabs are a Server-Components-as-props-into-a-Client-Component pattern: `page.tsx` (a Server Component) renders all three panels' JSX and passes them to `ManagerSecondaryTabs` (`'use client'`), which only toggles which one is visible via `useState` — no additional client-side data fetching, no new API calls, keeping the "prefer no backend change" and performance characteristics identical to CM-37.
 - No live API scripting was needed/run since the backend response shape is provably unchanged (not touched) — verification relied on rendered SSR HTML plus the full existing automated test suites (both unchanged in count, confirming no regressions).
+
+## CM-70I — Fix Contract Edit Page Save Changes Not Persisting (Completed 2026-09-07)
+
+### Summary
+
+Fixed the Contract Edit page (`/contracts/{id}/edit`) so "Save changes" reliably persists and confirms updates. Found and fixed two real, confirmed bugs: (1) the error banner and both required-field asterisks used the invalid `bg-danger`/`text-danger`/`border-danger` Tailwind tokens (the same class of bug fixed across Claims/Issues/Documents/Variations/Payments earlier in this session, but this form was never part of that sweep) — meaning ANY backend rejection (a version conflict, a validation error, anything) rendered completely invisible, making a genuinely-failed save look like nothing happened; (2) Department and Plant "— None —" selections were silently dropped rather than persisted as `null` — the frontend server action converted an intentionally-cleared dropdown to the same `undefined` value as a field the user never touched, and the backend's "omit = leave unchanged" PATCH semantics then left the previous Department/Plant in place. The redirect-after-save mechanism, BOQ replace-and-recalculate logic, and every other individual field mapping were all audited and confirmed already correct.
+
+### Files Audited
+
+`[id]/edit/page.tsx` (the Edit Contract Server Component — confirmed it fetches the current contract fresh via `contractsApi.get(id)`, which already uses `cache: 'no-store'` on every request, so no stale-data/caching issue was found there), `edit-contract-form.tsx` (the full form — confirmed `useActionState` + a native `<form action={formAction}>` + a server-side `redirect()` after success is a fundamentally more robust pattern than the Payment modal's old `useEffect`-based close, since the navigation signal comes directly from the Server Action's own control flow rather than depending on a later client effect correctly re-firing; found the 3 invisible-error-banner locations), `contract-form-fields.tsx` (the shared field components this form reuses — found a 4th invisible-token instance in `ScopeOfWorkFieldset`'s "Other Description" required marker, also used by New Contract Register), `actions.ts`'s `updateContractAction` (full field-by-field audit against the update DTO — found the Department/Plant null-clearing gap; confirmed `revalidatePath` already correctly targets both `/contracts` and `/contracts/${contractId}` — unlike the Payment modal's earlier bug, this was already right), `update-contract.dto.ts` (confirmed every frontend field name matches a real DTO property; confirmed `@IsOptional()` — verified directly from the installed `class-validator@0.14.4` source — skips validation for both `null` and `undefined`, so sending an explicit `null` for `departmentId`/`plantId` is valid and requires no DTO change), `contracts.service.ts`'s `update()` (confirmed the version-conflict path throws a real, specific `ConflictException` with a clear message — "Contract was changed by another user; please refresh and retry" — that was always being returned correctly, just rendered invisibly; confirmed the BOQ replace-in-place logic and `effectiveContractValue`/`effectiveCurrency` recalculation from BOQ totals are both already correct and complete), `create-contract-boq-item.dto.ts` (confirmed BOQ numeric fields are already sent as real JSON numbers via the frontend's own `parseFloat()` before `JSON.stringify`, not strings — no type-coercion bug found).
+
+### Root Cause
+
+Two distinct, real, now-fixed bugs, both explaining the reported symptoms without needing to invent anything: (1) an invisible error banner meant any genuine save failure (most plausibly a version conflict — this page has no `force-dynamic` export but doesn't need one since every underlying fetch already uses `cache: 'no-store'`, so this was ruled out as a live contributor) produced zero visible feedback, which alone fully explains "changes are not persisted correctly or UI does not confirm/update" for any save that hit any backend rejection; (2) Department/Plant "— None —" was a real, provable, always-reproducible bug independent of any timing/race condition.
+
+### Files Changed
+
+`actions.ts` (`updateContractAction`: `departmentId`/`plantId` now read as `string | null` — an empty selection becomes an explicit `null`, always included in the update payload rather than conditionally omitted). `edit-contract-form.tsx` (3 `danger`→`error` token fixes: the error banner, "Company Name *", "Project Name *"). `contract-form-fields.tsx` (1 `danger`→`error` fix: `ScopeOfWorkFieldset`'s "Other Description *", shared with New Contract Register).
+
+### Backend Changed — No
+
+Zero NestJS API files touched. `contracts.service.ts`'s `update()` already correctly applies `dto.plantId`/`dto.departmentId` to the Prisma update whenever the value is not `undefined` — confirmed via source inspection that this already-correct code accepts an explicit `null` and clears the relation; the DTO's `@IsOptional()` already accepts `null`. The gap was entirely in what the frontend Server Action chose to send, not in how the backend handles what it receives.
+
+### Migration Added — None
+
+Not needed and not added — this is a bug fix with zero schema involvement (`departmentId`/`plantId` were already confirmed-nullable columns). `pnpm db:migrate:status` confirms 38 migrations, unchanged.
+
+### Verification Results (2026-09-07)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 (unchanged — this fix lives entirely in a Server Action and React components that this repo's test infrastructure cannot exercise; no pure-logic helper was added or changed) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1446/1446 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 38 migrations, unchanged |
+| Live smoke check | ✓ Edit Contract, Contract Detail, Contract List, Dashboard, New Contract Register, Payments (register + per-contract tab), and every sibling per-contract tab all responded cleanly (307 redirects, no crash) on the restarted web dev server (API server left untouched — no backend change to pick up) |
+| Live authenticated click-through (Description/Counterparty Contact/Notes persistence, Plant→None, Renewal Notice Date, BOQ quantity update) | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via full source-level tracing of the update payload construction, the DTO's validation behavior (confirmed directly from the installed `class-validator` package source), and the backend's version-conflict/BOQ-recalculation logic |
+
+### Unsupported/Deferred Items
+
+Live authenticated confirmation of all the task's specific test scenarios — credential blocker, carried over. `actions.ts` has no dedicated test file anywhere in this repo (a long-established, repo-wide constraint — Next.js Server Actions aren't unit-tested here), so the Department/Plant null-clearing fix could not be covered by a new automated test; it was instead verified by tracing the exact data flow from form submission through the DTO's real validation semantics to the Prisma update call.
+
+### Next Recommended Unit
+
+The same "empty optional field silently omitted instead of explicitly cleared" pattern likely extends to this form's other ~20 optional text/date fields (Description, Notes, Renewal Notice Date, etc.) for the specific case of clearing a PREVIOUSLY-SET value back to empty — not explicitly reported or tested here (the task's own scenarios only test setting NEW values, which already works correctly), but worth a dedicated follow-up if a similar "cleared field didn't persist" report surfaces for those fields.
+
+## CM-70H — Fix Contract Payments Add Payment Modal Stuck on "Saving…" (Completed 2026-09-07)
+
+### Summary
+
+Fixed the Contract Detail > Payments "Add Payment" modal getting stuck on "Saving…" with the modal left open for some payments, even though the backend insert had already succeeded (confirmed by the payment appearing correctly after a manual browser refresh). Found and fixed a real, confirmed bug — `createPaymentAction`'s `revalidatePath('/contracts/payments')` only ever invalidated the module-level Payments Register's own cache, never the Contract Detail Payments tab's real route (`/contracts/{contractId}/payments`) that this modal is actually opened from most of the time — so the list never refreshed itself without a manual reload. Beyond that confirmed bug, rebuilt the modal's entire save flow from React 19's `useActionState`/`submittedRef`/`useEffect` combination (which depends on a later effect run to detect success and close the modal) to an explicit, manually-controlled `async` submit handler with `isSaving` set only inside a `try/finally`, so the button can never get structurally stuck regardless of timing, and a successful response closes the modal immediately and unconditionally rather than waiting on a separate effect.
+
+### Files Audited
+
+`payment-form-modal.tsx` (the shared Add/Edit Payment modal, used by both the module-level Payments Register and the Contract Detail Payments tab via a `variant` prop — read in full; confirmed the `useActionState` + `submittedRef` + `useEffect`-close pattern, identical to every other modal in this app), `actions.ts`'s `createPaymentAction`/`updatePaymentAction`/`actionFetch`/`handleActionResponse` (confirmed `handleActionResponse` already robustly treats any 2xx response — with or without a parseable JSON body — as success, and any non-2xx as a real, visible error; confirmed `createPaymentAction`'s `revalidatePath` call only ever targeted the module-level register path, never the contract-detail tab's own real route it's actually called from most often), `contract-payments.service.ts`'s `create()` (confirmed the backend insert + activity log + response shape are all correct and unchanged — no backend bug found), `validatePaymentFormValues`/`suggestPaymentStatus` (contract-payment-detail-helpers.ts — re-verified all 4 reported scenarios — Received=Invoice (Paid), 0<Received<Invoice (Partial), Received=0 (Pending), and the free-text "Retention Release" payment term — pass validation cleanly with no code path that blocks or mis-fires for any of them).
+
+### Root Cause
+
+Two distinct, real issues, both now fixed:
+1. **Confirmed bug**: `createPaymentAction` always called `revalidatePath('/contracts/payments')` regardless of where the payment was actually added from — a payment added via the Contract Detail Payments tab (`/contracts/{contractId}/payments`, a different route) never had ITS OWN cached data invalidated, so the list only ever showed the new payment after a manual browser reload (which forces a fresh, non-cached fetch).
+2. **Structural fragility**: the modal's success-detection depended on a `useEffect` correctly re-running with the right `isPending`/`state.error` values after the action's promise settled. This is a working pattern used throughout the app, but it has no independent safety net — if that specific effect run is ever missed or delayed for any reason, the button visually stays on "Saving…" and the modal stays open indefinitely, even though the underlying save request has already fully completed on the server. Rebuilt to remove this dependency entirely.
+
+### Files Changed
+
+`payment-form-modal.tsx` (removed `useActionState`/`submittedRef`/`useEffect`; added an explicit `isSaving` state and a manual `async handleSubmit` with `try/catch/finally`; the `<form>` no longer has an `action` prop — submission is fully manual via `onSubmit`). `actions.ts` (`createPaymentAction` now also revalidates `/contracts/{contractId}/payments`; `updatePaymentAction` gained a new `contractId` parameter, bound from the modal's own `payment.contractId`, and revalidates the same contract-detail path).
+
+### Backend Changed — No
+
+Zero NestJS API files touched — confirmed via audit that `contract-payments.service.ts`'s `create()`/`update()` and the payment DTOs are all already correct. The only backend-adjacent change is in the Next.js Server Action (`actions.ts`, part of the web app, not the API), fixing which page paths get revalidated after a save.
+
+### Migration Added — None
+
+Not needed and not added — this is a UI/server-action bug fix with zero schema involvement. `pnpm db:migrate:status` confirms 38 migrations, unchanged.
+
+### Verification Results (2026-09-07)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` / `@recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test --run` | ✓ 669/669 (unchanged — no new pure logic was added; `validatePaymentFormValues`/`suggestPaymentStatus` were reused as-is and re-verified by inspection against all 4 reported scenarios, not modified) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1446/1446 (unchanged — zero backend touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 38 migrations, unchanged |
+| Live smoke check | ✓ Payments (register + per-contract tab), Dashboard, Contract List, and every sibling per-contract tab all responded cleanly (307 redirects, no crash) on the restarted web dev server (API server left untouched, per this task's own "don't touch unrelated processes" instruction) |
+| Live authenticated click-through (Add Payment 1–4, double-click guard, refresh-without-reload) | **Not run** — same carried-over credential blocker as every unit since CM-62; verified instead via full source-level tracing of the save flow and the confirmed, fixed `revalidatePath` target mismatch |
+
+### Unsupported/Deferred Items
+
+Live authenticated confirmation that all 4 payment scenarios (Paid/Partial/Pending/Retention Release) save and appear without a manual refresh — credential blocker, carried over. `cancelPaymentAction` (a separate, unrelated action for cancelling an existing payment) has the same class of bug as the confirmed root cause here — it only ever calls `revalidatePath('/contracts/payments')`, never the contract-detail tab's own path — but was NOT fixed, since it is outside this task's explicit "add/create" scope and was not reported as broken.
+
+### Next Recommended Unit
+
+Apply the same contract-detail-path `revalidatePath` fix to `cancelPaymentAction`, noticed during this unit's audit but out of scope here.
 
 ## CM-70G — Fix Documents & Obligations Nested Form Upload Bug (Completed 2026-09-06)
 

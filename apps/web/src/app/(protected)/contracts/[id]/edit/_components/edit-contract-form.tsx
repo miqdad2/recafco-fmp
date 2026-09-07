@@ -146,7 +146,7 @@ export function EditContractForm({
   }
 
   const errorBanner = (state.error || boqError) && (
-    <div className="mb-6 rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
+    <div className="mb-6 rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
       {boqError ?? state.error}
     </div>
   );
@@ -198,7 +198,7 @@ export function EditContractForm({
 
             <div>
               <label htmlFor="counterpartyName" className={labelCls}>
-                Company Name <span className="text-danger">*</span>
+                Company Name <span className="text-error">*</span>
               </label>
               <input
                 id="counterpartyName"
@@ -214,7 +214,7 @@ export function EditContractForm({
 
             <div>
               <label htmlFor="title" className={labelCls}>
-                Project Name <span className="text-danger">*</span>
+                Project Name <span className="text-error">*</span>
               </label>
               <input
                 id="title"

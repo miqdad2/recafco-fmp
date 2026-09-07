@@ -275,8 +275,19 @@ export async function updateContractAction(
   const endDate = (formData.get('endDate') as string | null) || undefined;
   const renewalNoticeDate = (formData.get('renewalNoticeDate') as string | null) || undefined;
   const ownerUserId = (formData.get('ownerUserId') as string | null) || undefined;
-  const departmentId = (formData.get('departmentId') as string | null) || undefined;
-  const plantId = (formData.get('plantId') as string | null) || undefined;
+  // Bug fix: Department/Plant are real, nullable relations with a "— None —"
+  // option in the Edit Contract form. The old `|| undefined` conversion made
+  // an explicitly-cleared selection indistinguishable from a field the form
+  // never touched — both collapsed to `undefined`, which the backend treats
+  // as "leave the existing value unchanged". So choosing "— None —" and
+  // saving silently kept whatever Department/Plant was already set. Since
+  // this form always renders both selects (never conditionally), an empty
+  // selection here is always a deliberate clear, not an absent field — send
+  // it as an explicit `null` so the backend actually clears the relation.
+  const departmentIdRaw = (formData.get('departmentId') as string | null) ?? '';
+  const departmentId: string | null = departmentIdRaw.trim() === '' ? null : departmentIdRaw.trim();
+  const plantIdRaw = (formData.get('plantId') as string | null) ?? '';
+  const plantId: string | null = plantIdRaw.trim() === '' ? null : plantIdRaw.trim();
   const locationId = (formData.get('locationId') as string | null) || undefined;
   const notes = (formData.get('notes') as string | null)?.trim() || undefined;
   const clientContactName = (formData.get('clientContactName') as string | null)?.trim() || undefined;
@@ -298,6 +309,11 @@ export async function updateContractAction(
 
   const result = await actionFetch(`/contracts/${contractId}`, 'PATCH', {
     version,
+    // Always included (never conditional) — departmentId/plantId are always
+    // real form fields here, so a real UUID or an explicit null (cleared to
+    // "— None —") is always the deliberate current value, never "untouched".
+    departmentId,
+    plantId,
     ...(title !== undefined ? { title } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(description !== undefined ? { description } : {}),
@@ -315,8 +331,6 @@ export async function updateContractAction(
     ...(endDate !== undefined ? { endDate } : {}),
     ...(renewalNoticeDate !== undefined ? { renewalNoticeDate } : {}),
     ...(ownerUserId !== undefined ? { ownerUserId } : {}),
-    ...(departmentId !== undefined ? { departmentId } : {}),
-    ...(plantId !== undefined ? { plantId } : {}),
     ...(locationId !== undefined ? { locationId } : {}),
     ...(notes !== undefined ? { notes } : {}),
     ...(clientContactName !== undefined ? { clientContactName } : {}),
@@ -528,12 +542,19 @@ export async function createPaymentAction(
   const result = await actionFetch(`/contracts/${contractId}/payments`, 'POST', readPaymentFields(formData));
   if (!result.ok) return { error: result.message ?? 'Payment could not be created.' };
 
+  // Bug fix: this previously only revalidated the module-level register
+  // path, never the Contract Detail Payments tab's own real route — a
+  // payment added from that tab saved correctly but never showed up
+  // without a manual browser refresh, since that page's own cached data
+  // was never invalidated.
   revalidatePath('/contracts/payments');
+  revalidatePath(`/contracts/${contractId}/payments`);
   return { error: null };
 }
 
 export async function updatePaymentAction(
   paymentId: string,
+  contractId: string,
   _prev: ActionResult,
   formData: FormData,
 ): Promise<ActionResult> {
@@ -541,6 +562,7 @@ export async function updatePaymentAction(
   if (!result.ok) return { error: result.message ?? 'Payment could not be updated.' };
 
   revalidatePath('/contracts/payments');
+  if (contractId) revalidatePath(`/contracts/${contractId}/payments`);
   return { error: null };
 }
 

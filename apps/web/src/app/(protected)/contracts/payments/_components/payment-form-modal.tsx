@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 import type { ActionResult } from '../../actions';
@@ -75,9 +75,6 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
   // shown as a small read-only context block instead of plain text.
   const contractContext = isContractDetail ? (mode === 'add' ? contracts?.[0] : payment?.contract) : undefined;
   const router = useRouter();
-  const action = mode === 'edit' && payment ? updatePaymentAction.bind(null, payment.id) : createPaymentAction;
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(action, { error: null });
-  const submittedRef = useRef(false);
 
   // CM-70A — controlled only where live reactivity is genuinely needed
   // (Remaining Amount preview + auto-suggested Status + the Payment Term
@@ -93,6 +90,16 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
   const [paymentTermChoice, setPaymentTermChoice] = useState<string>(initialTerm.choice);
   const [otherPaymentTerm, setOtherPaymentTerm] = useState(initialTerm.other);
   const [clientError, setClientError] = useState<string | null>(null);
+  // Bug fix: this modal previously relied on useActionState's own isPending/
+  // state plus a submittedRef + useEffect to detect a successful save and
+  // close the modal. For some payments that effect never fired even though
+  // the backend insert had already succeeded, leaving the button stuck on
+  // "Saving…" and the modal open. Replaced with an explicit, manually
+  // controlled save flow: isSaving is set true only for the duration of the
+  // actual request (in a try/finally, so it can never get stuck regardless
+  // of what happens inside), and a successful response always closes the
+  // modal immediately — never gated on a separate effect run.
+  const [isSaving, setIsSaving] = useState(false);
 
   const invoiceAmountNum = submittedAmount.trim() ? Number(submittedAmount) : null;
   const receivedAmountNum = paidAmount.trim() ? Number(paidAmount) : null;
@@ -105,14 +112,6 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
   // looking inconsistent with what the user just typed into these two
   // specific fields.
   const remainingAmount = computeRemainingAmount(invoiceAmountNum, receivedAmountNum);
-
-  useEffect(() => {
-    if (submittedRef.current && !isPending && !state.error) {
-      submittedRef.current = false;
-      onClose();
-      router.refresh();
-    }
-  }, [state, isPending, onClose, router]);
 
   // CM-70A — auto-set the suggested status whenever either amount changes
   // (per this unit's own "Preferred: Auto-set status when amounts change"),
@@ -136,7 +135,25 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
     if (suggested) setStatus(suggested);
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
+  /**
+   * Bug fix — explicit, manually-controlled save flow (see the isSaving
+   * state comment above for why). Always preventDefault()s first, so the
+   * browser's native form submission is never involved and there is no
+   * dependency on useActionState's own transition/pending semantics.
+   * Double-submit is prevented by bailing out immediately if a save is
+   * already in flight; isSaving is only ever set inside the try/finally
+   * below, so it always returns to false exactly once the request settles,
+   * regardless of success, failure, or a thrown exception. A successful
+   * response ALWAYS closes the modal immediately (never gated on a later
+   * effect); router.refresh() is then attempted separately and its own
+   * failure is only logged as a warning — the save itself already
+   * succeeded and must not be treated as failed just because the list
+   * couldn't refresh automatically.
+   */
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (isSaving) return;
+
     const formData = new FormData(e.currentTarget);
     const errors = validatePaymentFormValues({
       invoiceNumber: (formData.get('invoiceNumber') as string | null) ?? '',
@@ -148,12 +165,38 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
       status,
     });
     if (errors.length > 0) {
-      e.preventDefault();
       setClientError(errors.join(' '));
       return;
     }
     setClientError(null);
-    submittedRef.current = true;
+
+    setIsSaving(true);
+    try {
+      const result: ActionResult =
+        mode === 'edit' && payment
+          ? await updatePaymentAction(payment.id, payment.contractId, { error: null }, formData)
+          : await createPaymentAction({ error: null }, formData);
+
+      // Defensive: treat any response without a real error message as
+      // success — covers a created/updated payment object, a bare success
+      // marker, or (per actionFetch's own handling) an empty-but-OK (200/201)
+      // response body.
+      if (result?.error == null) {
+        onClose();
+        try {
+          router.refresh();
+        } catch (refreshError) {
+          console.warn('Payment saved successfully, but refreshing the list failed. Refresh the page to see it.', refreshError);
+        }
+      } else {
+        setClientError(result.error);
+      }
+    } catch (err) {
+      console.error('Failed to save payment', err);
+      setClientError('Payment could not be saved. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const finalPaymentTerm = resolvePaymentTermValue(paymentTermChoice, otherPaymentTerm);
@@ -180,10 +223,10 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
           </button>
         </div>
 
-        <form id="payment-form" action={formAction} onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
-          {(clientError ?? state.error) && (
+        <form id="payment-form" onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          {clientError && (
             <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-              {clientError ?? state.error}
+              {clientError}
             </div>
           )}
 
@@ -431,10 +474,10 @@ export function PaymentFormModal({ mode, contracts, payment, onClose, variant = 
           <button
             type="submit"
             form="payment-form"
-            disabled={isPending}
+            disabled={isSaving}
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {isPending ? 'Saving…' : mode === 'add' ? 'Add Payment' : 'Save Changes'}
+            {isSaving ? 'Saving…' : mode === 'add' ? 'Add Payment' : 'Save Changes'}
           </button>
         </div>
       </div>
