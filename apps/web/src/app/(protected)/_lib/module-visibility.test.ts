@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess, isContractStaffOnlyAccess } from './module-visibility';
+import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from './module-visibility';
 
 describe('canSeeModule', () => {
   it('grants each operational module only when its read permission is present', () => {
@@ -100,5 +100,19 @@ describe('isContractStaffOnlyAccess', () => {
 
   it('is false for an empty permission set', () => {
     expect(isContractStaffOnlyAccess([])).toBe(false);
+  });
+});
+
+describe('isErectionDashboardMonitorOnly (CM-71H)', () => {
+  it('is true for a manager-tier actor (contracts.update) — relabels "Erection Status" in the sidebar', () => {
+    expect(isErectionDashboardMonitorOnly(['contracts.read', 'contracts.update'])).toBe(true);
+  });
+
+  it('is false for a non-manager actor (e.g. a future Erection Manager with only contracts.workflow_update) — keeps "Erection Dashboard"', () => {
+    expect(isErectionDashboardMonitorOnly(['contracts.read', 'contracts.workflow_update'])).toBe(false);
+  });
+
+  it('is false for an empty permission set', () => {
+    expect(isErectionDashboardMonitorOnly([])).toBe(false);
   });
 });

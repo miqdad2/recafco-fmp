@@ -44,9 +44,18 @@ export function computeStaffFocusedCounts(tasks: StaffTaskRow[], todayIso: strin
  * in-progress buckets is also the earliest-due task within that bucket;
  * the final "earliest due date" fallback re-sorts explicitly so this
  * function's own correctness never depends on the caller's ordering.
+ *
+ * CM-71H.5 — a locked guided erection step (guidedStepLocked === true,
+ * computed in dashboard/page.tsx from the same erection-step-lock.ts rule
+ * the guided pages themselves enforce) is NEVER a candidate here, at any
+ * priority tier — it isn't actionable yet regardless of how overdue/urgent
+ * its underlying generic task row looks, so surfacing it as "Today's Work"
+ * would send the actor to a screen that just tells them to come back
+ * later. See hasOnlyLockedOpenTasks() for the caller-side "you have open
+ * work, but none of it is actionable right now" case this creates.
  */
 export function pickNextTask(tasks: StaffTaskRow[], todayIso: string): StaffTaskRow | undefined {
-  const openTasks = tasks.filter((t) => t.status !== 'COMPLETED');
+  const openTasks = tasks.filter((t) => t.status !== 'COMPLETED' && t.guidedStepLocked !== true);
   if (openTasks.length === 0) return undefined;
 
   const overdue = openTasks.filter((t) => t.isOverdue);
@@ -67,4 +76,17 @@ export function pickNextTask(tasks: StaffTaskRow[], todayIso: string): StaffTask
   if (withDueDate.length > 0) return withDueDate[0];
 
   return openTasks[0];
+}
+
+/**
+ * CM-71H.5 — true only when the actor has real open (non-COMPLETED) work,
+ * but every single one of it is a locked guided erection step — the
+ * distinct "nothing to do RIGHT NOW, but not because your queue is empty"
+ * case pickNextTask()'s plain `undefined` return can't tell apart from
+ * "you have zero assigned work." Drives StaffTodaysWorkPanel's 3rd,
+ * dedicated empty-state message.
+ */
+export function hasOnlyLockedOpenTasks(tasks: StaffTaskRow[]): boolean {
+  const openTasks = tasks.filter((t) => t.status !== 'COMPLETED');
+  return openTasks.length > 0 && openTasks.every((t) => t.guidedStepLocked === true);
 }

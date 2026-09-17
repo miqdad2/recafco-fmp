@@ -9,6 +9,12 @@ import {
   isContractWorkspaceDetailPath,
   contractModuleBreadcrumbItems,
   contractWorkflowBreadcrumbItems,
+  contractErectionMethodStatementBreadcrumbItems,
+  contractErectionMethodStatementApprovalBreadcrumbItems,
+  contractErectionScheduleBreadcrumbItems,
+  contractErectionDeliveryStartBreadcrumbItems,
+  contractErectionStartBreadcrumbItems,
+  contractErectionChecklistBreadcrumbItems,
 } from '../_lib/contract-workspace-breadcrumb';
 import { isContractStaffOnlyAccess } from '../_lib/module-visibility';
 import type { ShellUser } from './app-shell';
@@ -44,6 +50,12 @@ export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Eleme
   const breadcrumbItems =
     contractModuleBreadcrumbItems(pathname) ??
     contractWorkflowBreadcrumbItems(pathname, searchParams, isStaffOnly) ??
+    contractErectionChecklistBreadcrumbItems(pathname, isStaffOnly) ??
+    contractErectionStartBreadcrumbItems(pathname, isStaffOnly) ??
+    contractErectionDeliveryStartBreadcrumbItems(pathname, isStaffOnly) ??
+    contractErectionScheduleBreadcrumbItems(pathname, isStaffOnly) ??
+    contractErectionMethodStatementApprovalBreadcrumbItems(pathname, isStaffOnly) ??
+    contractErectionMethodStatementBreadcrumbItems(pathname, isStaffOnly) ??
     (isContractWorkspaceDetailPath(pathname) ? WORKSPACE_DETAIL_BREADCRUMB : undefined);
 
   return (

@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import Link from 'next/link';
 import { Printer, Pencil } from 'lucide-react';
 import { DashboardScopeBadge } from '../../../_components/dashboard-scope-badge';
@@ -51,7 +52,47 @@ export default async function ContractWorkspaceLayout({ params, children }: Layo
   // (Schedule, Payments, Production, Variations, Claims, Risks, Documents,
   // Workflow, Issues, Attachments, Closeout, Activity) since they all share
   // this one layout — no per-tab hiding needed.
-  if (isContractStaffOnlyAccess(permissions)) redirect('/contracts/workflow?mode=my-tasks');
+  //
+  // CM-71H.3 — EXCEPT the 6 guided erection workflow screens
+  // (.../workflow/erection/...): CM-71A-H added those specifically so a
+  // Contract-Staff-tier "Erection Manager" (see the ERECTION_MANAGER access
+  // template, CM-71H.1) COULD reach them directly — this blanket redirect
+  // (written years before those screens existed) was silently sending every
+  // one of those users straight back to My Tasks before the guided page
+  // itself ever got a chance to render, for every single step including
+  // Step 1. The pathname is read from the `x-pathname` header proxy.ts now
+  // forwards (a layout has no other way to see the current sub-route — only
+  // `params`, which carries just the [id] segment). Every OTHER workspace
+  // tab keeps the exact same redirect, unchanged.
+  const pathname = (await headers()).get('x-pathname') ?? '';
+  const isGuidedErectionRoute = pathname.includes('/workflow/erection/');
+  const isStaffTier = isContractStaffOnlyAccess(permissions);
+  if (isStaffTier && !isGuidedErectionRoute) {
+    redirect('/contracts/workflow?mode=my-tasks');
+  }
+
+  // CM-71H.6 — a staff-tier (Erection Manager / Contract Staff) viewer on
+  // one of the 6 guided erection screens gets a focused workspace: the
+  // full Contract Detail header (title/status badges/Edit Contract/Actions
+  // menu/Print-Export) and the full tab bar (Overview, Schedule, Payments,
+  // Production, Variations, Claims, Risks, Documents, Workflow & Team
+  // Tasks, Issues, Attachments, Activity, Closeout) never render for them —
+  // those are manager-monitoring surfaces this viewer has no legitimate
+  // reason to see (see this unit's own business rule). Each guided panel
+  // already renders its own step title/status badge and Contract Summary
+  // (ID/Name/Client) — see e.g. erection-method-statement-panel.tsx — so no
+  // separate focused header needed here, just getting the manager chrome
+  // out of the way. A manager-tier viewer (or a staff-tier viewer on any
+  // OTHER route, which never reaches this point — they were redirected
+  // above) always gets the exact same full layout as before, unchanged.
+  const isFocusedErectionView = isStaffTier && isGuidedErectionRoute;
+  if (isFocusedErectionView) {
+    return (
+      <div className="px-4 lg:px-6 py-4 max-w-[1900px] mx-auto">
+        {children}
+      </div>
+    );
+  }
 
   const canEdit = contract.status === 'DRAFT' && permissions.includes('contracts.update');
 

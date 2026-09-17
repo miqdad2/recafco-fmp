@@ -1,7 +1,9 @@
 'use client';
 
-import { Paperclip, MessageSquare, AlertTriangle } from 'lucide-react';
+import Link from 'next/link';
+import { Paperclip, MessageSquare, AlertTriangle, HardHat, ArrowUpRight } from 'lucide-react';
 import type { ContractWorkflowTask } from '@/lib/contracts-api';
+import { getGuidedErectionWorkflowRoute, getGuidedErectionTaskDisplayName } from '../../_lib/guided-erection-workflow-route';
 import { WorkflowTaskStatusBadge } from './workflow-task-status-badge';
 import { WorkflowTaskPriorityBadge } from './workflow-task-priority-badge';
 
@@ -70,17 +72,30 @@ function submissionLine(task: ContractWorkflowTask): string | null {
   return null;
 }
 
+/**
+ * CM-71H.2 — a task with a dedicated CM-71A-G guided screen (detected via
+ * getGuidedErectionWorkflowRoute, keyed off the stable taskKey) opens that
+ * screen directly (a real navigation `<Link>`) instead of the generic
+ * WorkflowTaskDrawer — "Open Workflow"/"Continue Workflow" replaces the
+ * plain click-to-open-drawer affordance. Every other task (including
+ * Payment Issued, the one ERECTION task with no guided screen yet) is
+ * completely unchanged — still a `<button>` that opens the generic drawer
+ * via onOpen. Viewing is never blocked here: this only changes WHERE the
+ * click navigates, not who can click it — the guided screen's own read/
+ * write gating (unchanged by this unit) decides what the viewer can do
+ * once there.
+ */
 export function WorkflowTaskCard({ task, onOpen }: Props): React.JSX.Element {
   const submission = submissionLine(task);
+  const guided = getGuidedErectionWorkflowRoute(task, task.contractId);
+  const displayName = getGuidedErectionTaskDisplayName(task);
 
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(task)}
-      className={`w-full text-left rounded-md border border-border ${cardAccentCls(task)} bg-surface-secondary/40 p-2.5 space-y-1.5 hover:border-accent hover:bg-surface focus:outline-none focus:ring-2 focus:ring-focus`}
-    >
+  const cardBodyCls = `block w-full text-left rounded-md border border-border ${cardAccentCls(task)} bg-surface-secondary/40 p-2.5 space-y-1.5 hover:border-accent hover:bg-surface focus:outline-none focus:ring-2 focus:ring-focus`;
+
+  const cardContent = (
+    <>
       <div className="flex items-start justify-between gap-2">
-        <span className="text-xs font-medium text-text-primary">{task.taskName}</span>
+        <span className="text-xs font-medium text-text-primary">{displayName}</span>
         {task.isOverdue && (
           <span className="shrink-0 inline-flex items-center gap-0.5 text-error" title="Overdue">
             <AlertTriangle className="size-3.5" aria-hidden="true" />
@@ -91,6 +106,12 @@ export function WorkflowTaskCard({ task, onOpen }: Props): React.JSX.Element {
       <div className="flex flex-wrap items-center gap-1.5">
         <WorkflowTaskStatusBadge status={task.status} />
         <WorkflowTaskPriorityBadge priority={task.priority} />
+        {guided && (
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+            <HardHat className="size-2.5 shrink-0" aria-hidden="true" />
+            Guided Workflow · Step {guided.stepNumber}
+          </span>
+        )}
       </div>
 
       <p className="text-[11px] text-text-muted">
@@ -110,8 +131,29 @@ export function WorkflowTaskCard({ task, onOpen }: Props): React.JSX.Element {
             {task.commentsCount}
           </span>
         </div>
-        <span className="text-[10px] text-text-muted">{formatRelativeActivity(task.lastActivityAt)}</span>
+        {guided ? (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-accent">
+            {task.status === 'NOT_STARTED' ? 'Open Workflow' : 'Continue Workflow'}
+            <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
+          </span>
+        ) : (
+          <span className="text-[10px] text-text-muted">{formatRelativeActivity(task.lastActivityAt)}</span>
+        )}
       </div>
+    </>
+  );
+
+  if (guided) {
+    return (
+      <Link href={guided.href} className={cardBodyCls}>
+        {cardContent}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={() => onOpen(task)} className={cardBodyCls}>
+      {cardContent}
     </button>
   );
 }

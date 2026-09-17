@@ -22,6 +22,20 @@ import { ContractScheduleService } from './contract-schedule.service';
 import { ContractSchedulePlanService } from './contract-schedule-plan.service';
 import { ContractScheduleOverviewService } from './contract-schedule-overview.service';
 import { ContractDashboardService } from './contract-dashboard.service';
+import { ContractErectionDashboardService } from './contract-erection-dashboard.service';
+import { ContractErectionMethodStatementService } from './contract-erection-method-statement.service';
+import { ContractErectionMethodStatementApprovalService } from './contract-erection-method-statement-approval.service';
+import { ErectionMethodStatementApprovalAttachmentStorageService } from './erection-method-statement-approval-attachment-storage.service';
+import { ContractErectionScheduleService } from './contract-erection-schedule.service';
+import { ErectionScheduleAttachmentStorageService } from './erection-schedule-attachment-storage.service';
+import { ContractErectionDeliveryStartService } from './contract-erection-delivery-start.service';
+import { ErectionDeliveryStartAttachmentStorageService } from './erection-delivery-start-attachment-storage.service';
+import { ContractErectionStartService } from './contract-erection-start.service';
+import { ErectionStartAttachmentStorageService } from './erection-start-attachment-storage.service';
+import { ContractErectionChecklistService } from './contract-erection-checklist.service';
+import { ErectionChecklistAttachmentStorageService } from './erection-checklist-attachment-storage.service';
+import { ContractErectionWorkflowAssignmentService } from './contract-erection-workflow-assignment.service';
+import { ErectionMethodStatementAttachmentStorageService } from './erection-method-statement-attachment-storage.service';
 import { ContractsController } from './contracts.controller';
 
 @Module({
@@ -47,6 +61,20 @@ import { ContractsController } from './contracts.controller';
     ContractSchedulePlanService,
     ContractScheduleOverviewService,
     ContractDashboardService,
+    ContractErectionDashboardService,
+    ContractErectionMethodStatementService,
+    ErectionMethodStatementAttachmentStorageService,
+    ContractErectionMethodStatementApprovalService,
+    ErectionMethodStatementApprovalAttachmentStorageService,
+    ContractErectionScheduleService,
+    ErectionScheduleAttachmentStorageService,
+    ContractErectionDeliveryStartService,
+    ErectionDeliveryStartAttachmentStorageService,
+    ContractErectionStartService,
+    ErectionStartAttachmentStorageService,
+    ContractErectionChecklistService,
+    ErectionChecklistAttachmentStorageService,
+    ContractErectionWorkflowAssignmentService,
   ],
   controllers: [ContractsController],
 })

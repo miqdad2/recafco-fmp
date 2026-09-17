@@ -106,6 +106,7 @@ export interface DashboardContractRow {
 export interface DashboardTaskRow {
   id: string;
   contractId: string;
+  taskKey: string;
   taskName: string;
   team: string;
   status: string;
@@ -689,6 +690,7 @@ export interface ManagerDashboardData {
 
 export interface StaffTaskRow {
   id: string;
+  taskKey: string;
   taskName: string;
   contractId: string;
   contractReference: string;
@@ -741,6 +743,7 @@ export function buildStaffTaskRows(
     if (!c) continue;
     rows.push({
       id: t.id,
+      taskKey: t.taskKey,
       taskName: t.taskName,
       contractId: t.contractId,
       contractReference: c.referenceNumber,
@@ -883,6 +886,7 @@ const CONTRACT_DASHBOARD_SELECT = {
 const TASK_DASHBOARD_SELECT = {
   id: true,
   contractId: true,
+  taskKey: true,
   taskName: true,
   team: true,
   status: true,

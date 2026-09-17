@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -52,6 +53,44 @@ import { ContractScheduleService } from './contract-schedule.service';
 import { ContractSchedulePlanService } from './contract-schedule-plan.service';
 import { ContractScheduleOverviewService } from './contract-schedule-overview.service';
 import { ContractDashboardService } from './contract-dashboard.service';
+import { ContractErectionDashboardService } from './contract-erection-dashboard.service';
+import { ContractErectionMethodStatementService } from './contract-erection-method-statement.service';
+import {
+  ErectionMethodStatementAttachmentStorageService,
+  ERECTION_METHOD_STATEMENT_ATTACHMENT_MAX_BYTES,
+  ERECTION_METHOD_STATEMENT_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-method-statement-attachment-storage.service';
+import { ContractErectionMethodStatementApprovalService } from './contract-erection-method-statement-approval.service';
+import {
+  ErectionMethodStatementApprovalAttachmentStorageService,
+  ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENT_MAX_BYTES,
+  ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-method-statement-approval-attachment-storage.service';
+import { ContractErectionScheduleService } from './contract-erection-schedule.service';
+import {
+  ErectionScheduleAttachmentStorageService,
+  ERECTION_SCHEDULE_ATTACHMENT_MAX_BYTES,
+  ERECTION_SCHEDULE_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-schedule-attachment-storage.service';
+import { ContractErectionDeliveryStartService } from './contract-erection-delivery-start.service';
+import {
+  ErectionDeliveryStartAttachmentStorageService,
+  ERECTION_DELIVERY_START_ATTACHMENT_MAX_BYTES,
+  ERECTION_DELIVERY_START_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-delivery-start-attachment-storage.service';
+import { ContractErectionStartService } from './contract-erection-start.service';
+import {
+  ErectionStartAttachmentStorageService,
+  ERECTION_START_ATTACHMENT_MAX_BYTES,
+  ERECTION_START_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-start-attachment-storage.service';
+import { ContractErectionChecklistService } from './contract-erection-checklist.service';
+import {
+  ErectionChecklistAttachmentStorageService,
+  ERECTION_CHECKLIST_ATTACHMENT_MAX_BYTES,
+  ERECTION_CHECKLIST_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './erection-checklist-attachment-storage.service';
+import { ContractErectionWorkflowAssignmentService } from './contract-erection-workflow-assignment.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
 import { ContractListQueryDto } from './dto/contract-list-query.dto';
@@ -90,6 +129,19 @@ import { RejectContractCloseoutRequestDto } from './dto/reject-contract-closeout
 import { ContractScheduleListQueryDto } from './dto/contract-schedule-list-query.dto';
 import { UpdateContractSchedulePlanDto } from './dto/update-contract-schedule-plan.dto';
 import { ContractCloseoutListQueryDto } from './dto/contract-closeout-list-query.dto';
+import { CreateContractErectionMethodStatementDto } from './dto/create-contract-erection-method-statement.dto';
+import { UpdateContractErectionMethodStatementDto } from './dto/update-contract-erection-method-statement.dto';
+import { CreateContractErectionMethodStatementApprovalDto } from './dto/create-contract-erection-method-statement-approval.dto';
+import { UpdateContractErectionMethodStatementApprovalDto } from './dto/update-contract-erection-method-statement-approval.dto';
+import { CreateContractErectionScheduleDto } from './dto/create-contract-erection-schedule.dto';
+import { UpdateContractErectionScheduleDto } from './dto/update-contract-erection-schedule.dto';
+import { CreateContractErectionDeliveryStartDto } from './dto/create-contract-erection-delivery-start.dto';
+import { UpdateContractErectionDeliveryStartDto } from './dto/update-contract-erection-delivery-start.dto';
+import { CreateContractErectionStartDto } from './dto/create-contract-erection-start.dto';
+import { UpdateContractErectionStartDto } from './dto/update-contract-erection-start.dto';
+import { CreateContractErectionChecklistDto } from './dto/create-contract-erection-checklist.dto';
+import { UpdateContractErectionChecklistDto } from './dto/update-contract-erection-checklist.dto';
+import { AssignContractErectionWorkflowDto } from './dto/assign-contract-erection-workflow.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -135,6 +187,20 @@ export class ContractsController {
     private readonly contractSchedulePlanService: ContractSchedulePlanService,
     private readonly contractScheduleOverviewService: ContractScheduleOverviewService,
     private readonly contractDashboardService: ContractDashboardService,
+    private readonly contractErectionDashboardService: ContractErectionDashboardService,
+    private readonly contractErectionMethodStatementService: ContractErectionMethodStatementService,
+    private readonly erectionMethodStatementAttachmentStorage: ErectionMethodStatementAttachmentStorageService,
+    private readonly contractErectionMethodStatementApprovalService: ContractErectionMethodStatementApprovalService,
+    private readonly erectionMethodStatementApprovalAttachmentStorage: ErectionMethodStatementApprovalAttachmentStorageService,
+    private readonly contractErectionScheduleService: ContractErectionScheduleService,
+    private readonly erectionScheduleAttachmentStorage: ErectionScheduleAttachmentStorageService,
+    private readonly contractErectionDeliveryStartService: ContractErectionDeliveryStartService,
+    private readonly erectionDeliveryStartAttachmentStorage: ErectionDeliveryStartAttachmentStorageService,
+    private readonly contractErectionStartService: ContractErectionStartService,
+    private readonly erectionStartAttachmentStorage: ErectionStartAttachmentStorageService,
+    private readonly contractErectionChecklistService: ContractErectionChecklistService,
+    private readonly contractErectionWorkflowAssignmentService: ContractErectionWorkflowAssignmentService,
+    private readonly erectionChecklistAttachmentStorage: ErectionChecklistAttachmentStorageService,
   ) {}
 
   // summary and people MUST be declared before /:id to avoid route conflict
@@ -157,6 +223,19 @@ export class ContractsController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
     const data = await this.contractDashboardService.getDashboard(actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71B — Erection Manager Dashboard / Work Queue. 2 literal segments,
+  // so this can never collide with the single-param ':id' route regardless
+  // of declaration order (unlike 'summary'/'people'/'dashboard' above,
+  // which are exactly 1 segment and do need to stay declared before ':id').
+  @Get('erection/dashboard')
+  @Permissions('contracts.read')
+  async erectionDashboard(
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionDashboardService.getDashboard(actor);
     return { data, meta: meta(), error: null };
   }
 
@@ -1165,5 +1244,778 @@ export class ContractsController {
       'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
     });
     return new StreamableFile(this.closeoutAttachmentStorage.createReadStream(storagePath));
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71A — Erection Workflow, Step 1: Issue Erection Method Statement.
+  // Contract-scoped, one record per contract (contractId is unique — see
+  // ContractErectionMethodStatementService). GET returns null (200), never
+  // 404, when nothing has been created yet for this contract.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/method-statement')
+  @Permissions('contracts.read')
+  async getErectionMethodStatement(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionMethodStatementService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/method-statement')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async createErectionMethodStatement(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionMethodStatementDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 path segments (erection/method-statement/:statementId) — cannot
+  // collide with the 1-segment ':id' pattern above, same reasoning as
+  // 'variations/:variationId'.
+  @Patch('erection/method-statement/:statementId')
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async updateErectionMethodStatement(
+    @Param('statementId', new ParseUUIDPipe({ version: '4' })) statementId: string,
+    @Body() dto: UpdateContractErectionMethodStatementDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementService.update(statementId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71A — Erection Method Statement supporting documents. Nested under
+  // :id (contract) AND :statementId so the service can verify the statement
+  // actually belongs to that exact contract, matching the variation
+  // attachment routes above.
+  @Get(':id/erection/method-statement/:statementId/attachments')
+  @Permissions('contracts.read')
+  async listErectionMethodStatementAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('statementId', new ParseUUIDPipe({ version: '4' })) statementId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionMethodStatementService.listAttachments(id, statementId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/method-statement/:statementId/attachments')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_METHOD_STATEMENT_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_METHOD_STATEMENT_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_METHOD_STATEMENT_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionMethodStatementAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('statementId', new ParseUUIDPipe({ version: '4' })) statementId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementService.createAttachment(id, statementId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 6 path segments — cannot collide with any shorter route regardless of
+  // declaration order, same reasoning as the variation attachment download route.
+  @Get(':id/erection/method-statement/:statementId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionMethodStatementAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('statementId', new ParseUUIDPipe({ version: '4' })) statementId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionMethodStatementService.getAttachmentForDownload(
+      id,
+      statementId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionMethodStatementAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/method-statement/:statementId/attachments/:attachmentId')
+  @HttpCode(200)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async deleteErectionMethodStatementAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('statementId', new ParseUUIDPipe({ version: '4' })) statementId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionMethodStatementService.deleteAttachment(id, statementId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71C — Erection Workflow, Step 2: Erection Method Statement Approval.
+  // At most one record per method statement (see the service's own doc
+  // comment). GET returns null (200), never 404, when Step 1 or Step 2
+  // simply hasn't happened yet.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/method-statement/approval')
+  @Permissions('contracts.read')
+  async getErectionMethodStatementApproval(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionMethodStatementApprovalService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/method-statement/approval')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createErectionMethodStatementApproval(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionMethodStatementApprovalDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementApprovalService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 3 literal segments (erection/method-statement/approval/:approvalId) —
+  // cannot collide with ':id' or with CM-71A's own
+  // 'erection/method-statement/:statementId' (different segment count),
+  // same reasoning as every other nested-literal PATCH route in this file.
+  @Patch('erection/method-statement/approval/:approvalId')
+  @Permissions('contracts.update')
+  async updateErectionMethodStatementApproval(
+    @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string,
+    @Body() dto: UpdateContractErectionMethodStatementApprovalDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementApprovalService.update(approvalId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71C — QA/QC review attachments. Nested under :id (contract) AND
+  // :approvalId so the service can verify the approval actually belongs to
+  // that exact contract, matching the method-statement attachment routes.
+  @Get(':id/erection/method-statement/approval/:approvalId/attachments')
+  @Permissions('contracts.read')
+  async listErectionMethodStatementApprovalAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionMethodStatementApprovalService.listAttachments(id, approvalId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/method-statement/approval/:approvalId/attachments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionMethodStatementApprovalAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionMethodStatementApprovalService.createAttachment(id, approvalId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/erection/method-statement/approval/:approvalId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionMethodStatementApprovalAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionMethodStatementApprovalService.getAttachmentForDownload(
+      id,
+      approvalId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionMethodStatementApprovalAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/method-statement/approval/:approvalId/attachments/:attachmentId')
+  @HttpCode(200)
+  @Permissions('contracts.update')
+  async deleteErectionMethodStatementApprovalAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('approvalId', new ParseUUIDPipe({ version: '4' })) approvalId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionMethodStatementApprovalService.deleteAttachment(id, approvalId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71D — Erection Workflow, Step 3: Issue Erection Schedule. At most one
+  // record per contract (see the service's own doc comment). GET returns
+  // null (200), never 404, when Step 3 simply hasn't happened yet.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/schedule')
+  @Permissions('contracts.read')
+  async getErectionSchedule(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionScheduleService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/schedule')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async createErectionSchedule(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionScheduleDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionScheduleService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 literal segments (erection/schedule/:scheduleId) — cannot collide
+  // with ':id' or with any of the erection/method-statement... routes
+  // (different literal second segment), same reasoning as every other
+  // nested-literal PATCH route in this file.
+  @Patch('erection/schedule/:scheduleId')
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async updateErectionSchedule(
+    @Param('scheduleId', new ParseUUIDPipe({ version: '4' })) scheduleId: string,
+    @Body() dto: UpdateContractErectionScheduleDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionScheduleService.update(scheduleId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71D — Erection Schedule documents. Nested under :id (contract) AND
+  // :scheduleId so the service can verify the schedule actually belongs to
+  // that exact contract, matching the Step 1/Step 2 attachment routes.
+  @Get(':id/erection/schedule/:scheduleId/attachments')
+  @Permissions('contracts.read')
+  async listErectionScheduleAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('scheduleId', new ParseUUIDPipe({ version: '4' })) scheduleId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionScheduleService.listAttachments(id, scheduleId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/schedule/:scheduleId/attachments')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_SCHEDULE_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_SCHEDULE_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_SCHEDULE_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionScheduleAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('scheduleId', new ParseUUIDPipe({ version: '4' })) scheduleId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionScheduleService.createAttachment(id, scheduleId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/erection/schedule/:scheduleId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionScheduleAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('scheduleId', new ParseUUIDPipe({ version: '4' })) scheduleId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionScheduleService.getAttachmentForDownload(
+      id,
+      scheduleId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionScheduleAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/schedule/:scheduleId/attachments/:attachmentId')
+  @HttpCode(200)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async deleteErectionScheduleAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('scheduleId', new ParseUUIDPipe({ version: '4' })) scheduleId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionScheduleService.deleteAttachment(id, scheduleId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71E — Erection Workflow, Step 4: Delivery Start. Owned by the
+  // Delivery / Logistics Team (see the service's own doc comment). At most
+  // one record per contract. GET returns null (200), never 404, when
+  // Step 4 simply hasn't happened yet.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/delivery-start')
+  @Permissions('contracts.read')
+  async getErectionDeliveryStart(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionDeliveryStartService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/delivery-start')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createErectionDeliveryStart(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionDeliveryStartDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionDeliveryStartService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 literal segments (erection/delivery-start/:deliveryStartId) — cannot
+  // collide with ':id' or any other erection/... route, same reasoning as
+  // every other nested-literal PATCH route in this file.
+  @Patch('erection/delivery-start/:deliveryStartId')
+  @Permissions('contracts.update')
+  async updateErectionDeliveryStart(
+    @Param('deliveryStartId', new ParseUUIDPipe({ version: '4' })) deliveryStartId: string,
+    @Body() dto: UpdateContractErectionDeliveryStartDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionDeliveryStartService.update(deliveryStartId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71E — Delivery Start documents. Nested under :id (contract) AND
+  // :deliveryStartId so the service can verify the record actually belongs
+  // to that exact contract, matching the Step 1/2/3 attachment routes.
+  @Get(':id/erection/delivery-start/:deliveryStartId/attachments')
+  @Permissions('contracts.read')
+  async listErectionDeliveryStartAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('deliveryStartId', new ParseUUIDPipe({ version: '4' })) deliveryStartId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionDeliveryStartService.listAttachments(id, deliveryStartId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/delivery-start/:deliveryStartId/attachments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_DELIVERY_START_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_DELIVERY_START_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_DELIVERY_START_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionDeliveryStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('deliveryStartId', new ParseUUIDPipe({ version: '4' })) deliveryStartId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionDeliveryStartService.createAttachment(id, deliveryStartId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/erection/delivery-start/:deliveryStartId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionDeliveryStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('deliveryStartId', new ParseUUIDPipe({ version: '4' })) deliveryStartId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionDeliveryStartService.getAttachmentForDownload(
+      id,
+      deliveryStartId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionDeliveryStartAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/delivery-start/:deliveryStartId/attachments/:attachmentId')
+  @HttpCode(200)
+  @Permissions('contracts.update')
+  async deleteErectionDeliveryStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('deliveryStartId', new ParseUUIDPipe({ version: '4' })) deliveryStartId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionDeliveryStartService.deleteAttachment(id, deliveryStartId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71F — Erection Workflow, Step 5: Erection Start. Owned by the
+  // Erection Department / Site-Erection Team (see the service's own doc
+  // comment). At most one record per contract. GET returns null (200),
+  // never 404, when Step 5 simply hasn't happened yet.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/start')
+  @Permissions('contracts.read')
+  async getErectionStart(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionStartService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/start')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async createErectionStart(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionStartDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionStartService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 literal segments (erection/start/:erectionStartId) — cannot collide
+  // with ':id' or any other erection/... route, same reasoning as every
+  // other nested-literal PATCH route in this file.
+  @Patch('erection/start/:erectionStartId')
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async updateErectionStart(
+    @Param('erectionStartId', new ParseUUIDPipe({ version: '4' })) erectionStartId: string,
+    @Body() dto: UpdateContractErectionStartDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionStartService.update(erectionStartId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71F — Erection Start documents. Nested under :id (contract) AND
+  // :erectionStartId so the service can verify the record actually belongs
+  // to that exact contract, matching the Step 1/2/3/4 attachment routes.
+  @Get(':id/erection/start/:erectionStartId/attachments')
+  @Permissions('contracts.read')
+  async listErectionStartAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('erectionStartId', new ParseUUIDPipe({ version: '4' })) erectionStartId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionStartService.listAttachments(id, erectionStartId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/start/:erectionStartId/attachments')
+  @HttpCode(201)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_START_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_START_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_START_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('erectionStartId', new ParseUUIDPipe({ version: '4' })) erectionStartId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionStartService.createAttachment(id, erectionStartId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/erection/start/:erectionStartId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('erectionStartId', new ParseUUIDPipe({ version: '4' })) erectionStartId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionStartService.getAttachmentForDownload(
+      id,
+      erectionStartId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionStartAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/start/:erectionStartId/attachments/:attachmentId')
+  @HttpCode(200)
+  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  async deleteErectionStartAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('erectionStartId', new ParseUUIDPipe({ version: '4' })) erectionStartId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionStartService.deleteAttachment(id, erectionStartId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71G — Erection Workflow, Step 6: Erection Checklist. Owned by the
+  // QA / QC Team (see the service's own doc comment). At most one record
+  // per contract. GET returns null (200), never 404, when Step 6 simply
+  // hasn't happened yet.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/checklist')
+  @Permissions('contracts.read')
+  async getErectionChecklist(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionChecklistService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/checklist')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  async createErectionChecklist(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: CreateContractErectionChecklistDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionChecklistService.create(id, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // 2 literal segments (erection/checklist/:checklistId) — cannot collide
+  // with ':id' or any other erection/... route, same reasoning as every
+  // other nested-literal PATCH route in this file.
+  @Patch('erection/checklist/:checklistId')
+  @Permissions('contracts.update')
+  async updateErectionChecklist(
+    @Param('checklistId', new ParseUUIDPipe({ version: '4' })) checklistId: string,
+    @Body() dto: UpdateContractErectionChecklistDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionChecklistService.update(checklistId, dto, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  // CM-71G — Erection Checklist documents. Nested under :id (contract) AND
+  // :checklistId so the service can verify the record actually belongs to
+  // that exact contract, matching the Step 1/2/3/4/5 attachment routes.
+  @Get(':id/erection/checklist/:checklistId/attachments')
+  @Permissions('contracts.read')
+  async listErectionChecklistAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('checklistId', new ParseUUIDPipe({ version: '4' })) checklistId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.contractErectionChecklistService.listAttachments(id, checklistId, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/checklist/:checklistId/attachments')
+  @HttpCode(201)
+  @Permissions('contracts.update')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: ERECTION_CHECKLIST_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(ERECTION_CHECKLIST_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'CONTRACT_ERECTION_CHECKLIST_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, PNG, JPEG, Excel (.xlsx), Word (.docx).',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadErectionChecklistAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('checklistId', new ParseUUIDPipe({ version: '4' })) checklistId: string,
+    @UploadedFile() file: UploadedFileLike,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionChecklistService.createAttachment(id, checklistId, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/erection/checklist/:checklistId/attachments/:attachmentId/download')
+  @Permissions('contracts.read')
+  async downloadErectionChecklistAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('checklistId', new ParseUUIDPipe({ version: '4' })) checklistId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.contractErectionChecklistService.getAttachmentForDownload(
+      id,
+      checklistId,
+      attachmentId,
+      actor,
+    );
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.erectionChecklistAttachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/erection/checklist/:checklistId/attachments/:attachmentId')
+  @HttpCode(200)
+  @Permissions('contracts.update')
+  async deleteErectionChecklistAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('checklistId', new ParseUUIDPipe({ version: '4' })) checklistId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.contractErectionChecklistService.deleteAttachment(id, checklistId, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CM-71H — Erection Workflow Assignment (who owns Steps 1/3/5, the
+  // Erection-Department-owned steps — see the service's own doc comment).
+  // GET returns null (200), never 404, when the contract hasn't been
+  // assigned yet. POST both assigns (no row yet) and reassigns/"Change
+  // Assignment" (row exists) — contracts.update only, i.e. manager-tier
+  // (Contract Manager/Admin/Super Admin), matching this unit's own "Contract
+  // Manager assigns the Erection Workflow to an Erection Manager" framing.
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/erection/assignment')
+  @Permissions('contracts.read')
+  async getErectionWorkflowAssignment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown | null>> {
+    const data = await this.contractErectionWorkflowAssignmentService.getForContract(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/erection/assignment')
+  @Permissions('contracts.update')
+  async assignErectionWorkflow(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: AssignContractErectionWorkflowDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.contractErectionWorkflowAssignmentService.assign(id, dto, actor);
+    return { data, meta: meta(), error: null };
   }
 }

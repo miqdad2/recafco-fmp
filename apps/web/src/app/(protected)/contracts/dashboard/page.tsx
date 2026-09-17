@@ -13,9 +13,61 @@ import { ManagementAttentionRequiredPanel } from './_components/management-atten
 import { TopContractsTable } from './_components/top-contracts-table';
 import { StaffDashboardView } from './_components/staff-dashboard-view';
 import { buildContractsByStatusSegments, buildClaimsStatusSegments, formatKwdCompact } from './_lib/dashboard-insights-helpers';
+import { isGuidedErectionWorkflowTask } from '../_lib/guided-erection-workflow-route';
+import {
+  isErectionStep2Locked, isErectionStep3Locked, isErectionStep4Locked, isErectionStep5Locked, isErectionStep6Locked,
+} from '../_lib/erection-step-lock';
+import type { StaffTaskRow } from '@/lib/contracts-api';
 
 export const metadata: Metadata = { title: 'Contract Management Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
+
+// CM-71H.4 — "My Contract Work Dashboard should use the same guided task
+// behavior as My Tasks": the SAME 5 dedicated erection records
+// staff-my-tasks-view.tsx already fetches per contract, and the SAME
+// erection-step-lock.ts functions — one source of truth for "is this step
+// locked," never a second copy. Only fetched for a contract that actually
+// has a guided erection task among this actor's assigned tasks — never an
+// unconditional extra round-trip for the common case of a staff member with
+// no erection work at all.
+async function attachGuidedStepLocks(assignedTasks: StaffTaskRow[]): Promise<StaffTaskRow[]> {
+  const contractIds = Array.from(
+    new Set(assignedTasks.filter((t) => isGuidedErectionWorkflowTask(t)).map((t) => t.contractId)),
+  );
+  if (contractIds.length === 0) return assignedTasks;
+
+  const prereqsByContract = new Map<
+    string,
+    { statement: { status: string } | null; approval: { reviewStatus: string } | null; schedule: { status: string } | null; deliveryStart: { status: string } | null; erectionStart: { status: string } | null }
+  >();
+  await Promise.all(
+    contractIds.map(async (contractId) => {
+      const [statement, approval, schedule, deliveryStart, erectionStart] = await Promise.all([
+        contractsApi.getErectionMethodStatement(contractId).catch(() => null),
+        contractsApi.getErectionMethodStatementApproval(contractId).catch(() => null),
+        contractsApi.getErectionSchedule(contractId).catch(() => null),
+        contractsApi.getErectionDeliveryStart(contractId).catch(() => null),
+        contractsApi.getErectionStart(contractId).catch(() => null),
+      ]);
+      prereqsByContract.set(contractId, { statement, approval, schedule, deliveryStart, erectionStart });
+    }),
+  );
+
+  return assignedTasks.map((t) => {
+    const prereqs = prereqsByContract.get(t.contractId);
+    if (!prereqs) return t;
+    let locked: boolean | undefined;
+    switch (t.taskKey) {
+      case 'erection_statement_approval': locked = isErectionStep2Locked(prereqs.statement); break;
+      case 'erection_schedule_issued': locked = isErectionStep3Locked(prereqs.approval); break;
+      case 'erection_delivery_start': locked = isErectionStep4Locked(prereqs.schedule); break;
+      case 'erection_start': locked = isErectionStep5Locked(prereqs.deliveryStart); break;
+      case 'erection_issue_checklist': locked = isErectionStep6Locked(prereqs.erectionStart); break;
+      default: locked = undefined;
+    }
+    return locked !== undefined ? { ...t, guidedStepLocked: locked } : t;
+  });
+}
 
 export default async function ContractsDashboardPage(): Promise<React.JSX.Element> {
   const [data, permissions] = await Promise.all([
@@ -33,7 +85,10 @@ export default async function ContractsDashboardPage(): Promise<React.JSX.Elemen
   // that follows byte-for-byte identical to before CM-48, since it's simply
   // never reached when dashboardType === 'STAFF'.
   if (dashboardType === 'STAFF' && data) {
-    return <StaffDashboardView data={data} status={status} />;
+    const enrichedData: ContractDashboardData = data.staff
+      ? { ...data, staff: { ...data.staff, assignedTasks: await attachGuidedStepLocks(data.staff.assignedTasks) } }
+      : data;
+    return <StaffDashboardView data={enrichedData} status={status} />;
   }
 
   // CM-54 — approved design: title/subtitle apply to this route regardless

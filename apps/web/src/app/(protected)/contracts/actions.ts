@@ -1218,3 +1218,638 @@ export async function uploadCloseoutAttachmentAction(
   revalidateCloseout(contractId);
   return { error: null };
 }
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 1: Issue Erection Method Statement (CM-71A —
+// contract-scoped, at most one record per contract). Written from day one
+// using the CM-70J robust pattern (plain async functions, called directly
+// from the client component's own try/catch/finally — no useActionState/
+// submittedRef/useEffect close-detection ever existed for this feature).
+// No module-level list page exists (or is requested) for this feature, so
+// only the detail-tab route is revalidated, matching the Variations/Risks/
+// Documents single-target convention — plus the parent Workflow tab, since
+// it shows an entry card reflecting this record's status.
+// ---------------------------------------------------------------------------
+
+function readErectionMethodStatementFields(formData: FormData): Record<string, unknown> {
+  const plannedIssueDate = (formData.get('plannedIssueDate') as string | null) || undefined;
+  const methodStatementRefNo = (formData.get('methodStatementRefNo') as string | null)?.trim();
+  const jobOrderNo = (formData.get('jobOrderNo') as string | null)?.trim();
+  const workLocationYard = (formData.get('workLocationYard') as string | null)?.trim();
+  const preparedBy = (formData.get('preparedBy') as string | null)?.trim();
+  const departmentArea = (formData.get('departmentArea') as string | null)?.trim();
+  const reviewedByInternal = (formData.get('reviewedByInternal') as string | null)?.trim() ?? '';
+  const documentRevision = (formData.get('documentRevision') as string | null)?.trim() ?? '';
+  const applicableStandards = (formData.get('applicableStandards') as string | null)?.trim() ?? '';
+  // Real checkboxes, always rendered — their presence in FormData IS the
+  // value (checked vs unchecked), so these are always sent explicitly,
+  // never conditionally omitted, matching affectsContractValue above.
+  const includesLiftPlan = formData.get('includesLiftPlan') === 'true';
+  const includesRiskAssessment = formData.get('includesRiskAssessment') === 'true';
+  const requiresClientApproval = formData.get('requiresClientApproval') === 'true';
+  const scopeDescription = (formData.get('scopeDescription') as string | null)?.trim();
+  const status = (formData.get('status') as string | null) || undefined;
+
+  return {
+    ...(plannedIssueDate !== undefined ? { plannedIssueDate } : {}),
+    ...(methodStatementRefNo !== undefined ? { methodStatementRefNo } : {}),
+    ...(jobOrderNo !== undefined ? { jobOrderNo } : {}),
+    ...(workLocationYard !== undefined ? { workLocationYard } : {}),
+    ...(preparedBy !== undefined ? { preparedBy } : {}),
+    ...(departmentArea !== undefined ? { departmentArea } : {}),
+    // Always sent (never conditionally omitted) so an explicit clear back to
+    // empty reaches the backend as "" — which the service converts to a real
+    // null, distinguishing "the user cleared this" from "this request never
+    // touched this field" (same fix as CM-70I's Department/Plant clearing bug).
+    reviewedByInternal,
+    documentRevision,
+    applicableStandards,
+    includesLiftPlan,
+    includesRiskAssessment,
+    requiresClientApproval,
+    ...(scopeDescription !== undefined ? { scopeDescription } : {}),
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+// CM-71C — backfilled: revalidate the full erection-workflow route family
+// (Contract Detail, Workflow tab, Step 1, Step 2, Erection Dashboard), not
+// just the 2 paths CM-71A originally targeted — CM-71C's own task spelled
+// out this exact 5-path list, and it applies equally to Step 1's own
+// actions (the dashboard/Step 2 both read Step 1's status).
+// CM-71D — further backfilled with Step 3's own path, per that unit's own
+// (overlapping) 5-path list — every step's actions revalidate the full
+// family since the dashboard and later steps all read earlier steps' status.
+// CM-71E — further backfilled with Step 4's own path, per that unit's own
+// (overlapping) 5-path list.
+// CM-71F — further backfilled with Step 5's own path, per that unit's own
+// (overlapping) 5-path list.
+// CM-71G — further backfilled with Step 6's own path, per that unit's own
+// (overlapping) 5-path list.
+function revalidateErectionWorkflowPaths(contractId: string): void {
+  revalidatePath(`/contracts/${contractId}`);
+  revalidatePath(`/contracts/${contractId}/workflow`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement/approval`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/schedule`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/delivery-start`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/start`);
+  revalidatePath(`/contracts/${contractId}/workflow/erection/checklist`);
+  revalidatePath('/contracts/erection-dashboard');
+}
+
+export async function createErectionMethodStatementAction(contractId: string, formData: FormData): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/method-statement`, 'POST', readErectionMethodStatementFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Erection Method Statement could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionMethodStatementAction(
+  statementId: string,
+  contractId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/erection/method-statement/${statementId}`, 'PATCH', readErectionMethodStatementFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Erection Method Statement could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionMethodStatementAttachmentAction(
+  contractId: string,
+  statementId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/method-statement/${statementId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement`);
+  return { error: null };
+}
+
+export async function deleteErectionMethodStatementAttachmentAction(
+  contractId: string,
+  statementId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/method-statement/${statementId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 2: Erection Method Statement Approval (CM-71C —
+// contract-scoped, at most one record per method statement). Same CM-70J
+// robust pattern as Step 1: plain async functions, called directly from the
+// client component's own try/catch/finally.
+// ---------------------------------------------------------------------------
+
+function readErectionMethodStatementApprovalFields(formData: FormData): Record<string, unknown> {
+  const reviewRequiredBy = (formData.get('reviewRequiredBy') as string | null) || undefined;
+  const reviewingEngineer = (formData.get('reviewingEngineer') as string | null)?.trim() ?? '';
+  const reviewType = (formData.get('reviewType') as string | null)?.trim() ?? '';
+  const priority = (formData.get('priority') as string | null) || undefined;
+  const reviewStatus = (formData.get('reviewStatus') as string | null) || undefined;
+  const decision = (formData.get('decision') as string | null) || undefined;
+  const requiresClientApproval = formData.get('requiresClientApproval') === 'true';
+  const comments = (formData.get('comments') as string | null)?.trim() ?? '';
+
+  return {
+    // Always sent (never conditionally omitted) so an explicit clear back to
+    // empty reaches the backend as "" — converted to a real null there,
+    // same convention as readErectionMethodStatementFields above.
+    ...(reviewRequiredBy !== undefined ? { reviewRequiredBy } : {}),
+    reviewingEngineer,
+    reviewType,
+    ...(priority !== undefined ? { priority } : {}),
+    ...(reviewStatus !== undefined ? { reviewStatus } : {}),
+    ...(decision !== undefined ? { decision } : {}),
+    requiresClientApproval,
+    comments,
+  };
+}
+
+export async function createErectionMethodStatementApprovalAction(contractId: string, formData: FormData): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/method-statement/approval`,
+    'POST',
+    readErectionMethodStatementApprovalFields(formData),
+  );
+  if (!result.ok) return { error: result.message ?? 'Method Statement Approval could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionMethodStatementApprovalAction(
+  approvalId: string,
+  contractId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/erection/method-statement/approval/${approvalId}`,
+    'PATCH',
+    readErectionMethodStatementApprovalFields(formData),
+  );
+  if (!result.ok) return { error: result.message ?? 'Method Statement Approval could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionMethodStatementApprovalAttachmentAction(
+  contractId: string,
+  approvalId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/method-statement/approval/${approvalId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement/approval`);
+  return { error: null };
+}
+
+export async function deleteErectionMethodStatementApprovalAttachmentAction(
+  contractId: string,
+  approvalId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/method-statement/approval/${approvalId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/method-statement/approval`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 3: Issue Erection Schedule (CM-71D —
+// contract-scoped, "one-per-contract, create-once-edit-forever", same shape
+// as Step 1). Same CM-70J robust pattern as Steps 1/2: plain async
+// functions, called directly from the client component's own
+// try/catch/finally.
+// ---------------------------------------------------------------------------
+
+function readErectionScheduleFields(formData: FormData): Record<string, unknown> {
+  const scheduleReferenceNo = (formData.get('scheduleReferenceNo') as string | null)?.trim();
+  const scheduleDate = (formData.get('scheduleDate') as string | null) || undefined;
+  const plannedStartDate = (formData.get('plannedStartDate') as string | null) || undefined;
+  const plannedEndDate = (formData.get('plannedEndDate') as string | null) || undefined;
+  const jobOrderNo = (formData.get('jobOrderNo') as string | null)?.trim();
+  const erectionCrewTeam = (formData.get('erectionCrewTeam') as string | null)?.trim();
+  const estimatedManpowerPlannedRaw = formData.get('estimatedManpowerPlanned') as string | null;
+  const requiredEquipmentPlannedRaw = formData.get('requiredEquipmentPlanned') as string | null;
+  const preparedBy = (formData.get('preparedBy') as string | null)?.trim();
+  const reviewedByErectionManager = (formData.get('reviewedByErectionManager') as string | null)?.trim() ?? '';
+  const reviewedOn = (formData.get('reviewedOn') as string | null) ?? '';
+  const documentRevision = (formData.get('documentRevision') as string | null)?.trim() ?? '';
+  const totalActivitiesRaw = formData.get('totalActivities') as string | null;
+  const criticalActivitiesRaw = formData.get('criticalActivities') as string | null;
+  const status = (formData.get('status') as string | null) || undefined;
+  const remarks = (formData.get('remarks') as string | null)?.trim() ?? '';
+
+  return {
+    ...(scheduleReferenceNo !== undefined ? { scheduleReferenceNo } : {}),
+    ...(scheduleDate !== undefined ? { scheduleDate } : {}),
+    ...(plannedStartDate !== undefined ? { plannedStartDate } : {}),
+    ...(plannedEndDate !== undefined ? { plannedEndDate } : {}),
+    ...(jobOrderNo !== undefined ? { jobOrderNo } : {}),
+    ...(erectionCrewTeam !== undefined ? { erectionCrewTeam } : {}),
+    ...(estimatedManpowerPlannedRaw ? { estimatedManpowerPlanned: Number(estimatedManpowerPlannedRaw) } : {}),
+    ...(requiredEquipmentPlannedRaw ? { requiredEquipmentPlanned: Number(requiredEquipmentPlannedRaw) } : {}),
+    ...(preparedBy !== undefined ? { preparedBy } : {}),
+    // Always sent (never conditionally omitted) so an explicit clear back to
+    // empty reaches the backend as "" — converted to a real null there,
+    // same convention as readErectionMethodStatementFields above.
+    reviewedByErectionManager,
+    reviewedOn,
+    documentRevision,
+    ...(totalActivitiesRaw !== null && totalActivitiesRaw !== '' ? { totalActivities: Number(totalActivitiesRaw) } : {}),
+    ...(criticalActivitiesRaw !== null && criticalActivitiesRaw !== '' ? { criticalActivities: Number(criticalActivitiesRaw) } : {}),
+    ...(status !== undefined ? { status } : {}),
+    remarks,
+  };
+}
+
+export async function createErectionScheduleAction(contractId: string, formData: FormData): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/schedule`, 'POST', readErectionScheduleFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Erection Schedule could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionScheduleAction(
+  scheduleId: string,
+  contractId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/erection/schedule/${scheduleId}`, 'PATCH', readErectionScheduleFields(formData));
+  if (!result.ok) return { error: result.message ?? 'Erection Schedule could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionScheduleAttachmentAction(
+  contractId: string,
+  scheduleId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/schedule/${scheduleId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/schedule`);
+  return { error: null };
+}
+
+export async function deleteErectionScheduleAttachmentAction(
+  contractId: string,
+  scheduleId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/schedule/${scheduleId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/schedule`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 4: Delivery Start (CM-71E — contract-scoped,
+// "one-per-contract, create-once-edit-forever", same shape as Steps 1/3).
+// Same CM-70J robust pattern as Steps 1/2/3: plain async functions, called
+// directly from the client component's own try/catch/finally.
+//
+// Uses direct typed args (not FormData), matching the established
+// updateContractSchedulePlanAction precedent — the form collects several
+// item rows plus document overrides at once, a structured array payload
+// FormData is not a natural fit for.
+// ---------------------------------------------------------------------------
+
+export interface DeliveryStartItemInput {
+  description: string;
+  packageNo?: string;
+  weight?: number;
+  volume?: number;
+  quantity: number;
+  status?: string;
+}
+
+export interface DeliveryStartDocumentInput {
+  documentName: string;
+  status?: string;
+  attachmentId?: string;
+}
+
+export interface DeliveryStartFormInput {
+  deliveryReferenceNo?: string;
+  deliveryDate?: string;
+  plannedDeliveryWindowStart?: string;
+  plannedDeliveryWindowEnd?: string;
+  transportMode?: string;
+  dispatchProductionSource?: string;
+  dispatchFromYard?: string;
+  deliveryToSiteLocation?: string;
+  gateEntryContact?: string;
+  deliveryNoteOrLrNo?: string;
+  vehicleNo?: string;
+  driverName?: string;
+  driverContact?: string;
+  status?: string;
+  comments?: string;
+  items?: DeliveryStartItemInput[];
+  documents?: DeliveryStartDocumentInput[];
+}
+
+export async function createErectionDeliveryStartAction(contractId: string, input: DeliveryStartFormInput): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/delivery-start`, 'POST', input);
+  if (!result.ok) return { error: result.message ?? 'Delivery Start could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionDeliveryStartAction(
+  deliveryStartId: string,
+  contractId: string,
+  input: DeliveryStartFormInput,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/erection/delivery-start/${deliveryStartId}`, 'PATCH', input);
+  if (!result.ok) return { error: result.message ?? 'Delivery Start could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionDeliveryStartAttachmentAction(
+  contractId: string,
+  deliveryStartId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/delivery-start/${deliveryStartId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/delivery-start`);
+  return { error: null };
+}
+
+export async function deleteErectionDeliveryStartAttachmentAction(
+  contractId: string,
+  deliveryStartId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/delivery-start/${deliveryStartId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/delivery-start`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 5: Erection Start (CM-71F — contract-scoped,
+// "one-per-contract, create-once-edit-forever", same shape as Steps 1/3/4).
+// Same CM-70J robust pattern as Steps 1/2/3/4: plain async functions, called
+// directly from the client component's own try/catch/finally.
+//
+// Uses direct typed args (not FormData), matching the established
+// updateContractSchedulePlanAction / CM-71E delivery-start precedent — the
+// form collects several manpower/equipment/checklist rows at once.
+// ---------------------------------------------------------------------------
+
+export interface ErectionStartManpowerInput {
+  trade: string;
+  plannedNos?: number;
+  actualDeployedNos?: number;
+  remarks?: string;
+}
+
+export interface ErectionStartEquipmentInput {
+  equipmentType: string;
+  descriptionCapacity: string;
+  ownedOrRental: string;
+  assignedQty?: number;
+  operatorDriver?: string;
+  remarks?: string;
+}
+
+export interface ErectionStartChecklistInput {
+  checklistItem: string;
+  status?: string;
+  remarks?: string;
+}
+
+export interface ErectionStartFormInput {
+  actualStartDateTime?: string;
+  workLocationYard?: string;
+  erectionCrewTeam?: string;
+  supervisor?: string;
+  weatherCondition?: string;
+  windSpeed?: string;
+  scopeOfWorkToday?: string;
+  status?: string;
+  comments?: string;
+  manpowerRows?: ErectionStartManpowerInput[];
+  equipmentRows?: ErectionStartEquipmentInput[];
+  checklistRows?: ErectionStartChecklistInput[];
+}
+
+export async function createErectionStartAction(contractId: string, input: ErectionStartFormInput): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/start`, 'POST', input);
+  if (!result.ok) return { error: result.message ?? 'Erection Start could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionStartAction(
+  erectionStartId: string,
+  contractId: string,
+  input: ErectionStartFormInput,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/erection/start/${erectionStartId}`, 'PATCH', input);
+  if (!result.ok) return { error: result.message ?? 'Erection Start could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionStartAttachmentAction(
+  contractId: string,
+  erectionStartId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/start/${erectionStartId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/start`);
+  return { error: null };
+}
+
+export async function deleteErectionStartAttachmentAction(
+  contractId: string,
+  erectionStartId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/start/${erectionStartId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/start`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Erection Workflow, Step 6: Erection Checklist (CM-71G — contract-scoped,
+// "one-per-contract, create-once-edit-forever", same shape as Steps 1/3/4/5).
+// Same CM-70J robust pattern as Steps 1/2/3/4/5: plain async functions,
+// called directly from the client component's own try/catch/finally.
+//
+// Uses direct typed args (not FormData), matching the established
+// updateContractSchedulePlanAction / CM-71E/CM-71F precedent — the form
+// collects several checklist item rows at once.
+// ---------------------------------------------------------------------------
+
+export interface ErectionChecklistItemInput {
+  checklistItem: string;
+  status?: string;
+  remarks?: string;
+  attachmentRef?: string;
+}
+
+export interface ErectionChecklistFormInput {
+  checklistRefNo?: string;
+  checklistDate?: string;
+  checklistType?: string;
+  preparedBy?: string;
+  reviewedByQaqc?: string;
+  verifiedByClientRepresentative?: string;
+  status?: string;
+  workLocationYard?: string;
+  comments?: string;
+  items?: ErectionChecklistItemInput[];
+}
+
+export async function createErectionChecklistAction(contractId: string, input: ErectionChecklistFormInput): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/checklist`, 'POST', input);
+  if (!result.ok) return { error: result.message ?? 'Erection Checklist could not be created.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function updateErectionChecklistAction(
+  checklistId: string,
+  contractId: string,
+  input: ErectionChecklistFormInput,
+): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/erection/checklist/${checklistId}`, 'PATCH', input);
+  if (!result.ok) return { error: result.message ?? 'Erection Checklist could not be updated.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}
+
+export async function uploadErectionChecklistAttachmentAction(
+  contractId: string,
+  checklistId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Please choose a file to upload.' };
+
+  const upload = new FormData();
+  upload.set('file', file);
+
+  const result = await actionFetchMultipart(`/contracts/${contractId}/erection/checklist/${checklistId}/attachments`, upload);
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be uploaded.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/checklist`);
+  return { error: null };
+}
+
+export async function deleteErectionChecklistAttachmentAction(
+  contractId: string,
+  checklistId: string,
+  attachmentId: string,
+): Promise<ActionResult> {
+  const result = await actionFetch(
+    `/contracts/${contractId}/erection/checklist/${checklistId}/attachments/${attachmentId}`,
+    'DELETE',
+  );
+  if (!result.ok) return { error: result.message ?? 'Attachment could not be deleted.' };
+
+  revalidatePath(`/contracts/${contractId}/workflow/erection/checklist`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// CM-71H — Erection Workflow Assignment. One endpoint, POST, does both
+// Assign (no row yet) and Change Assignment (row exists) — see the API
+// service's own doc comment for why a single upsert is enough ("only one
+// active assignment per contract is needed for now").
+// ---------------------------------------------------------------------------
+
+export interface AssignErectionWorkflowInput {
+  assignedToUserId?: string;
+  assignedToName?: string;
+  assignedDepartment?: string;
+  assignedAt?: string;
+  remarks?: string;
+}
+
+export async function assignErectionWorkflowAction(contractId: string, input: AssignErectionWorkflowInput): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/erection/assignment`, 'POST', input);
+  if (!result.ok) return { error: result.message ?? 'Erection Workflow could not be assigned.' };
+
+  revalidateErectionWorkflowPaths(contractId);
+  return { error: null };
+}

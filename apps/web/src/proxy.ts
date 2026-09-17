@@ -68,12 +68,26 @@ function redirectToLogin(request: NextRequest): NextResponse {
   return NextResponse.redirect(new URL(LOGIN_PATH, request.url));
 }
 
+// CM-71H.3 — Server Components (e.g. the contract workspace layout) have no
+// built-in way to read the current request's pathname; middleware is the
+// only place it's directly available. Forwarding it as a request header
+// (the standard Next.js App Router pattern) lets a layout make a routing
+// decision — e.g. "this sub-route is exempt from a redirect that applies to
+// every other sub-route" — without needing the pathname threaded through
+// params, which only ever carries the dynamic segments ([id]), never the
+// full path.
+function nextWithPathname(request: NextRequest): NextResponse {
+  const headers = new Headers(request.headers);
+  headers.set('x-pathname', request.nextUrl.pathname);
+  return NextResponse.next({ request: { headers } });
+}
+
 export const proxy = async (request: NextRequest): Promise<NextResponse> => {
   const { pathname } = request.nextUrl;
 
   // Pass public paths through without auth check.
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
+    return nextWithPathname(request);
   }
 
   const accessToken = request.cookies.get('recafco_access')?.value;
@@ -94,7 +108,7 @@ export const proxy = async (request: NextRequest): Promise<NextResponse> => {
     const newPayload = parseJwtPayload(refreshed.accessToken);
     if (!newPayload) return redirectToLogin(request);
 
-    const res = NextResponse.next();
+    const res = nextWithPathname(request);
     setTokenCookies(res, refreshed.accessToken, refreshed.refreshToken);
 
     // Check mustChangePassword after refresh.
@@ -112,7 +126,7 @@ export const proxy = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(new URL(CHANGE_PASSWORD_PATH, request.url));
   }
 
-  return NextResponse.next();
+  return nextWithPathname(request);
 };
 
 export const config = {

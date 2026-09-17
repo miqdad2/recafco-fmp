@@ -216,7 +216,7 @@ export function computeActualStages(input: ComputeActualStagesInput): ActualStag
   }
 
   // 7. Erection — real ERECTION-team "Erection Start" (erection_start) for
-  // the start signal; real ERECTION-team "Issue Checklist"
+  // the start signal; real ERECTION-team "Erection Checklist"
   // (erection_issue_checklist, the last task in the real erection sequence)
   // as the completion signal.
   {

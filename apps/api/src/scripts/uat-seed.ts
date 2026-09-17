@@ -36,7 +36,13 @@ const ARGON2_OPTIONS = {
   parallelism: 4,
 } as const;
 
-const DEPT_CM01 = { code: 'CM-01', name: 'Contracts Management' };
+// CM-71H.1 — corrected from the original "Contracts Management" (typo — an
+// extra 's') to match this module's own real name everywhere else in the
+// app (sidebar, page titles, permission naming). Department.name has no
+// uniqueness/lookup-key usage anywhere in the codebase (verified before
+// this change) — this is a pure display-label fix via the SAME idempotent
+// upsert already used for this row, not a new migration or a code rename.
+const DEPT_CM01 = { code: 'CM-01', name: 'Contract Management' };
 const DEPT_ENG01 = { code: 'ENG-01', name: 'Engineering' };
 
 const PLANT_TEST = {

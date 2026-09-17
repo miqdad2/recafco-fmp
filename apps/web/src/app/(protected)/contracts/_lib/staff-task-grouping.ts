@@ -24,6 +24,8 @@ export interface StaffFlatTask extends ContractWorkflowTask {
   counterpartyName: string;
   contractManagerName: string;
   teamTasks: ContractWorkflowTask[];
+  /** CM-71H.3 — true only for a guided erection task (Steps 2-6) whose own CM-71A-G prerequisite record hasn't reached the required state yet. Always false/undefined for a non-guided task or Step 1 (no prerequisite). */
+  guidedStepLocked?: boolean;
 }
 
 export type StaffTaskBucketKey = 'overdue' | 'open' | 'inProgress' | 'submittedUnderReview' | 'completed';

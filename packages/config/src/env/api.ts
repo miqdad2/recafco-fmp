@@ -57,6 +57,12 @@ export const ApiEnvSchema = z
     CLOSEOUT_ATTACHMENTS_DIR: z.string().optional(),
     VARIATION_ATTACHMENTS_DIR: z.string().optional(),
     DOCUMENT_OBLIGATION_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_METHOD_STATEMENT_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_SCHEDULE_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_DELIVERY_START_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_START_ATTACHMENTS_DIR: z.string().optional(),
+    ERECTION_CHECKLIST_ATTACHMENTS_DIR: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -92,6 +98,14 @@ export const ApiEnvSchema = z
       variationAttachmentsDir: raw.VARIATION_ATTACHMENTS_DIR ?? './storage/variation-attachments',
       documentObligationAttachmentsDir:
         raw.DOCUMENT_OBLIGATION_ATTACHMENTS_DIR ?? './storage/document-obligation-attachments',
+      erectionMethodStatementAttachmentsDir:
+        raw.ERECTION_METHOD_STATEMENT_ATTACHMENTS_DIR ?? './storage/erection-method-statement-attachments',
+      erectionMethodStatementApprovalAttachmentsDir:
+        raw.ERECTION_METHOD_STATEMENT_APPROVAL_ATTACHMENTS_DIR ?? './storage/erection-method-statement-approval-attachments',
+      erectionScheduleAttachmentsDir: raw.ERECTION_SCHEDULE_ATTACHMENTS_DIR ?? './storage/erection-schedule-attachments',
+      erectionDeliveryStartAttachmentsDir: raw.ERECTION_DELIVERY_START_ATTACHMENTS_DIR ?? './storage/erection-delivery-start-attachments',
+      erectionStartAttachmentsDir: raw.ERECTION_START_ATTACHMENTS_DIR ?? './storage/erection-start-attachments',
+      erectionChecklistAttachmentsDir: raw.ERECTION_CHECKLIST_ATTACHMENTS_DIR ?? './storage/erection-checklist-attachments',
     };
   });
 

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
 import type { ContractWorkflowTask, ContractWorkflowTeam, ContractPerson } from '@/lib/contracts-api';
 import { WorkflowTaskCard } from './workflow-task-card';
 import { WorkflowTaskDrawer } from './workflow-task-drawer';
@@ -69,6 +71,19 @@ export function WorkflowBoard({
           return (
             <div key={lane.team} className="rounded-lg border border-border bg-surface p-3 min-w-0">
               <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2 px-1">{lane.label}</h3>
+              {/* CM-71H.1 — these are individual task cards (the generic team-task
+                  register); the Erection Team lane also links back to the dedicated,
+                  guided 7-step Erection Workflow (CM-71A-H) so this board is never
+                  mistaken for the only way to manage erection work. */}
+              {lane.team === 'ERECTION' && (
+                <Link
+                  href={`/contracts/${contractId}/workflow`}
+                  className="mb-2 flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-[11px] font-medium text-accent hover:bg-accent/10"
+                >
+                  Open Guided Erection Workflow
+                  <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
+                </Link>
+              )}
               <div className="space-y-2">
                 {laneTasks.map((task) => (
                   <WorkflowTaskCard key={task.id} task={task} onOpen={(t) => setOpenTaskId(t.id)} />

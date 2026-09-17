@@ -52,6 +52,7 @@ function makeTask(overrides: Partial<DashboardTaskRow> = {}): DashboardTaskRow {
   return {
     id: 'task-1',
     contractId: 'contract-1',
+    taskKey: 'technical_drawing_received',
     taskName: 'Submit Drawing',
     team: 'TECHNICAL',
     status: 'NOT_STARTED',
@@ -525,6 +526,12 @@ describe('buildStaffTaskRows', () => {
     expect(rows[0]!.contractReference).toBe('CONTRACT-2026-000001');
     expect(rows[0]!.counterpartyName).toBe('Acme Co');
     expect(rows[0]!.actionUrl).toBe('/contracts/contract-1/workflow');
+  });
+
+  it('passes taskKey through unchanged — CM-71H.4, the stable identifier the frontend keys guided-erection routing off', () => {
+    const contractsById = new Map([['contract-1', makeContract()]]);
+    const rows = buildStaffTaskRows([makeTask({ taskKey: 'erection_method_statement_issued' })], contractsById, TODAY);
+    expect(rows[0]!.taskKey).toBe('erection_method_statement_issued');
   });
 
   it('skips a task whose contract is missing from the candidate map', () => {

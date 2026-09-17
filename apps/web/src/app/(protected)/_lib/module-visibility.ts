@@ -84,3 +84,20 @@ export function isContractStaffOnlyAccess(permissions: string[]): boolean {
     !permissions.includes('contracts.close')
   );
 }
+
+/**
+ * CM-71H — "Contract Manager should not appear as the Erection Workflow's
+ * main execution owner; monitor, not owner." No dedicated "Erection
+ * Dashboard" permission exists yet (adding one would mean seeding a new
+ * permission code and re-granting every existing role — a larger, riskier
+ * change than this unit's own "additive/safe changes only" instruction
+ * allows), so the sidebar keeps every existing user's access unchanged
+ * (nothing hidden) and instead relabels the same link "Erection Status" for
+ * a manager-tier actor (contracts.update) — Option B from this unit's own
+ * task text, explicitly offered as an accepted alternative to hiding the
+ * item. A non-manager actor (e.g. a future Erection Manager holding only
+ * contracts.workflow_update) still sees it as "Erection Dashboard".
+ */
+export function isErectionDashboardMonitorOnly(permissions: string[]): boolean {
+  return permissions.includes('contracts.update');
+}

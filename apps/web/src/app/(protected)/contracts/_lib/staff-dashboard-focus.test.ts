@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeStaffFocusedCounts, pickNextTask } from './staff-dashboard-focus';
+import { computeStaffFocusedCounts, pickNextTask, hasOnlyLockedOpenTasks } from './staff-dashboard-focus';
 import type { StaffTaskRow } from '@/lib/contracts-api';
 
 const TODAY = '2026-08-25';
@@ -7,6 +7,7 @@ const TODAY = '2026-08-25';
 function task(overrides: Partial<StaffTaskRow>): StaffTaskRow {
   return {
     id: 'task-1',
+    taskKey: 'technical_drawing_received',
     taskName: 'Drawing Received',
     contractId: 'contract-1',
     contractReference: 'CONTRACT-2026-000001',
@@ -106,5 +107,56 @@ describe('pickNextTask', () => {
   it('falls back to the first open task when nothing has a due date', () => {
     const tasks = [task({ id: 'no-date-1', status: 'NOT_STARTED', priority: 'LOW', dueDate: null })];
     expect(pickNextTask(tasks, TODAY)?.id).toBe('no-date-1');
+  });
+
+  // ---------------------------------------------------------------------
+  // CM-71H.5 — a locked guided erection step is never picked as "Today's
+  // Work," at any priority tier, even when it looks maximally urgent.
+  // ---------------------------------------------------------------------
+
+  it('never picks a locked guided step, even when it is overdue', () => {
+    const lockedOverdue = task({ id: 'locked-1', isOverdue: true, guidedStepLocked: true });
+    const normalTask = task({ id: 'normal-1', dueDate: '2026-09-01' });
+    expect(pickNextTask([lockedOverdue, normalTask], TODAY)?.id).toBe('normal-1');
+  });
+
+  it('returns undefined when every open task is a locked guided step', () => {
+    const tasks = [
+      task({ id: 'locked-1', guidedStepLocked: true }),
+      task({ id: 'locked-2', guidedStepLocked: true, isOverdue: true }),
+    ];
+    expect(pickNextTask(tasks, TODAY)).toBeUndefined();
+  });
+
+  it('falls through to an unlocked task when a locked one would otherwise win by priority', () => {
+    const lockedDueToday = task({ id: 'locked-1', dueDate: TODAY, guidedStepLocked: true });
+    const unlockedInProgress = task({ id: 'unlocked-1', status: 'IN_PROGRESS', dueDate: '2026-08-27' });
+    expect(pickNextTask([lockedDueToday, unlockedInProgress], TODAY)?.id).toBe('unlocked-1');
+  });
+});
+
+describe('hasOnlyLockedOpenTasks', () => {
+  it('is false for an empty task list', () => {
+    expect(hasOnlyLockedOpenTasks([])).toBe(false);
+  });
+
+  it('is false when every task is completed (no open work at all — a different empty state)', () => {
+    expect(hasOnlyLockedOpenTasks([task({ status: 'COMPLETED', guidedStepLocked: true })])).toBe(false);
+  });
+
+  it('is true when the only open work is locked guided steps', () => {
+    const tasks = [
+      task({ id: 't1', guidedStepLocked: true }),
+      task({ id: 't2', status: 'COMPLETED' }),
+    ];
+    expect(hasOnlyLockedOpenTasks(tasks)).toBe(true);
+  });
+
+  it('is false when at least one open task is actionable (not a locked guided step)', () => {
+    const tasks = [
+      task({ id: 't1', guidedStepLocked: true }),
+      task({ id: 't2' }),
+    ];
+    expect(hasOnlyLockedOpenTasks(tasks)).toBe(false);
   });
 });

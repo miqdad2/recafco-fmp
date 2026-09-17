@@ -18,6 +18,7 @@ import {
   MapPin,
   Calendar,
   Workflow,
+  HardHat,
   Wallet,
   AlertCircle,
   Receipt,
@@ -28,7 +29,7 @@ import {
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
-import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess } from '../_lib/module-visibility';
+import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from '../_lib/module-visibility';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -90,6 +91,13 @@ const CONTRACT_ITEMS: NavItem[] = [
   { label: 'Contract List', href: '/contracts', icon: FileText, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Schedule', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Workflow & Team Tasks', href: '/contracts/workflow', icon: Workflow, module: 'CONTRACTS_MANAGEMENT' },
+  // CM-71B — visible to the same audience as every other CONTRACT_ITEMS
+  // entry (contracts.read via the shared CONTRACTS_MANAGEMENT module gate);
+  // no new role/permission was added for this dashboard, per that unit's
+  // own "do not add a new role immediately" instruction. Also present in
+  // CONTRACT_STAFF_ITEMS below as of CM-71H.1 — see that array's own doc
+  // comment for why.
+  { label: 'Erection Dashboard', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Payments', href: '/contracts/payments', icon: Wallet, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Issue Log', href: '/contracts/issues', icon: AlertCircle, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Claim Log', href: '/contracts/claims', icon: Receipt, module: 'CONTRACTS_MANAGEMENT' },
@@ -113,14 +121,29 @@ const CONTRACT_ITEMS: NavItem[] = [
  * payments/issue/claim/closeout tools. "My Schedule" was considered but deferred
  * (see progress-tracker.md CM-41 entry) — ShellUser doesn't carry the actor's
  * own id today, so a properly self-filtered schedule link isn't a trivial add.
+ *
+ * CM-71H.1 — Erection Dashboard added here too: an "Erection Manager /
+ * Workflow Owner" user IS a Contract-Staff-tier account (see the new-user-
+ * wizard's own ERECTION_MANAGER template, which maps to the CONTRACT_STAFF
+ * role), so without this addition an assigned Erection Manager would
+ * structurally never be able to reach their own dashboard. The dashboard
+ * itself already filters to only the current user's assigned contracts for
+ * a non-manager-tier viewer (contract-erection-dashboard.service.ts's own
+ * scopedContracts logic, CM-71H) — an unassigned Contract Staff user simply
+ * sees an empty work queue (ErectionEmptyState), never another user's
+ * contracts, so showing this link to every Contract Staff user (not just
+ * ones already known to be assigned) is safe: nothing is leaked, and the
+ * common case (this IS how an Erection Manager gets access at all) is what
+ * actually needs to work.
  */
 const CONTRACT_STAFF_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks', icon: Workflow, module: 'CONTRACTS_MANAGEMENT' },
+  { label: 'Erection Dashboard', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
-const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts'];
+const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'erection-dashboard'];
 
 const ADMIN_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/administration/dashboard', icon: Settings },
@@ -191,9 +214,18 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   const contractStaffOnly = isContractStaffOnlyAccess(user.permissions);
   const contractItemsSource = contractStaffOnly ? CONTRACT_STAFF_ITEMS : CONTRACT_ITEMS;
 
-  const visibleContractItems = contractItemsSource.filter(
-    (item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission),
-  );
+  // CM-71H — relabels "Erection Dashboard" to "Erection Status" for a
+  // manager-tier viewer, without hiding or moving the link (see
+  // isErectionDashboardMonitorOnly's own doc comment for why relabeling was
+  // chosen over hiding).
+  const erectionDashboardMonitorOnly = isErectionDashboardMonitorOnly(user.permissions);
+  const visibleContractItems = contractItemsSource
+    .filter((item) => isNavItemVisible(item, user.permissions, hasAnyAdminPermission))
+    .map((item) => (
+      item.href === '/contracts/erection-dashboard' && erectionDashboardMonitorOnly
+        ? { ...item, label: 'Erection Status' }
+        : item
+    ));
 
   // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:
   // no duplicate top-level Dashboard link, and Contract Management becomes its own

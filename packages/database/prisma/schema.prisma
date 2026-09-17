@@ -220,41 +220,62 @@ model User {
   safetyFindingsReopened     SafetyFinding[]           @relation("FindingReopenedBy")
   safetyInspectionComments   SafetyInspectionComment[] @relation("SafetyCommentAuthor")
 
-  contractsOwned                                Contract[]                             @relation("ContractOwner")
-  contractsCreated                              Contract[]                             @relation("ContractCreatedBy")
-  contractsActivated                            Contract[]                             @relation("ContractActivatedBy")
-  contractsTerminated                           Contract[]                             @relation("ContractTerminatedBy")
-  contractsClosed                               Contract[]                             @relation("ContractClosedBy")
-  contractsCancelled                            Contract[]                             @relation("ContractCancelledBy")
-  contractComments                              ContractComment[]                      @relation("ContractCommentAuthor")
-  contractPaymentsCreated                       ContractPayment[]                      @relation("ContractPaymentCreatedBy")
-  contractPaymentsUpdated                       ContractPayment[]                      @relation("ContractPaymentUpdatedBy")
-  contractBoqProductionStatusUpdated            ContractBoqItemProductionStatus[]      @relation("ContractBoqProductionStatusUpdatedBy")
-  contractWorkflowTasksResponsible              ContractWorkflowTask[]                 @relation("ContractWorkflowTaskResponsible")
-  contractWorkflowTasksCreated                  ContractWorkflowTask[]                 @relation("ContractWorkflowTaskCreatedBy")
-  contractWorkflowTasksUpdated                  ContractWorkflowTask[]                 @relation("ContractWorkflowTaskUpdatedBy")
-  contractWorkflowTaskAttachmentsUploaded       ContractWorkflowTaskAttachment[]       @relation("ContractWorkflowTaskAttachmentUploadedBy")
-  contractWorkflowTaskCommentsCreated           ContractWorkflowTaskComment[]          @relation("ContractWorkflowTaskCommentCreatedBy")
-  contractIssuesResponsible                     ContractIssue[]                        @relation("ContractIssueResponsible")
-  contractIssuesCreated                         ContractIssue[]                        @relation("ContractIssueCreatedBy")
-  contractIssuesUpdated                         ContractIssue[]                        @relation("ContractIssueUpdatedBy")
-  contractClaimsResponsible                     ContractClaim[]                        @relation("ContractClaimResponsible")
-  contractClaimsCreated                         ContractClaim[]                        @relation("ContractClaimCreatedBy")
-  contractClaimsUpdated                         ContractClaim[]                        @relation("ContractClaimUpdatedBy")
-  contractVariationsCreated                     ContractVariation[]                    @relation("ContractVariationCreatedBy")
-  contractVariationsUpdated                     ContractVariation[]                    @relation("ContractVariationUpdatedBy")
-  contractVariationAttachmentsUploaded          ContractVariationAttachment[]          @relation("ContractVariationAttachmentUploadedBy")
-  contractRisksResponsible                      ContractRisk[]                         @relation("ContractRiskResponsible")
-  contractRisksCreated                          ContractRisk[]                         @relation("ContractRiskCreatedBy")
-  contractRisksUpdated                          ContractRisk[]                         @relation("ContractRiskUpdatedBy")
-  contractDocumentObligationsCreated            ContractDocumentObligation[]           @relation("ContractDocumentObligationCreatedBy")
-  contractDocumentObligationsUpdated            ContractDocumentObligation[]           @relation("ContractDocumentObligationUpdatedBy")
-  contractDocumentObligationAttachmentsUploaded ContractDocumentObligationAttachment[] @relation("ContractDocumentObligationAttachmentUploadedBy")
-  contractCloseoutRequestsRequested             ContractCloseoutRequest[]              @relation("ContractCloseoutRequestRequestedBy")
-  contractCloseoutRequestsReviewed              ContractCloseoutRequest[]              @relation("ContractCloseoutRequestReviewedBy")
-  contractCloseoutAttachmentsUploaded           ContractCloseoutAttachment[]           @relation("ContractCloseoutAttachmentUploadedBy")
-  contractScheduleItemsCreated                  ContractScheduleItem[]                 @relation("ContractScheduleItemCreatedBy")
-  contractScheduleItemsUpdated                  ContractScheduleItem[]                 @relation("ContractScheduleItemUpdatedBy")
+  contractsOwned                                             Contract[]                                          @relation("ContractOwner")
+  contractsCreated                                           Contract[]                                          @relation("ContractCreatedBy")
+  contractsActivated                                         Contract[]                                          @relation("ContractActivatedBy")
+  contractsTerminated                                        Contract[]                                          @relation("ContractTerminatedBy")
+  contractsClosed                                            Contract[]                                          @relation("ContractClosedBy")
+  contractsCancelled                                         Contract[]                                          @relation("ContractCancelledBy")
+  contractComments                                           ContractComment[]                                   @relation("ContractCommentAuthor")
+  contractPaymentsCreated                                    ContractPayment[]                                   @relation("ContractPaymentCreatedBy")
+  contractPaymentsUpdated                                    ContractPayment[]                                   @relation("ContractPaymentUpdatedBy")
+  contractBoqProductionStatusUpdated                         ContractBoqItemProductionStatus[]                   @relation("ContractBoqProductionStatusUpdatedBy")
+  contractWorkflowTasksResponsible                           ContractWorkflowTask[]                              @relation("ContractWorkflowTaskResponsible")
+  contractWorkflowTasksCreated                               ContractWorkflowTask[]                              @relation("ContractWorkflowTaskCreatedBy")
+  contractWorkflowTasksUpdated                               ContractWorkflowTask[]                              @relation("ContractWorkflowTaskUpdatedBy")
+  contractWorkflowTaskAttachmentsUploaded                    ContractWorkflowTaskAttachment[]                    @relation("ContractWorkflowTaskAttachmentUploadedBy")
+  contractWorkflowTaskCommentsCreated                        ContractWorkflowTaskComment[]                       @relation("ContractWorkflowTaskCommentCreatedBy")
+  contractIssuesResponsible                                  ContractIssue[]                                     @relation("ContractIssueResponsible")
+  contractIssuesCreated                                      ContractIssue[]                                     @relation("ContractIssueCreatedBy")
+  contractIssuesUpdated                                      ContractIssue[]                                     @relation("ContractIssueUpdatedBy")
+  contractClaimsResponsible                                  ContractClaim[]                                     @relation("ContractClaimResponsible")
+  contractClaimsCreated                                      ContractClaim[]                                     @relation("ContractClaimCreatedBy")
+  contractClaimsUpdated                                      ContractClaim[]                                     @relation("ContractClaimUpdatedBy")
+  contractVariationsCreated                                  ContractVariation[]                                 @relation("ContractVariationCreatedBy")
+  contractVariationsUpdated                                  ContractVariation[]                                 @relation("ContractVariationUpdatedBy")
+  contractVariationAttachmentsUploaded                       ContractVariationAttachment[]                       @relation("ContractVariationAttachmentUploadedBy")
+  contractRisksResponsible                                   ContractRisk[]                                      @relation("ContractRiskResponsible")
+  contractRisksCreated                                       ContractRisk[]                                      @relation("ContractRiskCreatedBy")
+  contractRisksUpdated                                       ContractRisk[]                                      @relation("ContractRiskUpdatedBy")
+  contractDocumentObligationsCreated                         ContractDocumentObligation[]                        @relation("ContractDocumentObligationCreatedBy")
+  contractDocumentObligationsUpdated                         ContractDocumentObligation[]                        @relation("ContractDocumentObligationUpdatedBy")
+  contractDocumentObligationAttachmentsUploaded              ContractDocumentObligationAttachment[]              @relation("ContractDocumentObligationAttachmentUploadedBy")
+  contractCloseoutRequestsRequested                          ContractCloseoutRequest[]                           @relation("ContractCloseoutRequestRequestedBy")
+  contractCloseoutRequestsReviewed                           ContractCloseoutRequest[]                           @relation("ContractCloseoutRequestReviewedBy")
+  contractCloseoutAttachmentsUploaded                        ContractCloseoutAttachment[]                        @relation("ContractCloseoutAttachmentUploadedBy")
+  contractScheduleItemsCreated                               ContractScheduleItem[]                              @relation("ContractScheduleItemCreatedBy")
+  contractScheduleItemsUpdated                               ContractScheduleItem[]                              @relation("ContractScheduleItemUpdatedBy")
+  contractErectionMethodStatementsCreated                    ContractErectionMethodStatement[]                   @relation("ContractErectionMethodStatementCreatedBy")
+  contractErectionMethodStatementsUpdated                    ContractErectionMethodStatement[]                   @relation("ContractErectionMethodStatementUpdatedBy")
+  contractErectionMethodStatementAttachmentsUploaded         ContractErectionMethodStatementAttachment[]         @relation("ContractErectionMethodStatementAttachmentUploadedBy")
+  contractErectionMethodStatementApprovalsCreated            ContractErectionMethodStatementApproval[]           @relation("ContractErectionMethodStatementApprovalCreatedBy")
+  contractErectionMethodStatementApprovalsUpdated            ContractErectionMethodStatementApproval[]           @relation("ContractErectionMethodStatementApprovalUpdatedBy")
+  contractErectionMethodStatementApprovalsReviewed           ContractErectionMethodStatementApproval[]           @relation("ContractErectionMethodStatementApprovalReviewedBy")
+  contractErectionMethodStatementApprovalAttachmentsUploaded ContractErectionMethodStatementApprovalAttachment[] @relation("ContractErectionMethodStatementApprovalAttachmentUploadedBy")
+  contractErectionSchedulesCreated                           ContractErectionSchedule[]                          @relation("ContractErectionScheduleCreatedBy")
+  contractErectionSchedulesUpdated                           ContractErectionSchedule[]                          @relation("ContractErectionScheduleUpdatedBy")
+  contractErectionScheduleAttachmentsUploaded                ContractErectionScheduleAttachment[]                @relation("ContractErectionScheduleAttachmentUploadedBy")
+  contractErectionDeliveryStartsCreated                      ContractErectionDeliveryStart[]                     @relation("ContractErectionDeliveryStartCreatedBy")
+  contractErectionDeliveryStartsUpdated                      ContractErectionDeliveryStart[]                     @relation("ContractErectionDeliveryStartUpdatedBy")
+  contractErectionDeliveryStartAttachmentsUploaded           ContractErectionDeliveryStartAttachment[]           @relation("ContractErectionDeliveryStartAttachmentUploadedBy")
+  contractErectionStartsCreated                              ContractErectionStart[]                             @relation("ContractErectionStartCreatedBy")
+  contractErectionStartsUpdated                              ContractErectionStart[]                             @relation("ContractErectionStartUpdatedBy")
+  contractErectionStartAttachmentsUploaded                   ContractErectionStartAttachment[]                   @relation("ContractErectionStartAttachmentUploadedBy")
+  contractErectionChecklistsCreated                          ContractErectionChecklist[]                         @relation("ContractErectionChecklistCreatedBy")
+  contractErectionChecklistsUpdated                          ContractErectionChecklist[]                         @relation("ContractErectionChecklistUpdatedBy")
+  contractErectionChecklistAttachmentsUploaded               ContractErectionChecklistAttachment[]               @relation("ContractErectionChecklistAttachmentUploadedBy")
+  contractErectionWorkflowAssignmentsAssignedTo              ContractErectionWorkflowAssignment[]                @relation("ContractErectionWorkflowAssignmentAssignedTo")
+  contractErectionWorkflowAssignmentsAssignedBy              ContractErectionWorkflowAssignment[]                @relation("ContractErectionWorkflowAssignmentAssignedBy")
 
   productionOrdersCreated    ProductionOrder[]   @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[]   @relation("ProdOrderSupervisor")
@@ -1118,18 +1139,29 @@ model Contract {
   plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
   location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  comments            ContractComment[]
-  activities          ContractActivity[]
-  boqItems            ContractBoqItem[]
-  payments            ContractPayment[]
-  workflowTasks       ContractWorkflowTask[]
-  issues              ContractIssue[]
-  claims              ContractClaim[]
-  variations          ContractVariation[]
-  risks               ContractRisk[]
-  documentObligations ContractDocumentObligation[]
-  closeoutRequests    ContractCloseoutRequest[]
-  scheduleItems       ContractScheduleItem[]
+  comments                         ContractComment[]
+  activities                       ContractActivity[]
+  boqItems                         ContractBoqItem[]
+  payments                         ContractPayment[]
+  workflowTasks                    ContractWorkflowTask[]
+  issues                           ContractIssue[]
+  claims                           ContractClaim[]
+  variations                       ContractVariation[]
+  risks                            ContractRisk[]
+  documentObligations              ContractDocumentObligation[]
+  closeoutRequests                 ContractCloseoutRequest[]
+  scheduleItems                    ContractScheduleItem[]
+  erectionMethodStatement          ContractErectionMethodStatement?
+  // Not a real one-to-one from Contract's own side (contractId here isn't
+  // unique — only methodStatementId is, on the model itself) — practically
+  // at most one row, but declared as a list since Prisma requires either a
+  // unique FK or list cardinality for a back-relation.
+  erectionMethodStatementApprovals ContractErectionMethodStatementApproval[]
+  erectionSchedule                 ContractErectionSchedule?
+  erectionDeliveryStart            ContractErectionDeliveryStart?
+  erectionStart                    ContractErectionStart?
+  erectionChecklist                ContractErectionChecklist?
+  erectionWorkflowAssignment       ContractErectionWorkflowAssignment?
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -2154,4 +2186,822 @@ model ProductionActivity {
 
   @@index([orderId, createdAt(sort: Asc)])
   @@map("production_activities")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71A — Erection Workflow, Step 1: Issue Erection Method Statement. First
+// of a planned 7-step Erection Workflow (Method Statement Approval, Issue
+// Erection Schedule, Delivery Start, Erection Start, Erection Checklist,
+// Payment Issued are NOT built by this unit — see progress-tracker.md).
+// Deliberately a NEW, dedicated table — NOT a reuse of ContractWorkflowTask
+// (the existing generic Team Task Register already has its own free-form
+// ERECTION-team tasks like "Delivery Start"/"Erection Start", untouched by
+// this unit); this feature is a separate, more structured record type with
+// its own fixed field set.
+// contractId is @unique: at most one Method Statement per contract, matching
+// the design ("Step 1 of the workflow", not a repeatable register). status
+// only ever stores the 3 real, save-triggered values (DRAFT on first Save
+// Draft; SUBMITTED_FOR_APPROVAL or ISSUED on "Issue to Client for Approval",
+// chosen by requiresClientApproval) — the 4th badge value shown in the
+// approved design ("Ready to Issue") is a computed frontend-only label for a
+// DRAFT record whose required fields are all already filled in, never a
+// stored status, so no not-yet-reachable enum value exists in the database.
+// ---------------------------------------------------------------------------
+enum ContractErectionMethodStatementStatus {
+  DRAFT
+  SUBMITTED_FOR_APPROVAL
+  ISSUED
+
+  @@map("contract_erection_method_statement_status")
+}
+
+model ContractErectionMethodStatement {
+  id                     String                                @id @default(uuid()) @db.Uuid
+  contractId             String                                @unique @map("contract_id") @db.Uuid
+  plannedIssueDate       DateTime?                             @map("planned_issue_date") @db.Date
+  methodStatementRefNo   String                                @map("method_statement_ref_no") @db.VarChar(50)
+  jobOrderNo             String                                @map("job_order_no") @db.VarChar(50)
+  workLocationYard       String                                @map("work_location_yard") @db.VarChar(200)
+  preparedBy             String                                @map("prepared_by") @db.VarChar(150)
+  departmentArea         String                                @map("department_area") @db.VarChar(150)
+  reviewedByInternal     String?                               @map("reviewed_by_internal") @db.VarChar(150)
+  documentRevision       String?                               @map("document_revision") @db.VarChar(50)
+  applicableStandards    String?                               @map("applicable_standards") @db.Text
+  includesLiftPlan       Boolean                               @default(false) @map("includes_lift_plan")
+  includesRiskAssessment Boolean                               @default(false) @map("includes_risk_assessment")
+  requiresClientApproval Boolean                               @default(true) @map("requires_client_approval")
+  scopeDescription       String                                @map("scope_description") @db.Text
+  status                 ContractErectionMethodStatementStatus @default(DRAFT)
+  createdByUserId        String                                @map("created_by_user_id") @db.Uuid
+  updatedByUserId        String?                               @map("updated_by_user_id") @db.Uuid
+  createdAt              DateTime                              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract          Contract                                    @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdByUser     User                                        @relation("ContractErectionMethodStatementCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser     User?                                       @relation("ContractErectionMethodStatementUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments       ContractErectionMethodStatementAttachment[]
+  approval          ContractErectionMethodStatementApproval?
+  // Not a real one-to-one from this side (methodStatementId on
+  // ContractErectionSchedule isn't unique — only contractId is, on that
+  // model itself) — practically at most one, declared as a list for the
+  // same reason as Contract.erectionMethodStatementApprovals above.
+  erectionSchedules ContractErectionSchedule[]
+
+  @@index([status])
+  @@map("contract_erection_method_statements")
+}
+
+// Real uploaded supporting documents (method statement PDF, lift plan, risk
+// assessment, approved shop drawing, etc.) for one Erection Method
+// Statement. Local-disk storage, structure mirrors
+// ContractVariationAttachment/ContractDocumentObligationAttachment exactly.
+// onDelete: Cascade on methodStatementId — this feature DOES support a real
+// delete-attachment endpoint (unlike the other 3 attachment tables, which
+// have none today), so a deleted statement row correctly never leaves
+// orphaned attachment rows behind either.
+model ContractErectionMethodStatementAttachment {
+  id                String   @id @default(uuid()) @db.Uuid
+  methodStatementId String   @map("method_statement_id") @db.Uuid
+  fileName          String   @map("file_name") @db.VarChar(255)
+  originalFileName  String   @map("original_file_name") @db.VarChar(255)
+  mimeType          String   @map("mime_type") @db.VarChar(150)
+  fileSize          Int      @map("file_size")
+  storagePath       String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId  String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  methodStatement ContractErectionMethodStatement @relation(fields: [methodStatementId], references: [id], onDelete: Cascade)
+  uploadedByUser  User                            @relation("ContractErectionMethodStatementAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([methodStatementId, createdAt(sort: Desc)])
+  @@map("contract_erection_method_statement_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71C — Erection Workflow, Step 2: Erection Method Statement Approval.
+// QA/QC (or an authorized reviewing engineer) reviews the CM-71A method
+// statement and records Approve / Request Revision / Reject. At most one
+// approval record per method statement (methodStatementId is @unique) — a
+// revision cycle re-uses and updates the SAME record rather than creating a
+// new one each time, matching CM-71A's own "create once, edit forever"
+// convention. reviewStatus defaults to PENDING_APPROVAL (a real, always-
+// present row state once a Step 1 record exists — unlike CM-71A's
+// frontend-only "Ready to Issue" label, PENDING_APPROVAL genuinely needs to
+// be a stored value here since the task's own suggested enum lists it
+// explicitly). decision is only ever set by one of the 3 final-action
+// buttons (Approve & Forward / Request Revision / Reject) — Save Draft
+// never sets a final decision, matching the task's own "Save Draft — saves
+// review fields without final decision" rule.
+// ---------------------------------------------------------------------------
+enum ContractErectionMethodStatementApprovalStatus {
+  PENDING_APPROVAL
+  DRAFT_REVIEW
+  APPROVED
+  REVISION_REQUESTED
+  REJECTED
+
+  @@map("contract_erection_method_statement_approval_status")
+}
+
+enum ContractErectionMethodStatementApprovalDecision {
+  APPROVE
+  REQUEST_REVISION
+  REJECT
+
+  @@map("contract_erection_method_statement_approval_decision")
+}
+
+model ContractErectionMethodStatementApproval {
+  id                     String                                           @id @default(uuid()) @db.Uuid
+  contractId             String                                           @map("contract_id") @db.Uuid
+  methodStatementId      String                                           @unique @map("method_statement_id") @db.Uuid
+  reviewRequiredBy       DateTime?                                        @map("review_required_by") @db.Date
+  reviewingEngineer      String?                                          @map("reviewing_engineer") @db.VarChar(150)
+  reviewType             String?                                          @map("review_type") @db.VarChar(150)
+  priority               ContractWorkflowTaskPriority                     @default(MEDIUM)
+  reviewStatus           ContractErectionMethodStatementApprovalStatus    @default(PENDING_APPROVAL) @map("review_status")
+  decision               ContractErectionMethodStatementApprovalDecision?
+  requiresClientApproval Boolean                                          @default(true) @map("requires_client_approval")
+  comments               String?                                          @db.Text
+  approvedAt             DateTime?                                        @map("approved_at") @db.Timestamptz(3)
+  revisionRequestedAt    DateTime?                                        @map("revision_requested_at") @db.Timestamptz(3)
+  rejectedAt             DateTime?                                        @map("rejected_at") @db.Timestamptz(3)
+  reviewedByUserId       String?                                          @map("reviewed_by_user_id") @db.Uuid
+  createdByUserId        String                                           @map("created_by_user_id") @db.Uuid
+  updatedByUserId        String?                                          @map("updated_by_user_id") @db.Uuid
+  createdAt              DateTime                                         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                                         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract          Contract                                            @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  methodStatement   ContractErectionMethodStatement                     @relation(fields: [methodStatementId], references: [id], onDelete: Restrict)
+  reviewedByUser    User?                                               @relation("ContractErectionMethodStatementApprovalReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  createdByUser     User                                                @relation("ContractErectionMethodStatementApprovalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser     User?                                               @relation("ContractErectionMethodStatementApprovalUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments       ContractErectionMethodStatementApprovalAttachment[]
+  // Not a real one-to-one from this side either (approvalId on
+  // ContractErectionSchedule isn't unique) — same reasoning as
+  // ContractErectionMethodStatement.erectionSchedules above.
+  erectionSchedules ContractErectionSchedule[]
+
+  @@index([reviewStatus])
+  @@map("contract_erection_method_statement_approvals")
+}
+
+// Real uploaded QA/QC review attachments (marked-up files, review reports,
+// etc.) for one Method Statement Approval — deliberately a SEPARATE table
+// from ContractErectionMethodStatementAttachment (Step 1's own uploads):
+// Step 2 must never delete or mutate Step 1's submitted attachments (see
+// this unit's own "Do not delete Step 1 submitted attachments from Step 2"
+// rule) — keeping them in two distinct tables with two distinct FKs makes
+// that impossible by construction, not just by convention.
+model ContractErectionMethodStatementApprovalAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  approvalId       String   @map("approval_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  approval       ContractErectionMethodStatementApproval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  uploadedByUser User                                    @relation("ContractErectionMethodStatementApprovalAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([approvalId, createdAt(sort: Desc)])
+  @@map("contract_erection_method_statement_approval_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71D — Erection Workflow, Step 3: Issue Erection Schedule. At most one
+// schedule per contract (contractId is @unique) — the same "create once,
+// edit forever" shape as CM-71A's Step 1 (not CM-71C's Step 2 shape, which
+// is keyed off its own parent record instead, since Step 3 — like Step 1 —
+// is fundamentally a single-per-contract record, not a review of another
+// record). methodStatementId/approvalId are nullable informational links to
+// which Step 1/Step 2 record this schedule was prepared against — never a
+// hard requirement at the DB level (the service enforces the real "Step 1
+// must exist" gate; Step 2 approval status is a soft, not hard, check —
+// see the service's own doc comment).
+//
+// status only ever stores the 4 real save-triggered values (DRAFT, ISSUED,
+// HOLD, RETURNED) — "Ready to Issue" (shown in the approved design) is a
+// computed frontend-only badge for a DRAFT record whose required fields are
+// all already filled in, exactly matching CM-71A's own "Ready to Issue"
+// precedent, deliberately NOT reproduced as a stored enum value here even
+// though the task's own suggested enum lists it — no button in this unit
+// ever explicitly transitions a record into it, so storing it would create
+// an unreachable-via-the-UI enum value (see contract-erection-schedule.service.ts).
+//
+// totalActivities/criticalActivities are real, user-entered integers
+// (default 0) — this unit does not build a real activity-row list, so these
+// are honestly editable summary counts, never derived from data that
+// doesn't exist.
+// ---------------------------------------------------------------------------
+enum ContractErectionScheduleStatus {
+  DRAFT
+  ISSUED
+  HOLD
+  RETURNED
+
+  @@map("contract_erection_schedule_status")
+}
+
+model ContractErectionSchedule {
+  id                        String                         @id @default(uuid()) @db.Uuid
+  contractId                String                         @unique @map("contract_id") @db.Uuid
+  methodStatementId         String?                        @map("method_statement_id") @db.Uuid
+  approvalId                String?                        @map("approval_id") @db.Uuid
+  scheduleReferenceNo       String                         @map("schedule_reference_no") @db.VarChar(50)
+  scheduleDate              DateTime                       @map("schedule_date") @db.Date
+  plannedStartDate          DateTime                       @map("planned_start_date") @db.Date
+  plannedEndDate            DateTime                       @map("planned_end_date") @db.Date
+  jobOrderNo                String                         @map("job_order_no") @db.VarChar(50)
+  erectionCrewTeam          String                         @map("erection_crew_team") @db.VarChar(150)
+  estimatedManpowerPlanned  Int                            @map("estimated_manpower_planned")
+  requiredEquipmentPlanned  Int                            @map("required_equipment_planned")
+  preparedBy                String                         @map("prepared_by") @db.VarChar(150)
+  reviewedByErectionManager String?                        @map("reviewed_by_erection_manager") @db.VarChar(150)
+  reviewedOn                DateTime?                      @map("reviewed_on") @db.Date
+  documentRevision          String?                        @map("document_revision") @db.VarChar(50)
+  totalActivities           Int                            @default(0) @map("total_activities")
+  criticalActivities        Int                            @default(0) @map("critical_activities")
+  status                    ContractErectionScheduleStatus @default(DRAFT)
+  remarks                   String?                        @db.Text
+  issuedAt                  DateTime?                      @map("issued_at") @db.Timestamptz(3)
+  createdByUserId           String                         @map("created_by_user_id") @db.Uuid
+  updatedByUserId           String?                        @map("updated_by_user_id") @db.Uuid
+  createdAt                 DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract                                 @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  methodStatement ContractErectionMethodStatement?         @relation(fields: [methodStatementId], references: [id], onDelete: SetNull)
+  approval        ContractErectionMethodStatementApproval? @relation(fields: [approvalId], references: [id], onDelete: SetNull)
+  createdByUser   User                                     @relation("ContractErectionScheduleCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser   User?                                    @relation("ContractErectionScheduleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  attachments     ContractErectionScheduleAttachment[]
+  // Not a real one-to-one from this model's own side (erectionScheduleId on
+  // ContractErectionDeliveryStart isn't unique — only contractId is, on that
+  // model itself) — practically at most one row, but declared as a list for
+  // the same Prisma back-relation-cardinality reason as
+  // Contract.erectionMethodStatementApprovals above.
+  deliveryStarts  ContractErectionDeliveryStart[]
+  // Same reasoning: erectionScheduleId on ContractErectionStart isn't unique
+  // either.
+  erectionStarts  ContractErectionStart[]
+
+  @@index([status])
+  @@map("contract_erection_schedules")
+}
+
+// Real uploaded schedule documents (schedule detail, manpower plan,
+// equipment plan, crane/site layout, coordination documents). Local-disk
+// storage, structure mirrors ContractErectionMethodStatementAttachment
+// exactly, delete endpoint included (same as Step 1/Step 2's own attachment
+// tables).
+model ContractErectionScheduleAttachment {
+  id                 String   @id @default(uuid()) @db.Uuid
+  erectionScheduleId String   @map("erection_schedule_id") @db.Uuid
+  fileName           String   @map("file_name") @db.VarChar(255)
+  originalFileName   String   @map("original_file_name") @db.VarChar(255)
+  mimeType           String   @map("mime_type") @db.VarChar(150)
+  fileSize           Int      @map("file_size")
+  storagePath        String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId   String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  erectionSchedule ContractErectionSchedule @relation(fields: [erectionScheduleId], references: [id], onDelete: Cascade)
+  uploadedByUser   User                     @relation("ContractErectionScheduleAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([erectionScheduleId, createdAt(sort: Desc)])
+  @@map("contract_erection_schedule_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71E — Erection Workflow, Step 4: Delivery Start. Owned by the
+// Delivery / Logistics Team (never shown as Erection Department-owned,
+// though the Erection Department depends on it and can view it) — same
+// "one-per-contract, create-once-edit-forever" shape as CM-71A's Step 1 and
+// CM-71D's Step 3. erectionScheduleId is auto-derived server-side from the
+// contract's real current Step 3 record at creation time (never
+// frontend-supplied), same reasoning as Step 3's own methodStatementId/
+// approvalId auto-linking.
+//
+// status only ever stores the 4 real save-triggered values (DRAFT, STARTED,
+// HOLD, RETURNED) — no stored READY_TO_START value, matching CM-71A's/
+// CM-71D's own "Ready to Issue"/"Ready to Start" precedent: that badge is
+// computed frontend-only for a DRAFT record whose required fields are all
+// already valid, never a 5th stored value the design's own suggested enum
+// implied but no real button transition would ever write.
+//
+// totalPackages/totalWeight/totalVolume/totalItems are DERIVED from the
+// real ContractErectionDeliveryItem rows below (never independently
+// user-entered) — recomputed server-side on every create/update so they can
+// never drift from the real item rows, per this unit's own "Delivery item
+// summary must calculate from real item rows" instruction.
+// ---------------------------------------------------------------------------
+enum ContractErectionDeliveryStartStatus {
+  DRAFT
+  STARTED
+  HOLD
+  RETURNED
+
+  @@map("contract_erection_delivery_start_status")
+}
+
+model ContractErectionDeliveryStart {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  contractId                 String                              @unique @map("contract_id") @db.Uuid
+  erectionScheduleId         String?                             @map("erection_schedule_id") @db.Uuid
+  deliveryReferenceNo        String                              @map("delivery_reference_no") @db.VarChar(50)
+  deliveryDate               DateTime                            @map("delivery_date") @db.Date
+  plannedDeliveryWindowStart DateTime                            @map("planned_delivery_window_start") @db.Date
+  plannedDeliveryWindowEnd   DateTime                            @map("planned_delivery_window_end") @db.Date
+  transportMode              String                              @map("transport_mode") @db.VarChar(100)
+  dispatchProductionSource   String                              @map("dispatch_production_source") @db.VarChar(200)
+  dispatchFromYard           String                              @map("dispatch_from_yard") @db.VarChar(200)
+  deliveryToSiteLocation     String                              @map("delivery_to_site_location") @db.VarChar(200)
+  gateEntryContact           String?                             @map("gate_entry_contact") @db.VarChar(150)
+  deliveryNoteOrLrNo         String?                             @map("delivery_note_or_lr_no") @db.VarChar(100)
+  vehicleNo                  String?                             @map("vehicle_no") @db.VarChar(50)
+  driverName                 String?                             @map("driver_name") @db.VarChar(150)
+  driverContact              String?                             @map("driver_contact") @db.VarChar(50)
+  totalPackages              Int                                 @default(0) @map("total_packages")
+  totalWeight                Decimal?                            @map("total_weight") @db.Decimal(14, 3)
+  totalVolume                Decimal?                            @map("total_volume") @db.Decimal(14, 3)
+  totalItems                 Int                                 @default(0) @map("total_items")
+  status                     ContractErectionDeliveryStartStatus @default(DRAFT)
+  comments                   String?                             @db.Text
+  confirmedAt                DateTime?                           @map("confirmed_at") @db.Timestamptz(3)
+  createdByUserId            String                              @map("created_by_user_id") @db.Uuid
+  updatedByUserId            String?                             @map("updated_by_user_id") @db.Uuid
+  createdAt                  DateTime                            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime                            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract         Contract                                  @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  erectionSchedule ContractErectionSchedule?                 @relation(fields: [erectionScheduleId], references: [id], onDelete: SetNull)
+  createdByUser    User                                      @relation("ContractErectionDeliveryStartCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser    User?                                     @relation("ContractErectionDeliveryStartUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  items            ContractErectionDeliveryItem[]
+  documents        ContractErectionDeliveryDocument[]
+  attachments      ContractErectionDeliveryStartAttachment[]
+  // Not a real one-to-one from this model's own side (deliveryStartId on
+  // ContractErectionStart isn't unique — only contractId is, on that model
+  // itself) — practically at most one row, but declared as a list for the
+  // same Prisma back-relation-cardinality reason as
+  // Contract.erectionMethodStatementApprovals above.
+  erectionStarts   ContractErectionStart[]
+
+  @@index([status])
+  @@map("contract_erection_delivery_starts")
+}
+
+// Real per-item delivery rows (precast panels, columns, kerbstones, etc.) —
+// item status is a genuine manual per-row selection (Ready to Dispatch /
+// Dispatched / Delivered / Hold), all 4 legitimately real-and-reachable
+// states, unlike the parent record's own "Ready to Start" (which stays
+// frontend-only).
+enum ContractErectionDeliveryItemStatus {
+  READY_TO_DISPATCH
+  DISPATCHED
+  DELIVERED
+  HOLD
+
+  @@map("contract_erection_delivery_item_status")
+}
+
+model ContractErectionDeliveryItem {
+  id              String                             @id @default(uuid()) @db.Uuid
+  deliveryStartId String                             @map("delivery_start_id") @db.Uuid
+  srNo            Int                                @map("sr_no")
+  description     String                             @db.VarChar(255)
+  packageNo       String?                            @map("package_no") @db.VarChar(50)
+  weight          Decimal?                           @db.Decimal(14, 3)
+  volume          Decimal?                           @db.Decimal(14, 3)
+  quantity        Decimal                            @db.Decimal(14, 3)
+  status          ContractErectionDeliveryItemStatus @default(READY_TO_DISPATCH)
+  createdAt       DateTime                           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  deliveryStart ContractErectionDeliveryStart @relation(fields: [deliveryStartId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryStartId, srNo])
+  @@map("contract_erection_delivery_items")
+}
+
+// Real per-document checklist rows (Packing List, Material Test
+// Certificates, Delivery Note / Invoice, Bill of Lading / LR) — status is
+// ATTACHED only when attachmentId genuinely links to a real uploaded
+// ContractErectionDeliveryStartAttachment row (set by the frontend when the
+// user tags an uploaded file against a checklist entry), never fabricated;
+// NOT_REQUIRED is a real manual override for a document that doesn't apply
+// to this delivery.
+enum ContractErectionDeliveryDocumentStatus {
+  PENDING
+  ATTACHED
+  NOT_REQUIRED
+
+  @@map("contract_erection_delivery_document_status")
+}
+
+model ContractErectionDeliveryDocument {
+  id              String                                 @id @default(uuid()) @db.Uuid
+  deliveryStartId String                                 @map("delivery_start_id") @db.Uuid
+  documentName    String                                 @map("document_name") @db.VarChar(150)
+  status          ContractErectionDeliveryDocumentStatus @default(PENDING)
+  attachmentId    String?                                @map("attachment_id") @db.Uuid
+  createdAt       DateTime                               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  deliveryStart ContractErectionDeliveryStart            @relation(fields: [deliveryStartId], references: [id], onDelete: Cascade)
+  attachment    ContractErectionDeliveryStartAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+
+  @@unique([deliveryStartId, documentName])
+  @@map("contract_erection_delivery_documents")
+}
+
+// Real uploaded delivery documents (packing list, material test
+// certificates, delivery note, LR/bill of lading). Local-disk storage,
+// structure mirrors ContractErectionScheduleAttachment exactly, delete
+// endpoint included.
+model ContractErectionDeliveryStartAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  deliveryStartId  String   @map("delivery_start_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  deliveryStart   ContractErectionDeliveryStart      @relation(fields: [deliveryStartId], references: [id], onDelete: Cascade)
+  uploadedByUser  User                               @relation("ContractErectionDeliveryStartAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  linkedDocuments ContractErectionDeliveryDocument[]
+
+  @@index([deliveryStartId, createdAt(sort: Desc)])
+  @@map("contract_erection_delivery_start_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71F — Erection Workflow, Step 5: Erection Start. Owned by the Erection
+// Department / Site-Erection Team (Contract Management tracks; Delivery /
+// Logistics completed Step 4 beforehand). Same "one-per-contract,
+// create-once-edit-forever" shape as Steps 1/3/4. deliveryStartId and
+// erectionScheduleId are auto-derived server-side from the contract's real
+// current Step 4/Step 3 records at creation time (never frontend-supplied),
+// same reasoning as every earlier step's own cross-reference auto-linking.
+// jobOrderNo/plannedStartDate/methodStatementRefNo are read-only snapshots
+// auto-fetched from Steps 1/3/the contract itself at creation time — per
+// this unit's own explicit "auto fetch from contract" / "from Step 3
+// schedule if available" / "read-only if available from Step 1" field
+// corrections.
+//
+// status only ever stores the 4 real save-triggered values (DRAFT, STARTED,
+// HOLD, RETURNED) — no stored READY_TO_START value, matching every earlier
+// step's own "Ready to X" precedent: that badge is computed frontend-only
+// for a DRAFT record whose required fields are all already valid, never a
+// 5th stored value the design's own suggested enum implied but no real
+// button transition would ever write.
+// ---------------------------------------------------------------------------
+enum ContractErectionStartStatus {
+  DRAFT
+  STARTED
+  HOLD
+  RETURNED
+
+  @@map("contract_erection_start_status")
+}
+
+model ContractErectionStart {
+  id                   String                      @id @default(uuid()) @db.Uuid
+  contractId           String                      @unique @map("contract_id") @db.Uuid
+  deliveryStartId      String?                     @map("delivery_start_id") @db.Uuid
+  erectionScheduleId   String?                     @map("erection_schedule_id") @db.Uuid
+  jobOrderNo           String                      @map("job_order_no") @db.VarChar(50)
+  plannedStartDate     DateTime?                   @map("planned_start_date") @db.Date
+  actualStartDateTime  DateTime?                   @map("actual_start_date_time") @db.Timestamptz(3)
+  workLocationYard     String                      @map("work_location_yard") @db.VarChar(200)
+  erectionCrewTeam     String                      @map("erection_crew_team") @db.VarChar(150)
+  supervisor           String                      @db.VarChar(150)
+  weatherCondition     String?                     @map("weather_condition") @db.VarChar(100)
+  windSpeed            String?                     @map("wind_speed") @db.VarChar(50)
+  methodStatementRefNo String?                     @map("method_statement_ref_no") @db.VarChar(50)
+  scopeOfWorkToday     String                      @map("scope_of_work_today") @db.Text
+  status               ContractErectionStartStatus @default(DRAFT)
+  comments             String?                     @db.Text
+  confirmedAt          DateTime?                   @map("confirmed_at") @db.Timestamptz(3)
+  createdByUserId      String                      @map("created_by_user_id") @db.Uuid
+  updatedByUserId      String?                     @map("updated_by_user_id") @db.Uuid
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract           Contract                          @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  deliveryStart      ContractErectionDeliveryStart?    @relation(fields: [deliveryStartId], references: [id], onDelete: SetNull)
+  erectionSchedule   ContractErectionSchedule?         @relation(fields: [erectionScheduleId], references: [id], onDelete: SetNull)
+  createdByUser      User                              @relation("ContractErectionStartCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser      User?                             @relation("ContractErectionStartUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  manpowerRows       ContractErectionStartManpower[]
+  equipmentRows      ContractErectionStartEquipment[]
+  checklistRows      ContractErectionStartChecklist[]
+  attachments        ContractErectionStartAttachment[]
+  // Not a real one-to-one from this model's own side (erectionStartId on
+  // ContractErectionChecklist isn't unique — only contractId is, on that
+  // model itself) — practically at most one row, but declared as a list for
+  // the same Prisma back-relation-cardinality reason as
+  // Contract.erectionMethodStatementApprovals above. NOT the same model as
+  // checklistRows above — that is Step 5's own pre-erection readiness
+  // checklist (ContractErectionStartChecklist); this is Step 6's own
+  // formal QA/QC verification checklist (ContractErectionChecklist), a
+  // deliberately separate model per this unit's own "should not duplicate
+  // Step 5 exactly" instruction.
+  erectionChecklists ContractErectionChecklist[]
+
+  @@index([status])
+  @@map("contract_erection_starts")
+}
+
+// Real editable Manpower / Work Activity rows — trade is free text (not an
+// enum) so a site can add its own row beyond the 10 suggested defaults;
+// Total Manpower on the dashboard/summary is always summed from these real
+// rows, never independently entered.
+model ContractErectionStartManpower {
+  id                String   @id @default(uuid()) @db.Uuid
+  erectionStartId   String   @map("erection_start_id") @db.Uuid
+  trade             String   @db.VarChar(100)
+  plannedNos        Int      @default(0) @map("planned_nos")
+  actualDeployedNos Int      @default(0) @map("actual_deployed_nos")
+  remarks           String?  @db.Text
+  sortOrder         Int      @default(0) @map("sort_order")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  erectionStart ContractErectionStart @relation(fields: [erectionStartId], references: [id], onDelete: Cascade)
+
+  @@index([erectionStartId, sortOrder])
+  @@map("contract_erection_start_manpower")
+}
+
+// Real editable Equipment / Vehicle Assignment rows — equipmentType and
+// descriptionCapacity are both free text (not enums), per this unit's own
+// explicit "allow user to type their own value or add their own row
+// because crane type, rental equipment, and trailer details may vary by
+// site" instruction. Crane/Trailer counts on the dashboard/summary are
+// derived by substring-matching equipmentType, never independently
+// entered.
+model ContractErectionStartEquipment {
+  id                  String   @id @default(uuid()) @db.Uuid
+  erectionStartId     String   @map("erection_start_id") @db.Uuid
+  equipmentType       String   @map("equipment_type") @db.VarChar(100)
+  descriptionCapacity String   @map("description_capacity") @db.VarChar(200)
+  ownedOrRental       String   @map("owned_or_rental") @db.VarChar(50)
+  assignedQty         Int      @default(0) @map("assigned_qty")
+  operatorDriver      String?  @map("operator_driver") @db.VarChar(150)
+  remarks             String?  @db.Text
+  sortOrder           Int      @default(0) @map("sort_order")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  erectionStart ContractErectionStart @relation(fields: [erectionStartId], references: [id], onDelete: Cascade)
+
+  @@index([erectionStartId, sortOrder])
+  @@map("contract_erection_start_equipment")
+}
+
+// Real per-checklist-item rows (the fixed 10-item pre-erection checklist
+// this unit specifies) — status is a genuine manual per-row selection
+// (Pending / Completed / Not Applicable), never fabricated as Completed by
+// default.
+enum ContractErectionStartChecklistStatus {
+  PENDING
+  COMPLETED
+  NOT_APPLICABLE
+
+  @@map("contract_erection_start_checklist_status")
+}
+
+model ContractErectionStartChecklist {
+  id              String                               @id @default(uuid()) @db.Uuid
+  erectionStartId String                               @map("erection_start_id") @db.Uuid
+  checklistItem   String                               @map("checklist_item") @db.VarChar(150)
+  status          ContractErectionStartChecklistStatus @default(PENDING)
+  remarks         String?                              @db.Text
+  sortOrder       Int                                  @default(0) @map("sort_order")
+  createdAt       DateTime                             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  erectionStart ContractErectionStart @relation(fields: [erectionStartId], references: [id], onDelete: Cascade)
+
+  @@unique([erectionStartId, checklistItem])
+  @@map("contract_erection_start_checklist")
+}
+
+// Real uploaded pre-erection records (toolbox talk sheet, pre-erection
+// checklist, crane documents, site photos, work start confirmation). Local-
+// disk storage, structure mirrors ContractErectionDeliveryStartAttachment
+// exactly, delete endpoint included.
+model ContractErectionStartAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  erectionStartId  String   @map("erection_start_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  erectionStart  ContractErectionStart @relation(fields: [erectionStartId], references: [id], onDelete: Cascade)
+  uploadedByUser User                  @relation("ContractErectionStartAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([erectionStartId, createdAt(sort: Desc)])
+  @@map("contract_erection_start_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CM-71G — Erection Workflow, Step 6: Erection Checklist. Owned by the QA /
+// QC Team (Erection Department / Site Team provides supporting documents
+// and status; Contract Management tracks). Same "one-per-contract,
+// create-once-edit-forever" shape as Steps 1/3/4/5. erectionStartId is
+// auto-derived server-side from the contract's real current Step 5 record
+// at creation time (never frontend-supplied), same reasoning as every
+// earlier step's own cross-reference auto-linking. jobOrderNo is a
+// read-only snapshot auto-fetched from the contract (falling back to Step
+// 5's own jobOrderNo) at creation time, per this unit's own "Work Package /
+// Area -> Job Order No., auto fetch from contract" field correction.
+//
+// This is a DELIBERATELY SEPARATE model from Step 5's own
+// ContractErectionStartChecklist (the pre-erection readiness checklist) —
+// per this unit's own explicit "Step 6 is a formal QA/QC verification
+// checklist and should not duplicate Step 5 exactly" instruction. Never
+// reuses Step 5's rows/table for anything.
+//
+// status stores 5 real save-triggered values (DRAFT, SUBMITTED_FOR_
+// VERIFICATION, VERIFIED, HOLD, RETURNED) — no stored READY_FOR_
+// VERIFICATION value, matching every earlier step's own "Ready to X"
+// precedent: that badge is computed frontend-only for a DRAFT record whose
+// required fields (and at least one checklist row) are already valid,
+// never a 6th stored value the design's own suggested enum implied but no
+// real button transition would ever write. A dedicated "Verify" action
+// (QA/QC's own terminal confirmation) was added beyond the task's own
+// explicitly-listed 4 buttons (Save Draft/Submit/Hold/Return) because
+// VERIFIED is named as a real header status badge and referenced by the
+// dashboard/workflow-tab integration sections as a real reachable state —
+// leaving it unreachable would contradict "every stored status should be
+// reachable via a real button," the same reasoning already applied
+// consistently across every earlier erection-workflow unit.
+//
+// Checklist Items Summary (Total/Completed/In Progress/Not Completed/Not
+// Applicable) is NEVER stored — this unit's own suggested schema has no
+// summary columns (matching CM-71F's own Resources Summary precedent) —
+// always computed live from the real ContractErectionChecklistItem rows.
+// ---------------------------------------------------------------------------
+enum ContractErectionChecklistStatus {
+  DRAFT
+  SUBMITTED_FOR_VERIFICATION
+  VERIFIED
+  HOLD
+  RETURNED
+
+  @@map("contract_erection_checklist_status")
+}
+
+model ContractErectionChecklist {
+  id                             String                          @id @default(uuid()) @db.Uuid
+  contractId                     String                          @unique @map("contract_id") @db.Uuid
+  erectionStartId                String?                         @map("erection_start_id") @db.Uuid
+  checklistRefNo                 String                          @map("checklist_ref_no") @db.VarChar(50)
+  checklistDate                  DateTime                        @map("checklist_date") @db.Date
+  jobOrderNo                     String                          @map("job_order_no") @db.VarChar(50)
+  checklistType                  String                          @map("checklist_type") @db.VarChar(100)
+  preparedBy                     String                          @map("prepared_by") @db.VarChar(150)
+  reviewedByQaqc                 String?                         @map("reviewed_by_qaqc") @db.VarChar(150)
+  verifiedByClientRepresentative String?                         @map("verified_by_client_representative") @db.VarChar(150)
+  status                         ContractErectionChecklistStatus @default(DRAFT)
+  workLocationYard               String?                         @map("work_location_yard") @db.VarChar(200)
+  comments                       String?                         @db.Text
+  submittedAt                    DateTime?                       @map("submitted_at") @db.Timestamptz(3)
+  verifiedAt                     DateTime?                       @map("verified_at") @db.Timestamptz(3)
+  createdByUserId                String                          @map("created_by_user_id") @db.Uuid
+  updatedByUserId                String?                         @map("updated_by_user_id") @db.Uuid
+  createdAt                      DateTime                        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                      DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract      Contract                              @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  erectionStart ContractErectionStart?                @relation(fields: [erectionStartId], references: [id], onDelete: SetNull)
+  createdByUser User                                  @relation("ContractErectionChecklistCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUser User?                                 @relation("ContractErectionChecklistUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  items         ContractErectionChecklistItem[]
+  attachments   ContractErectionChecklistAttachment[]
+
+  @@index([status])
+  @@map("contract_erection_checklists")
+}
+
+// Real editable checklist item rows (the 12 default items this unit
+// specifies, or any site-added row beyond them) — status is a genuine
+// manual per-row selection (Completed / In Progress / Not Completed / Not
+// Applicable), all 4 legitimately real-and-reachable states. attachmentRef
+// is a plain free-text field (not a real attachment link), per this unit's
+// own explicit "if file linking is too heavy for this unit, allow
+// free-text attachment/reference field per checklist item" fallback.
+enum ContractErectionChecklistItemStatus {
+  COMPLETED
+  IN_PROGRESS
+  NOT_COMPLETED
+  NOT_APPLICABLE
+
+  @@map("contract_erection_checklist_item_status")
+}
+
+model ContractErectionChecklistItem {
+  id            String                              @id @default(uuid()) @db.Uuid
+  checklistId   String                              @map("checklist_id") @db.Uuid
+  checklistItem String                              @map("checklist_item") @db.VarChar(255)
+  status        ContractErectionChecklistItemStatus @default(NOT_COMPLETED)
+  remarks       String?                             @db.Text
+  attachmentRef String?                             @map("attachment_ref") @db.VarChar(255)
+  sortOrder     Int                                 @default(0) @map("sort_order")
+  createdAt     DateTime                            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime                            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  checklist ContractErectionChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId, sortOrder])
+  @@map("contract_erection_checklist_items")
+}
+
+// Real uploaded checklist and supporting documents (checklist form,
+// material test reports, erection photos, QA/QC inspection records). Local-
+// disk storage, structure mirrors ContractErectionStartAttachment exactly,
+// delete endpoint included.
+model ContractErectionChecklistAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  checklistId      String   @map("checklist_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  checklist      ContractErectionChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  uploadedByUser User                      @relation("ContractErectionChecklistAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([checklistId, createdAt(sort: Desc)])
+  @@map("contract_erection_checklist_attachments")
+}
+
+// CM-71H — ASSIGNED/ACTIVE both mean "currently the live assignment for this
+// contract" (ACTIVE is offered for a future unit that wants to distinguish
+// "assigned, not yet acknowledged" from "actively working"; this unit's own
+// Assign/Change Assignment flow only ever writes ASSIGNED). COMPLETED/
+// CANCELLED are reserved for a future closeout/reassignment-history flow —
+// this unit's "only one active assignment per contract is needed for now"
+// instruction is satisfied by contractId being @unique below (Change
+// Assignment updates the one existing row in place; it does not insert a
+// new row and retire the old one).
+enum ContractErectionWorkflowAssignmentStatus {
+  ASSIGNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+
+  @@map("contract_erection_workflow_assignment_status")
+}
+
+// CM-71H — Assigns ownership of the (already-built, CM-71A-G) Erection
+// Workflow to a specific Erection Manager/user, distinct from Contract.
+// ownerUserId (the contract's own general business owner, unrelated to
+// erection execution — see that field's own doc comment) and from
+// ContractWorkflowTask.responsibleUserId (per-TASK assignment on the
+// generic team-task register, a different, older mechanism). One row per
+// contract (contractId @unique, same "create-once-edit-forever" shape as
+// every Step 1-6 model): Assign creates it, Change Assignment updates it in
+// place. assignedToName is a free-text fallback for when no user id is
+// selected from the dropdown (this unit's own "allow manual selection/
+// assignment safely" instruction) — assignedToUserId stays the source of
+// truth for the dashboard's own "assigned to current user" filter whenever
+// it is present.
+model ContractErectionWorkflowAssignment {
+  id                 String                                   @id @default(uuid()) @db.Uuid
+  contractId         String                                   @unique @map("contract_id") @db.Uuid
+  assignedToUserId   String?                                  @map("assigned_to_user_id") @db.Uuid
+  assignedToName     String?                                  @map("assigned_to_name") @db.VarChar(200)
+  assignedDepartment String                                   @default("Erection Department") @map("assigned_department") @db.VarChar(150)
+  assignedByUserId   String?                                  @map("assigned_by_user_id") @db.Uuid
+  assignedAt         DateTime                                 @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  status             ContractErectionWorkflowAssignmentStatus @default(ASSIGNED)
+  remarks            String?                                  @db.Text
+  createdAt          DateTime                                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract       Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  assignedToUser User?    @relation("ContractErectionWorkflowAssignmentAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedByUser User?    @relation("ContractErectionWorkflowAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([assignedToUserId])
+  @@map("contract_erection_workflow_assignments")
 }

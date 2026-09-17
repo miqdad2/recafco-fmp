@@ -3,6 +3,12 @@ import {
   isContractWorkspaceDetailPath,
   contractModuleBreadcrumbItems,
   contractWorkflowBreadcrumbItems,
+  contractErectionMethodStatementBreadcrumbItems,
+  contractErectionMethodStatementApprovalBreadcrumbItems,
+  contractErectionScheduleBreadcrumbItems,
+  contractErectionDeliveryStartBreadcrumbItems,
+  contractErectionStartBreadcrumbItems,
+  contractErectionChecklistBreadcrumbItems,
 } from './contract-workspace-breadcrumb';
 
 const CONTRACT_ID = '00000000-0000-0000-0000-000000000000';
@@ -46,6 +52,7 @@ describe('isContractWorkspaceDetailPath', () => {
     'issues',
     'claims',
     'closeouts',
+    'erection-dashboard',
   ])('is false for the %s module page', (segment) => {
     expect(isContractWorkspaceDetailPath(`/contracts/${segment}`)).toBe(false);
   });
@@ -88,6 +95,7 @@ describe('contractModuleBreadcrumbItems', () => {
     ['/contracts/issues', 'Issue Log'],
     ['/contracts/claims', 'Claim Log'],
     ['/contracts/closeouts', 'Closeout Requests'],
+    ['/contracts/erection-dashboard', 'Erection Dashboard'],
   ])('returns the real breadcrumb for %s', (path, label) => {
     expect(contractModuleBreadcrumbItems(path)).toEqual([
       { label: 'Contract Management', href: '/contracts/dashboard' },
@@ -188,5 +196,204 @@ describe('contractWorkflowBreadcrumbItems', () => {
       { label: 'Contract Management', href: '/contracts/dashboard' },
       { label: 'Overdue Tasks' },
     ]);
+  });
+});
+
+describe('contractErectionMethodStatementBreadcrumbItems (CM-71A)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Issue Erection Method Statement' },
+    ]);
+  });
+
+  // CM-71H.6 — a staff-tier (Erection Manager / Contract Staff) viewer
+  // never sees the manager-only Contract Detail/Workflow & Team Tasks
+  // chain — the focused erection view has no such tabs to link to.
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Issue Erection Method Statement' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for the plain Workflow tab (a shorter, different route)', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for an unrelated contract detail tab', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/variations`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for a future, not-yet-built erection step route (only Step 1 has this exact shape)', () => {
+    expect(contractErectionMethodStatementBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/schedule`, false)).toBeUndefined();
+  });
+});
+
+describe('contractErectionMethodStatementApprovalBreadcrumbItems (CM-71C)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionMethodStatementApprovalBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement/approval`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Erection Method Statement Approval' },
+    ]);
+  });
+
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionMethodStatementApprovalBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement/approval`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Erection Method Statement Approval' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionMethodStatementApprovalBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement/approval/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for Step 1 (a different, one-level-shallower route)', () => {
+    expect(contractErectionMethodStatementApprovalBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement`, false)).toBeUndefined();
+  });
+});
+
+describe('contractErectionScheduleBreadcrumbItems (CM-71D)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/schedule`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Issue Erection Schedule' },
+    ]);
+  });
+
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/schedule`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Issue Erection Schedule' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/schedule/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for the plain Workflow tab (a shorter, different route)', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for Step 1 (a different, one-level-deeper route)', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for Step 2 (a different, sibling route)', () => {
+    expect(contractErectionScheduleBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/method-statement/approval`, false)).toBeUndefined();
+  });
+});
+
+describe('contractErectionDeliveryStartBreadcrumbItems (CM-71E)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionDeliveryStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/delivery-start`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Delivery Start' },
+    ]);
+  });
+
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionDeliveryStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/delivery-start`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Delivery Start' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionDeliveryStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/delivery-start/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for the plain Workflow tab (a shorter, different route)', () => {
+    expect(contractErectionDeliveryStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for Step 3 (a different, sibling route)', () => {
+    expect(contractErectionDeliveryStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/schedule`, false)).toBeUndefined();
+  });
+});
+
+describe('contractErectionStartBreadcrumbItems (CM-71F)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/start`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Erection Start' },
+    ]);
+  });
+
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/start`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Erection Start' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/start/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for the plain Workflow tab (a shorter, different route)', () => {
+    expect(contractErectionStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for Step 4 (a different, sibling route)', () => {
+    expect(contractErectionStartBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/delivery-start`, false)).toBeUndefined();
+  });
+});
+
+describe('contractErectionChecklistBreadcrumbItems (CM-71G)', () => {
+  it('returns the full 5-level breadcrumb for a manager-tier viewer, with real contractId-derived hrefs', () => {
+    expect(contractErectionChecklistBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/checklist`, false)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'Contract List', href: '/contracts' },
+      { label: 'Contract Detail', href: `/contracts/${CONTRACT_ID}` },
+      { label: 'Workflow & Team Tasks', href: `/contracts/${CONTRACT_ID}/workflow` },
+      { label: 'Erection Checklist' },
+    ]);
+  });
+
+  it('returns the shorter 3-level breadcrumb for a staff-tier viewer', () => {
+    expect(contractErectionChecklistBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/checklist`, true)).toEqual([
+      { label: 'Contract Management', href: '/contracts/dashboard' },
+      { label: 'My Tasks', href: '/contracts/workflow?mode=my-tasks' },
+      { label: 'Erection Checklist' },
+    ]);
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(contractErectionChecklistBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/checklist/`, false)).toBeDefined();
+  });
+
+  it('returns undefined for the plain Workflow tab (a shorter, different route)', () => {
+    expect(contractErectionChecklistBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow`, false)).toBeUndefined();
+  });
+
+  it('returns undefined for Step 5 (a different, sibling route)', () => {
+    expect(contractErectionChecklistBreadcrumbItems(`/contracts/${CONTRACT_ID}/workflow/erection/start`, false)).toBeUndefined();
   });
 });

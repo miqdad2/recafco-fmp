@@ -29,13 +29,23 @@ const PRODUCTION_TEMPLATES: WorkflowTaskTemplate[] = [
   { team: 'PRODUCTION', taskKey: 'production_start', taskName: 'Production Start', sortOrder: 5 },
 ];
 
+// CM-71H.2 — wording corrected to match the CM-71A-G guided screens' own
+// step titles exactly ("Issued of..."/"Issued..."/"Issue Checklist" were the
+// original CM-29 copy, predating those guided screens). taskKey (the stable
+// identifier every guided-routing/detection helper keys off — see
+// guided-erection-workflow-route.ts) is UNCHANGED — only the display string
+// moved. Already-generated ContractWorkflowTask rows still hold the OLD
+// stored taskName (this is a template for future generation, not a live
+// re-sync) — getGuidedErectionTaskDisplayName() on the frontend corrects the
+// display for both old and new rows uniformly, so no data migration or
+// backfill was needed for this to be "corrected wherever visible."
 const ERECTION_TEMPLATES: WorkflowTaskTemplate[] = [
-  { team: 'ERECTION', taskKey: 'erection_method_statement_issued', taskName: 'Issued of Erection Method Statement', sortOrder: 1 },
-  { team: 'ERECTION', taskKey: 'erection_statement_approval', taskName: 'Erection Statement Approval', sortOrder: 2 },
-  { team: 'ERECTION', taskKey: 'erection_schedule_issued', taskName: 'Issued Erection Schedule', sortOrder: 3 },
+  { team: 'ERECTION', taskKey: 'erection_method_statement_issued', taskName: 'Issue Erection Method Statement', sortOrder: 1 },
+  { team: 'ERECTION', taskKey: 'erection_statement_approval', taskName: 'Erection Method Statement Approval', sortOrder: 2 },
+  { team: 'ERECTION', taskKey: 'erection_schedule_issued', taskName: 'Issue Erection Schedule', sortOrder: 3 },
   { team: 'ERECTION', taskKey: 'erection_delivery_start', taskName: 'Delivery Start', sortOrder: 4 },
   { team: 'ERECTION', taskKey: 'erection_start', taskName: 'Erection Start', sortOrder: 5 },
-  { team: 'ERECTION', taskKey: 'erection_issue_checklist', taskName: 'Issue Checklist', sortOrder: 6 },
+  { team: 'ERECTION', taskKey: 'erection_issue_checklist', taskName: 'Erection Checklist', sortOrder: 6 },
 ];
 
 const QS_COMMERCIAL_TEMPLATES: WorkflowTaskTemplate[] = [

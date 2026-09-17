@@ -65,20 +65,39 @@ const inputCls = (hasError?: boolean): string =>
 const selectCls =
   'w-full h-10 px-3 rounded-md border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus';
 
-type AccessTemplate = 'MODULE_STAFF' | 'MODULE_MANAGER' | 'MULTI_MODULE' | 'PLATFORM_ADMIN' | 'CUSTOM';
+type AccessTemplate = 'MODULE_STAFF' | 'MODULE_MANAGER' | 'ERECTION_MANAGER' | 'MULTI_MODULE' | 'PLATFORM_ADMIN' | 'CUSTOM';
 
 const TEMPLATE_OPTIONS: { value: AccessTemplate; label: string; helper: string }[] = [
   { value: 'MODULE_STAFF', label: 'Module Staff', helper: 'For normal users working in one module.' },
   { value: 'MODULE_MANAGER', label: 'Module Manager', helper: 'For managers responsible for a module or department.' },
+  // CM-71H.1 — no dedicated "Erection Manager" role exists (see TEMPLATE_ROLE_CODE below); this is a
+  // clearly-labelled access template, not a new role/permission, per that unit's own "if the existing
+  // role model does not support a separate role, create a safe access template" instruction.
+  { value: 'ERECTION_MANAGER', label: 'Erection Manager / Workflow Owner', helper: 'Contract Management — assigned to own and update a specific contract’s Erection Workflow.' },
   { value: 'MULTI_MODULE', label: 'Multi-Module User', helper: 'For managers or staff who need more than one module.' },
   { value: 'PLATFORM_ADMIN', label: 'Platform Admin', helper: 'For IT/admin users who manage users, roles or configuration.' },
   { value: 'CUSTOM', label: 'Custom', helper: 'Manually configure role, modules and scopes.' },
 ];
 
-/** Only Contract Management has dedicated Staff/Manager roles as of CM-35 — other modules fall back to manual role selection. */
+/**
+ * Only Contract Management has dedicated Staff/Manager roles as of CM-35 —
+ * other modules fall back to manual role selection.
+ *
+ * CM-71H.1 — Erection Manager / Workflow Owner deliberately maps to the
+ * SAME CONTRACT_STAFF role as Module Staff (contracts.workflow_update, no
+ * contracts.update): that permission tier is exactly what CM-71H.1's own
+ * erection-department-write-access.ts relaxation was built for (it lets a
+ * contracts.workflow_update-only actor save Steps 1/3/5, the Erection-
+ * Department-owned steps), and it deliberately stays short of Contract
+ * Manager's full contract-wide authority (payments/claims/closeout/etc.) —
+ * an Erection Manager should only ever be able to act on the SPECIFIC
+ * contracts a Contract Manager assigns them via the Erection Workflow
+ * Assignment flow (CM-71H), never on every contract in the department.
+ */
 const TEMPLATE_ROLE_CODE: Partial<Record<AccessTemplate, string>> = {
   MODULE_STAFF: 'CONTRACT_STAFF',
   MODULE_MANAGER: 'CONTRACT_MANAGER',
+  ERECTION_MANAGER: 'CONTRACT_STAFF',
 };
 
 /**
@@ -190,6 +209,9 @@ function computeAccessWarnings({ template, selectedRole, moduleScopes }: Warning
   if (template === 'MODULE_MANAGER' && selectedRole?.code === 'VIEWER') {
     warnings.push('Viewer is a read-only role — it does not match what the Module Manager template usually expects.');
   }
+  if (template === 'ERECTION_MANAGER' && selectedRole && selectedRole.code !== 'CONTRACT_STAFF') {
+    warnings.push('Erection Manager / Workflow Owner is designed around the Contract Staff role (contracts.workflow_update). A different role may grant broader or narrower access than intended.');
+  }
 
   return warnings;
 }
@@ -249,12 +271,23 @@ export function NewUserWizard({
 
   function handleTemplateChange(next: AccessTemplate): void {
     setTemplate(next);
-    setTargetModule('');
     if (next === 'PLATFORM_ADMIN') {
+      setTargetModule('');
       const admin = activeRoles.find((r) => r.code === 'ADMIN');
       setSelectedRoleId(admin?.id ?? '');
     } else if (next === 'MODULE_STAFF' || next === 'MODULE_MANAGER') {
+      setTargetModule('');
       setSelectedRoleId(''); // wait for the module to be chosen below
+    } else if (next === 'ERECTION_MANAGER') {
+      // CM-71H.1 — this template is Contract Management only, so there is no
+      // module picker to wait on (unlike Module Staff/Manager, which work
+      // across any module) — go straight to the role and module scope it implies.
+      setTargetModule('CONTRACTS_MANAGEMENT');
+      const contractStaff = activeRoles.find((r) => r.code === TEMPLATE_ROLE_CODE['ERECTION_MANAGER']);
+      setSelectedRoleId(contractStaff?.id ?? '');
+      setModuleScopes((prev) => (prev['CONTRACTS_MANAGEMENT'] !== undefined ? prev : { ...prev, CONTRACTS_MANAGEMENT: 'OWN_DEPARTMENT' }));
+    } else {
+      setTargetModule('');
     }
     // MULTI_MODULE / CUSTOM: leave the current role selection untouched.
   }
@@ -273,7 +306,9 @@ export function NewUserWizard({
   }
 
   const emphasizedModule =
-    (template === 'MODULE_STAFF' || template === 'MODULE_MANAGER') && targetModule ? targetModule : undefined;
+    template === 'ERECTION_MANAGER'
+      ? 'CONTRACTS_MANAGEMENT'
+      : (template === 'MODULE_STAFF' || template === 'MODULE_MANAGER') && targetModule ? targetModule : undefined;
 
   const selectedRole = roles.find((r) => r.id === selectedRoleId);
   const selectedDepartment = departments.find((d) => d.id === departmentId);
@@ -669,6 +704,21 @@ export function NewUserWizard({
                     manually below.
                   </p>
                 )}
+              </div>
+            )}
+
+            {template === 'ERECTION_MANAGER' && (
+              <div className="mt-4 text-xs text-info bg-info-light border border-info/20 rounded-md px-3 py-2">
+                <p className="font-medium mb-1">Erection Manager / Workflow Owner</p>
+                <p>
+                  Grants Contract Staff-level access (contracts.workflow_update — assigned work only, not the full
+                  Contract Manager permission set). Owned by Erection Department for erection execution.
+                </p>
+                <p className="mt-1.5">
+                  This alone does not put any contract in this user's Erection Dashboard. After creating this
+                  user, a Contract Manager must assign them the Erection Workflow for each specific contract from
+                  Contract Detail → Workflow &amp; Team Tasks → Erection Workflow Assignment.
+                </p>
               </div>
             )}
 

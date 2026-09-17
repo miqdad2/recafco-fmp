@@ -241,6 +241,7 @@ export interface ManagerDashboardData {
 
 export interface StaffTaskRow {
   id: string;
+  taskKey: string;
   taskName: string;
   contractId: string;
   contractReference: string;
@@ -252,6 +253,8 @@ export interface StaffTaskRow {
   priority: string;
   isOverdue: boolean;
   actionUrl: string;
+  /** CM-71H.4 — frontend-computed only (see dashboard/page.tsx); true only for a guided erection task whose prerequisite hasn't been met yet. */
+  guidedStepLocked?: boolean;
 }
 
 export interface StaffDashboardSummary {
@@ -300,6 +303,100 @@ export interface ContractDashboardData {
   dashboardType: ContractDashboardType;
   manager?: ManagerDashboardData;
   staff?: StaffDashboardData;
+}
+
+// ---------------------------------------------------------------------------
+// CM-71B — Erection Manager Dashboard / Work Queue. Mirrors
+// apps/api/src/contracts/contract-erection-dashboard.service.ts exactly, no
+// new table — see that file's own header comment for the real data sources
+// (Contract.scopeOfWork, CM-71A's ContractErectionMethodStatement, the
+// existing generic ERECTION-team ContractWorkflowTask rows).
+// ---------------------------------------------------------------------------
+
+export type ErectionMethodStatementDisplayStatus = 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED_FOR_APPROVAL' | 'ISSUED';
+/** CM-71C — Step 2's own review status as surfaced on the dashboard; NOT_STARTED is the dashboard's own "no approval row yet" convention. */
+export type ErectionMethodStatementApprovalDisplayStatus = 'NOT_STARTED' | 'PENDING_APPROVAL' | 'DRAFT_REVIEW' | 'APPROVED' | 'REVISION_REQUESTED' | 'REJECTED';
+/** CM-71D — Step 3's own schedule status as surfaced on the dashboard; NOT_STARTED is the dashboard's own "no schedule row yet" convention. */
+export type ErectionScheduleDisplayStatus = 'NOT_STARTED' | 'DRAFT' | 'ISSUED' | 'HOLD' | 'RETURNED';
+/** CM-71E — Step 4's own delivery-start status as surfaced on the dashboard; NOT_STARTED is the dashboard's own "no delivery-start row yet" convention. */
+export type ErectionDeliveryStartDisplayStatus = 'NOT_STARTED' | 'DRAFT' | 'STARTED' | 'HOLD' | 'RETURNED';
+/** CM-71F — Step 5's own erection-start status as surfaced on the dashboard; NOT_STARTED is the dashboard's own "no erection-start row yet" convention. */
+export type ErectionStartDisplayStatus = 'NOT_STARTED' | 'DRAFT' | 'STARTED' | 'HOLD' | 'RETURNED';
+/** CM-71G — Step 6's own erection-checklist status as surfaced on the dashboard; NOT_STARTED is the dashboard's own "no checklist row yet" convention. */
+export type ErectionChecklistDisplayStatus = 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED_FOR_VERIFICATION' | 'VERIFIED' | 'HOLD' | 'RETURNED';
+export type ErectionAttentionStatus = 'OVERDUE' | 'AWAITING_APPROVAL' | 'ON_TRACK' | 'NEEDS_PLANNING';
+
+export interface ErectionNextAction {
+  label: string;
+  href: string;
+}
+
+export interface ErectionWorkQueueRow {
+  contractId: string;
+  contractReference: string;
+  jobOrderNo: string | null;
+  projectName: string;
+  client: string;
+  contractStatus: string;
+  lifecycleStatus: DerivedLifecycleStatus;
+  methodStatementStatus: ErectionMethodStatementDisplayStatus;
+  approvalStatus: ErectionMethodStatementApprovalDisplayStatus;
+  scheduleStatus: ErectionScheduleDisplayStatus;
+  plannedIssueDate: string | null;
+  scheduleStartDate: string | null;
+  scheduleEndDate: string | null;
+  deliveryStartStatus: ErectionDeliveryStartDisplayStatus;
+  deliveryWindowStart: string | null;
+  deliveryWindowEnd: string | null;
+  erectionStartStatus: ErectionStartDisplayStatus;
+  actualStartDateTime: string | null;
+  checklistStatus: ErectionChecklistDisplayStatus;
+  workLocationYard: string | null;
+  responsibleTeam: string;
+  currentErectionStep: string;
+  attention: ErectionAttentionStatus;
+  lastUpdated: string;
+  hasMethodStatement: boolean;
+  nextAction: ErectionNextAction;
+  /** CM-71H — null until a ContractErectionWorkflowAssignment row exists for this contract. */
+  assignedToUserId: string | null;
+  assignedToName: string | null;
+  assignedDepartment: string | null;
+  assignmentStatus: ContractErectionWorkflowAssignmentStatus | null;
+  /** CM-71H — "Continue/Update" vs "View Status" vs read-only, computed server-side for the CURRENT viewer. */
+  viewerActionMode: ErectionViewerActionMode;
+  /** CM-71H.4 — WORKFLOW_ASSIGNMENT (formal, preferred) / TASK_ASSIGNMENT_ONLY (a real task assignment exists but no formal workflow assignment yet — a manager-tier viewer sees a nudge to formalize it) / NONE. */
+  assignmentSource: 'WORKFLOW_ASSIGNMENT' | 'TASK_ASSIGNMENT_ONLY' | 'NONE';
+}
+
+export interface ErectionDashboardKpis {
+  totalErectionContracts: number;
+  methodStatementPending: number;
+  submittedForApproval: number;
+  readyForErection: number;
+  erectionInProgress: number;
+  delayedAttentionRequired: number;
+  /** CM-71G — now a real count (Step 6 Draft/Submitted-but-not-verified records), not a fixed placeholder. */
+  checklistPending: number;
+  paymentPendingAfterErectionAvailable: false;
+}
+
+export interface ErectionRecentActivityRow {
+  id: string;
+  contractId: string;
+  contractReference: string;
+  event: string;
+  actorName: string | null;
+  createdAt: string;
+}
+
+export interface ErectionDashboardData {
+  kpis: ErectionDashboardKpis;
+  workQueue: ErectionWorkQueueRow[];
+  todaysActions: ErectionWorkQueueRow[];
+  pendingApproval: ErectionWorkQueueRow[];
+  overdueAttention: ErectionWorkQueueRow[];
+  recentActivity: ErectionRecentActivityRow[];
 }
 
 export interface ListResponse<T> {
@@ -1214,6 +1311,424 @@ export interface ContractAttachment {
 }
 
 // ---------------------------------------------------------------------------
+// CM-71A — Erection Workflow, Step 1: Issue Erection Method Statement. At
+// most one record per contract (see the model comment in schema.prisma for
+// why this is a new dedicated table, not a reuse of the existing generic
+// ContractWorkflowTask "Team Task Register"). status only ever stores the 3
+// real save-triggered values — "Ready to Issue" (shown in the approved
+// design) is a computed frontend-only badge for a DRAFT record whose
+// required fields are all already filled in, never a 4th stored value.
+// ---------------------------------------------------------------------------
+
+export type ContractErectionMethodStatementStatus = 'DRAFT' | 'SUBMITTED_FOR_APPROVAL' | 'ISSUED';
+
+export interface ContractErectionMethodStatementAttachment {
+  id: string;
+  methodStatementId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractErectionMethodStatement {
+  id: string;
+  contractId: string;
+  plannedIssueDate: string | null;
+  methodStatementRefNo: string;
+  jobOrderNo: string;
+  workLocationYard: string;
+  preparedBy: string;
+  departmentArea: string;
+  reviewedByInternal: string | null;
+  documentRevision: string | null;
+  applicableStandards: string | null;
+  includesLiftPlan: boolean;
+  includesRiskAssessment: boolean;
+  requiresClientApproval: boolean;
+  scopeDescription: string;
+  status: ContractErectionMethodStatementStatus;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  attachments: ContractErectionMethodStatementAttachment[];
+}
+
+// ---------------------------------------------------------------------------
+// CM-71C — Erection Workflow, Step 2: Erection Method Statement Approval.
+// At most one record per method statement (see the model comment in
+// schema.prisma). reviewStatus's PENDING_APPROVAL default IS a real stored
+// value here (unlike CM-71A's Step 1, where the equivalent "not yet
+// touched" state is a frontend-only computed label) — this table's own
+// task explicitly lists it in the suggested enum.
+// ---------------------------------------------------------------------------
+
+export type ContractErectionMethodStatementApprovalReviewStatus =
+  | 'PENDING_APPROVAL'
+  | 'DRAFT_REVIEW'
+  | 'APPROVED'
+  | 'REVISION_REQUESTED'
+  | 'REJECTED';
+
+export type ContractErectionMethodStatementApprovalDecision = 'APPROVE' | 'REQUEST_REVISION' | 'REJECT';
+
+export interface ContractErectionMethodStatementApprovalAttachment {
+  id: string;
+  approvalId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractErectionMethodStatementApproval {
+  id: string;
+  contractId: string;
+  methodStatementId: string;
+  reviewRequiredBy: string | null;
+  reviewingEngineer: string | null;
+  reviewType: string | null;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  reviewStatus: ContractErectionMethodStatementApprovalReviewStatus;
+  decision: ContractErectionMethodStatementApprovalDecision | null;
+  requiresClientApproval: boolean;
+  comments: string | null;
+  approvedAt: string | null;
+  revisionRequestedAt: string | null;
+  rejectedAt: string | null;
+  reviewedByUser?: { id: string; displayName: string } | null;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  attachments: ContractErectionMethodStatementApprovalAttachment[];
+}
+
+// ---------------------------------------------------------------------------
+// CM-71D — Erection Workflow, Step 3: Issue Erection Schedule. At most one
+// record per contract (see the model comment in schema.prisma) — same
+// "one-per-contract, create-once-edit-forever" shape as CM-71A's Step 1.
+// status only ever stores the 4 real save-triggered values — there is no
+// "Ready to Issue" stored value, matching CM-71A's own precedent (that
+// label, where shown, is a frontend-only computed badge for a DRAFT record
+// whose required fields are all already filled in).
+// ---------------------------------------------------------------------------
+
+export type ContractErectionScheduleStatus = 'DRAFT' | 'ISSUED' | 'HOLD' | 'RETURNED';
+
+export interface ContractErectionScheduleAttachment {
+  id: string;
+  erectionScheduleId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractErectionSchedule {
+  id: string;
+  contractId: string;
+  methodStatementId: string | null;
+  approvalId: string | null;
+  scheduleReferenceNo: string;
+  scheduleDate: string;
+  plannedStartDate: string;
+  plannedEndDate: string;
+  jobOrderNo: string;
+  erectionCrewTeam: string;
+  estimatedManpowerPlanned: number;
+  requiredEquipmentPlanned: number;
+  preparedBy: string;
+  reviewedByErectionManager: string | null;
+  reviewedOn: string | null;
+  documentRevision: string | null;
+  totalActivities: number;
+  criticalActivities: number;
+  status: ContractErectionScheduleStatus;
+  remarks: string | null;
+  issuedAt: string | null;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  attachments: ContractErectionScheduleAttachment[];
+}
+
+// ---------------------------------------------------------------------------
+// CM-71E — Erection Workflow, Step 4: Delivery Start. Owned by the
+// Delivery / Logistics Team (never Erection Department — see the badge
+// rendered by the Step 4 panel). At most one record per contract, same
+// "one-per-contract, create-once-edit-forever" shape as Steps 1/3.
+// status only ever stores the 4 real save-triggered values — there is no
+// "Ready to Start" stored value, matching Steps 1/3's own "Ready to
+// Issue" precedent. totalPackages/totalWeight/totalVolume/totalItems are
+// SERVER-DERIVED from the real item rows below — never independently
+// editable.
+// ---------------------------------------------------------------------------
+
+export type ContractErectionDeliveryStartStatus = 'DRAFT' | 'STARTED' | 'HOLD' | 'RETURNED';
+export type ContractErectionDeliveryItemStatus = 'READY_TO_DISPATCH' | 'DISPATCHED' | 'DELIVERED' | 'HOLD';
+export type ContractErectionDeliveryDocumentStatus = 'PENDING' | 'ATTACHED' | 'NOT_REQUIRED';
+
+export interface ContractErectionDeliveryItem {
+  id: string;
+  srNo: number;
+  description: string;
+  packageNo: string | null;
+  weight: number | null;
+  volume: number | null;
+  quantity: number;
+  status: ContractErectionDeliveryItemStatus;
+}
+
+export interface ContractErectionDeliveryDocument {
+  id: string;
+  documentName: string;
+  status: ContractErectionDeliveryDocumentStatus;
+  attachmentId: string | null;
+}
+
+export interface ContractErectionDeliveryStartAttachment {
+  id: string;
+  deliveryStartId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ContractErectionDeliveryStart {
+  id: string;
+  contractId: string;
+  erectionScheduleId: string | null;
+  deliveryReferenceNo: string;
+  deliveryDate: string;
+  plannedDeliveryWindowStart: string;
+  plannedDeliveryWindowEnd: string;
+  transportMode: string;
+  dispatchProductionSource: string;
+  dispatchFromYard: string;
+  deliveryToSiteLocation: string;
+  gateEntryContact: string | null;
+  deliveryNoteOrLrNo: string | null;
+  vehicleNo: string | null;
+  driverName: string | null;
+  driverContact: string | null;
+  totalPackages: number;
+  totalWeight: number | null;
+  totalVolume: number | null;
+  totalItems: number;
+  status: ContractErectionDeliveryStartStatus;
+  comments: string | null;
+  confirmedAt: string | null;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  items: ContractErectionDeliveryItem[];
+  documents: ContractErectionDeliveryDocument[];
+  attachments: ContractErectionDeliveryStartAttachment[];
+}
+
+// ---------------------------------------------------------------------------
+// CM-71F — Erection Workflow, Step 5: Erection Start. Owned by the Erection
+// Department / Site-Erection Team. At most one record per contract, same
+// "one-per-contract, create-once-edit-forever" shape as Steps 1/3/4.
+// status only ever stores the 4 real save-triggered values — there is no
+// "Ready to Start" stored value, matching every earlier step's own "Ready
+// to X" precedent. jobOrderNo/plannedStartDate/methodStatementRefNo are
+// read-only snapshots auto-fetched server-side at creation time. Resources
+// Summary is never stored — always computed live from the real manpower/
+// equipment rows (see resourcesSummary, computed server-side on every read).
+// ---------------------------------------------------------------------------
+
+export type ContractErectionStartStatus = 'DRAFT' | 'STARTED' | 'HOLD' | 'RETURNED';
+export type ContractErectionStartChecklistStatus = 'PENDING' | 'COMPLETED' | 'NOT_APPLICABLE';
+
+export interface ContractErectionStartManpower {
+  id: string;
+  trade: string;
+  plannedNos: number;
+  actualDeployedNos: number;
+  remarks: string | null;
+}
+
+export interface ContractErectionStartEquipment {
+  id: string;
+  equipmentType: string;
+  descriptionCapacity: string;
+  ownedOrRental: string;
+  assignedQty: number;
+  operatorDriver: string | null;
+  remarks: string | null;
+}
+
+export interface ContractErectionStartChecklistRow {
+  id: string;
+  checklistItem: string;
+  status: ContractErectionStartChecklistStatus;
+  remarks: string | null;
+}
+
+export interface ContractErectionStartAttachment {
+  id: string;
+  erectionStartId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ErectionStartResourcesSummary {
+  totalManpower: number;
+  totalEquipment: number;
+  craneAssigned: number;
+  trailerAssigned: number;
+}
+
+export interface ContractErectionStart {
+  id: string;
+  contractId: string;
+  deliveryStartId: string | null;
+  erectionScheduleId: string | null;
+  jobOrderNo: string;
+  plannedStartDate: string | null;
+  actualStartDateTime: string | null;
+  workLocationYard: string;
+  erectionCrewTeam: string;
+  supervisor: string;
+  weatherCondition: string | null;
+  windSpeed: string | null;
+  methodStatementRefNo: string | null;
+  scopeOfWorkToday: string;
+  status: ContractErectionStartStatus;
+  comments: string | null;
+  confirmedAt: string | null;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  manpowerRows: ContractErectionStartManpower[];
+  equipmentRows: ContractErectionStartEquipment[];
+  checklistRows: ContractErectionStartChecklistRow[];
+  attachments: ContractErectionStartAttachment[];
+  resourcesSummary: ErectionStartResourcesSummary;
+}
+
+// ---------------------------------------------------------------------------
+// CM-71G — Erection Workflow, Step 6: Erection Checklist. Owned by the QA /
+// QC Team. At most one record per contract, same "one-per-contract,
+// create-once-edit-forever" shape as Steps 1/3/4/5. status only ever stores
+// the 5 real save-triggered values — there is no "Ready for Verification"
+// stored value, matching every earlier step's own "Ready to X" precedent.
+// jobOrderNo is a read-only snapshot auto-fetched server-side at creation
+// time. A DELIBERATELY SEPARATE model from Step 5's own pre-erection
+// checklist (ContractErectionStartChecklistRow above) — never the same
+// data. Checklist Items Summary is never stored — always computed live
+// from the real item rows (see itemsSummary, computed server-side on every
+// read).
+// ---------------------------------------------------------------------------
+
+export type ContractErectionChecklistStatus = 'DRAFT' | 'SUBMITTED_FOR_VERIFICATION' | 'VERIFIED' | 'HOLD' | 'RETURNED';
+export type ContractErectionChecklistItemStatus = 'COMPLETED' | 'IN_PROGRESS' | 'NOT_COMPLETED' | 'NOT_APPLICABLE';
+
+export interface ContractErectionChecklistItem {
+  id: string;
+  checklistItem: string;
+  status: ContractErectionChecklistItemStatus;
+  remarks: string | null;
+  attachmentRef: string | null;
+}
+
+export interface ContractErectionChecklistAttachment {
+  id: string;
+  checklistId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+export interface ChecklistItemsSummary {
+  totalItems: number;
+  completed: number;
+  inProgress: number;
+  notCompleted: number;
+  notApplicable: number;
+}
+
+export interface ContractErectionChecklist {
+  id: string;
+  contractId: string;
+  erectionStartId: string | null;
+  checklistRefNo: string;
+  checklistDate: string;
+  jobOrderNo: string;
+  checklistType: string;
+  preparedBy: string;
+  reviewedByQaqc: string | null;
+  verifiedByClientRepresentative: string | null;
+  status: ContractErectionChecklistStatus;
+  workLocationYard: string | null;
+  comments: string | null;
+  submittedAt: string | null;
+  verifiedAt: string | null;
+  createdByUser: { id: string; displayName: string };
+  updatedByUser?: { id: string; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  items: ContractErectionChecklistItem[];
+  attachments: ContractErectionChecklistAttachment[];
+  itemsSummary: ChecklistItemsSummary;
+}
+
+// ---------------------------------------------------------------------------
+// CM-71H — Erection Workflow Assignment. Who owns Steps 1/3/5 (the Erection-
+// Department-owned steps) for this contract — distinct from Contract.
+// ownerUserId (the contract's own general business owner) and from
+// ContractWorkflowTask.responsibleUserId (per-task assignment on the older,
+// generic team-task register). One row per contract; Assign creates it,
+// Change Assignment updates it in place (see the API model's own doc
+// comment).
+// ---------------------------------------------------------------------------
+
+export type ContractErectionWorkflowAssignmentStatus = 'ASSIGNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+
+/** "ACT" = Continue/Update (assigned to the current viewer, or nobody assigned yet and the viewer is manager-tier); "MONITOR" = View Status (manager-tier, assigned to someone else); "READ_ONLY" = no update action shown. */
+export type ErectionViewerActionMode = 'ACT' | 'MONITOR' | 'READ_ONLY';
+
+export interface ContractErectionWorkflowAssignment {
+  id: string;
+  contractId: string;
+  assignedToUserId: string | null;
+  assignedToName: string | null;
+  assignedDepartment: string;
+  assignedByUserId: string | null;
+  assignedAt: string;
+  status: ContractErectionWorkflowAssignmentStatus;
+  remarks: string | null;
+  assignedToUser?: { id: string; displayName: string } | null;
+  assignedByUser?: { id: string; displayName: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssignContractErectionWorkflowInput {
+  assignedToUserId?: string;
+  assignedToName?: string;
+  assignedDepartment?: string;
+  assignedAt?: string;
+  remarks?: string;
+}
+
+// ---------------------------------------------------------------------------
 // CM-62 — Contract Risk Assessment. Not an ISO risk-scoring system:
 // riskEvaluation/residualRisk are plain manual dropdown values, never
 // auto-calculated. Contract-scoped and unpaginated, same pattern as
@@ -1563,6 +2078,9 @@ export const contractsApi = {
   dashboard: () =>
     apiFetch<ContractDashboardData>('/contracts/dashboard'),
 
+  erectionDashboard: () =>
+    apiFetch<ErectionDashboardData>('/contracts/erection/dashboard'),
+
   listComments: (id: string) =>
     apiFetch<ContractComment[]>(`/contracts/${id}/comments`),
 
@@ -1648,6 +2166,34 @@ export const contractsApi = {
 
   getContractAttachments: (contractId: string) =>
     apiFetch<ContractAttachment[]>(`/contracts/${contractId}/attachments`),
+
+  /** Returns null when no Erection Method Statement has been created yet for this contract — a normal, valid state, not an error. */
+  getErectionMethodStatement: (contractId: string) =>
+    apiFetch<ContractErectionMethodStatement | null>(`/contracts/${contractId}/erection/method-statement`),
+
+  /** Returns null when Step 1 or Step 2 simply hasn't happened yet — a normal, valid state, not an error. */
+  getErectionMethodStatementApproval: (contractId: string) =>
+    apiFetch<ContractErectionMethodStatementApproval | null>(`/contracts/${contractId}/erection/method-statement/approval`),
+
+  /** Returns null when Step 3 (the erection schedule) hasn't been created yet for this contract — a normal, valid state, not an error. */
+  getErectionSchedule: (contractId: string) =>
+    apiFetch<ContractErectionSchedule | null>(`/contracts/${contractId}/erection/schedule`),
+
+  /** Returns null when Step 4 (delivery start) hasn't been created yet for this contract — a normal, valid state, not an error. */
+  getErectionDeliveryStart: (contractId: string) =>
+    apiFetch<ContractErectionDeliveryStart | null>(`/contracts/${contractId}/erection/delivery-start`),
+
+  /** Returns null when Step 5 (erection start) hasn't been created yet for this contract — a normal, valid state, not an error. */
+  getErectionStart: (contractId: string) =>
+    apiFetch<ContractErectionStart | null>(`/contracts/${contractId}/erection/start`),
+
+  /** Returns null when Step 6 (erection checklist) hasn't been created yet for this contract — a normal, valid state, not an error. */
+  getErectionChecklist: (contractId: string) =>
+    apiFetch<ContractErectionChecklist | null>(`/contracts/${contractId}/erection/checklist`),
+
+  /** CM-71H — returns null when the Erection Workflow hasn't been assigned to anyone yet for this contract — a normal, valid state, not an error. */
+  getErectionWorkflowAssignment: (contractId: string) =>
+    apiFetch<ContractErectionWorkflowAssignment | null>(`/contracts/${contractId}/erection/assignment`),
 
   getContractRisks: (contractId: string) =>
     apiFetch<ContractRiskDetail>(`/contracts/${contractId}/risks`),

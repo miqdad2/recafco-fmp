@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { HardHat, Clock } from 'lucide-react';
 import type { StaffTaskRow } from '@/lib/contracts-api';
+import { getGuidedErectionWorkflowRoute, getGuidedErectionTaskDisplayName, getGuidedErectionWaitingLabel } from '../../_lib/guided-erection-workflow-route';
 import { StaffTaskStatusBadge, StaffTaskPriorityBadge } from './staff-task-badges';
 
 interface Props {
@@ -48,6 +50,18 @@ export function StaffTaskTable({ tasks, todayIso, limit }: Props): React.JSX.Ele
         const isDueToday = t.dueDate === todayIso && t.status !== 'COMPLETED';
         const isHighPriority = HIGH_PRIORITIES.includes(t.priority);
         const highlighted = t.isOverdue || isDueToday;
+        // CM-71H.4/CM-71H.7 — same guided-erection routing/label/waiting
+        // treatment as staff-task-card.tsx (My Tasks) — one source of truth
+        // (guided-erection-workflow-route.ts / erection-step-lock.ts), not a
+        // second copy of the same rule for this "My Contract Work
+        // Dashboard" surface. A not-yet-actionable step is never greyed out
+        // or shown as "Locked" — see staff-task-card.tsx's own comment.
+        const guided = getGuidedErectionWorkflowRoute(t, t.contractId);
+        const isWaiting = t.guidedStepLocked === true;
+        const waitingLabel = isWaiting ? getGuidedErectionWaitingLabel(t) : null;
+        const href = guided?.href ?? `/contracts/workflow?mode=my-tasks&taskId=${t.id}`;
+        const displayName = getGuidedErectionTaskDisplayName(t);
+        const buttonLabel = isWaiting ? 'View Status' : guided ? (t.status === 'NOT_STARTED' ? 'Open Workflow' : 'Continue Workflow') : 'Update Task';
         return (
           <div
             key={t.id}
@@ -57,11 +71,25 @@ export function StaffTaskTable({ tasks, todayIso, limit }: Props): React.JSX.Ele
             ].join(' ')}
           >
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-text-primary truncate" title={t.taskName}>{t.taskName}</p>
+              <p className="text-sm font-medium text-text-primary truncate" title={displayName}>{displayName}</p>
               <p className="text-xs text-text-muted mt-0.5 truncate">
                 <span className="font-mono">{t.contractReference}</span> · {t.contractTitle} · {t.counterpartyName}
               </p>
-              <p className="text-[11px] text-text-muted mt-0.5">{t.team.replace(/_/g, ' ')}</p>
+              <p className="text-[11px] text-text-muted mt-0.5 flex items-center gap-1">
+                {t.team.replace(/_/g, ' ')}
+                {guided && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                    <HardHat className="size-2.5 shrink-0" aria-hidden="true" />
+                    Guided Workflow · Step {guided.stepNumber}
+                  </span>
+                )}
+                {waitingLabel && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
+                    <Clock className="size-2.5 shrink-0" aria-hidden="true" />
+                    {waitingLabel}
+                  </span>
+                )}
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -76,10 +104,10 @@ export function StaffTaskTable({ tasks, todayIso, limit }: Props): React.JSX.Ele
                 {formatDate(t.dueDate)}
               </span>
               <Link
-                href={`/contracts/workflow?mode=my-tasks&taskId=${t.id}`}
-                className="inline-flex items-center rounded-md bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/20 focus:outline-none focus:ring-2 focus:ring-focus"
+                href={href}
+                className="inline-flex items-center gap-1 rounded-md bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/20 focus:outline-none focus:ring-2 focus:ring-focus"
               >
-                Update Task
+                {buttonLabel}
               </Link>
             </div>
           </div>

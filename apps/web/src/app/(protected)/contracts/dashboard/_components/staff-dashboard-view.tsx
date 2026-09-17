@@ -6,7 +6,8 @@ import { StaffTaskTable } from './staff-task-table';
 import { StaffRecentUpdates } from './staff-recent-updates';
 import { StaffTodaysWorkPanel } from './staff-todays-work-panel';
 import { UpcomingScheduleList } from './upcoming-schedule-list';
-import { computeStaffFocusedCounts, pickNextTask } from '../../_lib/staff-dashboard-focus';
+import { computeStaffFocusedCounts, pickNextTask, hasOnlyLockedOpenTasks } from '../../_lib/staff-dashboard-focus';
+import { isGuidedErectionWorkflowTask } from '../../_lib/guided-erection-workflow-route';
 
 interface Props {
   data: ContractDashboardData;
@@ -47,6 +48,18 @@ export function StaffDashboardView({ data, status }: Props): React.JSX.Element {
   const assignedTasks = data.staff?.assignedTasks ?? [];
   const focusedCounts = computeStaffFocusedCounts(assignedTasks, todayIso);
   const nextTask = pickNextTask(assignedTasks, todayIso);
+  const hasOnlyLockedWork = hasOnlyLockedOpenTasks(assignedTasks);
+
+  // CM-71H.5 — "avoid implying all 6 locked future steps are active work":
+  // the least-risky of this unit's own 2 named options — renaming the
+  // section, never filtering rows out of it (filtering would hide real
+  // assigned data other parts of this screen, e.g. My Work Summary's own
+  // counts, still count) — and only when EVERY visible task really is a
+  // guided erection step, so a staff member with a genuine mix of erection
+  // + Technical/Production/QS work never gets a misleadingly erection-only
+  // heading for their real, mixed queue.
+  const isAllErectionSteps = assignedTasks.length > 0 && assignedTasks.every((t) => isGuidedErectionWorkflowTask(t));
+  const assignedTasksHeading = isAllErectionSteps ? 'My Erection Workflow Steps' : 'My Assigned Tasks';
 
   // Staff's Upcoming Schedule shows only their own assigned workflow tasks
   // (never contract-level payment/issue/claim/closeout dates that happen to
@@ -71,7 +84,7 @@ export function StaffDashboardView({ data, status }: Props): React.JSX.Element {
       </div>
 
       {/* Today's Work — full-width compact priority card, above the two-column grid */}
-      <StaffTodaysWorkPanel task={nextTask} />
+      <StaffTodaysWorkPanel task={nextTask} hasOnlyLockedWork={hasOnlyLockedWork} />
 
       {/* Main dashboard grid — the only internally-scrolling region if content overflows */}
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -79,7 +92,7 @@ export function StaffDashboardView({ data, status }: Props): React.JSX.Element {
           {/* Left/main column — My Assigned Tasks, My Recent Task Updates */}
           <div className="flex flex-col gap-3 min-w-0">
             <section aria-labelledby="my-tasks-heading" className="rounded-lg border border-border bg-surface p-3">
-              <h2 id="my-tasks-heading" className="text-sm font-semibold text-text-primary mb-2">My Assigned Tasks</h2>
+              <h2 id="my-tasks-heading" className="text-sm font-semibold text-text-primary mb-2">{assignedTasksHeading}</h2>
               <StaffTaskTable tasks={assignedTasks} todayIso={todayIso} limit={5} />
             </section>
 
