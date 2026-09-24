@@ -108,7 +108,8 @@ describe('IncidentsService.getDashboard', () => {
       .mockResolvedValueOnce(15) // totalOpen
       .mockResolvedValueOnce(4)  // criticalOpen
       .mockResolvedValueOnce(3)  // underInvestigation
-      .mockResolvedValueOnce(7); // resolvedThisMonth
+      .mockResolvedValueOnce(7)  // resolvedThisMonth
+      .mockResolvedValueOnce(9); // closedTotal
     mockIncidentFindMany.mockResolvedValueOnce([
       { id: 'inc-r1', referenceNumber: 'INC-001', title: 'Chemical Spill', status: 'SUBMITTED', updatedAt: new Date('2026-07-01T10:00:00Z') },
     ]);
@@ -121,6 +122,7 @@ describe('IncidentsService.getDashboard', () => {
     expect(result.metrics.criticalOpen).toBe(4);
     expect(result.metrics.underInvestigation).toBe(3);
     expect(result.metrics.resolvedThisMonth).toBe(7);
+    expect(result.metrics.closedTotal).toBe(9);
     expect(result.recent).toHaveLength(1);
     expect(result.recent[0]?.referenceNumber).toBe('INC-001');
     expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

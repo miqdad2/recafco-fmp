@@ -60,3 +60,16 @@ export function computeModuleUserCounts(
 
   return result;
 }
+
+/**
+ * FMP-UI-02 — count for the Executive / Management card. Deliberately
+ * role-code based, not permission based: EXECUTIVE_MANAGER carries the same
+ * per-module read permissions as ADMIN for every operational module (see
+ * the role's own migration), so a permission-based count (like
+ * computeModuleUserCounts above) would double-count ADMIN/SUPER_ADMIN users
+ * who happen to also hold every one of those permissions but are not
+ * "Executive Manager" users at all.
+ */
+export function computeExecutiveManagerCount(users: ModuleCountUser[]): number {
+  return users.filter((u) => u.roleCode === 'EXECUTIVE_MANAGER').length;
+}

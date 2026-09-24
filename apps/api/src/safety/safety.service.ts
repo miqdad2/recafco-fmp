@@ -1281,6 +1281,8 @@ export class SafetyService {
       openFindings: number;
       criticalFindings: number;
       overdueFindings: number;
+      /** FMP-UI-01 — Executive Dashboard's "Completed Inspections" card metric. COMPLETED and CLOSED are both "done" states — a CLOSED inspection went through COMPLETED first. */
+      completedInspections: number;
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
@@ -1312,6 +1314,7 @@ export class SafetyService {
       openFindings,
       criticalFindings,
       overdueFindings,
+      completedInspections,
       recentRaw,
     ] = await Promise.all([
       this.db.getClient().safetyInspection.count({
@@ -1337,6 +1340,9 @@ export class SafetyService {
           status: { in: openFindingStatuses },
         },
       }),
+      this.db.getClient().safetyInspection.count({
+        where: { ...inspectionDeptWhere, status: { in: [InspectionStatus.COMPLETED, InspectionStatus.CLOSED] } },
+      }),
       this.db.getClient().safetyInspection.findMany({
         where: { ...inspectionDeptWhere },
         take: 8,
@@ -1347,7 +1353,10 @@ export class SafetyService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { scheduledInspections, inProgressInspections, openFindings, criticalFindings, overdueFindings },
+      metrics: {
+        scheduledInspections, inProgressInspections, openFindings, criticalFindings, overdueFindings,
+        completedInspections,
+      },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,

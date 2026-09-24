@@ -1009,6 +1009,8 @@ export class MaintenanceService {
       overdueRequests: number;
       waitingForParts: number;
       completedThisMonth: number;
+      /** FMP-UI-01 — Executive Dashboard's "In Progress Work Orders" card metric. */
+      inProgressRequests: number;
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
@@ -1039,7 +1041,7 @@ export class MaintenanceService {
 
     const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
 
-    const [openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth, recentRaw] =
+    const [openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth, inProgressRequests, recentRaw] =
       await Promise.all([
         this.db.getClient().maintenanceRequest.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
         this.db.getClient().maintenanceRequest.count({
@@ -1058,6 +1060,9 @@ export class MaintenanceService {
             completedAt: { gte: monthStart, lt: monthEnd },
           },
         }),
+        this.db.getClient().maintenanceRequest.count({
+          where: { ...deptWhere, status: MaintenanceStatus.IN_PROGRESS },
+        }),
         this.db.getClient().maintenanceRequest.findMany({
           where: { ...deptWhere },
           take: 8,
@@ -1068,7 +1073,7 @@ export class MaintenanceService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth },
+      metrics: { openRequests, assignedToMe, overdueRequests, waitingForParts, completedThisMonth, inProgressRequests },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,

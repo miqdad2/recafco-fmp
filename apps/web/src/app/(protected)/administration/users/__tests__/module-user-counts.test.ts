@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeModuleUserCounts, type RolePermissionMap } from '../_components/module-user-counts';
+import { computeModuleUserCounts, computeExecutiveManagerCount, type RolePermissionMap } from '../_components/module-user-counts';
 
 const ROLE_PERMS: RolePermissionMap = {
   CONTRACT_STAFF: ['contracts.read', 'contracts.comment', 'contracts.workflow_update'],
@@ -67,5 +67,22 @@ describe('computeModuleUserCounts', () => {
     for (const mod of ['CONTRACTS_MANAGEMENT', 'FACTORY_TASKS', 'INCIDENT_REPORT', 'MAINTENANCE_REQUESTS', 'SAFETY_COMPLIANCE', 'PRODUCTION_DASHBOARD']) {
       expect(counts[mod]?.total).toBe(1);
     }
+  });
+});
+
+describe('computeExecutiveManagerCount', () => {
+  it('is 0 when there are no users', () => {
+    expect(computeExecutiveManagerCount([])).toBe(0);
+  });
+
+  it('counts only EXECUTIVE_MANAGER role-code users, not ADMIN/SUPER_ADMIN even though they share the same operational permissions', () => {
+    const users = [
+      { roleCode: 'EXECUTIVE_MANAGER' },
+      { roleCode: 'EXECUTIVE_MANAGER' },
+      { roleCode: 'ADMIN' },
+      { roleCode: 'SUPER_ADMIN' },
+      { roleCode: 'VIEWER' },
+    ];
+    expect(computeExecutiveManagerCount(users)).toBe(2);
   });
 });

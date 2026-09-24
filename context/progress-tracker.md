@@ -7866,6 +7866,1629 @@ Added reviewer-requested Contract fields (client contact, forecast completion da
 - API dev server (`node -r ts-node/register src/main.ts`) has no hot reload — must be restarted standalone (`pnpm --filter @recafco/api dev`) after service/DTO changes before live verification; killing only that PID does not affect the standalone web dev server
 - `originalContractValue` is only auto-defaulted on **create**, never on **update**, to avoid silently overwriting a value the user intentionally left unset
 
+## FMP-UI-01 — Executive Platform Dashboard and Main Module Navigation (Completed 2026-09-22)
+
+### Summary
+
+Replaced the previous root dashboard (a dense admin/status page: API/DB health, org-entity counts, implementation-progress checklist) with a new Executive Platform Dashboard at `/dashboard`, aimed at senior management: 8 large module cards (Contract Management, Technical, Erection, Safety & Compliance, Incident Report, Production Planning, Maintenance Management, Task Management) in the required fixed order, each with a large icon, 4 large KPI numbers, a short description, and an "Open Module" button. Root `/` is now a one-line `redirect('/dashboard')` — login and the sidebar logo still point at `/`, so nothing broke, but the executive dashboard is the effective landing page. The existing Contract-Management-only redirect to `/contracts/dashboard` was preserved, just moved into the new page.
+
+Backend: audited every module's existing `getDashboard()` service method first (per this unit's own instruction) rather than inventing new aggregation logic. Added exactly one new endpoint, `GET /platform/dashboard` (new `PlatformModule`/`PlatformDashboardController`/`PlatformDashboardService`, no `@Permissions()` — any authenticated user may call it, and the service decides per-card visibility from the actor's real permissions, module by module, never a role code). It composes real data from the SAME dashboard services each module's own page already uses (`ContractDashboardService`, `ContractErectionDashboardService` (CM-71B's real Erection KPIs — reused as-is), `FactoryTasksService`, `IncidentsService`, `MaintenanceService`, `SafetyService`, `ProductionOrdersService` — each module exports its service for this reuse). Two module cards' metrics required small additive, honest counts:
+- **Technical** has no existing dashboard service — its 4 metrics are new counts over the already-real TECHNICAL-team `ContractWorkflowTask` rows (`contract-workflow-templates.ts`), scoped with the same `DepartmentAccessService` pattern every other contracts dashboard already uses. Its "Open Module" route (`/contracts/technical`) is a new placeholder page (reusing the existing, previously-unused `ContractPlaceholderPage` component) since no dedicated Technical screen exists yet — "coming next," never a broken link, per this unit's own instruction.
+- 4 existing module services gained exactly one or two new additive metric fields each, needed for dashboard counts that had no equivalent field yet, computed with the same scoping/query style already used in that service (never new business logic): `IncidentsService.getDashboard()` → `closedTotal`; `SafetyService.getDashboard()` → `completedInspections`; `MaintenanceService.getDashboard()` → `inProgressRequests`; `FactoryTasksService.getDashboard()` → `dueToday`, `completedThisWeek`.
+
+Two Production Planning metrics ("Delayed Items", "Ready for Delivery") have no real underlying data — `ProductionOrderStatus` has no delayed/ready-for-delivery state — so they render `null`/"Not available" rather than a fabricated count, per this unit's explicit "no fake data" instruction. "Outstanding Payments" on the Contract Management card is `null` for a Contract-Staff-tier viewer (no `contracts.update`/`contracts.close`) since that figure is only computed for the MANAGER-tier dashboard.
+
+Frontend: new `ExecutiveModuleCard` component (large icon, large title, 2×2 metric grid at `text-4xl`/`text-5xl` numbers, "Not available" in muted text for `null` metrics, large `Open Module` button) — deliberately separate from the existing `MetricCard`/`ModuleCard` (both untouched, still used elsewhere). Sidebar: root "Dashboard" link now points to `/dashboard`; "Technical" and "Erection" promoted to their own top-level Operations items (position 3/4, gated by the same `CONTRACTS_MANAGEMENT` module check as the existing Contract Management dropdown — no new permission) while the existing nested Contract Management dropdown (still containing its own "Erection Dashboard"/"Erection Status" link) was left untouched, additive only; "Factory Tasks Management" → "Task Management", "Production Dashboard" → "Production Planning", "Maintenance Requests" → "Maintenance Management" (labels only — routes unchanged). For a Contract-Management-only user (including the Erection-Manager persona, which is Contract-Staff-tier), Technical/Erection are excluded from the generic Operations-group rendering and rendered instead directly under that user's own flat "Contract Management" section, so the required top-level order still holds for them too.
+
+### Judgment call flagged for correction
+
+The task's own "Navigation" section suggested the Task Management card link to `/contracts/workflow?mode=my-tasks`, but that card's 4 required metrics ("My Open Tasks", "Due Today", "Overdue", "Completed This Week") are Factory Tasks Management metrics (`tasks.read`, `FactoryTask` model) — a different system from Contract Workflow tasks. Routed it to `/factory-tasks/dashboard` instead (matching its metrics and the sidebar rename source), since routing a card to a page whose data doesn't match its own metrics would be a broken/misleading link. Flagging this explicitly in case `/contracts/workflow?mode=my-tasks` was actually intended as a *second*, contracts-specific "my tasks" surface — that would be a new, separate card/unit, not a same-card substitution.
+
+### Changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts`, `platform-dashboard.controller.ts`, `platform.module.ts` (all new) + `platform-dashboard.service.test.ts` (new, 7 tests)
+- `apps/api/src/app.module.ts` — registers `PlatformModule`
+- `apps/api/src/{contracts,factory-tasks,incidents,maintenance,safety,production}/*.module.ts` — each now `exports` its dashboard-relevant service for `PlatformModule` to reuse
+- `apps/api/src/incidents/incidents.service.ts` (+test) — `closedTotal` metric
+- `apps/api/src/safety/safety.service.ts` (+test) — `completedInspections` metric
+- `apps/api/src/maintenance/maintenance.service.ts` (+test) — `inProgressRequests` metric
+- `apps/api/src/factory-tasks/factory-tasks.service.ts` (+test) — `dueToday`, `completedThisWeek` metrics
+- `apps/web/src/lib/platform-api.ts` (new) — typed client for `GET /platform/dashboard`
+- `apps/web/src/lib/{incidents,safety,maintenance,factory-tasks}-api.ts` — new metric fields added to each `*DashboardData` type
+- `apps/web/src/app/(protected)/dashboard/page.tsx` (new) — Executive Platform Dashboard
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` (new, registered in `ui-registry.md`)
+- `apps/web/src/app/(protected)/page.tsx` — now a one-line `redirect('/dashboard')` (previous dense admin dashboard content retired — see Key Implementation Notes)
+- `apps/web/src/app/(protected)/contracts/technical/page.tsx` (new) — placeholder page reusing `ContractPlaceholderPage`
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — root Dashboard href, Technical/Erection top-level items, label renames, `isActive()` fix for the `/dashboard` exact-match case, `CONTRACT_TOP_LEVEL_SLUGS` gained `technical`
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (both `@recafco/api` and `@recafco/web`) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (+7 new) |
+| `pnpm --filter @recafco/web test --run` | ✓ 924/924 tests (unchanged — no web unit-testable pure logic was added by this UI-only unit beyond the new API client, which has no branching to test) |
+| `pnpm build` | ✓ 8/8 tasks; `/dashboard` and `/contracts/technical` built cleanly alongside every existing route |
+| `pnpm db:migrate:status` | ✓ 45 migrations, up to date (no schema change — every new metric reads existing columns) |
+
+### Key Implementation Notes
+
+- The previous root dashboard's system-health strip (API/DB status) and org-entity counts (Users/Roles/Departments/Plants/Locations) are no longer shown anywhere as a single page — this was a deliberate trade-off to meet this unit's explicit "clean, simple, not a detailed/technical dashboard" and "keep the page fast and simple" instructions, not an oversight. `/administration/dashboard` still exists but only covers Users. If that system-health visibility is still wanted, it should be its own small follow-up unit (e.g. an Administration-only status widget) rather than restored to the new executive landing page.
+- No browser automation tool is available in this environment — the executive dashboard's visual rendering was not click-verified live; confidence comes from a clean production build (all new routes compiled, including the permission-gated redirect), full test coverage of the new/changed service-layer metric logic, and careful reuse of already-verified dashboard services rather than new business logic.
+
+## FMP-UI-02 — Update User Creation Flow for Executive Manager and Main Module Access (Completed 2026-09-22)
+
+### Summary
+
+Updated Administration → Users → "Create Users by Module" and the New User wizard to match FMP-UI-01's Executive Platform Dashboard/sidebar structure, and added a real Executive Manager role/template with full operational (not admin) access across every module.
+
+**Role/permission audit and mapping (per this unit's own explicit instruction to audit before adding anything new):** read every migration that seeds `roles`/`permissions`/`role_permissions`. Confirmed exactly 6 existing roles (`SUPER_ADMIN`, `ADMIN`, `VIEWER`, `CONTRACT_MANAGEMENT_USER`, `CONTRACT_STAFF`, `CONTRACT_MANAGER`) and ~98 live permission codes across 10 module prefixes; no existing role grants full cross-module operational access without also being `SUPER_ADMIN`/`ADMIN` (both of which additionally carry `users.*`/`roles.*`/`org.*`/`audit.*` system-administration permissions — not appropriate for "higher management, not IT admin"). No blanket "all modules" permission exists anywhere in the system — full access always means literally listing every module's own codes. Per the task's explicit "do not simply map Executive Manager to Platform Admin unless there is no other safe option," created one new additive, idempotent migration (`20260922000000_add_executive_manager_role`) inserting a new `EXECUTIVE_MANAGER` role (`is_system=true`, same pattern as CM-18C/CM-35) and granting it exactly ADMIN's own per-module operational permission set for all 6 operational modules — incidents (10), tasks (11), maintenance (11), safety (11), contracts incl. `contracts.workflow_update` (9), production (16) = **68 permissions total**, copied verbatim from each module's own foundation migration — while deliberately withholding every `users.*`/`roles.*`/`org.*`/`audit.*`/`access_scope.*` code. That withholding is the safe, documented Executive-Manager-vs-Platform-Admin boundary the task asked for; it was also verified live against the dev DB (queried the role's actual granted permissions — exactly 68, zero admin-module codes) before writing any frontend code against it. No existing role/permission/role_permissions row was touched — migration applied cleanly to the dev DB (`prisma migrate deploy`, now 46 migrations).
+
+**Create Users by Module page:** `module-catalog.ts`'s `MODULE_CATALOG` relabelled (Task Management / Production Planning / Maintenance Management, matching FMP-UI-01) and reordered, and extended with `Technical`/`Erection` entries — both share `CONTRACTS_MANAGEMENT`'s own `code` (confirmed by the same permission audit: neither is a separate permission module, exactly matching how the Executive Dashboard already treats them as sub-views of Contract Management), with their own name/description and, for Erection, a `presetTemplate: 'ERECTION_MANAGER'`. `scope-utils.ts`'s `MODULE_LABELS` (used by the Module Access editor and Review step) got the same 3 relabels — this fixed a naming-drift bug where those labels still said the pre-FMP-UI-01 names even after the sidebar/dashboard were renamed. `Executive / Management` is a role template, not a module (no single permission to filter/count by), so it is deliberately NOT part of `MODULE_CATALOG`'s `ModuleCode`-typed rows — it's a small standalone constant (`EXECUTIVE_CATALOG_ENTRY`) rendered first in `ModuleUserCards`, with its own role-code-based count (`computeExecutiveManagerCount`, new, tested) and a `?template=EXECUTIVE_MANAGER` link (its "Manage Users" link reuses the existing `?roleCode=` filter on the All Platform Users table — no new filter mechanism needed).
+
+**Access Template step:** added `EXECUTIVE_MANAGER` and `VIEWER` to the wizard's `AccessTemplate` union (`ERECTION_MANAGER` from CM-71H.1 was kept, not removed — still needed by the new Erection card and still useful standalone; nothing in the task's acceptance criteria required removing it). `?template=` is validated against a new exported `ACCESS_TEMPLATE_VALUES` runtime list before being trusted (it comes from a URL query string). Selecting **Executive Manager** hides the module picker (like Erection Manager — it isn't tied to one module), auto-selects the `EXECUTIVE_MANAGER` role, and seeds Module Access (Step 4) for all 6 operational modules to `ALL_DEPARTMENTS` **only when the creating actor can grant it** (`access_scope.manage_all_departments` — `canManageAll` prop, already computed from the actor's own permissions). A plain `ADMIN` actor (who has `access_scope.manage` but not `access_scope.manage_all_departments` — confirmed by the same audit) instead gets `SELECTED_DEPARTMENTS` with every currently-active department pre-checked, since the backend would otherwise reject an `ALL_DEPARTMENTS` grant from that actor (`DepartmentAccessService.canGrantScope`) — this fallback and the reason for it are shown in a clear helper box, satisfying the task's "document the limitation clearly" instruction rather than silently producing a narrower-than-intended grant. Selecting **Viewer / Read-only** auto-selects the `VIEWER` role only (its own permission set already grants read access to every module — confirmed by audit — so no per-module scope auto-seeding was added, keeping it conservative: Module Access stays at the normal My Department default per module unless the admin widens it manually, matching the task's literal "default to read-only access to selected modules," not "company-wide by default"). Both new templates got a `computeAccessWarnings()` mismatch rule (Executive Manager template + non-Executive-Manager role) and a `ROLE_HINTS` entry, mirroring the existing Erection Manager pattern exactly.
+
+**Primary Department step:** deliberately left unchanged. Audited the `Department` model and every seed path — departments are a flat, generic, admin-user-created org unit with no "type"/module-tag field anywhere in the schema, and in the real dev DB only one department (`CM-01`, "Contract Management") exists today; the module-named departments the task listed as an option ("Technical", "Erection", "Safety", …) do not exist in any seed/migration. Per the task's own explicit instruction ("do not fake dangerous records silently... document what was done"), no department rows were created — inventing an organizational structure RECAFCO hasn't confirmed would violate CLAUDE.md's "never invent missing business workflows." Admins remain free to create real department records matching their organization's structure via the existing Administration → Departments screen if desired; that is a business decision, not something this unit should make unilaterally.
+
+### Changes
+
+- `packages/database/prisma/migrations/20260922000000_add_executive_manager_role/migration.sql` (new) — `EXECUTIVE_MANAGER` role + 68 permission grants, purely additive
+- `apps/web/src/app/(protected)/administration/users/_components/module-catalog.ts` — relabelled/reordered `MODULE_CATALOG`, added Technical/Erection entries, new `EXECUTIVE_CATALOG_ENTRY`, `presetTemplate`/`showManagerStaffSplit` fields
+- `apps/web/src/app/(protected)/administration/users/_components/scope-utils.ts` — `MODULE_LABELS` relabels (Task Management/Production Planning/Maintenance Management)
+- `apps/web/src/app/(protected)/administration/users/_components/module-user-counts.ts` (+test) — new `computeExecutiveManagerCount()`
+- `apps/web/src/app/(protected)/administration/users/_components/module-user-cards.tsx` — Executive card, Manager/Staff split now gated on `showManagerStaffSplit` (Contract Management only, not Technical/Erection)
+- `apps/web/src/app/(protected)/administration/users/_components/new-user-wizard.tsx` — `EXECUTIVE_MANAGER`/`VIEWER` templates, `preselectedTemplate`/`preselectedModuleLabel` props, `ACCESS_TEMPLATE_VALUES` export, new helper text/warnings/role hints
+- `apps/web/src/app/(protected)/administration/users/new/page.tsx` — parses/validates `?template=`, resolves `preselectedModuleLabel` from the catalog entry
+- `apps/web/src/app/(protected)/administration/users/page.tsx` — computes and passes `executiveManagerCount`
+- `apps/web/src/app/(protected)/administration/users/__tests__/module-user-counts.test.ts` — `computeExecutiveManagerCount` tests
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (both `@recafco/api` and `@recafco/web`) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API service code touched, only a seed migration) |
+| `pnpm --filter @recafco/web test --run` | ✓ 926/926 tests (+2 new) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date |
+| Live DB check: `EXECUTIVE_MANAGER` role — 68 permissions granted, zero `users.*`/`roles.*`/`org.*`/`audit.*`/`access_scope.*` codes; all 6 pre-existing roles (`SUPER_ADMIN`, `ADMIN`, `VIEWER`, `CONTRACT_MANAGEMENT_USER`, `CONTRACT_STAFF`, `CONTRACT_MANAGER`) still present, untouched | ✓ |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment — the wizard's new steps were not click-verified live; confidence comes from a clean typecheck/build, full unit-test coverage of the new pure logic (`computeExecutiveManagerCount`), and a live query of the new role's actual DB-granted permissions (not just reading the migration SQL back).
+- `superadmin`/`managercontract`/`usercontract`/`managererection` (the real dev-DB accounts named in this unit's own instructions) are hand-created rows, not seed/migration-defined — they cannot be broken by this unit's additive-only migration, which never edits an existing role's or permission's row.
+
+## FMP-UI-03 — Executive Manager Dashboard/Sidebar Visual Refinement (Completed 2026-09-22)
+
+### Summary
+
+Refined the Executive Platform Dashboard (`/dashboard`) and, specifically for the Executive Manager persona, the sidebar — a pure visual/UX pass, no permission or routing changes.
+
+**Scope decision (read carefully before extending this further):** the request's "Important" note said to only touch "the Executive Manager dashboard UI and Executive Manager sidebar experience." Taken literally that could mean forking `/dashboard` into two different pixel experiences by role — but `/dashboard` is one shared landing page for every non-Contract-Management-only persona (Admin, Super Admin, Executive Manager, any future multi-module custom role), and the request's own framing ("senior managers," "executive overview," "not a dense operational screen") describes what that page fundamentally is for everyone who lands there, not a literal `role === EXECUTIVE_MANAGER` gate. Applied the card/hero/typography/color redesign (items 2–7 of the request) to `/dashboard` universally — forking it would leave Admin/Super Admin looking at a visibly worse, inconsistent page for no real benefit. Applied item 1 (sidebar item removal + sizing/spacing/active-state) strictly role-gated, since that item's own wording ("...only, since they already land on the dashboard after login") and the repeated "sidebar experience" framing are unambiguous there, and removing a nav item is the one change with real behavioral consequence for a specific persona. Flagging this interpretation so it can be corrected if two fully separate dashboard designs were actually intended.
+
+**Sidebar (item 1):** new permission-only classifier `isExecutiveManagerAccess()` in `module-visibility.ts` — true when a user can see all 6 operational modules (Contract Management, Factory Tasks, Incident Report, Maintenance Requests, Safety & Compliance, Production Dashboard) but has no Administration access at all, i.e. exactly the shape FMP-UI-02's `EXECUTIVE_MANAGER` role produces — derived from permissions only, never a role code, so any future role with the same shape is treated the same way (and it is provably false for `SUPER_ADMIN`/`ADMIN`, who both also hold an Administration-gating permission). `sidebar.tsx` now branches on this: when true, renders a dedicated flat 8-item list (`EXECUTIVE_SIDEBAR_ITEMS`) with no "Dashboard" link, larger text (`text-base` vs `text-sm`), larger icons (`size-5` vs `size-4`), more vertical padding (`py-3` vs `py-2`), and a clearer active state (solid `bg-nav-active` + a 4px accent-colored left border) — Contract Management is a single flat link to its own dashboard here, not the existing 9-item manager dropdown, matching the "keep only these 8 items" spec literally. Every other persona's existing rendering path (the `MAIN_GROUPS`/dropdown/Contract-Management-only/Administration logic) is wrapped unchanged in the `else` branch — zero risk of regression for any other role. New `isExecutiveItemActive()` helper avoids a latent false-positive: the existing generic `isActive()`'s "strip `/dashboard` suffix, treat the whole base as active" rule assumes the base belongs to one module alone (true for `/factory-tasks`, false for `/contracts`, which Technical/Erection/Schedule/Payments/etc. all also live under) — using it as-is for the new flat Contract Management item would have wrongly highlighted it while viewing Technical or Erection.
+
+**Cards (items 2–5):** `ExecutiveModuleCard` rewritten for a compact, premium look: a 1.5px module-colored top highlight bar, a smaller icon badge (size-11, was size-14), a single truncated description line (was up to 2 lines), a tight 2×2 metric grid (`text-[28px]` numbers in `bg-surface-secondary/70` tiles with a small colored bullet per label, was bare `text-4xl`/`text-5xl` numbers with no tile), and one `Open <Title>` button colored to the module's own accent (was a fixed `Open Module` in the brand red for every card). Button text is literally `Open {title}` — since `title` already equals the exact required string ("Contract Management", "Technical", … from `PlatformDashboardService`), this produces every one of the request's 8 required labels with no separate lookup table to maintain. Card padding/gaps were tightened throughout (`p-5`/`gap-2.5`/`gap-3.5`, down from `p-6 lg:p-8`/`gap-4 sm:gap-6`/`gap-5`) — estimated per-card height dropped roughly 35% (~470px → ~310px), meaningfully reducing the scroll needed for 8 cards in the existing 2-column grid.
+
+**Colors:** added 5 new soft/muted semantic tokens to `globals.css`'s `@theme` block (`--color-module-{contracts,technical,erection,production,tasks}` + `-light` variants) for the 3 hues with no existing token; Safety & Compliance, Incident Report, and Maintenance Management deliberately reuse the existing `--color-success`/`--color-error`/`--color-teal` tokens instead of duplicating green/red/teal — per `ui-tokens.md`'s own "never hardcode colors in feature components" rule, every card color is a semantic Tailwind utility (`bg-module-contracts`, `text-module-erection`, …), never a raw hex in a component. `ui-tokens.md` was updated to mirror `globals.css` exactly, same as every prior token addition in this project.
+
+**Hero (item 6):** new subtitle text ("Executive overview of key operational modules and current business activity."), wrapped in a bordered card instead of bare page text, plus a small honest overview strip (modules-accessible count, role name, today's date — all real data already available on the page; no fabricated cross-module aggregate, since summing e.g. "Total Contracts" + "Open Incidents" would mix unrelated units).
+
+### Changes
+
+- `apps/web/src/app/globals.css`, `context/ui-tokens.md` — 5 new module accent color token pairs
+- `apps/web/src/app/(protected)/_lib/module-visibility.ts` (+test) — new `isExecutiveManagerAccess()`
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `EXECUTIVE_SIDEBAR_ITEMS`, `isExecutiveItemActive()`, executive-mode nav branch (existing paths unchanged)
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — compact redesign, new `accent: ModuleAccent` prop
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — `CARD_ACCENTS` map, redesigned hero, tighter grid gap
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API code touched) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (+5 new, `isExecutiveManagerAccess`) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment — the visual redesign was not click-verified live; confidence comes from a clean build/typecheck, full test coverage of the new classifier (including the "false for ADMIN/SUPER_ADMIN" and "false when even one module is missing" edge cases), and reasoning through the estimated card-height reduction from the exact className changes made.
+- Considered coloring the metric numbers themselves with the module accent; kept them in high-contrast neutral dark text instead and used the accent only for the top bar/icon/button/label bullet — a pastel-tinted large bold number would have weakened contrast for the "senior users, avoid eye strain" goal the request itself named.
+
+## FMP-UI-04 — Executive Dashboard One-Screen Compact Layout Fix (Completed 2026-09-22)
+
+### Summary
+
+FMP-UI-03's redesign was still too tall in practice (live screen showed action buttons pushed out of view, heavy 2-column cards, real scrolling) — this unit is the layout-density follow-up, pure UI/copy, no backend/permission/schema changes.
+
+**Layout (before → after):** grid was `grid-cols-1 lg:grid-cols-2` (max 2 cards per row, 4 rows for 8 cards) → now `grid-cols-1 md:grid-cols-2 xl:grid-cols-4` (1 col mobile, 2 cols tablet/medium desktop, 4 cols large desktop → 2 rows for 8 cards). Grid gap tightened `gap-4` → `gap-3.5`.
+
+**Card height/visibility fix:** `ExecutiveModuleCard` padding `p-5 pt-6` → `p-4 pt-5`; icon badge `size-11`/`size-6` icon → `size-9`/`18px` icon; title `text-xl` → `text-[18px]` (within the requested 17–19px band); description stayed a single truncated line at `text-xs` (12px, within the requested 12–13px band); metric tiles `px-3 py-2.5` → `px-2.5 py-2`, numbers `text-[28px]` → `text-[26px]` (within the requested 24–28px band), labels stayed `text-xs` (12px); button `h-11 text-[15px]` → `h-10 text-sm` (14px) — kept at 40px rather than going lower, since `ui-tokens.md`'s own rule sets 40px as the button-height floor across this whole app, and the request's "smaller but still readable/always visible" goal doesn't require breaking that rule. Estimated per-card height dropped from FMP-UI-03's ~310px to roughly 230–260px. The actual "button always visible" fix is structural, not just smaller numbers: the card root is now `h-full flex flex-col` and the button carries `mt-auto`, so CSS grid's default `align-items: stretch` makes every card in a row match its row's tallest card, and the button is always pinned to the bottom of that stretched height — no fixed/max-height was used anywhere, so real content can never overflow or get clipped; it can only make an individual card (and therefore its whole row) a little taller, never hide the button.
+
+**Descriptions shortened (in `apps/api/src/platform/platform-dashboard.service.ts` — text-only, not logic):** all 8 card descriptions replaced with the shorter versions this unit specified verbatim (e.g. "Contracts, approvals, payments, and closeout." for Contract Management), reducing how often the now-narrower (4-per-row) cards need their description truncated. No test asserted on the old description strings, confirmed before changing them, so nothing broke.
+
+**Hero:** the previous bordered "overview strip" row (with its own `border-t`/`pt-4` divider) was removed and folded into a single `Welcome back, {name} · N modules accessible · {role} · {date}` paragraph directly under the subtitle — title shrunk `text-3xl`/`text-[34px]` → `text-2xl`/`text-[26px]`, block padding `p-6 lg:p-7` → `px-5 py-4`, outer page padding/spacing `p-6 lg:p-8`/`space-y-6` → `p-5 lg:p-6`/`space-y-4`.
+
+**Sidebar:** Executive Manager's flat 8-item list (from FMP-UI-03) still has no "Dashboard" link, unchanged. One small polish: nav items switched `items-center` → `items-start` (icon `mt-0.5`) with `leading-snug`, so a label that wraps onto 2 lines at this sidebar width (namely "Maintenance Management") reads as top-aligned/intentional rather than the icon floating mid-way between two lines. No other sidebar behavior touched.
+
+**Confirmed no backend/permission changes:** the only non-frontend file touched is `platform-dashboard.service.ts`, and only 8 literal `description:` string values — every permission check (`actor.permissions.includes(...)`), every metric computation, every route, and the card `code`/`title` fields are byte-for-byte unchanged. `isExecutiveManagerAccess()` (the sidebar classifier) was not touched. No migration was added; `db:migrate:status` still reports 46 migrations, up to date. Admin/Super Admin still render `/dashboard` through the exact same unforked page and component this unit only resized — nothing role-gated was added or removed for them.
+
+### Changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` — 8 shortened card `description` strings only
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — compact redesign (padding/icon/title/metric-tile/button sizes), `h-full flex flex-col` + button `mt-auto`
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — grid `md:grid-cols-2 xl:grid-cols-4`, compact single-line hero
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — executive nav item alignment/leading polish for wrapped labels
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (all 8 packages) |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — description-string-only change) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — no new branching logic, pure layout/className/copy) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment, so the exact on-screen "fits without scrolling on a 1080p display" outcome could not be pixel-verified live; the fix targets the two concrete, verifiable causes the request named (2-per-row cards were too few for 8 modules to fit in 2 rows; the card wasn't using a stretch-and-anchor flex layout, so a taller sibling card in the same row could leave a shorter card's button out of its expected position) rather than guessing at arbitrary pixel values.
+- Deliberately did not add an explicit `min-h-[...]` to the card — content-driven height via flex + grid row-stretch already satisfies "consistent height per row" without risking the exact failure mode (content overflow past a fixed height) this unit's hard requirement warned against.
+
+## FMP-UI-04B — Executive Dashboard Header Placement and Card Button Visibility Fix (Completed 2026-09-22)
+
+### Summary
+
+FMP-UI-04's live screen still had hidden buttons and a too-tall hero, per direct user report. This unit removes the hero entirely, moves the title into the shared top header (gated to `/dashboard` only), makes the card layout's button-visibility guarantee more robust/explicit, and replaces every metric label that was truncating with an ellipsis. Pure UI/copy, no backend logic/permission/route/schema changes.
+
+**Hero removed:** the whole bordered hero block (title, subtitle, welcome/module-count/role/date line) is gone from `dashboard/page.tsx` — the page now starts directly with the error/empty states (if any) and the 8-card grid, per this unit's explicit "no meta strip anywhere" instruction. The module-count/role/date line was not relocated anywhere; it is simply gone, as instructed.
+
+**Header placement:** `TopHeader` (the one shared header used by every protected page, via `AppShell`) already calls `usePathname()` for its Contract Management breadcrumb logic — reused that instead of threading a new prop through `AppShell`. Added `isExecutiveDashboard = pathname === '/dashboard'`; when true, the existing breadcrumb slot is suppressed (`breadcrumbItems` short-circuits to `undefined`) and a new absolutely-centered block renders "RECAFCO Factory Management Platform" (`text-base font-bold`) + "Executive Overview" (`text-[11px]`) inside the *same* `h-14` header height — no header-height increase. Centering is `absolute inset-x-0 ... md:flex` with `pointer-events-none` (so it never intercepts clicks meant for the hamburger or Sign out button) — true center relative to the header's own width, which already excludes the sidebar (the header lives inside `AppShell`'s right-hand flex column), so "do not overlap the sidebar" holds structurally, not by coincidence. Hidden below `md` (title would crowd the hamburger/user-info at narrow widths). Every other page's header (including the 8 different Contract Management breadcrumb variants) is untouched — confirmed by wrapping the *existing* breadcrumb expression in a ternary's `false` branch rather than editing any of its 8 helper calls.
+
+**Card button-visibility fix, made more robust:** the FMP-UI-04 card already used `h-full flex flex-col` + button `mt-auto`, which is structurally correct — but this unit tightens it further since the live bug persisted: (1) removed `overflow-hidden` entirely (it was only there to clip an absolutely-positioned top accent bar to the rounded corners) — there is now nothing in this component that could ever clip real content; (2) the top accent moved from an absolutely-positioned overlay to a real `border-t-4` on the card box itself, which needs no clipping at all; (3) added an explicit `min-h-60` (240px) floor so the button's position no longer depends solely on CSS grid's row-stretch behavior working as expected — it's a minimum only, content can still grow taller and the button simply follows via `mt-auto`, so it can never be hidden or pushed out, only ever pushed *lower* on a card that legitimately needs more room. Also fixed a real (if likely latent) CSS bug while touching this: the card's border color was previously set via the `border-border` shorthand (all 4 sides) plus a `border-t-{accent}` override for just the top — two utilities resolving to the same `border-top-color` property are order-dependent on Tailwind's *generated stylesheet* order, not on the className string's order, which is a known Tailwind footgun. Replaced with fully independent directional utilities (`border-x-border`, `border-b-border`, and the accent's own `border-t-*`) so there is no possible conflict regardless of build/stylesheet ordering.
+
+**Metric label cleanup:** all 32 card metric labels (in `platform-dashboard.service.ts`) shortened to the exact executive-friendly labels this unit specified (e.g. "Total Contracts"/"Active"/"Pending Approval"/"Outstanding" for Contract Management) — copy-only, every underlying computation/permission-gate/route is byte-for-byte unchanged. Updated `platform-dashboard.service.test.ts`'s label assertions to match (7 tests, all still passing). On the frontend, the metric label `<span className="truncate">` was removed — labels now wrap onto 2 lines if they ever need to (none of the new short labels are expected to, in practice) instead of ellipsis-truncating, with the small accent bullet given `items-start`/`mt-0.5` so a wrapped 2-line label still looks intentional rather than the bullet floating mid-way.
+
+**Regression checks performed:** Admin/Super Admin land on the exact same unforked `/dashboard` page and `TopHeader` component — the only role-gated logic anywhere in this stack remains `isExecutiveManagerAccess()` (sidebar-only, untouched by this unit) and the pre-existing Contract-Management-only redirect; nothing new was gated by role. All 8 card routes are still the same literal strings in `platform-dashboard.service.ts` (only `description`/label text changed in FMP-UI-04/04B, never `route`). Ran the full test/build suite below to confirm.
+
+### Changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` (+test) — 32 metric labels shortened
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — hero card removed entirely
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — `overflow-hidden` removed, top accent moved to `border-t-4`, explicit `min-h-60` floor, metric label wrapping instead of truncation, border-color utilities made order-independent
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — centered Executive Dashboard title/subtitle, gated to `pathname === '/dashboard'`
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (label-assertion updates only) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — pure layout/className/copy, no new branching logic) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment, so the exact live rendering could not be pixel-verified; this unit specifically targeted the two concrete, testable causes a live screen report can actually reveal (a genuine CSS specificity conflict on the border color, and an `overflow-hidden` that had no functional purpose left once the top bar became a real border) rather than only re-guessing at spacing values a second time.
+- If a third round is still needed, the next thing to check live (not deducible from source alone) is actual rendered row height at the exact desktop viewport in use — `min-h-60` is a floor based on this component's own estimated content height, not a live measurement.
+
+## FMP-UI-04C — Executive Dashboard Final Button Contrast and Card Polish (Completed 2026-09-22)
+
+### Summary
+
+Third consecutive live-screen report of "invisible/white" module card buttons, this time naming exactly 5 modules: Contract Management, Technical, Erection, Production Planning, Task Management. Before patching a fourth time on guesswork, this unit actually diagnosed the cause rather than assumed one, then applied a defensive fix plus every other requested polish item. Pure UI/copy, no backend/permission/route/schema changes.
+
+**Diagnosis (done before touching any code):** the 5 named modules are precisely the 5 accents added in FMP-UI-03 with no pre-existing token (`--color-module-contracts/technical/erection/production/tasks`) — the other 3 cards (Safety/Incident/Maintenance), which reuse long-established tokens (`--color-success`/`--color-error`/`--color-teal`) already used elsewhere in the app, were never reported as broken. Ran a real production build and inspected the generated CSS directly (`.next/static/chunks/*.css`): every `--color-module-*` variable resolves to its correct hex, and every `.bg-module-*`/`.border-t-module-*` utility class generates correctly, structurally identical to the confirmed-working `.bg-success`. This rules out a broken/missing token or an "opacity too low" color choice (all 5 hues are solid Tailwind-600/700-equivalent tones, not pastels) as the root cause — the most likely explanation is a stale dev-server/Turbopack CSS cache from when these 5 tokens were first added mid-session (consistent with an earlier screenshot in this same review chain showing Next.js's own dev-mode "(stale)" indicator), not a defect in the shipped CSS.
+
+**Fix applied anyway, defensively:** rather than tell the user "just restart your dev server" and change nothing, the button's background is now set through TWO independent paths simultaneously — the existing Tailwind class (`bg-module-*`) AND a new inline `style={{ backgroundColor: 'var(--color-module-*)' }}` referencing the exact same CSS variable. Inline styles are applied by the browser with zero dependency on Tailwind's utility-generation/purge/build-cache pipeline, so the button renders correctly even in the specific failure class reported three times running, regardless of whether the true cause was cache staleness or something not yet identified. This is not a new/hardcoded color — it is the identical semantic token, rendered via a second, independent mechanism as a guarantee.
+
+**No "Coming Soon" disabled state was added:** audited `PlatformDashboardService` — every one of the 8 cards is only ever included in the response for a user who already holds the permission to reach its real route (`contracts.read`, `safety.read`, etc. — see that service's own `getDashboard()`), so there is no scenario among the 8 rendered cards where the route is genuinely unavailable. Building a disabled-button code path for a case that structurally cannot occur would be exactly the kind of "invent a workflow that isn't real" this project's own CLAUDE.md warns against — documented here instead, so it isn't silently dropped.
+
+**Descriptions and metric labels shortened again** (both this unit's own exact requested text), and the description's `truncate` class was removed so no ellipsis can ever appear (the task's explicit "No description should show '…'" line) — text now wraps if it ever needs to, though at this length it is not expected to.
+
+**Card height/spacing polish:** top accent `border-t-4` → `border-t-2` (less heavy); card padding `p-4` → `p-3.5`; metric tile padding `px-2.5 py-2` → `px-2 py-1.5`; header-to-metrics gap `mt-2.5` → `mt-2`; `min-h-60` → `min-h-56` (224px floor, still a minimum only, never a cap); page-level top padding reduced (`pt-3`/`pt-4`, was full `p-5`/`p-6` on every side) now that there is no hero card above the grid to separate from; card-grid gap `gap-3.5` → `gap-3`.
+
+### Changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` (+test) — descriptions and metric labels shortened again
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — inline-style button background (dual-path fix), thinner top accent, tighter padding/gaps, no more `truncate` on description
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — reduced top padding and grid gap
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (label-assertion updates only) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — pure layout/className/copy) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Direct inspection of `.next/static/chunks/*.css` after the build | ✓ all 5 `--color-module-*` variables and their `bg-*`/`border-t-*` utilities generate correctly with the intended hex values |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment, so the actual dev-server-staleness hypothesis could not be confirmed directly — but it was not treated as an excuse to skip a defensive fix; the inline-style dual-path change makes the button's correct rendering independent of that hypothesis being right.
+- If a live report ever again names these same specific 5 modules after this unit, the cause is almost certainly NOT the CSS/token layer (now independently verified twice, by two different mechanisms) — the next place to look would be the actual running dev server process (confirm it was restarted after `globals.css` changes) rather than this component's source.
+
+## FMP-UI-04D — Fix Executive Dashboard Buttons Permanently and Improve Card UI/UX (Completed 2026-09-22)
+
+### Summary
+
+Fourth consecutive live-screen report of invisible module buttons — same 5 modules every time (Contract Management, Technical, Erection, Production Planning, Task Management). This unit stops treating it as a token/cache problem entirely, per explicit instruction, and removes per-module color from the button altogether, replacing it with the one button style already proven correct everywhere else in this app. No backend/permission/route/metric/schema changes — `platform-dashboard.service.ts` was not touched at all this round (the task explicitly said "do not change dashboard metrics").
+
+**Root cause, stated plainly:** FMP-UI-04C's own direct inspection of a fresh production build already proved the 5 custom `--color-module-*` tokens and their `bg-*`/`border-t-*` utilities generate correctly, with the right hex values, in the shipped CSS. That result still holds — this unit re-ran the same inspection on the new build (see Verification Results) and confirmed it again. So the actual defect was never in the generated CSS. The remaining, unfalsifiable-from-here possibility is a stale dev-server/Turbopack cache that never got the mid-session `globals.css` additions from FMP-UI-03 (an editor/dev-server restart was never confirmed to have happened between rounds) — but since that can't be verified without shell access to the running dev process, this unit does not rely on that theory at all. Instead: **the button no longer uses any per-module token, custom or pre-existing, correct-in-the-build or not.** It cannot be affected by a stale-token cache because it no longer references any token that was ever added mid-session.
+
+**Fix:** the button now uses exactly one style everywhere — `bg-accent` (`#c62828`, RECAFCO red) / `hover:bg-accent-hover` (`#a91f1f`) / `text-accent-foreground` (white) — the identical token triplet already rendering correctly today on dozens of other primary-action buttons across this app (Sign in, New User, Create User, etc.), proven since before this session started. Per-module color now appears in exactly one place: the icon badge (`ICON_ACCENT_CLASSES`, soft `-light` background + accent foreground) — nowhere near the button. The top border accent and the metric-label color bullet (both introduced in FMP-UI-03/04B) were removed entirely, per this unit's own "reduce heavy top borders," "soft icon badge colors only," and "reduce visual clutter" instructions — the card border is now a single plain neutral `border border-border` on all 4 sides (no more directional-utility juggling, since there's no longer a per-side color to keep independent).
+
+**Layout, exactly as specified:** card root `flex flex-col h-full min-h-56`; a `flex-1` wrapper around the header+metrics content; the button lives in its own `mt-auto pt-3` wrapper, full width (`w-full`), `h-10` (40px, inside the requested 38–42px band). No `overflow-hidden`, no `max-h-*` anywhere in the component — nothing left that could ever clip the button.
+
+**Browser visual verification:** genuinely not possible in this environment — no browser-automation tool is available (checked again this round via a fresh tool search before claiming otherwise). In its place, static verification was made as conclusive as the tooling allows: a real production build was run, and both its compiled server bundle and its generated CSS were inspected directly for (a) `bg-accent`/`bg-accent-hover`/`text-accent-foreground` all present and correctly generated, (b) zero remaining occurrences of any `bg-module-*` (non-`-light`) or `border-t-module-*` class anywhere in the compiled output — proving the button genuinely no longer references any per-module token at the source level, not just "should be fine in theory."
+
+### Changes
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — button switched to the universal `bg-accent` style; per-module color removed from border/button, kept only on the icon badge; layout restructured to `flex-1` content wrapper + `mt-auto pt-3` button wrapper
+
+No other file changed — `platform-dashboard.service.ts` (metrics/descriptions), `page.tsx` (grid/layout), `top-header.tsx` (title placement), and `sidebar.tsx` (Executive Manager nav) are all exactly as FMP-UI-04C left them, per this unit's own scope.
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — no metric/label assertions to update this round) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled server bundle inspection (`.next/server/chunks/ssr/[root-of-the-server]__*.js`) | ✓ `bg-accent`/`bg-accent-hover` present; zero `bg-module-*` (non-`-light`) occurrences anywhere |
+| Generated CSS inspection (`.next/static/chunks/*.css`) | ✓ `.bg-accent`, `.text-accent-foreground`, and the `:hover` rule for `bg-accent-hover` all present and correctly generated; zero `border-t-module-*` rules remain |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Honest limitation, stated again because this unit's own acceptance criteria asked for it explicitly: no in-browser visual check happened. The static verification above is the strongest evidence obtainable in this environment (it inspects the exact bytes the browser would receive, not just the source), but it is not the same as opening the page.
+- If a report of an invisible Contract/Technical/Erection/Production/Tasks button ever recurs after this unit specifically, the cause cannot be a per-module CSS token, since none is referenced by the button anymore — the next thing to check would be the `bg-accent`/`text-accent-foreground` tokens themselves (shared by every other button in the app, so a break there would be visible far more broadly than just these 5 cards) or a browser-side issue (extension, cached asset, viewport) rather than anything in this component.
+
+## FMP-UI-05 — Executive Dashboard Premium UI/UX Polish (Completed 2026-09-22)
+
+### Summary
+
+Brought module-specific accent colors back to the button (FMP-UI-04D had removed all per-module color from it after 3 rounds of "invisible button" reports) — but through a different, more defensive mechanism than any prior attempt, plus a genuine visual polish pass on cards/metrics/sidebar/header. UI-only; `platform-dashboard.service.ts` was not touched (numbers/labels unchanged, per this unit's own "do not change metrics" instruction).
+
+**Reconstructing why the color had to come back safely, not just "the same way again":** re-reading the chain — FMP-UI-04C already added a `var(--color-module-*)` inline style alongside the Tailwind class as a "belt and suspenders" fix, and FMP-UI-04D's own context said it was "still not visible even after token/style fixes," meaning that inline-`var()` attempt also failed live. Since `var(--color-module-*)` and the Tailwind class both ultimately read the exact same `--color-module-*` custom property from whatever CSS the browser had actually loaded, a stale dev-server/browser cache that never picked up `globals.css`'s `@theme` additions would explain both failing identically — and also explains why icon badges (using the SAME custom properties) were never reported broken: a badge missing its tint just looks like a plain icon (subtle), while a button losing its background while `text-white` still applies is glaring white-on-white (unmistakable). This diagnosis was not re-litigated from scratch — it was carried forward as the working theory and designed around directly.
+
+**The new mechanism:** every per-module color on the button is now a literal hex string in `style={{ backgroundColor: '#1e3a8a' }}` (etc.) — no CSS custom property, no Tailwind color utility class, involved at any point. React writes it straight into the element's `style` attribute; the browser paints it from the HTML it already has, with no dependency on any stylesheet being current. Hover is handled by `hover:brightness-90`, a generic Tailwind filter utility that reads no color token at all (same core-utility category as `transition`/`rounded-md`, never implicated in any prior round). White text uses the plain `text-white` utility (not `text-accent-foreground` or any custom token). Verified directly in the compiled build output (see below) that all 8 literal hex values and the `hover:brightness-90` utility are present, and that zero `bg-module-*`/`bg-accent` classes remain on the button.
+
+**Color system (8 accents, `ACCENT_PALETTE` in `executive-module-card.tsx`):** Contract Management navy/blue `#1e3a8a`, Technical indigo `#4338ca`, Erection amber `#b45309`, Safety & Compliance green `#15803d`, Incident Report red `#b91c1c`, Production Planning purple `#6d28d9`, Maintenance Management teal `#0f766e`, Task Management cyan `#0e7490` — each with a `light` tint for the icon badge only (icon badges kept their existing semantic Tailwind tokens from FMP-UI-03/04D; only the button and the new left-accent/metric-dot moved to literal hex, since those are the elements this unit asked to re-color).
+
+**Card design:** the heavy top border (present in every round back to FMP-UI-03) was replaced with a 4px left accent — applied as `style={{ borderLeftWidth: '4px', borderLeftColor: palette.base }}` overriding just that one side of an otherwise-neutral `border border-border` (a foundational, always-reliable token used on borders throughout the entire app, not in the same risk category as the mid-session `--color-module-*` additions). No border-conflict risk here: inline style vs. a class is unambiguous (inline always wins per property), unlike two classes both resolving to the same longhand.
+
+**Metric tiles:** background lightened from `bg-surface-secondary/70` (a visibly grey block) to `bg-background` (the page's own soft off-white, already a token, no border) for a lighter, less "heavy" feel; a small accent-colored dot (literal hex) sits beside each label again, tying the tile back to the card's module identity without recoloring the tile itself.
+
+**Sidebar:** `rounded-md` → `rounded-r-md` on the active/hover row so the left accent border sits flush against the sidebar edge instead of curving away from it; hover background softened slightly (`hover:bg-nav-hover` → `hover:bg-nav-hover/70`); added `duration-150` for a smoother transition. No structural change — still no "Dashboard" item, still the same 8 flat entries.
+
+**Header:** added `tracking-tight` to the title and `gap-0.5` between the two lines; "Executive Overview" subtitle changed to `uppercase tracking-wide` for a more typical "eyebrow" treatment. Still exactly centered, still `h-14`, still `pointer-events-none`.
+
+### Changes
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — literal-hex `ACCENT_PALETTE`, left accent, lighter metric tiles, module-colored button via inline style + generic hover filter
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — active-state corner rounding, softened hover, smoother transition
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — title/subtitle typographic polish
+
+No other file changed — `platform-dashboard.service.ts` (metrics/descriptions/routes), `page.tsx` (grid/layout) untouched.
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — pure layout/style, no new branching logic) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled server bundle inspection | ✓ all 8 literal hex accent values present; `hover:brightness-90` present; zero `bg-module-*`/`bg-accent` classes remain on the button |
+| Generated CSS inspection | ✓ `hover:brightness-90` rule generates correctly (a core, token-free Tailwind filter utility) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again before writing this). Static verification this round is, if anything, stronger than prior rounds': literal hex values in `style` cannot fail for any of the reasons implicated so far (stale custom-property definition, Tailwind purge/generation, dev-server cache) — the only remaining failure surface is React itself failing to write a `style` attribute, which is not a category any prior report is consistent with.
+- The `light` tint field in `ACCENT_PALETTE` intentionally still only feeds the icon badge, never the button — keeping the one visual element every report centered on (the button) fully independent of any token, while leaving the never-reported-broken icon badge as-is.
+
+## FMP-UI-06 — Executive Dashboard Card UI Polish (Completed 2026-09-22)
+
+### Summary
+
+Pure visual weight/spacing refinement on top of FMP-UI-05's card mechanism (unchanged: literal hex via inline `style`, `flex flex-col h-full` + `flex-1` content + `mt-auto` button). No backend/permission/route/metric/schema changes — `platform-dashboard.service.ts` was not touched.
+
+**Left accent:** thinned `4px` → `3px`, and its color softened to ~80% opacity via an 8-digit hex (`` `${palette.base}cc` `` — CSS accepts an alpha channel directly in a hex string; no color-math helper needed). Still applied as an inline `style` on one border side only (`borderLeftWidth`/`borderLeftColor`), so there is no risk of the two-classes-same-property conflict FMP-UI-04B had to fix for the old top-border approach.
+
+**Card shell:** border color softened `border-border` → `border-border/60`; added `transition-shadow hover:shadow-md` so the card itself has some tactile response on hover (only the button is a real link, but the whole card now visually acknowledges the cursor).
+
+**Metric tiles:** background switched from a flat neutral grey (`bg-background`) to the module's own soft tint (`palette.light` — the exact same color already used for the icon badge) — reads as intentionally "branded" and lighter than a grey block, directly addressing the "metric boxes look blocky" complaint. Radius bumped `rounded-md` → `rounded-lg`, matching a common "outer card softer/rounder than inner tile" hierarchy against the card's own `rounded-xl`.
+
+**Spacing/height:** padding and gaps tightened throughout (card padding `p-3.5`→`p-3`, header-to-metrics gap `mt-2`→`mt-1.5`, metric grid gap `gap-2`→`gap-1.5`, button wrapper `pt-3`→`pt-2.5`, floor height `min-h-56`→`min-h-52`, i.e. 224px→208px) — still a floor only, never a cap, so the button can still never be hidden or clipped.
+
+**Typography/button:** description color moved `text-text-secondary` → `text-text-muted` (reads as secondary/less dominant next to the bold title); button radius `rounded-md` → `rounded-lg` (matches the tiles) and hover eased `hover:brightness-90` → `hover:brightness-95` (a milder darken, "not too heavy").
+
+### Changes
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — only file changed
+
+No other file touched — `platform-dashboard.service.ts`, `page.tsx`, `top-header.tsx`, `sidebar.tsx` are exactly as FMP-UI-05 left them, per this unit's own scope ("do not change sidebar/header unless needed").
+
+### Verification Results (2026-09-22)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — pure styling, no new branching logic) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled server bundle inspection | ✓ all 8 base hex colors, the `` `${...base}cc` `` alpha-suffix concatenation, `min-h-52`, `hover:brightness-95`, and `border-border/60` all present |
+| Generated CSS inspection | ✓ `.min-h-52{min-height:calc(var(--spacing) * 52)}` (208px) generates correctly |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again). All changes this round are weight/spacing/opacity tweaks on a mechanism (literal-hex inline styles) already independently verified twice in FMP-UI-05 — nothing here reintroduces any of the failure categories from the earlier button-visibility rounds.
+- The alpha-suffixed border color (`${palette.base}cc`) is computed at runtime by string concatenation in the browser, not at build time — a static grep for the concatenated 8-digit result will never find it in compiled output; verified instead that the base hex and the literal `cc` suffix are both present in the bundle, which is the correct thing to check for a runtime-concatenated value.
+
+## FMP-UI-06B — Executive Dashboard Final Header and Card Polish (Completed 2026-09-23)
+
+### Summary
+
+Final header/card polish pass — larger header title, subtitle removed, metric tiles diluted further after live feedback that FMP-UI-06's solid-tint tiles still read as "color-blocked." No backend/permission/route/metric/schema changes — `platform-dashboard.service.ts` was not touched.
+
+**Header:** the Executive Dashboard title in `TopHeader` went `text-base` (16px) → `text-2xl` (24px), matching the size convention this app already uses for page-level `<h1>` titles elsewhere, so it now genuinely reads as "the main product title" rather than a small header label. Added `whitespace-nowrap` so it can never wrap onto a second line on desktop. The "Executive Overview" subtitle line was removed entirely (not replaced, per this unit's own "preferred: no subtitle" instruction) — the title alone is now vertically centered in the unchanged `h-14` header, so header height did not increase despite the larger text.
+
+**Card polish:** left accent unchanged structurally (3px, ~80% opacity, inline style — from FMP-UI-06) but the card's own border opacity eased further `border-border/60` → `border-border/50`; added a small `mt-0.5` gap between the title and description for breathing room.
+
+**Metric tiles — the main fix this round:** FMP-UI-06 had already moved tiles off flat grey onto a *solid* `palette.light` fill, but that still looked like 4 distinct colored blocks per card. Diluted further to ~56% opacity via the same alpha-hex-suffix trick already used for the left border (`` `${palette.light}90` ``) — each tile now reads as a bare whisper of the module's color over the white card background, not a distinct colored block, directly addressing "still color-blocked"/"too color-heavy" feedback. Numbers, labels, and the 2×2 layout are all unchanged.
+
+### Changes
+
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — title size/whitespace, subtitle removed
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — metric tile dilution, border/spacing polish
+
+No other file changed — `platform-dashboard.service.ts`, `page.tsx`, `sidebar.tsx` are exactly as the prior round left them, per this unit's own scope ("keep sidebar structure unchanged unless minor visual polish is needed" — none was needed here).
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test --run` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm --filter @recafco/web test --run` | ✓ 931/931 tests (unchanged — pure styling, no new branching logic) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled server bundle inspection | ✓ `text-2xl` and `whitespace-nowrap` present on the title; zero occurrences of "Executive Overview" anywhere in the build output; `light}90` alpha-suffix and `border-border/50` present on the card |
+| Generated CSS inspection | ✓ `.text-2xl{...}` and `.border-border\/50{border-color:#d8dee880}` (the 50%-opacity variant) both generate correctly |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again). Confirming "Executive Overview" has zero occurrences anywhere in the compiled server output is about as strong a proxy for "the subtitle is gone" as static analysis can offer.
+- `TopHeader` is bundled into the shared `app-shell` chunk, not the dashboard page's own chunk — worth remembering for future static-verification passes on this file specifically, since searching the wrong chunk (e.g. the one containing `ExecutiveModuleCard`) will silently show 0 matches for a change that is actually present and correct.
+
+## FMP-UI-07 — Executive Module Landing Pages and Senior-Friendly Navigation (Completed 2026-09-23)
+
+### Summary
+
+Built simplified, senior-manager-friendly landing pages for all 8 operational modules, each reached via a new Executive Module Landing Page route, with consistent breadcrumb/Back/Previous/Next/module-switcher navigation. The Executive Dashboard's 8 card buttons and the executive sidebar now route to these landing pages instead of straight into the full operational dashboards — none of which were modified. Every KPI, attention item, and recent-activity row on every landing page comes from a module's own existing, already-real dashboard API; nothing was fabricated, and honest "Not available" states are shown wherever a module has no real data for a section (Technical's Needs Attention/Recent Activity; Production's Needs Attention; Contract Staff-tier's Needs Attention).
+
+### Architecture decision
+
+Rather than repurpose the existing dense operational dashboards (`/contracts/dashboard`, `/contracts/erection-dashboard`, `/safety-compliance/dashboard`, `/incidents/dashboard`, `/production/dashboard`, `/maintenance/dashboard`, `/factory-tasks/dashboard` — all used today by Managers/Staff/Admins with their own established layouts) as the "senior-friendly" landing target, a brand-new landing route was added per module, and every existing operational route was left completely untouched:
+
+| Module | Landing route (new) | Existing operational route (untouched) |
+|---|---|---|
+| Contract Management | `/contracts/executive` | `/contracts/dashboard` |
+| Technical | `/contracts/technical` (upgraded in place — was an FMP-UI-01 placeholder, no operational page existed to protect) | — |
+| Erection | `/contracts/erection-executive` | `/contracts/erection-dashboard` |
+| Safety & Compliance | `/safety-compliance/executive` | `/safety-compliance/dashboard` |
+| Incident Report | `/incidents/executive` | `/incidents/dashboard` |
+| Production Planning | `/production/executive` | `/production/dashboard` |
+| Maintenance Management | `/maintenance/executive` | `/maintenance/dashboard` |
+| Task Management | `/factory-tasks/executive` | `/factory-tasks/dashboard` |
+
+Each landing page ends with a large "View [Records]" button linking to that module's existing list page (or, for Erection, to the existing full work-queue dashboard; for Technical, to the Workflow board filtered to the TECHNICAL team) — so nothing users could already do is now harder to reach, it is simply one extra, clearer step away.
+
+### Files audited before adding anything
+
+- All 6 web API clients (`contracts-api.ts`, `incidents-api.ts`, `safety-api.ts`, `production-api.ts`, `maintenance-api.ts`, `factory-tasks-api.ts`) — confirmed every dashboard fetcher's exact return shape, including the byte-for-byte-identical `recent: {id, referenceNumber, title, status, updatedAt}[]` shared by 6 of the 8 modules, and Contract Management's richer `manager.attentionItems`/Erection's `overdueAttention`/`recentActivity` shapes.
+- The 8 modules' existing dashboard `page.tsx` files and list-page routes/query params (`/incidents`, `/safety-compliance`, `/production`, `/maintenance`, `/factory-tasks`, `/contracts`, `/contracts/workflow?team=TECHNICAL`, `/contracts/erection-dashboard`).
+- Existing shared components reused as-is: `Breadcrumbs`, `MetricCard` (its built-in `status="unavailable"` honest state), `DashboardRecentTable` (its exact `recent` row shape).
+- `platform-dashboard.service.ts` / `platform-dashboard.service.test.ts`, `sidebar.tsx`, `executive-module-card.tsx`, `dashboard/page.tsx` — to find every place a module's route is referenced before changing any of them.
+
+### Changes
+
+**New shared library/components (all under `apps/web/src/app/(protected)/`):**
+- `_lib/module-accent.ts` — the `ACCENT_PALETTE`/`ModuleAccent` type extracted out of `executive-module-card.tsx` (FMP-UI-05/06) so landing pages can reuse the exact same literal-hex per-module colors; `executive-module-card.tsx` now imports from here and re-exports the type, zero visual/behavioral change to the Executive Dashboard cards themselves.
+- `_lib/executive-modules.ts` — the single ordered list of all 8 modules (code, title, landing route, icon, accent) plus `getModuleNeighbors()`, driving Previous/Next and the module-switcher chips consistently across all 8 pages.
+- `_components/executive-module-nav.tsx` — breadcrumb ("Executive Dashboard > [Module]"), large text-labeled Back to Platform Dashboard / Previous / Next buttons (never icon-only), and a horizontal module-switcher chip row.
+- `_components/executive-module-title.tsx` — module icon + title + one-line description + acting user's name/role.
+- `_components/executive-kpi-grid.tsx` — renders every real field a module's own dashboard API returns as a `MetricCard`, humanizing the field name and honoring `null` as MetricCard's existing "Unavailable" state.
+- `_components/executive-attention-panel.tsx` — "Needs Attention" section; renders real per-record rows (Contract Management, Erection) or real aggregate counts (everything else), or an honest "Not available" message when a module has neither.
+
+**New/updated pages (8):**
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` (new) — Contract Management landing; KPIs from `contractsApi.dashboard().metrics`; Needs Attention from `manager.attentionItems` (Manager-tier only — Staff-tier shown honestly as "Not available for your current access level"); Recent Activity from `data.recent`; button → `/contracts` ("View Contract List").
+- `apps/web/src/app/(protected)/contracts/technical/page.tsx` (upgraded from FMP-UI-01 placeholder) — KPIs reuse the Executive Dashboard's own Technical card metrics (`platformApi.dashboard()`, filtered to `code === 'TECHNICAL'`); Needs Attention and Recent Activity both honestly "Not available yet — coming next"; button → `/contracts/workflow?team=TECHNICAL` ("View Technical Workflow").
+- `apps/web/src/app/(protected)/contracts/erection-executive/page.tsx` (new) — Erection landing; KPIs from `contractsApi.erectionDashboard().kpis` (excluding the non-numeric `paymentPendingAfterErectionAvailable` flag); Needs Attention from `overdueAttention` rows (real, with each row's own `nextAction` link); Recent Activity from `recentActivity` (its own event/actor/date shape, rendered inline since it doesn't match the shared `DashboardRecentTable` row shape); button → `/contracts/erection-dashboard` ("View Erection Work Queue").
+- `apps/web/src/app/(protected)/safety-compliance/executive/page.tsx` (new) — KPIs from all 6 real `safetyApi.dashboard().metrics` fields; Needs Attention from real `criticalFindings`/`overdueFindings` counts; Recent Activity from `data.recent`; button → `/safety-compliance`.
+- `apps/web/src/app/(protected)/incidents/executive/page.tsx` (new) — KPIs from `incidentsApi.dashboard().metrics`; Needs Attention from real `criticalOpen` count; Recent Activity from `data.recent`; button → `/incidents`.
+- `apps/web/src/app/(protected)/production/executive/page.tsx` (new) — KPIs from `productionApi.dashboard().metrics`; Needs Attention honestly "Not available" (no delayed/at-risk order state exists in the data model yet — same honesty rule the Executive Dashboard's Production card already follows); Recent Activity from `data.recent`; button → `/production`.
+- `apps/web/src/app/(protected)/maintenance/executive/page.tsx` (new) — KPIs from `maintenanceApi.dashboard().metrics`; Needs Attention from real `overdueRequests`/`waitingForParts` counts; Recent Activity from `data.recent`; button → `/maintenance`.
+- `apps/web/src/app/(protected)/factory-tasks/executive/page.tsx` (new) — KPIs from `tasksApi.dashboard().metrics`; Needs Attention from real `overdueTasks`/`blockedTasks` counts; Recent Activity from `data.recent`; button → `/factory-tasks`.
+
+**Dashboard card + sidebar routing (no new business logic, route strings only):**
+- `apps/api/src/platform/platform-dashboard.service.ts` — 7 of the 8 cards' `route` field now points to the new landing page instead of the operational dashboard (Technical's `/contracts/technical` was already correct and unchanged). `platform-dashboard.service.test.ts` updated for the 2 routes it asserted on (Erection, Task Management).
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `EXECUTIVE_SIDEBAR_ITEMS` (the Executive Manager's flat 8-item nav, FMP-UI-03) now points to the same 8 landing routes, so the sidebar and the dashboard cards always agree. `isActive()`'s existing "/dashboard-suffix also matches the bare module path" rule was generalized to cover "/executive"-suffixed hrefs too, so a landing-page sidebar item still highlights while viewing a record reached from it; `isExecutiveItemActive()`'s existing `/contracts/dashboard` exact-match override (needed because Contract Management shares the `/contracts/*` prefix with Technical/Erection, unlike every other single-item module) was moved to the new `/contracts/executive` href it now guards. `CONTRACT_TOP_LEVEL_SLUGS` gained `executive`/`erection-executive` so the regular (non-executive) Contract List sidebar item's active-state logic isn't confused by the two new sibling routes.
+
+**Removed:** `apps/web/src/app/(protected)/contracts/_components/contract-placeholder-page.tsx` — deleted after upgrading Technical (its only remaining caller) off the placeholder shell; confirmed zero other references before deletion.
+
+**Not changed, by design:** `apps/web/src/app/(protected)/dashboard/page.tsx` (its cards already render whatever `route` the API returns, so no code change was needed there for the new links to take effect), and all 8 existing operational dashboard pages/services — none were read-modified beyond the audit reads above.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors (both packages) — one round of `exactOptionalPropertyTypes` fixes needed in `executive-attention-panel.tsx`'s optional props |
+| `pnpm --filter @recafco/api test` | ✓ 1647/1647 tests |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged count — no existing test's assumptions were touched) |
+| `pnpm build` | ✓ 8/8 tasks; all 8 new/updated routes (`/contracts/executive`, `/contracts/technical`, `/contracts/erection-executive`, `/safety-compliance/executive`, `/incidents/executive`, `/production/executive`, `/maintenance/executive`, `/factory-tasks/executive`) present in the route manifest alongside every untouched original route |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again in this unit's predecessor, FMP-UI-06B) — verification relied on typecheck/test/build plus reading the route manifest `pnpm build` printed.
+- The Contract Management sidebar/`isActive` interaction is the one place a naive route rename would have silently broken active-state highlighting for sibling modules — worth re-checking this exact interaction if any other module ever grows sibling routes under a shared prefix the way Contract Management has (Technical, Erection, Schedule, Payments, etc. all under `/contracts/*`).
+- Erection's `recentActivity` row shape (`event`/`actorName`/`createdAt`) does not match the `{referenceNumber, title, status, updatedAt}` shape every other module's `recent` array shares — rendered with a small inline list on that one page rather than forcing it through `DashboardRecentTable`.
+
+## FMP-UI-07B — Executive Module Navigation Access Filtering, Quick Links, and Whole-Card Click (Completed 2026-09-23)
+
+### Summary
+
+A follow-up spec restated FMP-UI-07's goal (consistent executive navigation across all 8 module landing pages) but suggested a different architecture — embedding the nav banner directly into the existing operational dashboards and routing dashboard cards back to them. Per explicit user confirmation, the existing FMP-UI-07 architecture (8 dedicated `/module/executive` landing pages, all 8 original operational dashboards untouched) was kept as-is; this unit instead closed the real remaining gaps the new spec surfaced against that architecture: permission-filtered module-switcher/Previous/Next, per-module Quick Links, whole-card click on the Executive Dashboard, and breadcrumb wording. No backend, permission, metric, or schema change.
+
+### Changes
+
+**Access-filtered navigation (spec item 10 — the one real correctness gap):** `_lib/executive-modules.ts` gained `requiredPermission` per module and two new functions, `getVisibleModules(permissions)` and an updated `getModuleNeighbors(code, permissions)` that both filter to modules the viewer actually holds the (already-existing) read permission for — the identical permission each module's own controller and `PlatformDashboardService` already gate on, never a new one. `executive-module-nav.tsx` now takes a required `permissions: string[]` prop and renders only the visible chips, with Previous/Next skipping over any module the viewer can't open. All 8 landing pages pass their already-fetched `permissions` array through. Before this fix, a single-module viewer (e.g. Safety-only) who reached their own landing page would have seen switcher chips for all 8 modules, including ones a click would 404 on.
+
+**Quick Links (spec item 8):** new shared `_components/executive-quick-links.tsx` renders a row of secondary link buttons. Added to all 8 landing pages, using only routes/query params each module's own existing list page already supports (confirmed by reading each list page's filter logic before adding a single link):
+- Contract Management: Schedule, Payments, Claims, Closeout Requests
+- Technical: Contract List
+- Erection: My Tasks (`/contracts/workflow?mode=my-tasks`)
+- Safety & Compliance: Scheduled, In Progress, Completed
+- Incident Report: Open Incidents, Critical
+- Production Planning: Scheduled, In Progress, Paused
+- Maintenance Management: Waiting for Parts, Overdue Maintenance
+- Task Management: Active Tasks, Overdue, My Tasks
+
+**Whole-card click (spec item 9):** `dashboard/_components/executive-module-card.tsx` — the card's root `<div>` became the `<Link>` itself (the whole card is now the clickable/tappable target, not just the bottom button); the former "Open {title}" `<Link>` became a `<span>` styled identically (HTML forbids a nested `<a>`, so there can only be one real anchor per card). `group`/`group-hover:brightness-95` on that span reproduces the exact same hover feedback the button alone used to give; the focus ring moved from the now-non-focusable span onto the outer `<Link>`, so keyboard users still get exactly one clear focus stop per card, not two pointing at the same destination.
+
+**Breadcrumb wording (spec item 6):** `executive-module-nav.tsx`'s breadcrumb first item changed from "Executive Dashboard" to "Platform Dashboard" — matches the "Back to Platform Dashboard" button's own existing wording and the spec's literal requirement.
+
+**Not changed:** dashboard card routes, sidebar hrefs, module header content, and every existing operational dashboard page — none of the new spec's suggested routing changes were applied, per the confirmed decision to keep the FMP-UI-07 landing-page architecture.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm --filter @recafco/api test` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm build` | ✓ 8/8 tasks; all 8 landing routes present |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `getModuleNeighbors` falls back to matching by module code across the FULL list (ignoring visibility) if the current module somehow isn't in the viewer's own visible set — defensive only; in practice every landing page already 404s before rendering the nav if the viewer lacks that module's own permission, so `code` is always a member of `getVisibleModules(permissions)` by the time this runs.
+- No browser automation tool is available in this environment (checked again) — the whole-card-click change was verified via typecheck (valid JSX, no nested-anchor type error would surface anyway since React doesn't statically catch that) and a manual re-read confirming exactly one `<Link>`/`<a>` per card in the compiled tree.
+
+## Add Official RECAFCO Logo Across the Platform (Completed 2026-09-23)
+
+### Summary
+
+Added the real RECAFCO company logo (supplied as `recafco-logo.png`, a square lockup with an Arabic wordmark, the stylized wing mark, "RECAFCO" in red, and a "Since 1976" tagline, on a transparent background) to the two highest-impact, always-visible brand spots: the sidebar (every protected page) and the login page. Also set it as the browser tab/app icon platform-wide. No backend/permission/route/schema change.
+
+### Changes
+
+- Source file `recafco-logo.png` (3375×3375, transparent PNG) was cropped to its real content bounding box (removing ~20% of surrounding transparent padding baked into the original canvas) and downscaled to a web-appropriate size, producing `apps/web/public/recafco-logo.png` (1158×900, ~150KB) — used by both the sidebar and the login page via a plain `<img>` (no `next/image` elsewhere in this codebase, so none introduced here either).
+- `apps/web/src/app/icon.png` (512×512, resized from the original) — Next.js App Router auto-detects this filename as the site's favicon/app icon; confirmed in the build output as a new static `/icon.png` route, no code/metadata change needed.
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — the brand header row (previously a generic red "R" square + "RECAFCO FMP" text, always on the sidebar's dark `bg-nav` background) now shows the real logo. Because the logo's dark elements (the Arabic wordmark, the dark grey wing) would be invisible against the dark sidebar, the row itself was given an explicit `bg-white` panel (height `h-14`→`h-24` to fit the logo at a legible `h-16`) instead of wrapping just the image in a small chip — a full light "brand panel" atop an otherwise dark sidebar, a common enterprise-UI pattern. The mobile close button and the link's focus ring were re-colored for the new light background (`text-text-inverse/70`→`text-text-secondary`, `focus-visible:ring-white/50`→`focus-visible:ring-focus`).
+- `apps/web/src/app/login/page.tsx` — the "RECAFCO FMP" heading was replaced with the logo image at `h-24`, centered, with the "Factory Management Platform" tagline kept underneath (the logo itself doesn't say "FMP", so the tagline still carries that context).
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ succeeds; `/icon.png` appears as a new static route in the route manifest |
+
+### Key Implementation Notes
+
+- The source PNG's alpha channel is genuinely transparent (verified pixel-by-pixel, not just visually white) — this is why placing it directly on the dark sidebar without a light backing would have made its dark-grey elements disappear; only the red parts would have shown.
+- No browser automation tool is available in this environment — visual placement was verified by reading the cropped/resized PNG back with the image-reading tool before wiring it in, plus the build's route-manifest confirmation that `/icon.png` and both edited pages compile.
+
+## FMP-UI-07C — Route Executive Module Cards to Senior-Friendly Landing Pages, Not Operational Dashboards (Completed 2026-09-23)
+
+### Summary
+
+This unit's premise ("clicking Contract Management still opens /contracts/dashboard directly") was checked against the current codebase before any change: `PlatformDashboardService`'s `CONTRACTS_MANAGEMENT` card route and `sidebar.tsx`'s `EXECUTIVE_SIDEBAR_ITEMS` entry were already `/contracts/executive`, not `/contracts/dashboard` — set by FMP-UI-07 and unchanged by FMP-UI-07B. All 8 cards and all 8 executive sidebar entries were re-verified individually and already point at their landing pages (`/contracts/executive`, `/contracts/technical`, `/contracts/erection-executive`, `/safety-compliance/executive`, `/incidents/executive`, `/production/executive`, `/maintenance/executive`, `/factory-tasks/executive`), none at a `/dashboard` route. Whole-card click (FMP-UI-07B) already routes the entire card, not just the button, to the same `href`. So acceptance criteria 1, 2, 6, 8, 9 were already true in the code — most likely the live test that reported this was against a stale running server/build from before FMP-UI-07/07B (this work has never been committed or deployed; a dev server or `.next` build that predates those changes would still serve the old `/contracts/dashboard` link). A full clean rebuild was run as part of this unit specifically to rule that out.
+
+What genuinely needed fixing, found by checking this unit's very specific content spec for the Contract Management landing page against what FMP-UI-07 had actually shipped there:
+- **The page had no link to `/contracts/dashboard` at all.** FMP-UI-07's Contract Management landing page linked to `/contracts` (the list) as its only "go deeper" action — it never actually offered a way back to the full operational dashboard, which is exactly acceptance criterion 5's explicit requirement. This was the one real, concrete gap.
+- The KPI section showed the raw 7-field `ContractDashboardData.metrics` object (Draft/Active/Expiring/Expired/Terminated/Closed/Cancelled counts) rather than the 4 specific figures this unit's spec names (Total Contracts, Active Contracts, Pending Approvals, Outstanding Payments) — which are exactly the same 4 the Executive Dashboard's own card already shows.
+- Needs Attention showed the per-record `manager.attentionItems` list rather than the 4 specific real aggregate counts this unit's spec names (Open Claims, Overdue Workflow Tasks, Critical Contracts, Contracts Closing Soon).
+
+### Changes
+
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx`:
+  - KPIs rebuilt to the 4 named figures — `totalContracts` (sum of all 7 real status counts, same formula `PlatformDashboardService.buildContractManagementCard()` already uses), `activeContracts` (`metrics.totalActive`), `pendingApprovals` (`metrics.totalDraft`), `outstandingPayments` (`manager.summary.outstandingPayments`, honestly `null`/"Not available" for a Staff-tier viewer with no manager summary computed).
+  - Needs Attention rebuilt to the 4 named real aggregate counts — Open Claims (`manager.summary.openClaims`), Overdue Workflow Tasks (`manager.summary.overdueWorkflowTasks`), Critical Contracts (`manager.insights.criticalProjectContracts`), Contracts Closing Soon (`manager.insights.contractsClosingSoon`) — using `ExecutiveAttentionPanel`'s `countItems` variant instead of `recordItems`. Same `available={dashboardType === 'MANAGER'}` honesty gate as before.
+  - Description updated to this unit's exact wording: "Executive overview of contracts, approvals, payments, claims, risks, and closeout."
+  - Quick Links gained "Operational Dashboard" → `/contracts/dashboard` as the first link — the fix for acceptance criterion 5. "Documents & Obligations" was checked and confirmed to have no module-level route (only a per-contract `/contracts/[id]/documents` page exists) — correctly omitted per the spec's own "if route exists" condition.
+- The same "Operational Dashboard" quick link was added to the 5 other modules that have a real, separate `/module/dashboard` route distinct from their list page — `apps/web/src/app/(protected)/safety-compliance/executive/page.tsx`, `incidents/executive/page.tsx`, `production/executive/page.tsx`, `maintenance/executive/page.tsx`, `factory-tasks/executive/page.tsx` — for the same navigation-clarity reason, applied consistently across all 8 rather than singling out Contract Management. Erection's primary button already targets its own operational dashboard (`/contracts/erection-dashboard`, unchanged); Technical has no separate operational dashboard to link to.
+- No change to `PlatformDashboardService`, `sidebar.tsx`, `executive-module-card.tsx`, or any of the other 6 executive landing pages' KPI/Needs Attention structure — already correct from FMP-UI-07/07B.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm --filter @recafco/api test` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm build` (fresh, to rule out a stale-build explanation for the report) | ✓ 8/8 tasks; `/contracts/dashboard` and `/contracts/executive` both present as separate routes in the manifest |
+| Compiled output inspection | ✓ "Operational Dashboard" string present in the compiled SSR chunks; "Total Contracts", "Pending Approvals", "Outstanding Payments" and the 4 Needs Attention labels all present in the compiled Contract Management landing page chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Before changing any routing code, every route this unit's premise depended on was re-checked directly in the source (`grep` on `PlatformDashboardService`'s `route:` fields and `sidebar.tsx`'s `EXECUTIVE_SIDEBAR_ITEMS`) — all 8 were already correct. Acting on a bug report's stated symptom without first confirming it against current source would have risked "fixing" something that wasn't broken and missing the one thing that actually was (the missing Operational Dashboard link).
+- No browser automation tool is available in this environment (checked again) — confirmed via a genuinely fresh `pnpm build` (this unit deliberately avoided relying on Turborepo's build cache reasoning alone, given the concern was specifically about staleness) plus direct grep of the compiled `.next/server` chunks for the new strings.
+
+## FMP-UI-08 — Improve Login Page UI/UX for RECAFCO Factory Management Platform (Completed 2026-09-23)
+
+### Summary
+
+Redesigned `/login` into a professional two-panel enterprise layout, with the exact same authentication logic — no changes to `login/actions.ts`, `LoginForm`'s `action`/`useActionState` wiring, cookie/session handling, or the first-login `/change-password` redirect. Only presentation (`page.tsx` layout and `login-form.tsx` styling) changed.
+
+### Files audited
+
+- `apps/web/src/app/login/actions.ts` — confirmed untouched: same `loginAction`, same cookie names/flags/maxAge, same `mustChangePassword` → `/change-password` redirect.
+- `apps/web/src/app/change-password/page.tsx` — confirmed the first-login flow is a fully separate route/page; nothing here was read or changed beyond confirming it exists and isn't affected.
+- `apps/web/src/app/globals.css` — confirmed `--color-nav` (deep navy), `--color-accent` (RECAFCO red), `--color-background`/`--color-surface` already match this unit's requested brand palette exactly; no new color tokens were needed or added.
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — reused its exact `CARD_ICONS` icon choices (FileText/Ruler/HardHat/ShieldCheck/AlertTriangle/Factory/Wrench/ClipboardList) for the new branding panel's module strip, rather than inventing a second icon mapping.
+
+### Changes
+
+- `apps/web/src/app/login/page.tsx` — rebuilt as a two-panel layout:
+  - **Left branding panel (`hidden lg:flex`, desktop only):** dark `bg-nav` background with a faint CSS-only diagonal-hairline pattern (`repeating-linear-gradient`, ~4% white opacity, no image); the RECAFCO logo in a small white rounded chip (same "light backing behind the logo" pattern the sidebar already established, since the logo's dark elements would disappear directly on `bg-nav`); a "Since 1976" pill; the "RECAFCO Factory Management Platform" heading; the exact suggested description text; an 8-icon module strip (reusing the dashboard's own icons); and the "Authorized RECAFCO users only." trust note with a `Lock` icon.
+  - **Right side (always visible):** the login card, now `rounded-xl` / `shadow-md` / `p-8` (up from `rounded-lg`/`shadow-sm`/`p-6`), title "Sign in" at `text-2xl font-bold` (up from `text-base font-semibold`), subtitle "Use your company account to continue.", and a new footer line "© RECAFCO · Factory Management Platform · Internal Use Only". Below `lg`, a compact logo + "Factory Management Platform" block appears above the card instead of the full left panel — the spec's separate "tablet" and "mobile" tiers both resolve to this same single-column, card-first shape, so no third breakpoint-specific layout was built.
+  - Background gained a subtle two-token gradient (`bg-linear-to-br from-background to-surface-secondary`, Tailwind v4's canonical gradient utility) in place of the flat `bg-background`.
+- `apps/web/src/app/login/_components/login-form.tsx` — visual-only pass: inputs grew `h-10`→`h-12` with `text-base` (was `text-sm`) and gained a leading `User`/`Lock` icon (lucide-react, already the app's icon system); the button grew to `h-12 text-base font-semibold`; the error banner gained an `AlertCircle` icon and `rounded-lg`. Every `name`, `type`, `required`, `autoComplete`, `id`, and the `action`/`useActionState` call are byte-for-byte unchanged from before this unit.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged — no test exists for this route, none needed to change) |
+| `pnpm build` | ✓ 8/8 tasks; `/login` still builds as a static page |
+| Compiled output inspection | ✓ "Authorized RECAFCO users only", "Use your company account to continue", and "Since 1976" all present in `.next/server/app/login.html` |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again) — visual correctness was verified by reading the compiled static `login.html` output for the expected strings, plus a full re-read of both edited files before finalizing.
+- The same "dark background needs a light backing behind the logo" rule established for the sidebar (see that component's own ui-registry note) applied again here for the left branding panel — documented once more so it isn't re-discovered from scratch next time a dark surface needs this logo.
+
+## FMP-UI-08B — Redesign Login Page with Unique Factory Command Center Style (Completed 2026-09-23)
+
+### Summary
+
+FMP-UI-08's two-panel layout (dark `bg-nav` branding panel on the left, white card on the right, 8-icon module grid) read too close to a generic enterprise/"maintenance system" login. This unit replaces it entirely with a single centered layout — no side panel at any breakpoint — with the "factory command center" identity coming from the background itself (a light CSS-only blueprint grid plus two very faint navy/red glow accents) rather than from a dark zone. Authentication logic untouched.
+
+### Changes
+
+- `apps/web/src/app/login/page.tsx` — fully rewritten:
+  - Removed: the `hidden lg:flex` left panel, its `bg-nav` background, the diagonal-hairline pattern, the "Since 1976" pill, the 8-icon `MODULE_STRIP` grid, and the separate `lg:hidden` compact-branding block (no longer needed — there's now only ever one branding block, always shown).
+  - New: a single centered column (`max-w-md`, always centered, every breakpoint) — logo in a small white rounded chip, "RECAFCO Factory Management Platform" title, "Internal Operations System" tagline, the login card, then a two-line footer ("Authorized RECAFCO users only · Internal Use Only" / "© RECAFCO · Since 1976").
+  - Background: light `bg-background` with a CSS-only "blueprint" grid — two `repeating-linear-gradient` pairs (fine 48px lines at ~3.5% opacity, major 240px lines at ~7% opacity), both tinted with `--color-nav`'s own RGB (`rgba(23,32,51,*)`, no new token) — plus two large, heavily blurred, very-low-opacity circles (`blur-3xl`, navy top-left at 7%, red bottom-right at 6%, `--color-accent`'s RGB) for a faint premium glow. All of it is `pointer-events-none aria-hidden` decoration behind a `relative z-10` content column.
+  - Card unchanged in spirit from FMP-UI-08 (`rounded-2xl` now, up from `rounded-xl`; `shadow-lg`, up from `shadow-md`) — same "Sign in" title, same subtitle, same `<LoginForm>`.
+- `apps/web/src/app/login/_components/login-form.tsx` — **not touched**. FMP-UI-08 already gave it `h-12`/`text-base` inputs with `User`/`Lock` icons, a large button, and a visible focus ring — this unit's "Card UX" requirements (large inputs, easy to click, clear labels, good spacing, visible keyboard focus) were already satisfied.
+- `apps/web/src/app/login/actions.ts` and `apps/web/src/app/change-password/**` — not opened. Confirmed by inspection in FMP-UI-08 to be independent of the page's presentation; nothing in this unit touches them either.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; `/login` still builds as a static page |
+| Compiled output inspection | ✓ "Internal Operations System" and the new footer line present in `.next/server/app/login.html`; zero occurrences of the removed split-panel markers (`hidden lg:flex`, `MODULE_STRIP`, the old "Since 1976" pill) anywhere in that file |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again) — verified by reading the compiled static `login.html` for both "new content present" and "old split-panel markup absent."
+- The blueprint-grid + glow background is 3 small `aria-hidden` decorative divs with inline `style`, not a new global CSS class or token — consistent with how one-off visual effects have been handled elsewhere in this app (e.g. the dashboard card's inline hex colors), keeping this page self-contained and easy to remove/adjust again if a future round wants a different background treatment.
+
+## FMP-UI-08C — Final Login Page Premium UI Polish (Completed 2026-09-23)
+
+### Summary
+
+A polish pass on FMP-UI-08B's centered "factory command center" layout — the structure (centered logo → title → card → footer, no side panel) is unchanged; every change here is sizing, color, shadow, or an added decorative element addressing "too plain/empty," "background too flat," "card looks basic," and "branding not strong enough." Auth logic untouched.
+
+### Changes
+
+- `apps/web/src/app/login/page.tsx`:
+  - **Branding strengthened:** logo chip grew `p-3`→`p-4` / `rounded-xl`→`rounded-2xl` / logo `h-16`→`h-20`; title grew `text-2xl font-bold`→`text-3xl font-extrabold`; "Internal Operations System" restyled as a small uppercase-tracked label instead of plain body text; added a new "Secure Internal Access" pill (`ShieldCheck` icon, white pill, subtle shadow) beneath the tagline.
+  - **Background refined:** added a large soft central radial-gradient glow (white, centered on the same point as the card) — this both satisfies "soft radial glow behind the card" and doubles as a vignette that naturally softens the grid pattern right where the eye focuses, addressing "grid too flat/repetitive" without a second masking layer. The fine grid line opacity eased `0.035`→`0.03`. The two corner glow accents (navy top-left, red bottom-right, unchanged colors/positions from FMP-UI-08B) were enlarged (`size-96`→`size-112`) and nudged slightly stronger (`0.07/0.06`→`0.09/0.08` opacity) — still heavily blurred, still low-opacity, never a flashy gradient.
+  - **Card polished:** `max-w-md`→`max-w-lg` (more presence), `rounded-2xl`→`rounded-3xl`, `border-border`→`border-border/60` (softer), `shadow-lg`→`shadow-2xl`, added a subtle top "sheen" (a plain `bg-linear-to-b from-white/60 to-transparent` overlay strip, not a blur/glass effect, so the card's own content stays perfectly crisp), title grew to match the branding title (`text-3xl font-extrabold`).
+- `apps/web/src/app/login/_components/login-form.tsx`:
+  - Field spacing `space-y-5`→`space-y-6`.
+  - **Focus rings switched from the generic blue `--color-focus` to RECAFCO's own brand colors** (this unit's explicit "stronger focus ring using RECAFCO red/navy" requirement): both inputs now use `focus:ring-accent` (red); the button uses `focus:ring-nav` (navy), chosen specifically because a navy ring reads clearly against the button's own red fill, where a red-on-red ring would not.
+  - Button gained `shadow-md hover:shadow-lg` for a "slightly premium" lift on hover.
+  - Every `name`, `type`, `required`, `autoComplete`, `id`, and the `action`/`useActionState` call remain byte-for-byte unchanged.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; `/login` still builds as a static page |
+| Compiled output inspection | ✓ "Secure Internal Access" present in `.next/server/app/login.html`; `ring-accent`/`ring-nav` utility classes present in the compiled CSS |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `ring-accent`/`ring-nav` are ordinary Tailwind utility classes compiled at build time from the existing `--color-accent`/`--color-nav` theme tokens — not a repeat of the historical "invisible button" issue (that was specifically about an INLINE `style={{ backgroundColor: 'var(--color-x)' }}` reference; a compiled utility class has no such runtime dependency).
+- No browser automation tool is available in this environment (checked again) — verified via the compiled `login.html`/CSS output as above.
+
+## FMP-UI-09 — Fix Executive Dashboard Logo Placement and Sidebar Brand Polish (Completed 2026-09-23)
+
+### Summary
+
+This unit's premise ("the logo appears large in the white top-left header area") was checked against source before any change, the same way FMP-UI-07C checked its own premise: `top-header.tsx` and `dashboard/page.tsx` were both re-read and confirmed to have never contained a logo image — the Executive Dashboard header only ever shows the centered title text ("RECAFCO Factory Management Platform"), added back in FMP-UI-04B, with no `<img>` anywhere near it. What the report was actually describing is the **sidebar's own brand panel** — added when the logo was first placed across the platform — which renders as a full-width, full-height (`h-24`) **white row** with a 64px logo, visually reading as a large logo disconnected from the rest of the dark sidebar, sitting at the top of the screen's left column (easy to describe as "the top-left header area" even though it isn't `TopHeader`). That panel is the one real thing this unit needed to fix.
+
+### Changes
+
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — the brand row (inside `sidebarContent`, shared by both the desktop and mobile `<aside>`) went from a full white panel back to a compact, dark-background row matching the rest of the sidebar's own theme:
+  - Row height `h-24`→`h-16`; `bg-white`/`border-border`→ no background override (inherits the sidebar's own dark `bg-nav`) / `border-nav-hover` (the sidebar's own existing divider color).
+  - The logo itself now sits in a small white chip (`rounded-md bg-white p-1`) sized to just the image (`w-11`, ≈44px wide — within this unit's own "40–48px" recommendation), not a full-row white background — still enough contrast for the logo's dark elements (same "needs a light backing" rule documented on this component before), but now reads as a small badge inside the dark row instead of a separate white panel.
+  - "RECAFCO FMP" (bold, light text) + a "Factory Management" subtitle (small, muted light text) now sit beside the logo, restoring a text label that had been dropped when the full logo image replaced the sidebar's original "R" badge + text.
+  - Mobile close button and the link's focus ring recolored back for a dark background (`text-text-inverse/70`, `focus-visible:ring-white/50`) — they had been switched to light-background colors when the row was white.
+- `apps/web/src/app/(protected)/_components/top-header.tsx` and `apps/web/src/app/(protected)/dashboard/page.tsx` — **not changed.** Confirmed by inspection to already satisfy every requirement this unit's spec states for them (clean centered title, user/role + Sign out on the right, no logo, dashboard cards unaffected) — there was nothing to fix in either file.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ the new `h-16 ... border-nav-hover` brand row and "Factory Management" text present in the compiled `app-shell` chunk; the old `h-24 ... bg-white` row string is gone |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Same lesson as FMP-UI-07C: a bug report's stated location ("the top header") is a starting hypothesis, not a given — `top-header.tsx` was re-read and confirmed innocent before any edit, which pointed straight at the sidebar's brand panel as the actual, adjacent issue instead of risking a no-op edit to the wrong file.
+- No browser automation tool is available in this environment (checked again) — verified via the compiled `app-shell` chunk as above.
+
+## FMP-UI-09B — Executive Dashboard Fit-to-Screen Card Spacing Polish (Completed 2026-09-23)
+
+### Summary
+
+Fixed the Executive Dashboard's "cards look compressed while the page still has unused space" problem — verified real before touching anything: with the previous card sizing, the 2-row grid's natural content height was only ~240px per row (~500px total), while a typical maximized-browser 1080p `<main>` area is ~900–950px tall, leaving a large one-sided gap below the grid. The fix has two parts working together: cards grew a deliberate, moderate step (not stretched to arbitrarily fill leftover space, which would just relocate the empty gap to *inside* each card, between the metrics and the button), and the page now centers the whole 2-row grid vertically within whatever space `<main>` actually gives it, so any remaining slack is split evenly above and below instead of dumped as one lopsided gap at the bottom.
+
+### Changes
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — every element inside the card grew one step: icon badge `size-9`→`size-10`, icon `size-4.5`→`size-5`, title `18px`→`20px`, description `text-xs`→`text-sm`, card padding `p-3`→`p-4`, header-to-metrics gap `mt-1.5`→`mt-2.5`, metric tile padding `px-2 py-1.5`→`px-2.5 py-2`, metric number `26px`→`28px`, metrics grid gap `gap-1.5`→`gap-2`, button-wrapper top padding `pt-2.5`→`pt-3`, button height `h-10`→`h-11`, and the `min-h` floor `min-h-52`(208px)→`min-h-64`(256px). Mechanism (literal-hex colors, `flex flex-col`+`flex-1`+`mt-auto`, whole-card `<Link>`) is completely unchanged — this is a pure sizing pass.
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — outer container padding trimmed (`pt-3 pb-5 lg:pt-4 lg:pb-6`→`pt-2 pb-3 lg:pt-3 lg:pb-4`) to give the grid more of the available height; the container gained `flex min-h-full flex-col`, and its content (error/empty states + the grid) is now wrapped in a `flex flex-1 flex-col justify-center` div so the 2-row grid centers within whatever height `<main>` (AppShell's own real scroll container, `flex-1 overflow-auto`, unchanged) actually provides. `min-h-full` (not `h-full`) was used deliberately — it lets content grow taller and scroll normally on mobile/tablet exactly as before, while giving the flex column a real height to center within on desktop.
+- 4 columns × 2 rows, `align-items: stretch` (default), and every route/permission/metric computation are completely unchanged.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 931/931 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ `min-h-64` present (old `min-h-52` gone), `flex min-h-full max-w-7xl flex-col` and `flex flex-1 flex-col justify-center` both present in the compiled dashboard chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment (checked again), so the exact pixel result on a live 1080p screen couldn't be visually confirmed — the fix is grounded in an explicit height budget calculation (documented above: ~900–950px typical `<main>` height on a maximized 1080p browser vs. the grid's own natural content height before and after this change) rather than a guess, and the `justify-center` wrapper makes the result robust to browser-chrome/zoom variance either way — any leftover space becomes balanced framing, never a one-sided gap, regardless of the exact number.
+- Confirmed the Administration dashboard (`/administration/dashboard`) does not import `ExecutiveModuleCard` and lives in a completely separate file tree — this unit's changes cannot have touched it.
+- `min-h-full` requires `<main>` to have a definite (non-auto) computed height for the percentage to resolve — true here because `<main>` is itself a flex item (`flex-1`) inside AppShell's `h-screen` flex layout, so this was safe without needing `h-screen` on the page itself (which would have broken the mobile "grow and scroll normally" requirement).
+
+## FMP-UI-07D — Simplify Contract Management Executive Overview for Senior Managers (Completed 2026-09-23)
+
+### Summary
+
+A polish pass on the Contract Management executive landing page that found and fixed one genuine, previously-undetected bug (a wrong breadcrumb rendering above the page's own correct one) plus five real content/structure issues, three of which were fixed in SHARED components (affecting all 8 landing pages consistently, not just Contract Management, since the underlying duplication/styling issues were identical everywhere) and two of which were Contract-Management-specific rewrites.
+
+### Files audited
+
+- `apps/web/src/app/(protected)/_lib/contract-workspace-breadcrumb.ts` — read in full to find why "the breadcrumb shows Contract Detail context." Found the real cause: `isContractWorkspaceDetailPath()`'s `CONTRACT_MODULE_SEGMENTS` set (the real top-level Contract Management module pages) had never been updated when FMP-UI-07 added `/contracts/executive`, `/contracts/technical`, `/contracts/erection-executive` — all three fell through to the function's "anything else looks like a contract id" default of `true`, making `TopHeader` render "Contract Management > Contract List > Contract Detail" ABOVE each landing page's own correct "Platform Dashboard > [Module]" breadcrumb from `ExecutiveModuleNav`. This affected all 3 of those routes, not only Contract Management's.
+- `apps/web/src/app/(protected)/_components/executive-module-title.tsx`, `executive-module-nav.tsx`, `executive-attention-panel.tsx` — re-read to confirm the "duplicate user text" and "too many small chips" complaints were structural (shared-component) issues present on all 8 landing pages, not unique to Contract Management.
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` — re-read against this unit's detailed content spec.
+
+### Changes
+
+**Shared fixes (apply to all 8 Executive Module Landing Pages):**
+- `_lib/contract-workspace-breadcrumb.ts` — added `'executive'`, `'technical'`, `'erection-executive'` to `CONTRACT_MODULE_SEGMENTS`, fixing the wrong-breadcrumb bug at its root for all 3 affected routes. `contract-workspace-breadcrumb.test.ts` extended with the 3 new segments in its existing parametrized "is false for the %s module page" case.
+- `_components/executive-module-title.tsx` — removed the right-side displayName/roleName block entirely (duplicated what `TopHeader` already shows, always, top-right, on every protected page). All 8 landing pages updated to stop fetching/passing those two props (the `authApi.me()` call itself is unchanged — `permissions` is still read from the same response).
+- `_components/executive-module-nav.tsx` — the module-switcher chip row restyled to read as clearly secondary: every inactive chip is now a uniform neutral grey (`border-border`/`text-text-secondary`, plain Tailwind classes, no inline style) instead of each module's own bright accent color all at once (a "rainbow" of 7 colored pills was the real reason the row read as "too many small confusing controls," not its size) — only the current page's own chip keeps its module color as a highlight. Row also gained a `border-t` divider and a small "Other modules" caption, and only renders at all when there is more than one visible module.
+- `_components/executive-attention-panel.tsx` — added an opt-in `showZeroCounts` prop (default `false`, so the other 5 modules' existing "hide if zero" alert-list behavior is completely unchanged) that renders every `countItem` including zero-value ones, styled neutrally (grey chip) rather than the warning-orange treatment reserved for non-zero counts.
+
+**Contract Management page rewrite (`apps/web/src/app/(protected)/contracts/executive/page.tsx`):**
+- Description updated to this unit's exact wording ("...claims, risks and closeout status.").
+- Needs Attention now passes `showZeroCounts` — all 4 named figures (Open Claims, Overdue Workflow Tasks, Critical Contracts, Closing Soon) always render, honestly showing 0 rather than disappearing.
+- "Recent Activity" renamed "Recent Contract Updates" and rebuilt as a purpose-built compact table (Contract No. / Project / Status / Last Updated columns, matching this unit's exact spec) in place of the shared `DashboardRecentTable` (whose generic Ref/Title/Status/Updated columns didn't match the requested labels). The same real `data.recent` records are shown — CANCELLED contracts are stably sorted after active ones and rendered at `opacity-60`, never hidden, satisfying "if cancelled records must be shown, de-emphasize them" without touching any backend query.
+- Quick Links and the standalone primary button merged into one "Actions" section: primary "View Contract List" button first, the same 5 secondary links (Operational Dashboard, Schedule, Payments, Claims, Closeout Requests) below it — one section instead of two separately-headed ones.
+- Page spacing loosened `space-y-6`→`space-y-8` for a more "executive," less cramped feel.
+
+**Not changed:** `/contracts/dashboard` (the operational dashboard) — not read or touched, confirmed still a completely separate, untouched route; `PlatformDashboardService`, permissions, and every other module's landing page content beyond the 3 shared-component fixes above.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 934/934 tests (+3 — the new breadcrumb segment test cases) |
+| `pnpm --filter @recafco/api test` | ✓ 1647/1647 tests (unchanged — no API file touched) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ "Recent Contract Updates" present in the compiled Contract Management landing page chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The breadcrumb bug is the clearest example yet in this project of "a bug report's stated symptom is a starting hypothesis" — the fix was in a completely different file (`contract-workspace-breadcrumb.ts`) than the one that renders the page's own (already-correct) breadcrumb, and it affected 2 other routes (`/contracts/technical`, `/contracts/erection-executive`) that this unit's own report never mentioned.
+- No browser automation tool is available in this environment (checked again) — verified via the compiled output plus the extended unit test locking the breadcrumb fix in permanently.
+
+## FMP-UI-10 — Add QA/QC and Storage & Delivery Executive Modules (Completed 2026-09-23)
+
+### Summary
+
+Added QA/QC and Storage & Delivery as the platform's 9th and 10th executive modules — dashboard cards, sidebar entries, module-switcher chips, and two new placeholder landing pages — with zero fake data and zero new permissions. Neither module has a real backend yet, so every metric on both cards is honestly `null` ("Not available"), and both landing pages say plainly that the module is coming later. Since no dedicated permission exists for either, visibility is gated on a new `isExecutiveManagerOrAdminAccess()` rule (Executive Manager OR Admin/Super Admin), duplicated identically on the API and the web app, explicitly documented as a temporary rule to replace once the real modules are built.
+
+### Files audited
+
+- `apps/api/src/platform/platform-dashboard.service.ts` and its test — to find the exact card-building/gating pattern to extend and confirm no existing test asserts an exhaustive card list that adding 2 more cards would silently break (checked: every existing single-module test uses a permission set that can't satisfy the new "all 6 or admin" gate, so none were affected).
+- `apps/web/src/app/(protected)/_lib/module-visibility.ts` — to find the exact `isExecutiveManagerAccess`/`canSeeModule(..., 'ADMINISTRATION')` shapes to combine, rather than inventing a new classification scheme.
+- `apps/web/src/app/(protected)/_lib/executive-modules.ts`, `_components/sidebar.tsx`, `dashboard/page.tsx` — to find every place the 8-module list is enumerated and needs the 2 new entries added in sync.
+
+### Changes
+
+**Backend:**
+- `apps/api/src/platform/platform-dashboard.service.ts` — `PlatformModuleCard['code']` extended with `'QA_QC' | 'STORAGE_DELIVERY'`. New `isExecutiveManagerOrAdminAccess()` (literal permission arrays — this file/package has no shared permission-utils module with the web app) gates two new pure `buildQaQcCard()`/`buildStorageDeliveryCard()` functions, inserted into `getDashboard()` right after the Contract Management/Technical/Erection block. Both cards' 4 metrics are all `metric(label, null)` — no computation, no fake numbers, since neither module has any real data to read.
+- `platform-dashboard.service.test.ts` — 3 new tests: a single-module viewer never sees either card; an Executive-Manager-shaped actor (all 6 operational read permissions) sees all 10 cards in the correct order with both new cards' honest-null metrics and correct routes; an Admin-shaped actor (`users.read` alone, no operational permissions at all) still sees both.
+
+**Frontend:**
+- `apps/web/src/lib/platform-api.ts` — `PlatformModuleCode` extended with the same 2 codes.
+- `apps/web/src/app/(protected)/_lib/module-visibility.ts` — new `isExecutiveManagerOrAdminAccess()` export (`isExecutiveManagerAccess() || canSeeModule(permissions, 'ADMINISTRATION')`), the frontend twin of the backend function above. 4 new test cases in `module-visibility.test.ts`.
+- `apps/web/src/app/(protected)/_lib/module-accent.ts` — 2 new `ModuleAccent` values: `qaqc` (`#7e22ce`, violet — deliberately not purple/indigo, to stay distinct from Production and Technical's existing hues) and `storage` (`#475569`, slate blue-grey — deliberately not amber, to stay distinct from Erection's existing hue, since both sit close together in the card order).
+- `apps/web/src/app/(protected)/_lib/executive-modules.ts` — `ExecutiveModuleMeta.requiredPermission: string` generalized to `isVisible: (permissions: string[]) => boolean`, since QA/QC and Storage & Delivery can't be expressed as a single permission string. The other 8 modules use a tiny `permissionGate(permission)` helper that reproduces their exact previous behavior; QA/QC and Storage & Delivery use `isExecutiveManagerOrAdminAccess` directly. Both new entries added right after Erection, matching this unit's own requested order.
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — `CARD_ICONS`/`CARD_ACCENTS` extended (`BadgeCheck`/`qaqc`, `Warehouse`/`storage`); grid breakpoints widened for 10 cards: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5` (was `md:grid-cols-2 xl:grid-cols-4`) — still exactly 2 rows at the large-desktop breakpoint, with an added 3-column medium-desktop step. The FMP-UI-09B fit-to-screen mechanism (card sizing, `flex-1 justify-center` centering) is otherwise untouched — 2 rows is still 2 rows, so that unit's height math still holds.
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `EXECUTIVE_SIDEBAR_ITEMS` gained QA/QC and Storage & Delivery right after Erection (new `BadgeCheck`/`Warehouse` icon imports). This section only ever renders under `isExecutiveManagerAccess` — the "same executive-only access rule" this unit's own instruction permits using for these placeholder items, with no separate per-item permission check needed.
+- New: `apps/web/src/app/(protected)/_components/executive-coming-soon.tsx` — a small shared "this module isn't built yet" message block (icon + text, never a fake table).
+- New: `apps/web/src/app/(protected)/executive/qaqc/page.tsx` and `apps/web/src/app/(protected)/executive/storage-delivery/page.tsx` — both follow the exact `ExecutiveModuleNav` + `ExecutiveModuleTitle` + `ExecutiveComingSoon` + "Back to Platform Dashboard" button shape this unit's spec describes, gated by the same `isExecutiveManagerOrAdminAccess` check at the route level (defense in depth alongside the API's own gate).
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (+4 — new `isExecutiveManagerOrAdminAccess` cases) |
+| `pnpm --filter @recafco/api test` | ✓ 1650/1650 tests (+3 — new QA/QC/Storage & Delivery card cases) |
+| `pnpm build` | ✓ 8/8 tasks; `/executive/qaqc` and `/executive/storage-delivery` both present in the route manifest |
+| Compiled output inspection | ✓ "will be configured in a future unit" present in the compiled chunks; the new `xl:grid-cols-5` breakpoint present in the dashboard's own chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No dedicated permission was created for either module (per this unit's own "do not change permissions unless absolutely required" instruction) — `isExecutiveManagerOrAdminAccess()` is explicitly documented, on both the API and web copies, as a temporary rule to delete once real `qaqc.read`/`storage.read` permissions exist for the real modules. Whoever builds those modules next should grep for `isExecutiveManagerOrAdminAccess` in both packages to find every place this temporary rule needs replacing.
+- No browser automation tool is available in this environment (checked again) — verified via the compiled output as above.
+
+## FMP-UI-10B — Fix Missing QA/QC and Storage & Delivery Dashboard Cards (Completed 2026-09-23)
+
+### Root cause
+
+Not a code defect. The API dev process is started via a plain `node -r ts-node/register src/main.ts` (see `apps/api/package.json`'s `dev` script) — no `--watch`, no `nodemon`, no `ts-node-dev`. `ts-node` compiles TypeScript to JavaScript **once, in memory, at process startup**; it never re-reads source files afterward. The specific API process the user's browser was hitting (PID 36060) had been running continuously since 10:16:22 AM — well before FMP-UI-10's edit to `platform-dashboard.service.ts` (made later the same session, confirmed by that unit's own test-run timestamp of ~12:54 PM). That process was still serving the exact pre-FMP-UI-10 compiled code: 8 cards, no QA/QC, no Storage & Delivery — even though the source file on disk, the build, and every unit test had already been correct and passing since FMP-UI-10 finished. The Next.js web dev server (Turbopack, fast-refresh) picked up the FMP-UI-10 sidebar/frontend changes immediately, which is exactly why the sidebar showed the new items while the dashboard cards — sourced from a live HTTP call to the stale API process — did not. `dashboard/page.tsx`'s fetch already uses `cache: 'no-store'` and `dynamic = 'force-dynamic'`, so no frontend-side caching was involved either; the response itself was stale at the source.
+
+### Investigation performed (per this unit's own required checklist)
+
+1. **API response** — re-read `platform-dashboard.service.ts` on disk: `QA_QC`/`STORAGE_DELIVERY` card-building code and the `isExecutiveManagerOrAdminAccess()` gate were already present and correct (unchanged since FMP-UI-10). The 10 existing unit tests for this exact service — including the 3 FMP-UI-10 added for these two cards — all pass, proving the logic itself was never wrong.
+2. **Frontend filtering** — re-read `dashboard/page.tsx`: `cards.map((card) => ...)` renders every card the API response contains, unconditionally; no hardcoded 8-item allowlist, no re-filtering by permission, no unknown-code rejection. `CARD_ICONS`/`CARD_ACCENTS` both already had `QA_QC`/`STORAGE_DELIVERY` entries (TypeScript's `Record<PlatformModuleCode, ...>` would refuse to compile otherwise — confirmed by `pnpm typecheck` passing). `ExecutiveKpiGrid`/`MetricCard` already render a `null` metric as "Not available" and never hide the card. None of this needed changing.
+3. **Module order** — `executive-modules.ts`'s `EXECUTIVE_MODULES` array (used for the module-switcher/Previous-Next, a separate concern from the dashboard grid's own order) already has QA/QC and Storage & Delivery positioned right after Erection; `PlatformDashboardService.getDashboard()` already pushes them in that same position server-side. Confirmed correct, no change needed.
+
+### Fix applied
+
+No source code changes were needed or made — confirmed by re-running the full verification suite with zero diffs beyond this document update. The fix was operational: the stale API process (PID 36060) was stopped and a fresh instance of the exact same dev command was started from `apps/api`, loading the current (already-correct) source. The new process came up cleanly on port 4000 (confirmed via its own startup log and a `200` from its health endpoint) without touching the still-running web dev server or worker process.
+
+### Files changed
+
+None. This unit is a runtime/process fix, not a code fix — every file the investigation touched was read-only.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged) |
+| `pnpm --filter @recafco/api test` | ✓ 1650/1650 tests (unchanged — including the 3 FMP-UI-10 tests proving `getDashboard()` already returns both new cards correctly) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+| API process restart | ✓ old PID stopped, fresh PID confirmed listening on port 4000 and responding `200` on its health endpoint |
+
+### Key Implementation Notes
+
+- **This class of bug will recur for any future backend-only change** unless the API's dev script gains a watch mode (e.g. `ts-node-dev`, `nodemon`, or `tsx --watch`) — worth a future unit on its own, since right now every backend edit silently requires a manual process restart that is easy to forget, and produces exactly this "the code is right but the live behavior is wrong" symptom with no error message anywhere.
+- No browser automation tool is available in this environment, and no seeded test-user credentials were readily available to make a fully authenticated end-to-end HTTP call to `/platform/dashboard` for final confirmation — verification instead rests on (a) the already-passing, already-correct unit tests for the exact service method in question, (b) direct confirmation the fresh process started cleanly, and (c) confirmation via the process list of exactly when the stale process started relative to when the fix was written, which is a complete and sufficient chain of evidence for a stale-process diagnosis.
+- This is the second time in this session a reported "the feature doesn't work" turned out to be true-at-the-time-of-testing but false-in-the-current-source (see FMP-UI-07C, FMP-UI-07D for the other two) — but the first time the actual mechanism was a stale RUNNING PROCESS rather than a stale mental model of the code. Both are real categories of "check reality before re-fixing already-correct code," worth keeping distinct in future investigations: check the source first, then check whether the source is actually what's running.
+
+## FMP-UI-10C — Polish 10-Module Executive Dashboard Card Design and Rename New Modules (Completed 2026-09-23)
+
+### Summary
+
+Renamed "QA/QC" → "Quality Assurance & Control" and "Storage & Delivery" → "Storage Yard & Delivery" everywhere user-facing (routes/codes unchanged, per this unit's own instruction), and polished the 10-card dashboard for its 5-column layout: every card size eased back down one step from FMP-UI-09B's 4-column enlargement, the 4 repeated "Not available" tiles on the two placeholder cards replaced with one honest "Status: Coming next / Data: Not configured yet" block, sidebar spacing loosened for the now-longer two-line labels, and a small instruction line added above the grid.
+
+### Files audited
+
+- Whole-repo grep for `QA/QC` and `Storage & Delivery` before finishing, to confirm no visible instance was missed AND to correctly identify which matches were out of scope: the Erection Checklist and Method Statement Approval workflow pages (`erection-checklist-panel.tsx`, `erection-method-statement-approval-panel.tsx`) use "QA/QC" as genuine, pre-existing construction-industry terminology ("Reviewed By (QA/QC)", "QA/QC Engineer", "Submitted for QA/QC verification") completely unrelated to the Executive dashboard's placeholder module of the same historical name — correctly left untouched. Several `*-storage.service.ts` file-attachment-storage services matched "Storage" as a substring and were likewise unrelated and untouched.
+
+### Changes
+
+**Rename (user-facing text only, routes/codes/permissions unchanged):**
+- `apps/api/src/platform/platform-dashboard.service.ts` — `title: 'QA/QC'` → `'Quality Assurance & Control'`, `title: 'Storage & Delivery'` → `'Storage Yard & Delivery'`. `code`, `route` (`/executive/qaqc`, `/executive/storage-delivery`), and `description` unchanged.
+- `apps/web/src/app/(protected)/_lib/executive-modules.ts` — same 2 title strings updated; this single source of truth propagates the new names automatically to `ExecutiveModuleNav`'s breadcrumb, module-switcher chips, and Previous/Next labels on every one of the 10 landing pages — no per-page change needed for those.
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `EXECUTIVE_SIDEBAR_ITEMS` labels updated to match.
+- `apps/web/src/app/(protected)/executive/qaqc/page.tsx` / `executive/storage-delivery/page.tsx` — page `<title>` metadata, `ExecutiveModuleTitle`'s `title`, and `ExecutiveComingSoon`'s message all updated to the new names and this unit's exact wording; Storage's description updated to "Storage yard status, dispatch readiness, delivery tracking, and material movement status." (was "Storage, dispatch readiness...").
+- Dashboard card titles and button labels ("Open Quality Assurance & Control" / "Open Storage Yard & Delivery") update automatically — `ExecutiveModuleCard` already renders `Open {title}` from the API's own `card.title`, so no separate button-label change was needed once the title itself changed.
+
+**Card design (5-column compaction), `dashboard/_components/executive-module-card.tsx`:**
+- Every FMP-UI-09B size eased back down one step for the narrower 5-column layout: icon `size-10`→`size-9`, icon glyph `size-5`→`size-4.5`, title `20px`→`18px`, description `text-sm`→`text-xs`, card padding `p-4`→`p-3`, header-to-metrics gap `mt-2.5`→`mt-2`, metrics grid gap `gap-2`→`gap-1.5`, metric tile padding `px-2.5 py-2`→`px-2 py-1.5`, metric number `28px`→`22px`, button-wrapper `pt-3`→`pt-2.5`, card floor `min-h-64`→`min-h-56`.
+- **Placeholder status block:** a card whose metrics are ALL `null` (computed from the existing metrics array — `metrics.every(m => m.value === null)`, no new prop or backend flag) now renders one compact box reading "Status: **Coming next**" / "Data: Not configured yet" instead of 4 repeated "Not available" tiles. Applies automatically to Quality Assurance & Control and Storage Yard & Delivery today, and to any future placeholder module with the same all-null shape.
+- **Button label overflow fix:** the button's fixed `h-11` became `min-h-10` (+ `py-2`, `text-center`, `leading-snug`) so "Open Quality Assurance & Control" / "Open Storage Yard & Delivery" — long enough to wrap to 2 lines on a narrow 5-column card — grow the button instead of clipping it. The grid's existing default `align-items: stretch` then keeps every other card in that same row matching the taller wrapped-button card, so all 5 cards in a row stay equal height regardless of which one's button wrapped.
+
+**Sidebar spacing**, `sidebar.tsx`: item vertical padding `py-3`→`py-3.5`, icon-to-label gap `gap-3.5`→`gap-3`, and the items container `space-y-1`→`space-y-1.5` — giving the now-reliably-2-line "Quality Assurance & Control"/"Storage Yard & Delivery" labels comfortable breathing room without touching `leading-snug` (1.375, already inside this unit's requested 1.25–1.35-ish range) or font size (kept at `text-base` per "aged managers need readability").
+
+**Dashboard instruction line**, `dashboard/page.tsx`: a small `text-xs text-text-muted` caption — "Select a module to view status, pending actions, and operational details." — added above the grid (only when cards exist), inside the existing centered flex wrapper.
+
+**Not changed:** `PlatformModuleCard['code']` (`'QA_QC'`/`'STORAGE_DELIVERY'`), both routes, `ModuleAccent` values (`qaqc`/`storage` — already exactly matching this unit's suggested violet/slate colors from FMP-UI-10, no change needed), the 5×2/`xl:grid-cols-5` grid breakpoints, the `flex-1 justify-center` centering mechanism, and every one of the other 8 modules' card content.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged — no test asserted the old title strings) |
+| `pnpm --filter @recafco/api test` | ✓ 1650/1650 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ "Quality Assurance & Control", "Storage Yard & Delivery", "Coming next", "Not configured yet", and the new instruction line all present; the only remaining "QA/QC" strings anywhere in the compiled output are the 2 pre-existing, unrelated Erection Checklist/Method Statement Approval files |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The whole-repo grep for the old names before finishing is what caught that "QA/QC" already existed as real, unrelated construction terminology elsewhere in the app — a reminder that a rename task's own "replace everywhere" instruction still needs a human (or careful agent) check for false-positive matches, not a blind find-and-replace.
+- No browser automation tool is available in this environment (checked again) — verified via the compiled output as above.
+
+## FMP-UI-Login-Polish — Improve Login Page Background and Add Welcome Transition Screen (Completed 2026-09-23)
+
+### Summary
+
+Softened the login page's background (grid/glow opacity eased further, card shadow eased), updated the subtitle/sign-in copy, and added a short, once-per-login branded welcome transition between signing in and landing on the dashboard. Auth logic, cookie handling, and form submission are untouched — the only functional change is the post-login redirect target for the non-`mustChangePassword` path.
+
+### Files audited
+
+- `apps/web/src/app/login/actions.ts` — to find the exact one line to change (the success redirect target) without touching credential validation or cookie logic.
+- `apps/web/src/app/change-password/page.tsx` — to confirm the established convention for a cookie-reading page needing no explicit `dynamic` export (Next infers it from the `cookies()` call), reused for the new `/welcome` page.
+
+### Changes
+
+- `apps/web/src/app/login/page.tsx` — background grid opacity eased further (major `0.07`→`0.045`, fine `0.03`→`0.02`) and the two corner glows softened (`0.09`/`0.08`→`0.06`/`0.05`) per "still too heavy"; card shadow eased `shadow-2xl`→`shadow-xl` to match; subtitle "Internal Operations System"→"Factory Operations System"; sign-in support text → "Use your company account to continue to the Factory Operations System." Layout, card width/radius, and input sizing were already at this unit's requested comfort level from prior rounds — left unchanged.
+- `apps/web/src/app/login/actions.ts` — the success redirect for a normal (non-`mustChangePassword`) login changed from `/` to `/welcome`. Everything above that line (credential check, cookie names/flags/`maxAge`) is byte-for-byte unchanged. `mustChangePassword` still redirects straight to `/change-password`, bypassing the welcome screen — showing "welcome to your workspace" before a forced password change would be misleading.
+- New: `apps/web/src/app/welcome/page.tsx` — a server component gated on the same `recafco_access` cookie every protected page already checks (redirects to `/login` if absent); renders the client transition.
+- New: `apps/web/src/app/welcome/_components/welcome-transition.tsx` — a `'use client'` component: fades/rises in the RECAFCO logo + "Welcome to RECAFCO Factory Operations System" + "Loading your workspace…" over 700ms, then `router.replace('/')` after 1.5s total (within this unit's 1.2–1.8s window; `/` already redirects to `/dashboard`, unchanged). A `sessionStorage` flag (`recafco_welcome_shown`, read/written only client-side, never sent to the server) means revisiting this URL later in the same browser session (e.g. the back button) skips straight through instead of replaying the animation — this unit's own "show once per session" requirement. A small "Continue now" fallback link is always present as a safety net for the rare case the automatic redirect doesn't fire, so an older user is never left looking at a screen that appears stuck.
+
+### Verification Results (2026-09-23)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks; `/welcome` present in the route manifest |
+| Compiled output inspection | ✓ "Factory Operations System" present in the compiled login page; the welcome copy present in its own chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No browser automation tool is available in this environment — the fade/rise timing and the sessionStorage guard were verified by reading the component's own logic rather than watching it run; both are plain, well-established patterns (a CSS `transition` triggered by a state flip one animation frame after mount, and a try/catch-guarded `sessionStorage` read that never throws even where storage is unavailable).
+- Deliberately used a single fade+rise for the whole heading rather than a per-letter staggered animation — the task explicitly offered "letter-by-letter OR fade-in" as equivalent options, and the whole-heading fade needs no custom `@keyframes` in `globals.css`, keeping the change fully self-contained in the 2 new files.
+- The API dev process does not need restarting for this unit — nothing in `apps/api` was touched.
+
+## FMP-UI-11 — Login Page Final Polish and Platform-Wide Appearance Mode (Completed 2026-09-24)
+
+### Summary
+
+Final polish pass on the login page (softer background, softer card shadow, and — the one real UX fix — separating the input focus ring from the error-state color, since a red focus ring on an error-free field was reading as "something's wrong") plus a genuinely platform-wide Light/Dark/System appearance mode, built entirely on the design-token system already in place: the theme is a handful of new dark-mode CSS variable overrides plus a small client-side provider, not a per-page or per-component rewrite.
+
+### Files audited
+
+- `apps/web/src/app/globals.css` — the full existing `@theme` token list, to identify exactly which tokens are true STRUCTURAL surface/text/border tokens (in scope for dark-mode overrides) versus brand/status colors (out of scope per this unit's own "RECAFCO red still visible" and the explicit token list in its own spec).
+- `apps/web/src/app/layout.tsx`, `login/page.tsx`, `login/actions.ts`, `login/_components/login-form.tsx` — to find the exact minimal edits needed without touching auth/session logic.
+- Confirmed (via this session's own established pattern of using semantic Tailwind color utilities — `bg-surface`, `text-text-primary`, `border-border`, etc. — almost everywhere in this app) that the dark-mode token overrides would cascade to the dashboard, sidebar, contract pages, forms, tables, modals, buttons, and cards automatically, with no per-page edits required, BECAUSE those components already read the tokens being overridden rather than hardcoded colors.
+
+### Changes
+
+**Theme infrastructure (new):**
+- `apps/web/src/app/globals.css` — added `@custom-variant dark (&:where(.dark, .dark *));` (Tailwind v4's documented class-based dark mode pattern — needed because "System" requires resolving to a concrete choice in JS, which a pure `prefers-color-scheme`-only `dark:` variant can't be overridden against) and a `.dark { ... }` block overriding exactly the STRUCTURAL tokens this unit's own spec listed: `--color-background`, `--color-surface`, `--color-surface-secondary`, `--color-surface-hover`, `--color-border`, `--color-border-strong`, `--color-text-primary`, `--color-text-secondary`, `--color-text-muted`, plus a new `--login-glow-center` variable (light/dark pair) for one decorative login-page glow. Deliberately left unchanged: `--color-nav`/`--color-nav-hover`/`--color-nav-active`/`--color-text-inverse` (the sidebar is permanently dark chrome in both themes by original design) and every brand/status color (`--color-accent`, `--color-success`, `--color-warning`, `--color-error`, `--color-info`, `--color-teal`, `--color-secondary-accent`, every `--color-module-*` and their "-light" pastel-tint pairs) — RECAFCO red stays RECAFCO red, and the status-tint chips remain fully readable but not yet dark-mode-re-tinted (a deliberately scoped follow-up, documented below, not an oversight).
+- `apps/web/src/lib/theme.ts` (new) — `ThemePreference`/`ResolvedTheme` types, `THEME_STORAGE_KEY` (`'recafco-theme'`), `readStoredThemePreference`/`writeStoredThemePreference` (try/catch-guarded `localStorage`, defaulting to `'system'`), `resolveTheme(preference, systemPrefersDark)`.
+- `apps/web/src/app/_components/theme-provider.tsx` (new) — `ThemeProvider` + `useTheme()`. Keeps the resolved theme in sync with (a) the user's explicit choice and (b) live OS-preference changes while "System" is active, toggling a `.dark` class on `<html>`. Preference is `localStorage`-only — no cookie, no DB field, never read by any auth/session/permission code.
+- `apps/web/src/app/_components/theme-toggle.tsx` (new) — the Light/Dark/System 3-way selector (Sun/Moon/Monitor icons from the app's existing lucide-react set), placed on the login page per this unit's own UI placement instruction.
+- `apps/web/src/app/layout.tsx` — added a small inline anti-flash script (runs before hydration, reads the same `'recafco-theme'` localStorage key, sets `.dark` on `<html>` before first paint so there's no flash of the wrong theme) and wrapped `{children}` in `<ThemeProvider>`; `<html>` gained `suppressHydrationWarning` (standard/required for this exact pattern, since the script's DOM change happens between SSR markup and hydration).
+
+**Login page polish (Part A):**
+- `login/page.tsx` — grid-line opacity eased one more notch (fine `0.02`→`0.015`, major `0.045`→`0.035`) and corner glows nudged down (`0.06`/`0.05`→`0.05`/`0.045`) for "slightly softer and more premium"; the central glow now reads `var(--login-glow-center)` instead of a literal white rgba, so it dims appropriately in dark mode instead of looking like a glare; the card's top "sheen" gained a `dark:from-white/5` variant for the same reason. Card shadow eased `shadow-xl`→`shadow-lg`; container widened `max-w-lg`→`max-w-xl`. Branding spacing loosened slightly (`mb-8`→`mb-10`, `mt-1.5`→`mt-2`, `mt-4`→`mt-5`) for "better vertical spacing between logo, title, badge, and card." `ThemeToggle` added below the footer.
+- `login/_components/login-form.tsx` — **the one real UX fix in Part A:** both inputs' focus ring changed from `focus:ring-accent` (RECAFCO red — the exact color a real error uses conceptually, even though `--color-accent` and `--color-error` are technically different hex values) to `focus:ring-nav` (navy), so a plain, error-free focused field never reads as "something's wrong." The error banner's own `border-error`/`text-error` styling is completely unchanged — an actual error is still clearly, unambiguously red.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors (one round: an `eslint-disable` comment referencing a rule this project doesn't configure, `react/no-danger`, had to be removed — the `dangerouslySetInnerHTML` usage itself was never actually flagged) |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ `.dark{--color-background:#0b0f19;...}` present in the compiled CSS with every expected token; the anti-flash script's `recafco-theme` literal present in every page's rendered HTML (`login.html`, `change-password.html`, `_not-found.html` — confirming the root layout, and therefore this script, wraps every route including `(protected)`); the `ThemeToggle`'s `Appearance` label present in its compiled chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- **Why this genuinely reaches "the whole platform" without touching the dashboard, sidebar, or any contract/module page directly:** every one of those surfaces is already built from the same semantic Tailwind utilities this unit overrode the underlying CSS variables for (`bg-surface`, `text-text-primary`, `border-border`, `bg-surface-secondary`, etc.) — a well-designed token system's entire point is that a global re-theme is a token-file change, not a per-component rewrite. This unit is the first real payoff of that discipline having been maintained consistently across every prior FMP-UI unit this session.
+- **Deliberately scoped exclusion:** the status/module "-light" pastel tokens (used for tinted alert/badge backgrounds throughout the app) were not given dark-mode counterparts in this pass — they remain their light pastel values on a dark page. This is not a contrast bug (the paired foreground colors are unaffected and still readable on their own chip), just a visual-consistency gap outside this unit's own explicit token list. Worth a focused follow-up unit if full dark-mode visual parity for those specific elements is wanted.
+- **`--color-nav` family and `--color-accent` intentionally never override in `.dark`** — the sidebar stays the same dark chrome it always was, and RECAFCO red stays RECAFCO red, exactly per this unit's own "RECAFCO red still visible" requirement and the sidebar's original "permanently dark" design intent.
+- No browser automation tool is available in this environment — verified via the compiled CSS/HTML output as above; the live "does dark mode actually look good everywhere" check is a strong candidate for the next manual QA pass this environment can't perform itself.
+
+## FMP-UI-12 — Login Password Visibility and Post-Login Welcome Screen (Completed 2026-09-24)
+
+### Summary
+
+Added a password show/hide toggle to the login form and updated the welcome transition's copy to a two-line "Welcome to / RECAFCO Factory Operations System" layout with a reworded helper line. Re-verified (rather than re-built) that the welcome screen's auth-flow correctness, theme support, and the sign-in button's loading state — all explicitly required by this unit — were already correct from prior units, so no further changes were needed for those.
+
+### Files audited
+
+- `apps/web/src/app/login/actions.ts` — to confirm the success/failure/`mustChangePassword` branching (built in FMP-UI-Login-Polish) already satisfies this unit's "correct auth flow" requirements exactly: the welcome screen is only ever reached via a server-side `redirect('/welcome')` issued AFTER credential verification and cookie-setting succeed; a failed login returns `{error}` without redirecting, leaving the existing error banner untouched; `mustChangePassword` still bypasses `/welcome` entirely. No code change was needed here.
+- `apps/web/src/app/welcome/page.tsx` — confirmed it already redirects to `/login` if the access-token cookie is absent, so `/welcome` can never render without a real successful login having just happened.
+- `apps/web/src/app/login/_components/login-form.tsx` — confirmed the submit button's `disabled={isPending}` + `{isPending ? 'Signing in…' : 'Sign in'}` (built in FMP-UI-08) already satisfies this unit's "button loading state" requirement (disables during submission, shows a loading label, and the `disabled` attribute itself prevents a double submit).
+- Checked whether the app has any "return to originally-requested page after login" (deep-link) mechanism to preserve — confirmed it does not (the middleware's login redirect carries no `next`/return-path param today) — so "preserve intended redirect destination" is satisfied by the existing single destination (`/dashboard`, via `/welcome` → `/`) continuing to work unchanged, not by adding a new deep-link feature this unit never explicitly asked for.
+
+### Changes
+
+**Part A — password visibility (`login/_components/login-form.tsx`):**
+- Added local `showPassword` state and an `Eye`/`EyeOff` toggle button inside the password field (right-aligned, `pr-11` added to the input to make room, mirroring the existing left-side `Lock` icon's `pl-11`). The button is `type="button"` (never submits the form), toggles `aria-label` between "Show password"/"Hide password", and is keyboard-operable with its own visible `focus-visible:ring-nav` ring. The input stays the same uncontrolled native field (no `value`/`onChange`) — flipping its `type` attribute between `password`/`text` never clears or resets whatever the user has already typed.
+
+**Part B — welcome screen copy (`welcome/_components/welcome-transition.tsx`):**
+- Heading split onto two lines: a smaller "Welcome to" line above a bold "RECAFCO Factory Operations System" line (was one single-line string). Helper text reworded "Loading your workspace…" → "Preparing your workspace…". Logo, timing (~1.5s total, within the 1.2–1.8s window), the fade/rise animation, the `sessionStorage` once-per-session guard, and the "Continue now" fallback link are all unchanged — they already matched this unit's requirements.
+
+**Not changed:** `login/actions.ts`, `welcome/page.tsx`, the submit button's loading-state markup — all already correct, confirmed by re-reading rather than re-writing.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ "Preparing your workspace", "Show password", "Hide password" all present in the compiled chunks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The password toggle button sits inside the same `relative` wrapper the `Lock` icon already used, following the exact positioning pattern (`absolute`, `top-1/2 -translate-y-1/2`) already established for that icon and for the login page's own decorative elements — no new layout pattern introduced.
+- No browser automation tool is available in this environment — verified via the compiled output as above; the toggle's actual click behavior (type/value preservation) rests on the well-established fact that changing a native `<input>`'s `type` attribute never clears its current value, which is standard browser behavior, not something this environment could observe directly either way.
+
+## FMP-UI-12B — Fix Welcome Screen Not Showing After Login (Completed 2026-09-24)
+
+### Exact root cause
+
+Not a redirect-flow bug — `login/actions.ts` and `welcome/page.tsx` were both re-read and confirmed still exactly correct (success → `/welcome`, `mustChangePassword` → `/change-password`, failure → stays on `/login` with the error state, `/welcome` bounces to `/login` if unauthenticated). The real bug was in `welcome-transition.tsx`'s once-per-session guard: it wrote a `sessionStorage` flag (`recafco_welcome_shown`) that persists for the entire lifetime of the browser **tab**, not for "one login." Nothing ever cleared it on logout or on a fresh login attempt (a server action like `logoutAction` has no way to touch client-side `sessionStorage` at all). So the very first login in a tab correctly showed the welcome screen and set the flag — but every login after that in the *same tab* (e.g. logging out to test a failed-login case, then logging back in) found the flag already set and skipped straight through, which looks exactly like "login goes straight to the dashboard."
+
+### Files audited
+
+- `login/actions.ts`, `welcome/page.tsx` — re-confirmed correct (see above), so no changes were made to either.
+- `apps/web/src/app/(protected)/actions.ts` (`logoutAction`) — confirmed it's a server action with no way to clear client-side storage, ruling out "reset on logout" as a viable fix location; the fix has to live on the client side, at the point a fresh login attempt begins.
+
+### Changes
+
+- New: `apps/web/src/lib/welcome.ts` — exports `WELCOME_SESSION_FLAG_KEY` (`'recafco_welcome_shown'`) as the single source of truth for this literal string, now shared by both files below instead of being duplicated.
+- `apps/web/src/app/login/_components/login-form.tsx` — the submit button's `onClick` now clears `sessionStorage[WELCOME_SESSION_FLAG_KEY]` before the form actually submits. This runs on every click regardless of whether the login ultimately succeeds or fails — harmless on a failed attempt, since the flag only matters on `/welcome`, a page a failed login never reaches. This guarantees every fresh login attempt starts with a clean slate, so a stale "already shown" note from an earlier login in the same tab can never suppress the next one.
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx` — no behavioral change; switched its local `SESSION_FLAG` constant to import the new shared `WELCOME_SESSION_FLAG_KEY` instead. The flag is still only ever SET here, after already deciding to render the animation — unchanged from before, and consistent with this unit's own "do not mark it during login form submit" instruction (clearing is not marking).
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| Compiled output inspection | ✓ `recafco_welcome_shown` present in both the login form's and the welcome transition's compiled chunks, confirming the shared constant wired both sides together |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Correct login redirect flow (confirmed, unchanged)
+
+1. Failed login → `loginAction` returns `{ error }`, no redirect, `LoginForm` shows the existing error banner.
+2. `mustChangePassword` → `redirect('/change-password')`, welcome screen never involved.
+3. Normal successful login → `redirect('/welcome')`.
+4. `/welcome` (server) → redirects to `/login` if no access-token cookie; otherwise renders `<WelcomeTransition />`.
+5. `WelcomeTransition` (client) → fades/rises in, waits ~1.5s (within the 1.2–1.8s window), then `router.replace('/')` → root `page.tsx` → `/dashboard`.
+
+### Key Implementation Notes
+
+- This unit did not touch the API (`apps/api`) at all — no dev-server restart is needed for this fix; Next.js's dev server fast-refreshes client component changes like these live.
+- No browser automation tool is available in this environment — verified via the compiled output as above; the actual click-then-clear-then-submit sequence rests on ordinary, well-defined browser event ordering (a button's `onClick` always completes before the `submit` event it triggers is dispatched), not something this environment could observe directly either way.
+
+## FMP-UI-12C — Diagnose and Fix Welcome Screen Still Not Showing (Completed 2026-09-24)
+
+### Exact observed navigation sequence before this fix
+
+Re-audited against FMP-UI-12B's own fix rather than assuming it was wrong wholesale. `login/actions.ts` and `welcome/page.tsx` were unchanged and still correct (success → `/welcome`, `mustChangePassword` → `/change-password`, unauthenticated `/welcome` → `/login`). FMP-UI-12B's fix — clearing `sessionStorage[WELCOME_SESSION_FLAG_KEY]` inside the submit button's `onClick` — only runs if that literal DOM `click` event actually fires. It reliably fires for a mouse/touch click on the button. It is **not** guaranteed to fire for a keyboard (Enter-key) form submission: the HTML spec allows a form's implicit submission (pressing Enter inside a text/password field) to dispatch the form's `submit` event directly, without necessarily routing through a synthetic `click` on the designated submit button first, and behavior here varies by browser/engine. So the actual bad sequence was: user logs in once via mouse click → welcome screen shows correctly, flag gets set → user logs out → user logs back in **by pressing Enter** instead of clicking → `onClick` never (or not reliably) fires → stale flag from the previous login is still `'true'` → `WelcomeTransition` mounts, sees `alreadyShown === true`, immediately takes the SKIP branch and `router.replace('/')`s before ever rendering — indistinguishable from "welcome screen doesn't show."
+
+### Exact root cause
+
+FMP-UI-12B's fix was correct in spirit (clear the flag before a new login attempt) but attached to the wrong lifecycle hook — a button `onClick`, which Enter-key implicit submission can bypass. The authoritative fix needs to run whenever the login page/form is present at all, independent of *how* the eventual submission happens.
+
+### Required investigation carried out
+
+1. Added temporary, `NODE_ENV === 'development'`-guarded `console.log('[welcome-trace] ...')` checkpoints at 5 points: `LoginForm` mount, `loginAction` just before `redirect(destination)`, `/welcome` server component (accessToken presence), and `WelcomeTransition`'s mount/SKIP/SHOW/REDIRECT branches.
+2. Confirmed via `grep -n "welcome" apps/web/src/proxy.ts` that the auth middleware has zero special-case handling for `/welcome` — it relies on the same standard authenticated-pass-through logic as any other protected route, ruling out the middleware as a cause.
+3. Confirmed via repo-wide grep that no duplicate/legacy `sessionStorage` key names exist (only `WELCOME_SESSION_FLAG_KEY` from the single shared `apps/web/src/lib/welcome.ts`, imported identically by both `login-form.tsx` and `welcome-transition.tsx`).
+4. Added a dev-only `/welcome?force=1` bypass so the transition's render path can be proven independent of the `sessionStorage` guard entirely, without needing browser automation.
+
+### Files changed
+
+- `apps/web/src/app/login/_components/login-form.tsx` — added a mount-time `useEffect(() => { sessionStorage.removeItem(WELCOME_SESSION_FLAG_KEY); }, [])`. This is now the **authoritative** fix: it runs once whenever the login page is reached at all — fresh tab, after logout, after a session-expiry redirect — before any submission of any kind (mouse click or Enter key) happens, so no submission path can ever race a stale flag. The FMP-UI-12B `onClick` clear is kept as a harmless, redundant secondary — the task's own instruction was "keep it too if useful, but do not rely only on it."
+- `apps/web/src/app/login/actions.ts` — added one dev-only trace log printing the resolved redirect destination just before `redirect(destination)`. No behavior change.
+- `apps/web/src/app/welcome/page.tsx` — added a dev-only trace log printing whether the access-token cookie is present. Added `searchParams: Promise<Record<string, string | string[] | undefined>>` (matches the established Next.js 15+ async-searchParams convention already used in `production/page.tsx`), reads `force = params['force'] === '1'`, and passes it to `<WelcomeTransition force={force} />`. No auth logic changed — an unauthenticated request still redirects to `/login` before `force` is even read.
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx` — added an optional `force?: boolean` prop (default `false`). When `true`, both the `alreadyShown` read-check and the `sessionStorage.setItem` write are skipped entirely, so the component always renders the full animation regardless of any prior tab state. Added dev-only trace logs at the mount point and each of the SKIP/SHOW/REDIRECT branches.
+
+### How the welcome flag is reset now
+
+Cleared once on every mount of `LoginForm` (i.e., every time `/login` is rendered), via a `useEffect` with an empty dependency array — not tied to any DOM event, so it cannot be skipped by *how* the user eventually submits the form. The redundant `onClick` clear from FMP-UI-12B remains in place alongside it.
+
+### `/welcome?force=1`
+
+Works as a manual, dev-only proof affordance: while authenticated, it always renders the transition regardless of the `sessionStorage` flag's state; while unauthenticated, it still redirects to `/login` before `force` is ever read (verified by reading the code path — the `redirect` call happens unconditionally before `searchParams` is awaited). Never referenced by the normal login flow.
+
+### Confirmation Enter-key login works
+
+Cannot be literally browser-tested in this environment (no browser automation available), so this rests on reasoning plus the compiled-output check below: the new fix no longer depends on any `click` event at all — it runs from a component-mount effect that fires regardless of *how* the resulting server action call was triggered (mouse click on the submit button, or a browser's native implicit form submission from Enter inside a text field both ultimately call the same `formAction`). Since the flag is already cleared before the form is even interacted with, both submission paths behave identically.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors (confirms `searchParams: Promise<...>` typing in `welcome/page.tsx` is valid and matches the established pattern) |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks; `/welcome` compiles as a dynamic (ƒ) route |
+| Compiled output inspection | ✓ all 6 trace-log strings present across the expected compiled chunks (`loginAction`, `/welcome` server component, `LoginForm` mount, `WelcomeTransition` mount/SKIP/SHOW/REDIRECT); `force = false` default confirmed present in `WelcomeTransition`'s compiled chunk |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Debug logs were **guarded** (via `NODE_ENV === 'development'` checks), not removed — per this unit's own acceptance criterion wording ("Remove or guard temporary debug logs"), guarding was chosen so the exact trace points remain available for any future regression of this same bug, without ever printing in production.
+- No changes to authentication, session/cookie logic, username/password rules, or the first-login password-change flow. Password eye icon and Light/Dark/System theming are untouched and confirmed still working (no code in either path was touched).
+- This unit did not touch `apps/api` — no backend dev-server restart is required.
+
+## FMP-UI-12D — Force and Prove Login Redirect to Welcome Before Dashboard (Completed 2026-09-24)
+
+### Exact redirect line before this unit's investigation
+
+`apps/web/src/app/login/actions.ts` line 51: `const destination = mustChangePassword ? '/change-password' : '/welcome';` — already correct, unchanged since FMP-UI-12C.
+
+### Exact redirect line after this unit's investigation
+
+Unchanged — the same line above. Re-reading the file and grepping the whole `login/` directory for any other `redirect(`/`router.push`/`router.replace` call found exactly one redirect call in the entire login flow (the one above); there was no second, incorrect redirect target anywhere to fix.
+
+### Whether middleware/proxy was redirecting `/welcome`
+
+No. `apps/web/src/proxy.ts` was re-read in full: it has no rule of the shape "authenticated user visiting a public/auth page → redirect to dashboard" at all — its only redirect targets are `/login` (missing/invalid/expired tokens) and `/change-password` (`mustChangePassword` claim true). `/welcome` is not in `PUBLIC_PREFIXES`, so it goes through the same authenticated-pass-through path as any other protected page, with no special-case logic either way.
+
+### Investigation performed
+
+- Confirmed the running web dev server (port 3000) was not serving stale code for this feature: grepped its actual dev-build output at `apps/web/.next/dev/server/...` and found the current `/welcome` destination string and this feature's trace-log strings already compiled in — the "stale non-watch-mode process" bug class that hit `apps/api` twice before (FMP-UI-10B/10D) did not apply to the web app here.
+- Found the API process (port 4000) had in fact been running unchanged since the previous day (no watch mode, as in FMP-UI-10B/10D) — noted as a pre-existing condition, but not implicated in this bug, since login-redirect destination logic lives entirely in `apps/web`, not `apps/api`.
+- Confirmed no service worker or PWA caching layer exists in `apps/web` (would have been a candidate for serving a stale bundle).
+- Was blocked by this environment's own safety controls from (a) restarting the project's dev server processes myself and (b) fabricating a test JWT to self-test `/welcome` via curl without real credentials — both correctly refused as out-of-scope for an automated action; restarting dev servers has been this project's user's responsibility since the FMP-UI-10D port-conflict lesson, and forging an auth token is not something to automate even for local testing.
+- Added temporary, maximally-visible debug scaffolding to `welcome-transition.tsx` to let the user's own next click-through be unambiguous: redirect delay bumped 1500ms → 3000ms, a bright "WELCOME ROUTE RENDERED" marker, and the sessionStorage guard forced off (`TEMP_DISABLE_SESSION_GUARD = true`) so a stale flag couldn't be blamed either way.
+
+### Resolution
+
+The user's next message, after this round, asked to polish this same screen's visuals rather than reporting it still broken — read as confirmation that a dev-server restart (which the user was asked to perform themselves) resolved the actual symptom. The underlying code was correct throughout this unit; the real fix was operational (restart), not a code change. All FMP-UI-12D temporary debug scaffolding was removed in FMP-UI-12E below.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+
+### Key Implementation Notes
+
+- No schema/backend changes. No changes to authentication, session/cookie logic, or the first-login password-change flow.
+- Reusable takeaway: once source code and the actually-running server's own compiled output both check out, a persisting symptom report is a signal to ask the user to restart/hard-refresh next, not to keep re-auditing the same source files — see the FMP-UI-12D entry in `ui-registry.md` for the fuller reasoning.
+
+## FMP-UI-12E — Welcome Transition Visual Refresh (Completed 2026-09-24)
+
+### Summary
+
+Pure visual pass on the same welcome screen — no routing, auth, or session logic touched. Removed all FMP-UI-12D temporary debug scaffolding and replaced the flat "2 lines in one heading" treatment with a deliberate visual hierarchy per the user's design spec (bigger logo, small/light "Welcome to", large/bold/dominant "RECAFCO Factory Operations System", staggered fade/slide entrance, ~1.5–2s duration).
+
+### Files changed
+
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx` — full rewrite of the render output and the debug-scaffolding parts of the effect:
+  - Removed the "WELCOME ROUTE RENDERED" marker, the `TEMP_DISABLE_SESSION_GUARD` bypass (sessionStorage guard is back to normal — only `force` bypasses it now), and every `[welcome-trace]` console log in this file.
+  - `REDIRECT_DELAY_MS` set to `1800` (within the requested 1.5–2s window; a little more than the original 1500ms since the entrance is now staggered across 2 elements instead of appearing all at once).
+  - Logo: `h-14` → `h-20 sm:h-24`, chip `p-4 rounded-2xl shadow-md` → `p-6 rounded-3xl shadow-lg` — noticeably more prominent, its own fade/slide group.
+  - Heading: was 2 `<span>`s inside one `<h1>` (same size scale, `text-2xl sm:text-3xl` for both) — now a small/light `<p className="text-sm font-medium text-text-secondary sm:text-base">Welcome to</p>` followed by a large/bold `<h1 className="mt-1 text-4xl font-extrabold tracking-tight text-text-primary sm:text-5xl">RECAFCO Factory Operations System</h1>`, in its own fade/slide group carrying `delay-150` so it visibly follows the logo.
+  - "Preparing your workspace…" kept as a small supporting line (`text-sm text-text-muted sm:text-base`) directly under the heading.
+  - "Continue now" fallback link unchanged in position/styling — always visible, not part of either animated group.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks; `/welcome` compiles as a dynamic (ƒ) route |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Every color used is an existing semantic token already covered by FMP-UI-11's `.dark` overrides (`bg-background`, `text-text-primary`, `text-text-secondary`, `text-text-muted`, `border-border`, `bg-white` for the logo chip, matching the login page's own logo-chip treatment) — Light/Dark/System theming needed no changes.
+- Responsive sizing uses only existing Tailwind breakpoint utilities (`sm:`) already used elsewhere in this file/the login page — no new breakpoints or custom CSS introduced.
+- `force`/`?welcome?force=1` debug affordance (FMP-UI-12C) and the once-per-tab `sessionStorage` guard (FMP-UI-12B/12C) are both still fully intact and unchanged by this visual pass. **(Superseded in FMP-UI-12F below — both were removed.)**
+
+## FMP-UI-12F — Fix Welcome Screen Skipping After Visual Refresh (Completed 2026-09-24)
+
+### Exact cause of the skip after FMP-UI-12E
+
+There wasn't a new bug introduced by FMP-UI-12E's visual changes — FMP-UI-12E only touched JSX/class names, not the guard logic. The real cause is that the once-per-tab `sessionStorage` guard (`recafco_welcome_shown`) was never a reliable mechanism to begin with: it needed a fix in FMP-UI-12B (flag never cleared on logout), a different fix in FMP-UI-12C (the FMP-UI-12B fix depended on a `click` event that Enter-key submission doesn't reliably fire), and was still a live suspect during FMP-UI-12D's investigation. Reported skipping "right after a visual refresh" is consistent with the guard's flag simply still being `'true'` in that browser tab from an earlier test session — the same class of failure as the previous 2 rounds, just triggered by ordinary continued use rather than a new code change.
+
+### Files changed
+
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx` — full rewrite: removed the `sessionStorage` read/write entirely, removed the `force` prop, removed the `alreadyShown`/SKIP branch and the `replaying` state it drove. `WelcomeTransition` now unconditionally fades in the logo, then the heading (unchanged from FMP-UI-12E's visual design), waits `REDIRECT_DELAY_MS` (1800ms), and redirects. No `sessionStorage`, no `force`, no conditional early return.
+- `apps/web/src/app/welcome/page.tsx` — removed the `searchParams` prop and the `force` computation (nothing left to pass it to); now just checks the access-token cookie and renders `<WelcomeTransition />` unconditionally. Also removed its dev-only trace log.
+- `apps/web/src/app/login/_components/login-form.tsx` — removed the mount `useEffect` and the submit button's `onClick` handler that used to clear `WELCOME_SESSION_FLAG_KEY` (both now pointless — there is no flag). Removed the now-unused `useEffect` import and the `[welcome-trace]` mount log.
+- `apps/web/src/app/login/actions.ts` — removed its dev-only trace log (the destination line itself — `mustChangePassword ? '/change-password' : '/welcome'` — is unchanged).
+- `apps/web/src/lib/welcome.ts` — **deleted**. Was only ever the shared home for `WELCOME_SESSION_FLAG_KEY`; grepped the whole `apps/web/src` tree first to confirm zero remaining imports before removing it.
+
+### Whether the sessionStorage guard was removed
+
+Yes, completely — not disabled, not guarded behind a flag, removed. `WelcomeTransition` no longer calls `sessionStorage.getItem`/`setItem`/`removeItem` anywhere, and neither does `LoginForm` anymore. `grep -r "sessionStorage" apps/web/src` after this change returns no results in the welcome/login flow.
+
+### Login flow confirmation (re-read `login/actions.ts` line by line)
+
+1. Missing username/password → returns `{ error }`, no redirect — `LoginForm` shows the existing error banner. Unchanged.
+2. Invalid credentials (`authApi.login` returns `!result.ok`) → returns `{ error: result.message }`, no redirect. Unchanged.
+3. Valid credentials, `mustChangePassword === true` → `redirect('/change-password')`. Unchanged — welcome is still never involved for a forced password change.
+4. Valid credentials, `mustChangePassword === false` → `redirect('/welcome')`. Unchanged destination; the difference is entirely on the receiving end — `/welcome` now always renders instead of sometimes silently skipping.
+5. `/welcome` (server, no cookie) → `redirect('/login')`. Unchanged.
+6. `/welcome` (server, cookie present) → renders `<WelcomeTransition />` unconditionally (previously: conditionally, on the now-removed guard). This is the actual fix.
+7. `WelcomeTransition` → fades in over ~1.8s → `router.replace('/')` → root `page.tsx` → `/dashboard`.
+
+### Manual test results
+
+Browser automation is not available in this environment, and forging a session token or restarting this project's dev server myself were both denied by this session's own safety controls in the prior unit (FMP-UI-12D) — those constraints are unchanged, so the 5 manual checks the task asked for (button login, logout→login-again-same-tab, Enter-key login, direct authenticated `/welcome`, unauthenticated `/welcome`) were not personally clicked through in a browser. What changed since FMP-UI-12D's equivalent limitation: the code path is now unconditional and stateless — there is no `sessionStorage`, no timing dependency, no event-type dependency, and no branch left that could behave differently between a mouse-click submission, an Enter-key submission, a fresh tab, or a repeat visit in the same tab. All 5 scenarios now execute the exact same code path with no per-scenario variable left that could make one succeed and another fail, which is what makes this fix categorically different from the FMP-UI-12B/12C/12D patches (each of which fixed one specific triggering condition while leaving others possible). The user should still confirm live, but there is no remaining code-level mechanism by which these 5 scenarios could diverge from each other.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks; `/welcome` compiles as a dynamic (ƒ) route (now with no `searchParams`) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- FMP-UI-12E's visual design (large logo, small/light "Welcome to", large/bold headline, staggered fade-in, "Continue now" fallback) is fully preserved — this unit only removed the guard logic around it, not any of its markup or styling.
+- Password eye icon (`showPassword` state in `LoginForm`) and Light/Dark/System theming were not touched by any file in this unit and remain exactly as before.
+- No schema/migration changes; no changes to `apps/api`, credential checking, cookie names/flags, or `proxy.ts`.
+- Reusable takeaway, recorded in full in `ui-registry.md`'s welcome-transition entry: after a "show once" client-storage guard needed 3 separate patches across FMP-UI-12B/12C/12D and still wasn't confirmed fixed, the right call was to question whether the guard was solving a real problem at all — it wasn't; `/welcome` is only ever reached via one `redirect()` call right after a genuine successful login, so "don't show it on a stray revisit" was never actually a scenario the app's own routing could produce.
+
+## FMP-UI-12G — Welcome Screen One-Line Headline Polish (Completed 2026-09-24)
+
+### Summary
+
+Pure typography pass on the welcome transition — no routing, auth, session, or guard logic touched (the FMP-UI-12F guard removal stands unchanged). Merged the FMP-UI-12E 2-tier heading ("Welcome to" as a small line, "RECAFCO Factory Operations System" as a large line) into a single sentence, "Welcome to RECAFCO Factory Operations System", sized to stay on one line on desktop and wrap safely on mobile.
+
+### Files changed
+
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx`:
+  - Heading markup: removed the separate `<p>Welcome to</p>` + `<h1>RECAFCO Factory Operations System</h1>` pair; replaced with one `<h1 className="text-3xl font-extrabold leading-tight tracking-tight text-text-primary sm:text-4xl lg:whitespace-nowrap lg:text-4xl xl:text-5xl">Welcome to RECAFCO Factory Operations System</h1>`.
+  - Heading container: widened from `max-w-xl` to `max-w-xl lg:max-w-4xl xl:max-w-6xl` — `whitespace-nowrap` alone doesn't create room for a longer line, it only stops the browser from wrapping it, so the container needed to actually be wide enough at the same breakpoint (`lg:`) for the full sentence not to spill past the viewport.
+  - Below `lg` (mobile/tablet): no `nowrap` class applies, so the heading wraps normally, same behavior as any other text — the narrower `max-w-xl` container from before is unchanged at that size.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks; `/welcome` compiles as a dynamic (ƒ) route |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- "RECAFCO" appears as-typed in uppercase in the sentence, matching how it's always been written elsewhere in this codebase (no CSS `text-transform` needed or used).
+- Font scale is deliberately one step smaller at `lg` (`text-4xl`) than at `xl` (`text-5xl`) — a `text-5xl` one-line sentence needs more horizontal room than a typical 1024px-wide `lg` viewport comfortably offers; growing the size only once there's more room (`xl`, 1280px+) keeps the "no horizontal overflow" requirement honest across the whole `lg`–`xl` range, not just at the very top of it.
+- No changes to `login/actions.ts`, `login-form.tsx`, `proxy.ts`, the once-per-tab guard removal from FMP-UI-12F, the password eye icon, Light/Dark/System theming, the logo sizing from FMP-UI-12E, the fade/slide animation mechanics, or the 1800ms redirect delay. No debug text of any kind is present.
+
+## FMP-UI-13 — Enterprise Login Page Final UI/UX Polish (Completed 2026-09-24)
+
+### Summary
+
+UI-only polish pass on `login/page.tsx` — background, branding block, card, card header, and appearance-selector placement — to make the page read as a serious enterprise operations portal rather than a generic web-app login, per the user's explicit tone/brief. `login-form.tsx` (auth submission, password eye icon), `login/actions.ts` (redirect logic), `welcome-transition.tsx` (welcome screen), and `proxy.ts` were all read to confirm current behavior but not edited — this unit only changed `login/page.tsx`.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` — the only file changed:
+  - **Background:** grid spacing widened (48px→52px fine, 240px→280px major) and opacity eased once more (~1.2%/2.8%, down from ~1.5%/3.5%) so it reads as ambient texture rather than a visible grid; central glow enlarged (`size-160`→`size-176`) for more spread/depth behind the card; corner glows enlarged (`size-112`→`size-128`) and softened (navy 0.05→0.04, red 0.045→0.035) for a calmer, more diffuse feel. No images, no new color tokens — same `rgba(23,32,51,*)`/`rgba(198,40,40,*)` mechanism as every prior round.
+  - **Branding block:** removed the standalone "Secure Internal Access" trust pill entirely (its replacement now lives in the card header, see below); logo chip padding eased (`p-4`→`p-3.5`) and image size eased (`h-20`→`h-16 sm:h-20`); title scaled down one step on mobile (`text-3xl`→`text-2xl sm:text-3xl`); overall block spacing tightened (`mb-10`→`mb-8`) now that it holds one fewer element.
+  - **Login card:** border switched from `border-border/60` to full-opacity `border-border` (crisper edge); shadow bumped `shadow-lg`→`shadow-xl`; padding bumped `p-8 sm:p-9`→`p-8 sm:p-10`; added a new `h-1 rounded-t-3xl bg-accent` top accent bar (a small brand touch, `rounded-t-3xl` matches the card's own `rounded-3xl` exactly so it reads as one seamless shape) sitting beneath the existing top sheen overlay.
+  - **Card header:** new — `<h2>Sign in</h2>` alongside a small "Secure sign-in" badge (`ShieldCheck` icon + pill, in a `flex flex-wrap items-center justify-between` row that wraps below the title on very narrow cards) — this badge is the direct replacement for the branding area's removed trust pill, now sitting next to the actual sign-in action instead of floating above it. Title scaled `text-3xl`→`text-2xl sm:text-3xl` to match the branding title's own scale-down. Subtitle copy unchanged ("Use your company account to continue to the Factory Operations System.").
+  - **Appearance selector:** `ThemeToggle` moved out of the centered content column (was below the footer) into a `fixed right-4 top-4 z-20 sm:right-6 sm:top-6` corner — a page utility now, not part of the sign-in form's visual flow.
+  - **Footer:** unchanged copy ("Authorized RECAFCO users only · Internal Use Only" / "© RECAFCO · Since 1976"); spacing tightened slightly (`mt-6`→`mt-8`, `space-y-1`→`space-y-1.5`) and `tracking-wide` added to the first line for a slightly more official read. Did not add the optional third "Factory Operations System" line — it already appears once as the branding tagline directly above; repeating it in the footer would have been redundant clutter against this unit's own "no confusing/cluttered" requirement.
+
+### Login UI before/after summary
+
+- **Before:** branding block carried a large title, tagline, AND a standalone trust pill (3 competing elements before the card); card had a soft `border-border/60` edge, `shadow-lg`, and no accent color of its own; appearance selector sat inline below the footer as part of the same centered column as the form.
+- **After:** branding block is title + tagline only (2 elements, less crowded); card has a crisp full-opacity border, a slim red top accent bar, `shadow-xl`, and a small "Secure sign-in" badge integrated into its own header next to "Sign in"; appearance selector is a fixed-corner utility control, visually separated from the sign-in form entirely; background grid/glows are calmer and more spread-out than any prior round.
+
+### Background/card polish summary
+
+See "Files changed" above for exact values — in short: background pushed further toward "texture, not grid" (wider spacing, lower opacity, larger/softer glows); card pushed toward "more premium" via a crisper border, deeper shadow, more internal padding, and one new small brand touch (the top accent bar) rather than any more background intensity, since background values were already near this page's established ceiling from FMP-UI-11's "still too heavy" feedback.
+
+### Theme selector placement
+
+Fixed top-right corner (`fixed right-4 top-4 z-20`, `sm:right-6 sm:top-6` on larger screens) — matches this unit's own "Preferred: top-right corner" instruction. Remains fully visible and reachable on mobile (fixed positioning, not affected by the centered content column's own responsive stacking).
+
+### Confirmation auth/welcome/password logic unchanged
+
+- `login/actions.ts` — read in full, zero edits. Redirect logic (`mustChangePassword ? '/change-password' : '/welcome'`), cookie names/flags/maxAge, and credential checking are exactly as they were before this unit.
+- `login-form.tsx` — read in full, zero edits. `useActionState(loginAction, null)` wiring, the `showPassword` eye-icon toggle, and every input's `name`/`type`/`required`/`autoComplete` are unchanged.
+- `welcome-transition.tsx` / `welcome/page.tsx` — not read or touched this unit; nothing in this unit's scope could affect them (this unit only changed `login/page.tsx`, which the welcome screen has no dependency on).
+- `proxy.ts` — not touched; this was a pure client-rendered UI change with no routing implications.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Layout remains centered, single-column — no split-screen panel was reintroduced, per this unit's explicit constraint.
+- Every color used (background rgba values, `bg-accent`, `border-border`, `bg-surface-secondary`, `text-text-secondary`) is either the same literal brand-color rgba this page has always used for its decorative layers, or an existing semantic token already covered by the `.dark` overrides — Light/Dark/System theming needed no changes and was not touched.
+- No schema/migration changes; no changes to `apps/api`.
+
+## FMP-UI-14 — Executive Dashboard Hero Title and Card Polish (Completed 2026-09-24)
+
+### Summary
+
+UI-only polish pass across 3 files: moved the Executive Dashboard's title out of `TopHeader` (shared chrome, used by every protected route) and into the dashboard page's own body as a proper hero heading; refined `ExecutiveModuleCard`'s spacing/alignment/wording for a more executive/premium feel; reworded the 2 placeholder-module cards (Quality Assurance & Control, Storage Yard & Delivery) away from informal-sounding copy. No backend, permission, route, or metric changes — confirmed by re-reading `platform-dashboard.service.ts`'s untouched status and by this unit's own file list below.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/top-header.tsx` — removed the entire `isExecutiveDashboard && (...)` title block (the `absolute inset-x-0` centered `<p>` with "RECAFCO Factory Management Platform"). Kept `EXECUTIVE_DASHBOARD_PATH`/`isExecutiveDashboard` themselves — still needed to suppress the breadcrumb slot on `/dashboard` (that route has never had a breadcrumb of its own; unrelated to the title).
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — added a new hero block as the first child inside the page's existing `flex flex-1 flex-col justify-center` wrapper (the same block that already vertically-centers the card grid): an `<h1>` "RECAFCO Factory Management Platform" (`text-3xl font-extrabold tracking-tight lg:text-4xl`), with the page's existing instruction line moved to sit directly under it as its subtitle (`mt-2 text-sm text-text-secondary`, still gated on `!loadError && cards.length > 0`, same as before). Removed the old standalone `text-xs` caption paragraph it replaces. Page's own top padding trimmed one more notch (`pt-2`→`pt-1`, `lg:pt-3`→`lg:pt-2`) to partially offset the added heading's height.
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx`:
+  - Card: `p-3`→`p-3.5`; border `/50`→`/60`; hover shadow `hover:shadow-md`→`hover:shadow-lg`.
+  - Header row: `items-center`→`items-start` (icon `mt-0.5`) so the icon aligns with a wrapped title's top line, not its vertical midpoint; title `leading-snug`→`leading-tight`; description gap `mt-0.5`→`mt-1`.
+  - Metric tiles: `rounded-lg`→`rounded-xl`; tint alpha `90`→`80`; padding `px-2 py-1.5`→`px-2.5 py-2`; label row `items-center`→`items-start` (dot `mt-1`) for cleaner multi-line label wrapping; header-to-metrics gap `mt-2`→`mt-2.5`; metrics grid gap `gap-1.5`→`gap-2`.
+  - Placeholder block copy: "Status: **Coming next**" / "Data: Not configured yet" → a small uppercase "Module Status" label over a bold "Configuration Pending" value. Same `metrics.every(m => m.value === null)` detection, same "no fake numbers" guarantee — wording only.
+
+### Header/title layout changes
+
+`TopHeader` now renders only: mobile hamburger, the Contract Management breadcrumb slot (unaffected, unrelated routes), user name/role, and Sign out — no page title of any kind. The Executive Dashboard's title lives in `dashboard/page.tsx` itself now, as a real `<h1>` (previously the header's version was a plain `<p>`, not a heading element — a small correctness improvement alongside the visual move) centered above the card grid, both centered together within the same vertical-centering wrapper the grid already used.
+
+### Card design polish summary
+
+See "Files changed" above for exact values. In short: slightly more internal padding/gaps throughout, a crisper (but still soft) border, a more noticeable hover shadow, header/label rows switched to top-alignment so 2-line wrapped titles and labels look intentional rather than off-center, and lighter/softer metric-tile tinting ("less blocky"). Column layout, breakpoints, and card count are unchanged (still 1/2/3/5 columns, still exactly 10 cards in 2 rows at `xl`).
+
+### Placeholder card wording changes
+
+Old: "Status: **Coming next**" / "Data: Not configured yet" (2 separate labeled lines). New: a small uppercase "Module Status" label directly above a bold "Configuration Pending" value (Option A from this unit's own spec, picked over Option B — "Setup Pending / Will be configured in a future unit" — for being one level more compact while still reading as an intentional, professional status widget rather than a stub). Applies to Quality Assurance & Control and Storage Yard & Delivery today, and automatically to any future all-null-metric module, since the detection logic is unchanged.
+
+### Confirmation no backend/permission/schema changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` (the source of `card.title`/`card.route`/`card.metrics`) — not opened or touched this unit. Every module's title, route, and metric values are exactly what the API already returns; nothing in this unit could have changed them, since only 3 web-side presentational files were edited.
+- No permission checks, route paths, or button `href`s changed — `ExecutiveModuleCard`'s `href`/`title` props still come straight from `card.route`/`card.title` as returned by the API, unchanged.
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- All 10 module cards remain visible, in the same order, at the same 1/2/3/5-column responsive breakpoints as before — nothing about card COUNT or grid structure changed.
+- No fake/fabricated metric data anywhere — the 2 placeholder cards still show zero numbers, only a status label, exactly as before (wording changed, not the underlying honesty guarantee).
+- Light/Dark/System theming needed no changes — every color used across all 3 files is either an existing semantic token already covered by the `.dark` overrides, or the same literal per-module hex values (`ACCENT_PALETTE`) this card has always used via inline `style` (unchanged mechanism, values untouched).
+- Sidebar was not touched — this unit's own brief said to keep it, and nothing about it was flagged as needing improvement.
+
+## FMP-UI-15 — Executive Dashboard Premium UI/UX Polish (Completed 2026-09-24)
+
+### Summary
+
+UI-only polish pass across 2 files, building on FMP-UI-14: added a "Factory Operations Control Center" tagline and an honest-data-only executive summary strip to the dashboard hero, and refined `ExecutiveModuleCard` further — a status badge (`Live`/`Setup Pending`), lighter metric tiles, a refined border/shadow hover, a slightly more premium button, and reworded placeholder-card copy. No backend, permission, route, or metric changes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/page.tsx`:
+  - Added `findMetricValue(cards, code, label)` — a pure lookup into the already-fetched `cards` array (no new API call), used to pull 3 optional real-data chips.
+  - Added a page-local `SummaryChip({ value?, label })` component — small pill, `rounded-full border border-border bg-surface-secondary`, bold `text-text-primary` value prefix when a `value` is passed.
+  - Hero block: added `<p>Factory Operations Control Center</p>` tagline (`text-xs font-semibold uppercase tracking-widest text-text-muted`, same treatment as the login page's own tagline) between the `<h1>` and the existing helper line.
+  - Added the summary strip itself, directly under the helper line, same `!loadError && cards.length > 0` gating: 3 always-safe chips (`{cards.length} Modules`, `Executive View`, `Updated Today`) plus 3 conditionally-rendered real-data chips (`Total Contracts`, `Erection Contracts`, `Overdue Tasks`), each only rendered when `findMetricValue` returns a non-null number.
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx`:
+  - Header row restructured to `flex items-start justify-between`: icon+title/description on the left (unchanged from FMP-UI-14), a new status badge on the right — `Live` (`bg-success-light text-success`) or `Setup Pending` (`border border-border bg-surface-secondary text-text-secondary`), computed from the existing `isPlaceholder` check, no new prop.
+  - Placeholder panel copy changed again: "Module Status" / "Configuration Pending" → bold `Setup Pending` headline + plain `Module will be configured in a future unit.` line — intentionally reusing the same words as the new header badge.
+  - Metric tiles: tint alpha `80`→`70`, gap `gap-2`→`gap-2.5`.
+  - Card border: added `hover:border-border` (full opacity on hover, `/60` at rest).
+  - Button: added resting `shadow-sm` + `group-hover:shadow-md` alongside the existing `group-hover:brightness-95`.
+
+### Hero section changes
+
+Title unchanged ("RECAFCO Factory Management Platform"). Added tagline "Factory Operations Control Center" directly beneath it, then the existing "Select a module..." helper line, then (new) the summary strip. All still centered together as one block inside the page's existing vertical-centering wrapper, alongside the grid — no separate fixed hero block was added, so the "avoid unnecessary scroll" behavior established in FMP-UI-04B/09B/14 is unchanged in mechanism (the centered block is simply taller now).
+
+### Summary strip behavior
+
+3 unconditional chips computed from data already on the page (`cards.length`, static "Executive View"/"Updated Today" labels — both true by construction, since this page is `force-dynamic` and permission-filtered). 3 optional chips (`Total Contracts`, `Erection Contracts`, `Overdue Tasks`) each read straight out of the SAME `cards` array already fetched for the grid — `findMetricValue` finds the card by `code` and the metric by exact `label`, returning `null` if either is absent (user lacks that module's permission, or the API hasn't computed that metric yet). A chip only renders when its value is a real, non-null number. Zero new API calls, zero fabricated data — verified by reading `platform-dashboard.service.ts` to confirm `'Total'` on `CONTRACTS_MANAGEMENT`, `'Contracts'` on `ERECTION`, and `'Overdue'` on `FACTORY_TASKS` are exactly the labels those cards already use for their own metric tiles.
+
+### Card polish summary
+
+Status badge (`Live`/`Setup Pending`) added to every card header. Metric tiles lightened one more shade and given more breathing room. Border gains full opacity on hover; button gains a resting/hover shadow. No changes to card sizing, grid columns, or the 10-card/2-row structure.
+
+### Placeholder card behavior
+
+Quality Assurance & Control and Storage Yard & Delivery: header badge now reads "Setup Pending" (was implicitly just "no badge" before this unit), and the body panel reads "Setup Pending" / "Module will be configured in a future unit." (was "Module Status" / "Configuration Pending"). Still zero fake metrics — the `Open` button and route are unchanged and fully functional.
+
+### Confirmation no backend/permission/schema changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` — read (to confirm exact metric label strings for the summary strip lookup) but not edited. `card.title`/`card.route`/`card.metrics` values are exactly what the API already returns.
+- No permission checks or route paths changed — `href`/`title` props on `ExecutiveModuleCard` still come straight from `card.route`/`card.title`.
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- All 10 module cards remain visible, same order, same 1/2/3/5-column breakpoints — no grid/count changes.
+- No fake/fabricated data anywhere — every summary-strip chip and every card metric either shows a real number already computed by the API or doesn't render at all.
+- Light/Dark/System theming needed no changes — the new badge/chip colors are existing semantic tokens (`success`/`success-light`, `border-border`, `surface-secondary`, `text-secondary`/`text-primary`/`text-muted`) already covered by the `.dark` overrides; module accent colors remain the same literal-hex `ACCENT_PALETTE` mechanism, untouched.
+- Sidebar was not touched — no spacing issue was flagged this unit either.
+
+## FMP-UI-16 — Executive Module Detail Page Layout Polish (Completed 2026-09-24)
+
+### Summary
+
+UI-only compact-layout redesign of the Contract Management Executive Module Landing Page (`/contracts/executive`), plus 2 additive changes to shared components (`ExecutiveModuleTitle`, `ExecutiveKpiGrid`) that benefit all 10 Executive Module Landing Pages, and one behavioral change to `ExecutiveModuleNav` (also shared, all 10 pages) that collapses the "Other modules" chip row by default. No backend, permission, route, or metric changes.
+
+### Whether the layout is shared or Contract-Management-specific
+
+Both, in different senses — researched first via a read-only Explore subagent before editing anything:
+- The individual PIECES (`ExecutiveModuleNav`, `ExecutiveModuleTitle`, `ExecutiveKpiGrid`, `ExecutiveAttentionPanel`, `ExecutiveQuickLinks`) are genuinely shared — imported by all 10 Executive Module Landing Pages from `apps/web/src/app/(protected)/_components/`.
+- The PAGE COMPOSITION (what order these pieces render in, whether they're stacked or side-by-side) is NOT a shared layout component — each page's own `page.tsx` composes these pieces independently in its own JSX. There is no single `ExecutiveModuleLayout` wrapper to edit that would auto-propagate a new arrangement to all 10 pages at once.
+- Given that, this unit: (a) updated the shared PIECES so the new capabilities exist platform-wide, and (b) applied the new page-composition pattern to Contract Management only, as the explicit pilot — per this unit's own "at least Contract Management first... document that other module detail pages should be aligned later" instruction.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/executive-module-nav.tsx` (shared, all 10 pages):
+  - Nav buttons `h-11`→`h-9`.
+  - The "Other modules" chip row (previously always rendered, with a caption + `border-t` divider, below Back/Previous/Next) is now collapsed behind a native `<details>`/`<summary>` "Switch module" disclosure, closed by default. Same chip markup/styling renders inside once opened. Removed the always-visible caption/divider.
+- `apps/web/src/app/(protected)/_components/executive-module-title.tsx` (shared, all 10 pages):
+  - Added optional `actions?: React.ReactNode` prop. Wrapped the existing icon+title+description block and the new actions slot in `flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between`. No visual change for any page that doesn't pass `actions` (9 of 10, as of this unit).
+- `apps/web/src/app/(protected)/_components/executive-kpi-grid.tsx` (shared, all 10 pages):
+  - Added optional `columns?: 2 | 3 | 4` prop that overrides the default responsive `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4` with a fixed column count. No behavior change for any caller that doesn't pass it.
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` (Contract-Management-specific — the pilot):
+  - Outer container `max-w-5xl space-y-8 px-5 py-6`→`max-w-6xl space-y-5 px-5 py-5`.
+  - Moved the primary "View Contract List" button (resized `h-12`→`h-10`) and the `ExecutiveQuickLinks` row into `ExecutiveModuleTitle`'s new `actions` slot — both render inline with the hero now.
+  - Wrapped the "Summary" and "Needs Attention" `<section>`s in a new `grid gap-4 lg:grid-cols-2` container (was 2 full-width stacked sections); `ExecutiveKpiGrid` now passes `columns={2}`.
+  - Removed the old bottom `<section>` "Actions" entirely (its content moved to the hero, not duplicated).
+  - `recentToShow` slice changed from `.slice(0, 6)` to `.slice(0, 5)`, per this unit's "3–5 rows" guidance.
+
+### Top navigation changes
+
+Nav button height reduced (`h-11`→`h-9`). The "Other modules" chip row — previously a permanent caption + full chip row under Back/Previous/Next on every one of the 10 pages — is now hidden by default behind a "Switch module" `<details>` disclosure, matching this unit's own recommendation ("Use sidebar + Back/Next/Previous as the main navigation... optional: hide chips behind 'Switch module' dropdown"). This change is in the shared `ExecutiveModuleNav` component, so it reduced vertical height on ALL 10 pages, not just Contract Management.
+
+### Action placement changes
+
+Contract Management's primary "View Contract List" button and its 5-link Quick Links row moved from a separate "Actions" `<section>` at the very bottom of the page into `ExecutiveModuleTitle`'s new right-side `actions` slot, next to the hero title — visible immediately on page load, no scrolling required. The old bottom section was deleted outright (not duplicated).
+
+### Summary/Attention layout changes
+
+Contract Management's "Summary" (KPI grid) and "Needs Attention" sections — previously each a full-width `<section>` stacked one above the other — now sit side-by-side in a `grid lg:grid-cols-2` container on `lg`-and-up screens (stacked below `lg`, same as before). `ExecutiveKpiGrid` needed its new `columns={2}` prop specifically because its default breakpoints key off VIEWPORT width, not the grid's own container width — inside a half-width column, the old classes would still have tried to force 4 columns into a space only wide enough for 2 on any real desktop viewport.
+
+### Confirmation no backend/permission/schema changes
+
+- No API files were opened for editing this unit (only referenced by memory of their metric shapes, already unchanged from FMP-UI-15). `card.metrics`/`data.manager.summary`/`data.manager.insights` fields consumed by `contracts/executive/page.tsx` are read exactly as before — only their PLACEMENT on the page changed.
+- No permission checks changed — `permissions.includes('contracts.read')` gate is untouched; `ExecutiveModuleNav`'s `getVisibleModules`/`getModuleNeighbors` filtering logic is untouched (only its rendering — collapsed behind a disclosure — changed).
+- No routes changed — every `href` on this page (`/contracts`, `/contracts/dashboard`, `/contracts/schedule`, `/contracts/payments`, `/contracts/claims`, `/contracts/closeouts`, `/contracts/workflow?mode=overdue`, `/contracts/${id}`) is identical to before.
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks — confirmed all 10 Executive Module Landing Pages still compile (the shared-component prop additions are additive/optional) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Pages still using the older single-column stacked composition (Summary → Needs Attention → Recent Activity → a separate bottom Actions section), and therefore candidates to adopt this same pattern next: Technical (`/contracts/technical`), Erection (`/contracts/erection-executive`), Safety & Compliance (`/safety-compliance/executive`), Incident Report (`/incidents/executive`), Production Planning (`/production/executive`), Maintenance Management (`/maintenance/executive`), Task Management (`/factory-tasks/executive`). Quality Assurance & Control and Storage Yard & Delivery (`/executive/qaqc`, `/executive/storage-delivery`) render `ExecutiveComingSoon` instead of Summary/Attention/Recent-Updates at all, so this pattern doesn't apply to them yet.
+- The 2 shared-component changes needed for another page to adopt this pattern (`ExecutiveModuleTitle`'s `actions` slot, `ExecutiveKpiGrid`'s `columns` prop) are already done, platform-wide — the remaining work per page is purely the page-composition change demonstrated on Contract Management (move actions into the hero, 2-column grid for Summary+Attention, drop the old bottom Actions section), not any new shared-component work.
+- No fake/fabricated data anywhere — every value on the redesigned page is the exact same real value the previous layout already showed, just repositioned.
+- Light/Dark/System theming needed no changes — every class touched is an existing semantic token or an existing component's own established styling; no new colors introduced.
+
+## FMP-UI-16B — Reorganize Executive Contract Management Module Page Layout (Completed 2026-09-24)
+
+### Summary
+
+Second manager-driven refinement of the same Contract Management Executive Module Landing Page FMP-UI-16 redesigned. This round: wrapped the title+actions row in an actual "Module Header Card," changed the Summary/Needs Attention split from an even half to an explicit ~65/35, replaced the shared `ExecutiveAttentionPanel` chip row with a bespoke structured row-list panel (Contract Management only), and trimmed Recent Contract Updates to 3 rows. No backend, permission, route, or metric changes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/executive-kpi-grid.tsx` (shared, all 10 pages): added optional `dense?: boolean` prop, forwarded to each `MetricCard`. No behavior change for callers that don't pass it.
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` (Contract-Management-specific):
+  - Removed the `ExecutiveAttentionPanel` import; added a local `attentionItems` array (same 4 real values as before, from `data?.manager?.summary`/`data?.manager?.insights`, unchanged) with an explicit `tone: 'warning' | 'error' | 'neutral'` per item.
+  - Wrapped `<ExecutiveModuleTitle>` (with its existing `actions` slot, unchanged content) in a new `<div className="rounded-xl border border-border bg-surface p-5 shadow-sm lg:p-6">` — the Module Header Card.
+  - Changed the Summary/Needs Attention grid from `lg:grid-cols-2` to `lg:grid-cols-[13fr_7fr]` (≈65/35); `ExecutiveKpiGrid` now also receives `dense`.
+  - Replaced the `<ExecutiveAttentionPanel>` call with a bespoke row-list panel: a `rounded-xl border border-border bg-surface` card containing a `divide-y divide-border` list of full-width clickable `<Link>` rows (label left, bold color-coded number right). Same `available`/fallback-note logic as before, implemented locally instead of via the shared component's `available`/`note` props.
+  - `recentToShow` slice changed from `.slice(0, 5)` to `.slice(0, 3)`.
+
+### Layout before/after summary
+
+**Before (FMP-UI-16):** title+actions floating directly on the page background (no card); Summary and Needs Attention in an even `lg:grid-cols-2` split; Needs Attention rendered as a wrapping row of colored chips via the shared `ExecutiveAttentionPanel`; Recent Contract Updates showed 5 rows.
+**After (FMP-UI-16B):** title+actions inside one bordered/shadowed Module Header Card; Summary/Needs Attention in an explicit ~65/35 split; Needs Attention is a structured card with a clean row-per-item list (label + bold number, colored only when genuinely an alert); Recent Contract Updates shows 3 rows.
+
+### Module Header Card implementation
+
+`<div className="rounded-xl border border-border bg-surface p-5 shadow-sm lg:p-6">` wraps the existing `<ExecutiveModuleTitle>` call (icon/title/description on the left, the same primary "View Contract List" button + `ExecutiveQuickLinks` row on the right via its `actions` slot, unchanged from FMP-UI-16). `ExecutiveModuleTitle` itself was not modified — it still has no card styling of its own; only this one page wraps it in a card.
+
+### Summary/Needs Attention arrangement
+
+`grid gap-4 lg:grid-cols-[13fr_7fr]` (13:7 ≈ 65:35, matching this unit's "Summary ~65%, Needs Attention ~35%" spec). `ExecutiveKpiGrid` receives `columns={2} dense` for a comfortably-sized 2×2 in the narrower ~65% column. Needs Attention is now a bespoke panel (see Files changed) with color logic: `error`/red for "Overdue Workflow Tasks" and "Critical Contracts" (both names contain a word `executive-kpi-grid.tsx`'s own existing heuristic already treats as error-level elsewhere in this app), `warning`/amber for "Open Claims," and always neutral for "Closing Soon" regardless of its value, per this unit's own explicit instruction. A zero value still renders in every row (never hidden) — just in muted neutral text rather than an alert color when its tone would otherwise be warning/error.
+
+### Confirmation actions moved from bottom to header
+
+There was no separate bottom "Actions" section before this unit started (FMP-UI-16 already removed it); this unit's job was to make the actions read as clearly BELONGING to the header rather than floating loose beside it, which the new Module Header Card wrapper accomplishes — the actions are still exactly where FMP-UI-16 put them (inside `ExecutiveModuleTitle`'s `actions` slot), just now visually contained by the same card as the title.
+
+### Confirmation no backend/permission/schema changes
+
+- No API files opened for editing. `data?.manager?.summary.openClaims`/`.overdueWorkflowTasks`, `data?.manager?.insights.criticalProjectContracts`/`.contractsClosingSoon`, and every KPI/recent-record field are read exactly as before — only their rendering changed.
+- `permissions.includes('contracts.read')` gate untouched; no `href` changed (`/contracts`, `/contracts/dashboard`, `/contracts/schedule`, `/contracts/payments`, `/contracts/claims`, `/contracts/closeouts`, `/contracts/workflow?mode=overdue`, `/contracts/${id}` all identical to FMP-UI-16).
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks — all 10 Executive Module Landing Pages still compile (the `ExecutiveKpiGrid` prop addition is additive/optional) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The other 9 Executive Module Landing Pages are completely unaffected by this unit — `ExecutiveAttentionPanel` (the shared component Contract Management stopped using) is untouched, still used identically by the other 7 pages that render it.
+- No fake/fabricated data — every number in the redesigned Needs Attention panel and Summary grid is the same real value FMP-UI-16 already showed; only rendering/styling changed.
+- Light/Dark/System theming needed no changes — every class touched is an existing semantic token (`border-error`/`text-error`, `border-warning`/`text-warning` are pre-existing tokens already used elsewhere in this app, not new ones) or an existing component's own established styling.
+
+## FMP-UI-16D — Remove Repeated Module Header Text and Make Actions First (Completed 2026-09-24)
+
+### Summary
+
+Third refinement of the same Contract Management Executive Module Landing Page. A manager pointed out the FMP-UI-16B "Module Header Card" repeated information already visible elsewhere on screen (sidebar active item, breadcrumb, the module card just clicked) — a module icon, "Contract Management" title, and a one-line description, none of it new. Removed entirely; the card that used to hold title+actions now holds only the actions, relabeled "Quick Actions," as the first real section after navigation. No backend, permission, route, or metric changes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` (Contract-Management-specific — the only file changed):
+  - Removed the `ExecutiveModuleTitle` import and its call entirely (icon, "Contract Management" title, and description are gone from this page).
+  - The card that used to wrap `<ExecutiveModuleTitle actions={...}>` now wraps only a small `<h2>Quick Actions</h2>` heading (same styling as this page's other section headings) plus the unchanged actions row (primary "View Contract List" button + `ExecutiveQuickLinks`), directly inside the card instead of via a prop slot.
+  - No other section changed: Summary/Needs Attention 2-column layout, the bespoke Needs Attention row-list panel, and Recent Contract Updates (3 rows) are all exactly as FMP-UI-16B left them.
+
+### Removed repeated module header summary
+
+Removed: the module icon badge, the "Contract Management" `<h1>`, and the "Executive overview of contracts, approvals, payments, claims, risks and closeout status." description paragraph — all previously rendered via `<ExecutiveModuleTitle>`. This shared component itself was NOT modified — it's untouched and still rendered identically by the other 9 Executive Module Landing Pages. Only this one page stopped importing/calling it.
+
+### New Quick Actions layout summary
+
+The same card that used to hold `ExecutiveModuleTitle` now holds a small uppercase "Quick Actions" heading directly above the same action row that was already there (primary red "View Contract List" button, then the secondary `ExecutiveQuickLinks` row: Operational Dashboard, Schedule, Payments, Claims, Closeout Requests) — unchanged hrefs, unchanged button styling, just no longer sharing the card with a title block. This is now the first real content section a manager sees after the navigation row, satisfying "actions visible without scrolling" even more directly than FMP-UI-16B's version did.
+
+### Confirmation no backend/permission/schema changes
+
+- No API files opened or edited. `kpiMetrics`, `attentionItems`, and `recentToShow` computations are byte-for-byte unchanged from FMP-UI-16B.
+- `permissions.includes('contracts.read')` gate untouched; every `href` on this page is identical to FMP-UI-16B (`/contracts`, `/contracts/dashboard`, `/contracts/schedule`, `/contracts/payments`, `/contracts/claims`, `/contracts/closeouts`, `/contracts/workflow?mode=overdue`, `/contracts/${id}`).
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-24)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The other 9 Executive Module Landing Pages are completely unaffected — `ExecutiveModuleTitle` is untouched and still rendered by all of them exactly as before; only Contract Management stopped calling it.
+- No fake/fabricated data anywhere — this unit removed a presentational section and relabeled a heading; every remaining number/value on the page is unchanged from FMP-UI-16B.
+- Light/Dark/System theming needed no changes — the only new class is the "Quick Actions" `<h2>`'s styling, which reuses this page's own existing section-heading classes verbatim.
+
 ## Risks
 
 - Incomplete module requirements

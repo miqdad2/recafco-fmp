@@ -1,9 +1,11 @@
 import Link from 'next/link';
-import { MODULE_CATALOG } from './module-catalog';
+import { MODULE_CATALOG, EXECUTIVE_CATALOG_ENTRY } from './module-catalog';
 import type { ModuleUserCounts } from './module-user-counts';
 
 interface Props {
   counts: Record<string, ModuleUserCounts>;
+  /** FMP-UI-02 — role-code-based count for the Executive / Management card; see computeExecutiveManagerCount(). */
+  executiveManagerCount: number;
 }
 
 /**
@@ -13,8 +15,16 @@ interface Props {
  * "Create User" carries the module into the wizard via ?module=<slug>;
  * "Manage Users" re-renders this same page with the All Platform Users tab
  * active (CM-42B) and the table filtered to that module.
+ *
+ * FMP-UI-02 — relabelled/reordered to match the Executive Platform Dashboard
+ * (FMP-UI-01) and extended with a leading Executive / Management card. That
+ * card is not a module (see EXECUTIVE_CATALOG_ENTRY's own doc comment), so
+ * it is rendered separately, before the MODULE_CATALOG grid, with its own
+ * role-code-based count and a Manage Users link filtered by ?roleCode=
+ * (the existing Role filter on the All Platform Users table) rather than
+ * ?module=.
  */
-export function ModuleUserCards({ counts }: Props): React.JSX.Element {
+export function ModuleUserCards({ counts, executiveManagerCount }: Props): React.JSX.Element {
   return (
     <section aria-labelledby="module-cards-heading" className="mb-8">
       <h2 id="module-cards-heading" className="text-lg font-semibold text-text-primary">
@@ -25,11 +35,35 @@ export function ModuleUserCards({ counts }: Props): React.JSX.Element {
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="rounded-lg border border-accent bg-accent/5 p-4 flex flex-col gap-2">
+          <h3 className="text-sm font-semibold text-text-primary">{EXECUTIVE_CATALOG_ENTRY.name}</h3>
+          <p className="text-xs text-text-secondary flex-1">{EXECUTIVE_CATALOG_ENTRY.shortDescription}</p>
+
+          <p className="text-xs text-text-muted">
+            {executiveManagerCount} user{executiveManagerCount === 1 ? '' : 's'}
+          </p>
+
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Link
+              href={`/administration/users/new?template=${EXECUTIVE_CATALOG_ENTRY.presetTemplate}`}
+              className="inline-flex items-center h-8 px-3 rounded-md bg-accent text-accent-foreground text-xs font-medium hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              Create User
+            </Link>
+            <Link
+              href="/administration/users?tab=all-users&roleCode=EXECUTIVE_MANAGER"
+              className="inline-flex items-center h-8 px-3 rounded-md border border-border bg-surface text-text-primary text-xs font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              Manage Users
+            </Link>
+          </div>
+        </div>
+
         {MODULE_CATALOG.map((mod) => {
           const c = counts[mod.code] ?? { total: 0 };
-          const hasStaffManagerSplit = c.staffCount !== undefined && c.managerCount !== undefined;
+          const hasStaffManagerSplit = mod.showManagerStaffSplit && c.staffCount !== undefined && c.managerCount !== undefined;
           return (
-            <div key={mod.code} className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2">
+            <div key={mod.slug} className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2">
               <h3 className="text-sm font-semibold text-text-primary">{mod.name}</h3>
               <p className="text-xs text-text-secondary flex-1">{mod.shortDescription}</p>
 

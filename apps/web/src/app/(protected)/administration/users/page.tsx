@@ -12,7 +12,7 @@ import { UserLifecycleActions } from './_components/user-lifecycle-actions';
 import { ModuleUserCards } from './_components/module-user-cards';
 import { UsersPageTabs, type UsersPageTabKey } from './_components/users-page-tabs';
 import { MODULE_CATALOG, moduleBySlug } from './_components/module-catalog';
-import { computeModuleUserCounts, type RolePermissionMap } from './_components/module-user-counts';
+import { computeModuleUserCounts, computeExecutiveManagerCount, type RolePermissionMap } from './_components/module-user-counts';
 import { MODULE_READ_PERMISSION } from '../../_lib/module-visibility';
 import { activateUserAction, deactivateUserAction, archiveUserAction, deleteTestUserAction } from './actions';
 
@@ -76,6 +76,9 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
     allFetchedUsers.map((u) => ({ roleCode: u.role.code })),
     rolePermissions,
   );
+  const executiveManagerCount = computeExecutiveManagerCount(
+    allFetchedUsers.map((u) => ({ roleCode: u.role.code })),
+  );
 
   // Module filter is applied on top of the already-fetched (search/role/status
   // filtered) page of users — frontend-only, no new backend query param: a
@@ -112,7 +115,9 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
 
         <UsersPageTabs active={activeTab} />
 
-        {activeTab === 'modules' && <ModuleUserCards counts={moduleUserCounts} />}
+        {activeTab === 'modules' && (
+          <ModuleUserCards counts={moduleUserCounts} executiveManagerCount={executiveManagerCount} />
+        )}
 
         {activeTab === 'all-users' && (
           <>

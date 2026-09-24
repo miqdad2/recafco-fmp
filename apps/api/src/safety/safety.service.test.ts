@@ -1074,7 +1074,8 @@ describe('SafetyService.getDashboard', () => {
     // buildDeptFilter returns null by default — no department lookup
     mockInspectionCount
       .mockResolvedValueOnce(4)  // scheduledInspections
-      .mockResolvedValueOnce(2); // inProgressInspections
+      .mockResolvedValueOnce(2)  // inProgressInspections
+      .mockResolvedValueOnce(6); // completedInspections
     mockFindingCount
       .mockResolvedValueOnce(9)  // openFindings
       .mockResolvedValueOnce(3)  // criticalFindings
@@ -1092,6 +1093,7 @@ describe('SafetyService.getDashboard', () => {
     expect(result.metrics.openFindings).toBe(9);
     expect(result.metrics.criticalFindings).toBe(3);
     expect(result.metrics.overdueFindings).toBe(1);
+    expect(result.metrics.completedInspections).toBe(6);
     expect(result.recent).toHaveLength(1);
     expect(result.recent[0]?.referenceNumber).toBe('SAFE-001');
     expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

@@ -118,6 +118,8 @@ export interface TaskDashboardData {
     overdueTasks: number;
     blockedTasks: number;
     completedThisMonth: number;
+    dueToday: number;
+    completedThisWeek: number;
   };
   recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
 }

@@ -414,6 +414,8 @@ export class IncidentsService {
       criticalOpen: number;
       underInvestigation: number;
       resolvedThisMonth: number;
+      /** FMP-UI-01 — Executive Dashboard's "Closed Incidents" card metric: all-time closed count, distinct from resolvedThisMonth's monthly/resolved-only window. */
+      closedTotal: number;
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
@@ -445,7 +447,7 @@ export class IncidentsService {
 
     const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
 
-    const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, recentRaw] =
+    const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, closedTotal, recentRaw] =
       await Promise.all([
         this.db.getClient().incident.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
         this.db.getClient().incident.count({
@@ -459,6 +461,7 @@ export class IncidentsService {
             resolvedAt: { gte: monthStart, lt: monthEnd },
           },
         }),
+        this.db.getClient().incident.count({ where: { ...deptWhere, status: IncidentStatus.CLOSED } }),
         this.db.getClient().incident.findMany({
           where: { ...deptWhere },
           take: 8,
@@ -469,7 +472,7 @@ export class IncidentsService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { totalOpen, criticalOpen, underInvestigation, resolvedThisMonth },
+      metrics: { totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, closedTotal },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,

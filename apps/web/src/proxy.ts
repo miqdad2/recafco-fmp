@@ -5,7 +5,15 @@ const LOGIN_PATH = '/login';
 const CHANGE_PASSWORD_PATH = '/change-password';
 
 // Paths that do not require authentication.
-const PUBLIC_PREFIXES = [LOGIN_PATH, '/_next', '/favicon.ico', '/api/health'];
+// FMP-UI-11-fix — `/recafco-logo.png` (apps/web/public/) and `/icon.png`
+// (Next's app/icon.png auto-generated favicon route) were never added here
+// when the logo was introduced, so an unauthenticated request for either
+// (e.g. the <img> on the login page itself, or the browser tab favicon)
+// fell through to the auth check below and got redirected to /login —
+// returning an HTML page instead of image bytes, which is why the logo
+// rendered as a broken image on /login. Any future public static asset
+// added outside `_next/` needs a matching entry here.
+const PUBLIC_PREFIXES = [LOGIN_PATH, '/_next', '/favicon.ico', '/api/health', '/recafco-logo.png', '/icon.png'];
 
 // Parse JWT payload without signature verification (navigation use only).
 // Authorization is enforced by JwtAuthGuard in NestJS on every API call.

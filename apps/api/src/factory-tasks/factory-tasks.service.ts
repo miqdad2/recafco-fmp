@@ -1102,6 +1102,10 @@ export class FactoryTasksService {
       overdueTasks: number;
       blockedTasks: number;
       completedThisMonth: number;
+      /** FMP-UI-01 — Executive Dashboard's "Due Today" card metric: active tasks due within today (UTC). */
+      dueToday: number;
+      /** FMP-UI-01 — Executive Dashboard's "Completed This Week" card metric: same COMPLETED/CLOSED population as completedThisMonth, weekly (UTC Mon–Sun) window instead of monthly. */
+      completedThisWeek: number;
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
@@ -1123,10 +1127,16 @@ export class FactoryTasksService {
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    // UTC Monday-start week, matching monthStart/monthEnd's own UTC-boundary convention.
+    const weekDayIndex = (todayStart.getUTCDay() + 6) % 7; // 0 = Monday
+    const weekStart = new Date(todayStart.getTime() - weekDayIndex * 24 * 60 * 60 * 1000);
+    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
 
-    const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, recentRaw] =
+    const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek, recentRaw] =
       await Promise.all([
         this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: { in: ACTIVE_STATUSES } } }),
         this.db.getClient().factoryTask.count({
@@ -1143,6 +1153,16 @@ export class FactoryTasksService {
             completedAt: { gte: monthStart, lt: monthEnd },
           },
         }),
+        this.db.getClient().factoryTask.count({
+          where: { ...deptWhere, status: { in: ACTIVE_STATUSES }, dueAt: { gte: todayStart, lt: todayEnd } },
+        }),
+        this.db.getClient().factoryTask.count({
+          where: {
+            ...deptWhere,
+            status: { in: [TaskStatus.COMPLETED, TaskStatus.CLOSED] },
+            completedAt: { gte: weekStart, lt: weekEnd },
+          },
+        }),
         this.db.getClient().factoryTask.findMany({
           where: { ...deptWhere },
           take: 8,
@@ -1153,7 +1173,7 @@ export class FactoryTasksService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth },
+      metrics: { openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,

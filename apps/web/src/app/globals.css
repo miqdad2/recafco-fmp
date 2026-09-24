@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* FMP-UI-11 — class-based dark mode: Tailwind v4's `dark:` variant defaults
+   to `prefers-color-scheme` alone, which can't express an explicit
+   Light/Dark override that beats the OS setting. Redefining it to key off a
+   `.dark` class on `<html>` (this is Tailwind v4's own documented pattern
+   for class-based dark mode) means `dark:` classes now respond to whatever
+   `<html>` class `ThemeProvider` sets — which itself already accounts for
+   "System" by resolving to the OS preference — so every `dark:` usage below
+   and everywhere else in the app has one consistent trigger. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", "Segoe UI", Arial, sans-serif;
   --font-mono: "JetBrains Mono", Consolas, monospace;
@@ -53,11 +63,82 @@
   --color-teal: #0f766e;
   --color-teal-light: #ecfdfa;
 
+  /* FMP-UI-03 — Executive Dashboard per-module accent colors (soft, muted
+     tones — not the bright/saturated raw Tailwind swatches). Safety &
+     Compliance and Incident Report reuse the existing --color-success/
+     --color-error tokens (green/red already match); Maintenance Management
+     reuses --color-teal above — no new token added for those 3. Only the 5
+     hues with no existing token get one here. */
+  --color-module-contracts: #2563eb;
+  --color-module-contracts-light: #eff6ff;
+  --color-module-technical: #4f46e5;
+  --color-module-technical-light: #eef2ff;
+  --color-module-erection: #d97706;
+  --color-module-erection-light: #fffbeb;
+  --color-module-production: #7c3aed;
+  --color-module-production-light: #f5f3ff;
+  --color-module-tasks: #0e7490;
+  --color-module-tasks-light: #ecfeff;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;
   --radius-xl: 14px;
   --radius-full: 9999px;
+}
+
+/* Plain (non-@theme) variable — a raw decorative value for one inline
+   `style` on the login page, not a Tailwind-generated utility, so it lives
+   outside @theme. Declared BEFORE the .dark override block below: `:root`
+   and `.dark` have equal CSS specificity, and when both match the same
+   element (`<html class="dark">` matches both selectors), the LATER rule in
+   source order wins — so this base value must come first, or `.dark`'s
+   override would be silently overwritten back to the light value. */
+:root {
+  --login-glow-center: rgba(255, 255, 255, 0.85);
+}
+
+/* FMP-UI-11 — dark mode overrides for the core STRUCTURAL tokens only (page
+   background, card/surface backgrounds, borders, primary/secondary/muted
+   text) — exactly the token list this unit's own spec asked for (page
+   background, card background, text primary/secondary, border, input
+   background, table background, muted surfaces). Every component already
+   built against these Tailwind utility classes (`bg-surface`, `text-text-
+   primary`, `border-border`, etc. — the overwhelming majority of this app)
+   re-themes automatically the moment `.dark` is present on `<html>`, with
+   zero per-component changes, because a CSS custom property redefined on an
+   ancestor cascades to every descendant that reads it via `var()`.
+
+   Deliberately UNCHANGED here: `--color-nav`/`--color-nav-hover`/
+   `--color-nav-active`/`--color-text-inverse` (the sidebar is permanently
+   dark chrome in both platform themes today, by original design — it does
+   not need to get lighter for "dark mode"); `--color-accent` and every
+   status/module "-light" pastel tint (success/warning/error/info/teal/
+   secondary-accent/module-*) — these stay their light-mode pastel values in
+   both themes for now. They remain fully readable (the paired foreground
+   colors like --color-error are unaffected), just not re-tinted for a dark
+   page — a deliberately scoped follow-up, not an oversight; see this unit's
+   own progress-tracker entry. RECAFCO red (`--color-accent`) is unchanged
+   everywhere per this unit's own "RECAFCO red still visible" requirement. */
+.dark {
+  --color-background: #0b0f19;
+  --color-surface: #141b2d;
+  --color-surface-secondary: #1c2438;
+  --color-surface-hover: #212a42;
+
+  --color-border: #2b3550;
+  --color-border-strong: #3f4b6b;
+
+  --color-text-primary: #f1f4f9;
+  --color-text-secondary: #aab4c8;
+  --color-text-muted: #7e8aa3;
+
+  /* Login page's central "spotlight" glow behind the card — a bright white
+     blob reads as a lit lamp on the light background but as an odd glare on
+     a dark one, so it dims to a faint highlight instead of disappearing
+     outright (the card's own lighter surface already gives it contrast
+     against the darker page without help from this glow in dark mode). */
+  --login-glow-center: rgba(255, 255, 255, 0.05);
 }
 
 *,

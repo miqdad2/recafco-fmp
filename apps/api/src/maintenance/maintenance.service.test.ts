@@ -825,7 +825,8 @@ describe('MaintenanceService', () => {
         .mockResolvedValueOnce(3)  // assignedToMe
         .mockResolvedValueOnce(2)  // overdueRequests
         .mockResolvedValueOnce(1)  // waitingForParts
-        .mockResolvedValueOnce(5); // completedThisMonth
+        .mockResolvedValueOnce(5)  // completedThisMonth
+        .mockResolvedValueOnce(4); // inProgressRequests
       mockMrFindMany.mockResolvedValueOnce([
         { id: 'mr-r1', referenceNumber: 'MR-001', title: 'Fix Pump', status: 'SUBMITTED', updatedAt: new Date('2026-07-01T08:00:00Z') },
       ]);
@@ -839,6 +840,7 @@ describe('MaintenanceService', () => {
       expect(result.metrics.overdueRequests).toBe(2);
       expect(result.metrics.waitingForParts).toBe(1);
       expect(result.metrics.completedThisMonth).toBe(5);
+      expect(result.metrics.inProgressRequests).toBe(4);
       expect(result.recent).toHaveLength(1);
       expect(result.recent[0]?.referenceNumber).toBe('MR-001');
       expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

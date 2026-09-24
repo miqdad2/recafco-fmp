@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useMemo } from 'react';
+import { useActionState, useState, useMemo, useEffect } from 'react';
 import { Check, AlertTriangle } from 'lucide-react';
 import type { OrgEntity, LocationEntity } from '@/lib/organizations-api';
 import type { RoleSummary, PermissionSummary } from '@/lib/roles-api';
@@ -8,7 +8,10 @@ import type { ModuleIdentifier, DepartmentAccessScope } from '@/lib/users-api';
 import { RolePermissionSummary } from './role-permission-summary';
 import { ModuleAccessEditor, ALL_MODULES } from './module-access-editor';
 import { MODULE_LABELS, SCOPE_LABELS } from './scope-utils';
+import type { AccessTemplate } from './access-template';
 import type { CreateWithAccessState } from '../actions';
+
+export type { AccessTemplate } from './access-template';
 
 export interface RoleWithPerms extends RoleSummary {
   permissions: PermissionSummary[];
@@ -26,6 +29,10 @@ interface Props {
   locApiError?: boolean;
   /** CM-42 — carried in from /administration/users/new?module=<slug> (Users page module cards). Only affects initial state — the Module dropdown and Access Template stay fully editable, exactly as if picked by hand. */
   preselectedModule?: ModuleIdentifier;
+  /** FMP-UI-02 — display name for the banner shown alongside preselectedModule, so a card whose slug differs from the underlying module's own name (e.g. "Technical"/"Erection", both really Contract Management) shows the label the admin actually clicked, not the generic module name. Falls back to MODULE_LABELS[preselectedModule] when omitted. */
+  preselectedModuleLabel?: string;
+  /** FMP-UI-02 — carried in from ?template=<value> (module-catalog.ts's presetTemplate, or the standalone Executive / Management card link). Applied once on mount via the same handleTemplateChange() path a manual radio click would use. */
+  preselectedTemplate?: AccessTemplate;
 }
 
 function FieldError({ errors }: { errors: string[] | undefined }): React.JSX.Element | null {
@@ -65,16 +72,20 @@ const inputCls = (hasError?: boolean): string =>
 const selectCls =
   'w-full h-10 px-3 rounded-md border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus';
 
-type AccessTemplate = 'MODULE_STAFF' | 'MODULE_MANAGER' | 'ERECTION_MANAGER' | 'MULTI_MODULE' | 'PLATFORM_ADMIN' | 'CUSTOM';
-
 const TEMPLATE_OPTIONS: { value: AccessTemplate; label: string; helper: string }[] = [
-  { value: 'MODULE_STAFF', label: 'Module Staff', helper: 'For normal users working in one module.' },
+  // FMP-UI-02 — no dedicated "Executive Manager" role existed before this unit (audited all 6
+  // existing roles first); EXECUTIVE_MANAGER is a new additive role (all 6 operational modules'
+  // own read/write permissions, withholding users.*/roles.*/org.*/audit.*/access_scope.* — see
+  // that role's own migration) so it is deliberately NOT the same as Platform Admin below.
+  { value: 'EXECUTIVE_MANAGER', label: 'Executive Manager', helper: 'Higher management — full operational access across every module (not system administration).' },
   { value: 'MODULE_MANAGER', label: 'Module Manager', helper: 'For managers responsible for a module or department.' },
+  { value: 'MODULE_STAFF', label: 'Module Staff', helper: 'For normal users working in one module.' },
   // CM-71H.1 — no dedicated "Erection Manager" role exists (see TEMPLATE_ROLE_CODE below); this is a
   // clearly-labelled access template, not a new role/permission, per that unit's own "if the existing
   // role model does not support a separate role, create a safe access template" instruction.
   { value: 'ERECTION_MANAGER', label: 'Erection Manager / Workflow Owner', helper: 'Contract Management — assigned to own and update a specific contract’s Erection Workflow.' },
   { value: 'MULTI_MODULE', label: 'Multi-Module User', helper: 'For managers or staff who need more than one module.' },
+  { value: 'VIEWER', label: 'Viewer / Read-only', helper: 'Monitor dashboards and records without create, update, or delete access.' },
   { value: 'PLATFORM_ADMIN', label: 'Platform Admin', helper: 'For IT/admin users who manage users, roles or configuration.' },
   { value: 'CUSTOM', label: 'Custom', helper: 'Manually configure role, modules and scopes.' },
 ];
@@ -93,12 +104,22 @@ const TEMPLATE_OPTIONS: { value: AccessTemplate; label: string; helper: string }
  * an Erection Manager should only ever be able to act on the SPECIFIC
  * contracts a Contract Manager assigns them via the Erection Workflow
  * Assignment flow (CM-71H), never on every contract in the department.
+ *
+ * FMP-UI-02 — EXECUTIVE_MANAGER and VIEWER map to their own real roles of
+ * the same name (see the migration for EXECUTIVE_MANAGER's exact grant).
  */
 const TEMPLATE_ROLE_CODE: Partial<Record<AccessTemplate, string>> = {
+  EXECUTIVE_MANAGER: 'EXECUTIVE_MANAGER',
   MODULE_STAFF: 'CONTRACT_STAFF',
   MODULE_MANAGER: 'CONTRACT_MANAGER',
   ERECTION_MANAGER: 'CONTRACT_STAFF',
+  VIEWER: 'VIEWER',
 };
+
+/** Every operational module EXECUTIVE_MANAGER's Module Access step auto-selects — deliberately excludes ADMINISTRATION (Executive Manager has no users/roles/org permission codes, so an Administration scope row would be meaningless). */
+const EXECUTIVE_MANAGER_MODULES: ModuleIdentifier[] = [
+  'CONTRACTS_MANAGEMENT', 'FACTORY_TASKS', 'INCIDENT_REPORT', 'MAINTENANCE_REQUESTS', 'SAFETY_COMPLIANCE', 'PRODUCTION_DASHBOARD',
+];
 
 /**
  * CM-42 — mirrors what handleTargetModuleChange() below would do, for the
@@ -117,6 +138,7 @@ function preselectedRoleId(mod: ModuleIdentifier | undefined, roles: RoleWithPer
 
 /** Short capability hint shown next to a role's name in the Role dropdown — purely descriptive, not authoritative (the permission preview below is). */
 const ROLE_HINTS: Record<string, string> = {
+  EXECUTIVE_MANAGER: 'Full operational access — all modules, not admin',
   CONTRACT_STAFF: 'Contract Management — Staff',
   CONTRACT_MANAGER: 'Contract Management — Manager',
   CONTRACT_MANAGEMENT_USER: 'Contract Management — Legacy / full access',
@@ -212,6 +234,9 @@ function computeAccessWarnings({ template, selectedRole, moduleScopes }: Warning
   if (template === 'ERECTION_MANAGER' && selectedRole && selectedRole.code !== 'CONTRACT_STAFF') {
     warnings.push('Erection Manager / Workflow Owner is designed around the Contract Staff role (contracts.workflow_update). A different role may grant broader or narrower access than intended.');
   }
+  if (template === 'EXECUTIVE_MANAGER' && selectedRole && selectedRole.code !== 'EXECUTIVE_MANAGER') {
+    warnings.push('Executive Manager template is designed around the Executive Manager role. A different role may grant broader or narrower access than intended.');
+  }
 
   return warnings;
 }
@@ -227,6 +252,8 @@ export function NewUserWizard({
   plantApiError = false,
   locApiError = false,
   preselectedModule,
+  preselectedModuleLabel,
+  preselectedTemplate,
 }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
   const [step, setStep] = useState(0);
@@ -286,11 +313,54 @@ export function NewUserWizard({
       const contractStaff = activeRoles.find((r) => r.code === TEMPLATE_ROLE_CODE['ERECTION_MANAGER']);
       setSelectedRoleId(contractStaff?.id ?? '');
       setModuleScopes((prev) => (prev['CONTRACTS_MANAGEMENT'] !== undefined ? prev : { ...prev, CONTRACTS_MANAGEMENT: 'OWN_DEPARTMENT' }));
+    } else if (next === 'EXECUTIVE_MANAGER') {
+      // FMP-UI-02 — not tied to one module (unlike Module Staff/Manager), so
+      // no module picker is shown, same reasoning as Erection Manager above.
+      // Auto-selects the Executive Manager role and seeds every operational
+      // module's Module Access scope: All Departments when this actor can
+      // grant it (access_scope.manage_all_departments — see canManageAll),
+      // otherwise Selected Departments with every currently-active
+      // department pre-checked, since granting All Departments without that
+      // permission would be rejected server-side. Either way this is a
+      // starting point, not a lock — every row stays editable in Step 4.
+      setTargetModule('');
+      const executiveManager = activeRoles.find((r) => r.code === TEMPLATE_ROLE_CODE['EXECUTIVE_MANAGER']);
+      setSelectedRoleId(executiveManager?.id ?? '');
+      const allDeptIds = departments.map((d) => d.id);
+      setModuleScopes((prev) => {
+        const seeded = { ...prev };
+        for (const mod of EXECUTIVE_MANAGER_MODULES) seeded[mod] = canManageAll ? 'ALL_DEPARTMENTS' : 'SELECTED_DEPARTMENTS';
+        return seeded;
+      });
+      if (!canManageAll) {
+        setModuleDeptIds((prev) => {
+          const seeded = { ...prev };
+          for (const mod of EXECUTIVE_MANAGER_MODULES) seeded[mod] = allDeptIds;
+          return seeded;
+        });
+      }
+    } else if (next === 'VIEWER') {
+      // FMP-UI-02 — Viewer's own role already carries read-only access to
+      // every module (see the RBAC foundation migration), so there is no
+      // module picker to wait on either; Module Access in Step 4 stays at
+      // its normal My Department default per module unless the admin widens
+      // it manually — read-only visibility, not automatically company-wide.
+      setTargetModule('');
+      const viewer = activeRoles.find((r) => r.code === TEMPLATE_ROLE_CODE['VIEWER']);
+      setSelectedRoleId(viewer?.id ?? '');
     } else {
       setTargetModule('');
     }
     // MULTI_MODULE / CUSTOM: leave the current role selection untouched.
   }
+
+  // FMP-UI-02 — applies a ?template=<value> card preset (Executive /
+  // Management, or Erection's presetTemplate) once on mount, through the
+  // exact same handleTemplateChange() a manual radio click would use — one
+  // source of truth for what each template means, never duplicated logic.
+  useEffect(() => {
+    if (preselectedTemplate) handleTemplateChange(preselectedTemplate);
+  }, []);
 
   function handleTargetModuleChange(mod: ModuleIdentifier | ''): void {
     setTargetModule(mod);
@@ -443,8 +513,14 @@ export function NewUserWizard({
 
       {preselectedModule && (
         <p className="mb-5 rounded-md bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
-          Creating a user for {MODULE_LABELS[preselectedModule]}. The module is already selected in Access
-          Template below — change it there if needed.
+          Creating a user for {preselectedModuleLabel ?? MODULE_LABELS[preselectedModule]}. The module is already
+          selected in Access Template below — change it there if needed.
+        </p>
+      )}
+      {!preselectedModule && preselectedTemplate === 'EXECUTIVE_MANAGER' && (
+        <p className="mb-5 rounded-md bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
+          Creating an Executive Manager user. The access template is already selected below — change it there if
+          needed.
         </p>
       )}
 
@@ -722,6 +798,30 @@ export function NewUserWizard({
               </div>
             )}
 
+            {template === 'EXECUTIVE_MANAGER' && (
+              <div className="mt-4 text-xs text-info bg-info-light border border-info/20 rounded-md px-3 py-2">
+                <p className="font-medium mb-1">Executive Manager gets access to all operational modules.</p>
+                <p>
+                  Grants full view/create/update/approve/assign/manage access to Contract Management (incl.
+                  Technical and Erection), Safety &amp; Compliance, Incident Report, Production Planning,
+                  Maintenance Management, and Task Management — not user, role, or organization administration
+                  (that is Platform Admin, below).
+                </p>
+                <p className="mt-1.5">
+                  {canManageAll
+                    ? 'Module Access (Step 4) has been set to All Departments for every module above — company-wide visibility.'
+                    : 'Your account cannot grant company-wide (All Departments) access. Module Access (Step 4) has been set to Selected Departments with every currently active department pre-checked instead — ask a Super Admin to upgrade this to All Departments later if new departments are added.'}
+                </p>
+              </div>
+            )}
+
+            {template === 'VIEWER' && (
+              <p className="mt-4 text-xs text-text-muted">
+                Read-only across every module — no create, update, or delete access. Good for users who should
+                monitor dashboards and records but not edit them.
+              </p>
+            )}
+
             {template === 'MULTI_MODULE' && (
               <p className="mt-4 text-xs text-text-muted">
                 Select a role manually below, then configure department scope for each module this user needs in
@@ -774,6 +874,11 @@ export function NewUserWizard({
           <p className="text-xs text-text-muted bg-info-light border border-info/20 rounded-md px-3 py-2">
             Module Access controls data visibility, not action permissions.
           </p>
+          {template === 'EXECUTIVE_MANAGER' && (
+            <p className="text-xs font-medium text-accent bg-accent/10 rounded-md px-3 py-2">
+              Executive Manager gets access to all operational modules.
+            </p>
+          )}
           {emphasizedModule && (
             <p className="text-xs text-text-muted">
               {MODULE_LABELS[emphasizedModule]} is highlighted below and defaults to My Department. The other

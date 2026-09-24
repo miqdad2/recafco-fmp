@@ -109,6 +109,7 @@ export interface MrDashboardData {
     overdueRequests: number;
     waitingForParts: number;
     completedThisMonth: number;
+    inProgressRequests: number;
   };
   recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
 }

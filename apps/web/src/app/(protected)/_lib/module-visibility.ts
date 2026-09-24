@@ -101,3 +101,45 @@ export function isContractStaffOnlyAccess(permissions: string[]): boolean {
 export function isErectionDashboardMonitorOnly(permissions: string[]): boolean {
   return permissions.includes('contracts.update');
 }
+
+const OPERATIONAL_MODULES: Exclude<ModuleCode, 'ADMINISTRATION'>[] = [
+  'FACTORY_TASKS', 'INCIDENT_REPORT', 'MAINTENANCE_REQUESTS', 'SAFETY_COMPLIANCE', 'CONTRACTS_MANAGEMENT', 'PRODUCTION_DASHBOARD',
+];
+
+/**
+ * FMP-UI-03 — true for a user who can see every operational module but has
+ * no Administration access at all: exactly the permission shape the
+ * EXECUTIVE_MANAGER role produces (see that role's own migration,
+ * 20260922000000_add_executive_manager_role — full read/write on all 6
+ * operational modules, withholding every users/roles/org/audit permission
+ * code), derived from permissions only, never a role code — any future role with the same
+ * shape gets the same treatment automatically. Drives the Executive
+ * Dashboard sidebar experience (hides the redundant "Dashboard" link since
+ * that IS the landing page for this shape, and switches to a flat,
+ * larger-type nav — see sidebar.tsx). Never true for SUPER_ADMIN/ADMIN
+ * (both hold at least one ADMINISTRATION_GATE_PERMISSIONS code) or for any
+ * single/partial-module role (Contract Manager/Staff, the legacy
+ * CONTRACT_MANAGEMENT_USER, Viewer — none holds all 6 modules' own read
+ * permission).
+ */
+export function isExecutiveManagerAccess(permissions: string[]): boolean {
+  return OPERATIONAL_MODULES.every((m) => canSeeModule(permissions, m)) && !canSeeModule(permissions, 'ADMINISTRATION');
+}
+
+/**
+ * FMP-UI-10 — QA/QC and Storage & Delivery are placeholder modules: no real
+ * module exists yet, so there is no dedicated read permission to gate them
+ * on. Per this unit's own explicit instruction, visibility instead mirrors
+ * "Executive Manager OR Admin/Super Admin" — broader than
+ * isExecutiveManagerAccess() alone (which is deliberately false for Admin/
+ * Super Admin, see that function's own doc comment), since both should see
+ * these placeholder cards/nav entries for now. Replace with a real
+ * dedicated permission check once the QA/QC and Storage & Delivery modules
+ * are actually built — this rule is not meant to be permanent. The API's
+ * own PlatformDashboardService duplicates this exact shape server-side
+ * (literal permission arrays, since the two packages don't share a
+ * permission-utils module) — keep both in sync if this rule ever changes.
+ */
+export function isExecutiveManagerOrAdminAccess(permissions: string[]): boolean {
+  return isExecutiveManagerAccess(permissions) || canSeeModule(permissions, 'ADMINISTRATION');
+}

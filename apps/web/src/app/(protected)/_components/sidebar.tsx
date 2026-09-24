@@ -19,17 +19,20 @@ import {
   Calendar,
   Workflow,
   HardHat,
+  Ruler,
   Wallet,
   AlertCircle,
   Receipt,
   ClipboardCheck,
+  BadgeCheck,
+  Warehouse,
   ChevronDown,
   ChevronRight,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
-import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from '../_lib/module-visibility';
+import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly, isExecutiveManagerAccess } from '../_lib/module-visibility';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -61,21 +64,30 @@ interface NavGroup {
   items: NavItem[];
 }
 
+// FMP-UI-01 — Technical and Erection are promoted to their own top-level
+// sidebar entries (positions 3 and 4 in the required module order), even
+// though they are sub-views of Contract Management with no dedicated
+// permission — gated by the same CONTRACTS_MANAGEMENT module check as the
+// Contract Management dropdown itself. They render first in this array so
+// they appear immediately after that dropdown (see the group-rendering loop
+// below, which renders the dropdown before this array's items).
 const MAIN_GROUPS: NavGroup[] = [
   {
     label: null,
     items: [
-      { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { label: 'Factory Tasks Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
-      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
-      { label: 'Maintenance Requests', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
+      { label: 'Technical', href: '/contracts/technical', icon: Ruler, module: 'CONTRACTS_MANAGEMENT' },
+      { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
-      { label: 'Production Dashboard', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
+      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
+      { label: 'Production Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
+      { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
+      { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
     ],
   },
   {
@@ -142,8 +154,57 @@ const CONTRACT_STAFF_ITEMS: NavItem[] = [
   { label: 'Erection Dashboard', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
 ];
 
+/**
+ * FMP-UI-01 — Technical/Erection links reused verbatim inside the flat
+ * Contract-Management-only section (see the group-filter above for why they
+ * are excluded from the generic Operations rendering in that case). Gating
+ * is already guaranteed by the caller only rendering this list when
+ * contractManagementOnly is true (which itself requires contracts.read).
+ */
+const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
+  { label: 'Technical', href: '/contracts/technical', icon: Ruler },
+  { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat },
+];
+
+/**
+ * FMP-UI-03 — the flat, larger-type nav shown only when isExecutiveManagerAccess()
+ * is true (see that function's own doc comment). No "Dashboard" link — that
+ * IS the landing page for this shape (root `/` already redirects there), and
+ * no per-item gating is needed: isExecutiveManagerAccess() already requires
+ * every one of these 6 modules' own read permission to be true, so all 8
+ * entries are always valid together. Contract Management is a single flat
+ * link here (unlike CONTRACT_ITEMS' 9-item dropdown) — Executive Manager
+ * gets the module's own dashboard, not the full manager register toolset,
+ * matching the task's literal "keep only these 8 items" sidebar spec.
+ */
+// FMP-UI-07 — these now point to each module's Executive Module Landing Page
+// (see _lib/executive-modules.ts, the single source of truth these hrefs are
+// kept in sync with) instead of straight into the full operational
+// dashboard, so the Executive Manager persona always lands on the
+// simplified senior-friendly overview first — matching the Executive
+// Dashboard's own card buttons, which now route the same way.
+// FMP-UI-10 — QA/QC and Storage & Delivery added right after Erection, per
+// this unit's own spec. Both are placeholder modules with no dedicated
+// permission (see _lib/executive-modules.ts's isVisible for the real
+// gating logic on the dashboard cards themselves) — shown here purely
+// because this whole sidebar section already only renders under
+// isExecutiveManagerAccess (below), the exact "executive-only access rule"
+// this unit's own instruction allows using for now.
+const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
+  { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
+  { label: 'Technical', href: '/contracts/technical', icon: Ruler },
+  { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
+  { label: 'Quality Assurance & Control', href: '/executive/qaqc', icon: BadgeCheck },
+  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
+  { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
+  { label: 'Incident Report', href: '/incidents/executive', icon: AlertTriangle },
+  { label: 'Production Planning', href: '/production/executive', icon: Factory },
+  { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
+  { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
+];
+
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
-const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'erection-dashboard'];
+const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'erection-dashboard', 'technical', 'executive', 'erection-executive'];
 
 const ADMIN_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/administration/dashboard', icon: Settings },
@@ -181,12 +242,44 @@ interface SidebarProps {
 }
 
 function isActive(href: string, pathname: string): boolean {
-  if (href === '/') return pathname === '/';
-  if (href.endsWith('/dashboard')) {
-    const base = href.slice(0, -'/dashboard'.length);
+  // Exact match only — the generic suffix rule below would otherwise compute
+  // an empty base ('') for this exact href and match every pathname (every
+  // path starts with '/').
+  if (href === '/dashboard') return pathname === '/dashboard';
+  // FMP-UI-07 — '/executive' gets the same "also match the bare module base"
+  // treatment '/dashboard' already had: EXECUTIVE_SIDEBAR_ITEMS now points
+  // to each module's landing page (e.g. /safety-compliance/executive), and
+  // this keeps the sidebar item highlighted while viewing a record reached
+  // from it (e.g. /safety-compliance/{id}), exactly as it did before for
+  // /dashboard-suffixed hrefs.
+  const suffix = href.endsWith('/dashboard') ? '/dashboard' : href.endsWith('/executive') ? '/executive' : null;
+  if (suffix) {
+    const base = href.slice(0, -suffix.length);
     return pathname === href || pathname === base || pathname.startsWith(base + '/');
   }
   return pathname === href || pathname.startsWith(href + '/');
+}
+
+/**
+ * FMP-UI-03 — isActive()'s generic "/dashboard suffix -> whole base is active"
+ * rule (above) assumes the base prefix belongs to one module alone (true for
+ * e.g. /factory-tasks). /contracts is NOT one of those — Technical, Erection,
+ * Schedule, Payments etc. all live under it as siblings with their own
+ * EXECUTIVE_SIDEBAR_ITEMS entries — so treating all of /contracts/* as
+ * "Contract Management is active" would wrongly highlight it while viewing
+ * Technical or Erection. Only the exact-match branch is correct here.
+ */
+function isExecutiveItemActive(href: string, pathname: string): boolean {
+  // FMP-UI-07 — Contract Management's item now points to /contracts/executive
+  // (was /contracts/dashboard); isActive()'s generic '/executive'-suffix rule
+  // would otherwise strip it down to the bare '/contracts' base and wrongly
+  // mark this item active while viewing Technical or Erection (its own
+  // sibling EXECUTIVE_SIDEBAR_ITEMS entries under /contracts/*) — same reason
+  // this override existed for /contracts/dashboard before.
+  if (href === '/contracts/executive') {
+    return pathname === '/contracts/executive' || pathname.startsWith('/contracts/executive/');
+  }
+  return isActive(href, pathname);
 }
 
 export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): React.JSX.Element {
@@ -232,20 +325,32 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   // top-level section instead of a nested group under Operations.
   const contractManagementOnly = isContractManagementOnlyAccess(user.permissions);
 
+  // FMP-UI-03 — Executive Manager gets a dedicated flat, larger-type nav
+  // (see isExecutiveManagerAccess's own doc comment and EXECUTIVE_SIDEBAR_ITEMS
+  // above). Every other persona's rendering below is completely untouched.
+  const executiveMode = isExecutiveManagerAccess(user.permissions);
+
   const sidebarContent = (
     <div className="flex flex-col h-full">
-      {/* Logo / Brand */}
-      <div className="flex items-center justify-between h-14 px-4 shrink-0 border-b border-nav-hover">
+      {/* Logo / Brand — FMP-UI-09: a full white panel here (FMP-UI-07's fix)
+          read as a large logo disconnected from the dark sidebar, so this is
+          back to a compact, dark-background brand row: only the logo itself
+          sits in a small white chip (~44px wide, just enough for its dark
+          elements to keep contrast — see that same rule on the login page
+          and Sidebar's own history), with "RECAFCO FMP" + a small subtitle
+          in light text beside it, matching the sidebar's own dark theme. */}
+      <div className="flex items-center justify-between h-16 px-4 shrink-0 border-b border-nav-hover">
         <Link
           href="/"
-          className="flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded"
+          className="flex items-center gap-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded"
           onClick={onClose}
         >
-          <span className="flex items-center justify-center size-7 rounded bg-accent text-white text-xs font-bold shrink-0">
-            R
+          <span className="flex shrink-0 items-center justify-center rounded-md bg-white p-1">
+            <img src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} className="h-auto w-11" />
           </span>
-          <span className="text-sm font-semibold text-text-inverse tracking-tight">
-            RECAFCO FMP
+          <span className="flex flex-col leading-tight">
+            <span className="text-sm font-bold tracking-tight text-text-inverse">RECAFCO FMP</span>
+            <span className="text-[10px] text-text-inverse/60">Factory Management</span>
           </span>
         </Link>
         <button
@@ -260,11 +365,62 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-0.5" aria-label="Primary navigation">
+        {executiveMode ? (
+          // FMP-UI-03 — flat 8-item list only, larger type/icon/spacing, no
+          // "Dashboard" link (this IS the landing page), no dropdown, no
+          // Administration section (Executive Manager holds no admin
+          // permission, so hasAnyAdminPermission is already false for them).
+          <div className="px-2 space-y-1.5">
+            {EXECUTIVE_SIDEBAR_ITEMS.map((item) => {
+              const active = isExecutiveItemActive(item.href, pathname);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={onClose}
+                  aria-current={active ? 'page' : undefined}
+                  className={[
+                    // FMP-UI-04 — items-start (not items-center) + a small icon
+                    // top-margin so a 2-word label that wraps (e.g. "Maintenance
+                    // Management" at this width) still reads as intentional,
+                    // top-aligned with the icon, rather than the icon floating
+                    // in the vertical middle of two lines.
+                    // FMP-UI-05 — rounded-r-md only (not rounded-md) so the
+                    // active indicator's left border sits flush against the
+                    // sidebar's edge instead of curving away from it.
+                    // FMP-UI-10C — py-3→py-3.5 and gap-3.5→gap-3 (item spacing
+                    // container also went space-y-1→space-y-1.5) now that
+                    // "Quality Assurance & Control"/"Storage Yard & Delivery"
+                    // are long enough to reliably wrap to 2 lines at this
+                    // sidebar width — the extra vertical padding keeps a
+                    // wrapped label from reading as cramped against its
+                    // neighbors, and leading-snug (1.375) sits inside this
+                    // unit's own requested 1.25–1.35 range.
+                    'flex items-start gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-base leading-snug transition-colors duration-150',
+                    active
+                      ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                      : 'border-transparent text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse font-medium',
+                  ].join(' ')}
+                >
+                  <item.icon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+        <>
         {MAIN_GROUPS.map((group) => {
           const visibleItems = group.items.filter((item) => {
             // The top-level Dashboard link duplicates Contract Management's own Dashboard
             // for a Contract-Management-only user — hide it there instead of showing two.
-            if (contractManagementOnly && group.label === null && item.href === '/') return false;
+            if (contractManagementOnly && group.label === null && item.href === '/dashboard') return false;
+            // Technical/Erection are gated on the same CONTRACTS_MANAGEMENT module as every
+            // other item here — so for a Contract-Management-only user they'd otherwise
+            // still pass isNavItemVisible and render under a floating "Operations" heading
+            // above the flat Contract Management section below. Render them there instead,
+            // right after that section, so the required top-level order still holds.
+            if (contractManagementOnly && group.label === 'Operations' && (item.label === 'Technical' || item.label === 'Erection')) return false;
             return isNavItemVisible(item, user.permissions, hasAnyAdminPermission);
           });
           const showContractsHere = group.label === 'Operations' && hasAnyContractPermission && !contractManagementOnly;
@@ -397,6 +553,27 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </Link>
               );
             })}
+            {/* Technical/Erection — same CONTRACTS_MANAGEMENT gate as the items above, rendered here (not under a separate "Operations" heading) so a Contract-Management-only user still sees the required top-level order. */}
+            {TECHNICAL_AND_ERECTION_ITEMS.map((item) => {
+              const active = isActive(item.href, pathname);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={onClose}
+                  aria-current={active ? 'page' : undefined}
+                  className={[
+                    'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
+                    active
+                      ? 'bg-nav-active text-text-inverse font-medium'
+                      : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                  ].join(' ')}
+                >
+                  <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         )}
 
@@ -432,6 +609,8 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
               })}
             </div>
           </div>
+        )}
+        </>
         )}
       </nav>
 

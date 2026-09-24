@@ -56,6 +56,21 @@ Use semantic tokens throughout. Never hardcode colors in feature components and 
   --color-teal: #0f766e;
   --color-teal-light: #ecfdfa;
 
+  /* FMP-UI-03 — Executive Dashboard per-module accent colors (soft, muted
+     tones). Safety & Compliance / Incident Report / Maintenance Management
+     reuse --color-success / --color-error / --color-teal above instead of
+     duplicating a token for hues that already exist. */
+  --color-module-contracts: #2563eb;
+  --color-module-contracts-light: #eff6ff;
+  --color-module-technical: #4f46e5;
+  --color-module-technical-light: #eef2ff;
+  --color-module-erection: #d97706;
+  --color-module-erection-light: #fffbeb;
+  --color-module-production: #7c3aed;
+  --color-module-production-light: #f5f3ff;
+  --color-module-tasks: #0e7490;
+  --color-module-tasks-light: #ecfeff;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;

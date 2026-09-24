@@ -10,5 +10,6 @@ import { DepartmentAccessModule } from '../department-access/department-access.m
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
   controllers: [MaintenanceController],
   providers: [MaintenanceService, MaintenanceRefService],
+  exports: [MaintenanceService],
 })
 export class MaintenanceModule {}

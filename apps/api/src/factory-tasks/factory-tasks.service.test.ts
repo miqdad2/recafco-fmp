@@ -790,7 +790,9 @@ describe('FactoryTasksService', () => {
         .mockResolvedValueOnce(4)  // assignedToMe
         .mockResolvedValueOnce(2)  // overdueTasks
         .mockResolvedValueOnce(1)  // blockedTasks
-        .mockResolvedValueOnce(7); // completedThisMonth
+        .mockResolvedValueOnce(7)  // completedThisMonth
+        .mockResolvedValueOnce(3)  // dueToday
+        .mockResolvedValueOnce(5); // completedThisWeek
       mockFactoryTaskFindMany.mockResolvedValueOnce([
         { id: 'task-r1', referenceNumber: 'TASK-001', title: 'Inspect Belt', status: 'OPEN', updatedAt: new Date('2026-07-01T10:00:00Z') },
       ]);
@@ -804,6 +806,8 @@ describe('FactoryTasksService', () => {
       expect(result.metrics.overdueTasks).toBe(2);
       expect(result.metrics.blockedTasks).toBe(1);
       expect(result.metrics.completedThisMonth).toBe(7);
+      expect(result.metrics.dueToday).toBe(3);
+      expect(result.metrics.completedThisWeek).toBe(5);
       expect(result.recent).toHaveLength(1);
       expect(result.recent[0]?.referenceNumber).toBe('TASK-001');
       expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

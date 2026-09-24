@@ -10,5 +10,6 @@ import { DepartmentAccessModule } from '../department-access/department-access.m
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
   controllers: [FactoryTasksController],
   providers: [FactoryTasksService, TasksRefService],
+  exports: [FactoryTasksService],
 })
 export class FactoryTasksModule {}

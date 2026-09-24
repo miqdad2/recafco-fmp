@@ -43,23 +43,38 @@ const WORKSPACE_DETAIL_BREADCRUMB: BreadcrumbItem[] = [
   { label: 'Contract Detail' },
 ];
 
+// FMP-UI-04B — the Executive Dashboard's title used to live here (moved out
+// of the page body so it sat "at the same visual level as the user name and
+// Sign out button"). FMP-UI-14 moved it back into the dashboard's own page
+// body as a proper hero heading (see `dashboard/page.tsx`) — a senior
+// manager's first screen reading as "a professional platform landing
+// screen" needed its own title in its own content area, not one borrowed
+// from the header chrome. `EXECUTIVE_DASHBOARD_PATH` is kept only so the
+// breadcrumb slot below still stays empty on this route (unchanged from
+// before — this route has never had a breadcrumb of its own).
+const EXECUTIVE_DASHBOARD_PATH = '/dashboard';
+
 export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Element {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isStaffOnly = isContractStaffOnlyAccess(user.permissions);
-  const breadcrumbItems =
-    contractModuleBreadcrumbItems(pathname) ??
-    contractWorkflowBreadcrumbItems(pathname, searchParams, isStaffOnly) ??
-    contractErectionChecklistBreadcrumbItems(pathname, isStaffOnly) ??
-    contractErectionStartBreadcrumbItems(pathname, isStaffOnly) ??
-    contractErectionDeliveryStartBreadcrumbItems(pathname, isStaffOnly) ??
-    contractErectionScheduleBreadcrumbItems(pathname, isStaffOnly) ??
-    contractErectionMethodStatementApprovalBreadcrumbItems(pathname, isStaffOnly) ??
-    contractErectionMethodStatementBreadcrumbItems(pathname, isStaffOnly) ??
-    (isContractWorkspaceDetailPath(pathname) ? WORKSPACE_DETAIL_BREADCRUMB : undefined);
+  const isExecutiveDashboard = pathname === EXECUTIVE_DASHBOARD_PATH;
+  const breadcrumbItems = isExecutiveDashboard
+    ? undefined
+    : (
+      contractModuleBreadcrumbItems(pathname) ??
+      contractWorkflowBreadcrumbItems(pathname, searchParams, isStaffOnly) ??
+      contractErectionChecklistBreadcrumbItems(pathname, isStaffOnly) ??
+      contractErectionStartBreadcrumbItems(pathname, isStaffOnly) ??
+      contractErectionDeliveryStartBreadcrumbItems(pathname, isStaffOnly) ??
+      contractErectionScheduleBreadcrumbItems(pathname, isStaffOnly) ??
+      contractErectionMethodStatementApprovalBreadcrumbItems(pathname, isStaffOnly) ??
+      contractErectionMethodStatementBreadcrumbItems(pathname, isStaffOnly) ??
+      (isContractWorkspaceDetailPath(pathname) ? WORKSPACE_DETAIL_BREADCRUMB : undefined)
+    );
 
   return (
-    <header className="flex items-center justify-between h-14 px-4 bg-surface border-b border-border shrink-0 gap-3">
+    <header className="relative flex items-center justify-between h-14 px-4 bg-surface border-b border-border shrink-0 gap-3">
       {/* Mobile hamburger */}
       <MobileMenuButton onMenuOpen={onMenuOpen} />
 

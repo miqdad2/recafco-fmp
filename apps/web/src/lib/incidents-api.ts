@@ -114,6 +114,7 @@ export interface IncidentDashboardData {
     criticalOpen: number;
     underInvestigation: number;
     resolvedThisMonth: number;
+    closedTotal: number;
   };
   recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
 }

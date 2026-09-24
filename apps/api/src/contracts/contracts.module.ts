@@ -77,5 +77,6 @@ import { ContractsController } from './contracts.controller';
     ContractErectionWorkflowAssignmentService,
   ],
   controllers: [ContractsController],
+  exports: [ContractsService, ContractDashboardService, ContractErectionDashboardService],
 })
 export class ContractsModule {}

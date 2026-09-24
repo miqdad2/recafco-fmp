@@ -27,6 +27,17 @@ const CONTRACT_MODULE_SEGMENTS = new Set([
   'closeouts',
   'closeout',
   'erection-dashboard',
+  // FMP-UI-07D — the 3 Executive Module Landing Pages living under
+  // /contracts/* (added in FMP-UI-07, never added here) were falling through
+  // to isContractWorkspaceDetailPath()'s "anything else looks like a
+  // contract id" default of `true`, making TopHeader render the wrong
+  // "Contract Management > Contract List > Contract Detail" breadcrumb on
+  // top of each page's own correct "Platform Dashboard > Contract
+  // Management" one from ExecutiveModuleNav. These are real top-level
+  // module pages, not a contract's own detail workspace.
+  'executive',
+  'technical',
+  'erection-executive',
 ]);
 
 const WORKSPACE_TAB_SEGMENTS = new Set([

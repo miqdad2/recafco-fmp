@@ -40,5 +40,14 @@ export async function loginAction(
   store.set('recafco_access', accessToken, { ...COOKIE_BASE, maxAge: 900 });
   store.set('recafco_refresh', refreshToken, { ...COOKIE_BASE, maxAge: 7 * 24 * 3600 });
 
-  redirect(mustChangePassword ? '/change-password' : '/');
+  // FMP-UI-Login-Polish — a normal successful login now lands on the short
+  // branded welcome transition first (was straight to '/', which itself
+  // just redirects to '/dashboard'), which then continues on to '/' itself
+  // once the transition finishes. Everything above this line — credential
+  // check, cookie names/flags/maxAge — is unchanged; only this destination
+  // string differs. mustChangePassword still goes straight to
+  // /change-password, unaffected — showing a "welcome to your workspace"
+  // screen before that would be misleading.
+  const destination = mustChangePassword ? '/change-password' : '/welcome';
+  redirect(destination);
 }

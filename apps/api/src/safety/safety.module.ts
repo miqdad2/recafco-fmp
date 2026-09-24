@@ -10,5 +10,6 @@ import { SafetyController } from './safety.controller';
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
   controllers: [SafetyController],
   providers: [SafetyService, SafetyRefService],
+  exports: [SafetyService],
 })
 export class SafetyModule {}

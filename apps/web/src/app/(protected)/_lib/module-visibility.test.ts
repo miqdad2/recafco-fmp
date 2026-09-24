@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from './module-visibility';
+import { canSeeModule, getVisibleModules, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly, isExecutiveManagerAccess, isExecutiveManagerOrAdminAccess } from './module-visibility';
 
 describe('canSeeModule', () => {
   it('grants each operational module only when its read permission is present', () => {
@@ -114,5 +114,62 @@ describe('isErectionDashboardMonitorOnly (CM-71H)', () => {
 
   it('is false for an empty permission set', () => {
     expect(isErectionDashboardMonitorOnly([])).toBe(false);
+  });
+});
+
+describe('isExecutiveManagerAccess (FMP-UI-03)', () => {
+  const EXECUTIVE_MANAGER_PERMS = [
+    'incidents.read', 'incidents.create', 'incidents.manage',
+    'tasks.read', 'tasks.create', 'tasks.manage',
+    'maintenance.read', 'maintenance.create', 'maintenance.manage',
+    'safety.read', 'safety.create', 'safety.manage',
+    'contracts.read', 'contracts.create', 'contracts.manage', 'contracts.workflow_update',
+    'production.read', 'production.create', 'production.manage',
+  ];
+
+  it('is true for the EXECUTIVE_MANAGER role permission shape (all 6 operational modules, no admin)', () => {
+    expect(isExecutiveManagerAccess(EXECUTIVE_MANAGER_PERMS)).toBe(true);
+  });
+
+  it('is false for SUPER_ADMIN/ADMIN-equivalent permissions (they also hold an Administration-gating permission)', () => {
+    expect(isExecutiveManagerAccess([...EXECUTIVE_MANAGER_PERMS, 'users.read'])).toBe(false);
+  });
+
+  it('is false when even one operational module is missing', () => {
+    const missingProduction = EXECUTIVE_MANAGER_PERMS.filter((p) => !p.startsWith('production.'));
+    expect(isExecutiveManagerAccess(missingProduction)).toBe(false);
+  });
+
+  it('is false for Contract Manager (single-module tier)', () => {
+    expect(isExecutiveManagerAccess([
+      'contracts.read', 'contracts.create', 'contracts.update', 'contracts.activate',
+      'contracts.terminate', 'contracts.close', 'contracts.comment', 'contracts.workflow_update',
+    ])).toBe(false);
+  });
+
+  it('is false for an empty permission set', () => {
+    expect(isExecutiveManagerAccess([])).toBe(false);
+  });
+});
+
+describe('isExecutiveManagerOrAdminAccess (FMP-UI-10)', () => {
+  const EXECUTIVE_MANAGER_PERMS = [
+    'incidents.read', 'tasks.read', 'maintenance.read', 'safety.read', 'contracts.read', 'production.read',
+  ];
+
+  it('is true for the Executive Manager permission shape', () => {
+    expect(isExecutiveManagerOrAdminAccess(EXECUTIVE_MANAGER_PERMS)).toBe(true);
+  });
+
+  it('is true for an Admin/Super Admin-equivalent permission set, even without all 6 operational permissions', () => {
+    expect(isExecutiveManagerOrAdminAccess(['users.read'])).toBe(true);
+  });
+
+  it('is false for a single-module viewer (e.g. Safety only)', () => {
+    expect(isExecutiveManagerOrAdminAccess(['safety.read'])).toBe(false);
+  });
+
+  it('is false for an empty permission set', () => {
+    expect(isExecutiveManagerOrAdminAccess([])).toBe(false);
   });
 });

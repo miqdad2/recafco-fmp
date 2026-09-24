@@ -10,5 +10,6 @@ import { DepartmentAccessModule } from '../department-access/department-access.m
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
   controllers: [IncidentsController],
   providers: [IncidentsService, IncidentsRefService],
+  exports: [IncidentsService],
 })
 export class IncidentsModule {}

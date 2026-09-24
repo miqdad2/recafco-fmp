@@ -11,5 +11,6 @@ import { ProductionController } from './production.controller';
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
   providers: [ProductionRefService, ProductionLinesService, ProductionOrdersService],
   controllers: [ProductionController],
+  exports: [ProductionOrdersService],
 })
 export class ProductionModule {}

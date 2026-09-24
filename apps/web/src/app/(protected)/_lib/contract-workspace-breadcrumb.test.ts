@@ -53,6 +53,9 @@ describe('isContractWorkspaceDetailPath', () => {
     'claims',
     'closeouts',
     'erection-dashboard',
+    'executive',
+    'technical',
+    'erection-executive',
   ])('is false for the %s module page', (segment) => {
     expect(isContractWorkspaceDetailPath(`/contracts/${segment}`)).toBe(false);
   });

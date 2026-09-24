@@ -136,6 +136,7 @@ export interface SafetyDashboardData {
     openFindings: number;
     criticalFindings: number;
     overdueFindings: number;
+    completedInspections: number;
   };
   recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
 }
