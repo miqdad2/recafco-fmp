@@ -9489,6 +9489,485 @@ The same card that used to hold `ExecutiveModuleTitle` now holds a small upperca
 - No fake/fabricated data anywhere — this unit removed a presentational section and relabeled a heading; every remaining number/value on the page is unchanged from FMP-UI-16B.
 - Light/Dark/System theming needed no changes — the only new class is the "Quick Actions" `<h2>`'s styling, which reuses this page's own existing section-heading classes verbatim.
 
+## FMP-UI-17B — Enterprise Split-Screen Login Design for RECAFCO FMP (Completed 2026-09-26)
+
+### Summary
+
+Full visual rebuild of the login page from a centered single column (FMP-UI-08B through FMP-UI-13) back to a left/right split-screen — explicitly reversing FMP-UI-13's own "do not return to left/right split-screen layout" instruction, on the user's own confirmed request after reviewing a split-screen HRMS-style reference. Rebuilt from scratch for this platform: no mountain image, no HRMS copy, no stock photography — every decorative element is plain CSS (gradients, `repeating-linear-gradient` hatching, blurred glows), the same "no images" technique this page's background has used since FMP-UI-08C. UI-only; `LoginForm`, `loginAction`, session/cookie behavior, the welcome-screen redirect, and theme storage are all untouched.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` — full rewrite (the only file changed):
+  - Outer container: `<div className="min-h-screen bg-background lg:grid lg:grid-cols-[5fr_6fr]">` — 2-column grid activates only at `lg` (1024px+); below that, the left panel (`hidden lg:block`) simply isn't rendered and the right panel becomes the page's sole visible child.
+  - Left panel (desktop only): `bg-nav` background with 4 layered decorative divs (diagonal navy gradient wash using `--color-nav`/`--color-nav-hover`/`--color-nav-active` — the sidebar's own permanently-dark tokens, unaffected by Light/Dark/System; an oversized rotated large-cell grid suggesting precast panel seams; a finer 45°-diagonal blueprint hatch; one subtle red `blur-3xl` glow), then real content on top: logo, title, "Factory Operations System" tagline, a supporting sentence, and 8 module-keyword tags (Contracts/Technical/Erection/Quality/Storage Yard/Safety/Maintenance/Tasks).
+  - Right panel: the existing FMP-UI-13 card design (top accent bar, sheen, border/shadow) kept, with a new header — a `ShieldCheck` badge, "Secure Sign in" (was "Sign in"), a new subtitle, and an "Authorized Company Access" pill (replaces the old inline "Secure sign-in" badge). `<LoginForm>` call is completely unchanged. `ThemeToggle` moved from a page-wide `fixed` corner to this panel's own `absolute` corner. Footer text unchanged.
+  - A `lg:hidden` compact branding block (logo + title + tagline, reusing the pre-FMP-UI-17B centered layout's own markup) stands in for the hidden left panel below `lg`, so mobile/tablet still get a clear identity above the form.
+
+### Desktop login design summary
+
+`lg:grid-cols-[5fr_6fr]` (~45/55) split. Left: dark navy branding panel with abstract precast/blueprint geometry (no images) and 8 module tags. Right: the same premium card this page already had, retitled "Secure Sign in" with a shield badge and an "Authorized Company Access" pill, `ThemeToggle` in its own top-right corner, footer below.
+
+### Mobile behavior summary
+
+Below `lg`, the grid never activates — normal block flow, left panel `hidden` (removed from layout, zero height cost), right panel (`min-h-screen`) is the only visible content, with a compact `lg:hidden` logo+title+tagline block replacing the decorative panel. This is functionally the same single-column mobile experience the page already had before this unit (same card, same footer, same `ThemeToggle`), just with the extra compact branding block above it that used to be the WHOLE page's branding.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened for editing. Same `useActionState(loginAction, null)` wiring, same `showPassword` eye-icon toggle, same focus-ring tokens (`focus:ring-nav`), same error banner. Read `login-form.tsx` in full after the page rewrite to confirm byte-for-byte no changes.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched; this unit only changed `login/page.tsx`, which the welcome flow has no dependency on.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched; only `login/page.tsx`'s own wrapper `<div>` around `<ThemeToggle />` changed (`fixed` page corner → `absolute` panel corner), the component itself and its `localStorage` behavior are identical.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- This reverses a previous unit's own explicit constraint (FMP-UI-13: "do not return to left/right split-screen layout") — done only after the user, prompted by this session, explicitly confirmed the reversal with a full numbered unit spec (FMP-UI-17B itself), rather than silently overriding it off an ambiguous first message.
+- No images anywhere on this page, before or after this unit — every left-panel texture (precast-panel geometry, diagonal blueprint hatch, glows) is a plain CSS `repeating-linear-gradient`/`radial-gradient`/`blur`, consistent with this page's own established "backgrounds are CSS, never photos" convention.
+- `--color-nav`/`--color-nav-hover`/`--color-nav-active` (the left panel's base gradient) are this app's permanently-dark chrome tokens — the same ones the sidebar uses — deliberately excluded from the `.dark` mode override block, so the left panel looks identical in both Light and Dark site themes, exactly like the sidebar always does. The right panel's `bg-background`/card/footer are ordinary theme-aware tokens, unchanged from before, so Light/Dark/System still fully applies there.
+
+## FMP-UI-17C — Split-Screen Login Final Enterprise Polish (Completed 2026-09-26)
+
+### Summary
+
+Polish pass on the FMP-UI-17B split-screen login, addressing a "left panel feels empty/flat, blueprint lines feel generic, logo/chips feel small, theme selector too dominant" report. All still plain CSS — no images added. UI-only; `LoginForm`, `loginAction`, session/cookie behavior, the welcome-screen redirect, and theme storage are all untouched.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` — the only file changed:
+  - Left panel: the single 45° blueprint hatch became a proper X cross-hatch (`45deg` + `-45deg` layered, same low opacity) — cross-hatching is a real technical-drawing convention for a material shown in section, chosen to answer "feels generic" with something that reads as a deliberate drafting reference. Added 2 small corner registration/crop-mark brackets (another genuine drafting motif) as placed accents, answering "feels too empty." Added a second, much fainter white glow in the top-right corner (opposite the existing red glow, bottom-left) for asymmetric lighting so the panel doesn't read as flat.
+  - Logo chip enlarged (`p-3`→`p-3.5`, image `h-14`→`h-16`, `shadow-lg`→`shadow-xl`).
+  - Title now wraps intentionally onto 2 lines ("RECAFCO Factory" / "Management Platform"), sized up (`text-3xl xl:text-4xl`→`text-4xl xl:text-5xl`), with more space above it (`mt-6`→`mt-8`).
+  - `MODULE_TAGS`: "Quality" → "QA/QC", per this unit's own explicit "do not use 'Quality' alone" instruction. Chips enlarged (`px-3 py-1 text-xs`→`px-3.5 py-1.5 text-sm`, gap `2`→`2.5`) with a `hover:` treatment for mouse users.
+  - Login card: shadow deepened (`shadow-xl`→`shadow-2xl`); the `ShieldCheck` badge moved from stacked-above-the-heading to beside it in one `flex items-start gap-3` row, so the icon and "Secure Sign in" read as one connected header unit.
+  - `ThemeToggle`'s wrapper (not the component itself) gained `origin-top-right scale-90 opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100` — 10% smaller, 70% opacity at rest, full size/opacity on hover or focus-within.
+
+### Left panel polish summary
+
+Cross-hatch (was a single-angle hatch), 2 corner registration marks, an added top-right white glow for asymmetric lighting, a larger logo chip with a deeper shadow, an intentionally 2-line larger title, and larger/roomier module tags with "QA/QC" replacing "Quality." All still `aria-hidden` CSS-only decorative layers — no images, no external assets.
+
+### Login card polish summary
+
+Deeper shadow (`shadow-2xl`); icon+heading+subtitle restructured into one connected flex row instead of a stacked block. Heading ("Secure Sign in"), subtitle ("Use your RECAFCO account to access factory operations."), and the "Authorized Company Access" badge copy are all unchanged from FMP-UI-17B.
+
+### Theme selector placement/visual change
+
+Stayed in the same top-right corner of the right panel (FMP-UI-17B's placement) — not moved below the card, since the "smaller/subtler" option in this unit's own spec was chosen over relocation. The `ThemeToggle` component itself is untouched; only its wrapper `<div>` in `login/page.tsx` gained a `scale-90` size reduction and a 70%-opacity resting state (100% on hover/focus-within), so it reads as a minor utility control without ever becoming harder to see or operate.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened this unit. Same server action, same password eye-icon toggle, same focus rings, same error handling as FMP-UI-17B and every prior login unit.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched; only the page's own wrapper around `<ThemeToggle />` changed (size/opacity), never the component or its `localStorage` behavior.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change; unrelated Prisma major-version-upgrade notice, not acted on — out of scope for this UI-only unit) |
+
+### Key Implementation Notes
+
+- No images added anywhere — every new left-panel element (cross-hatch, corner marks, second glow) is a plain CSS `repeating-linear-gradient`/`border`/`blur`, consistent with this page's established "backgrounds are CSS, never photos" convention.
+- Module tags are deliberately NOT made keyboard-focusable (no `tabIndex`/`role`) despite gaining a `hover:` style — they're decorative labels, not links, and adding fake focus stops would cost keyboard users wasted Tab presses for no actual action.
+- Light/Dark/System theming needed no changes — every new/changed class is either an existing semantic token, the same permanently-dark `--color-nav*` tokens the left panel already used, or a plain opacity/scale utility on the `ThemeToggle` wrapper.
+
+## FMP-UI-18 — Real RECAFCO Photo Login Background (Completed 2026-09-26)
+
+### Summary
+
+User-supplied request (not a full numbered spec, but following this project's own "one numbered unit, update the tracker/registry after every meaningful UI change" convention): add a real RECAFCO photo ("Desktop Lock Image.jpeg" — the actual precast yard at night, with the real RECAFCO signage and "50 years" display; NOT a stock/generic image) as the login page's background, full-screen, with an opacity/overlay treatment. This is the first real photo used anywhere on this login page — every prior background (FMP-UI-08C through FMP-UI-17C) was deliberately CSS-only. Also caught and fixed a real bug this change would otherwise have reintroduced: the exact same "static asset missing from the auth-middleware allowlist → broken image on /login" class of bug from FMP-UI-11-fix.
+
+### Files changed
+
+- `apps/web/public/login-hero.jpg` (new, 2400×1350, ~411KB) and `apps/web/public/login-hero-mobile.jpg` (new, 1000×563, ~85KB) — both derived from the user's original file (8533×4800, ~33MB — far too large to ship as-is) via `sharp` (already present in the dependency tree for Next.js's own image optimization, so no new dependency was added), resized and re-encoded as quality-78/75 mozjpeg. The original 33MB file the user placed at the repo root was left untouched — only these 2 derived, committed copies were created.
+- `apps/web/src/app/login/page.tsx`:
+  - Desktop left panel: removed the FMP-UI-17C CSS-only cross-hatch, precast-panel geometry, and second (white) glow layers; added the real photo as a full-bleed `<img object-cover object-[75%_45%]>` (position biased toward the actual RECAFCO signage in the source photo, not the crane), with a navy gradient overlay on top using the SAME `--color-nav`/`-hover`/`-active` RGBs the previous solid wash used (now at 92%/82%/68% alpha instead of 100%) — this overlay is the "with opacity" treatment: it's the tint that's semi-transparent, not the photo itself, since a raw dimmed photo with no color overlay would have fought the white text's contrast far more. Kept the 2 corner registration marks and the 1 red glow from FMP-UI-17C (cheap, still complementary over a real photo).
+  - Mobile/tablet compact branding block: rebuilt as a small rounded photo "hero band" (previously just background-color + a white logo chip) using the mobile-sized asset, the same overlay, with white/light text now that it sits on a dark photo — so mobile also gets the real photo, not just desktop.
+- `apps/web/src/proxy.ts`: added `/login-hero.jpg` and `/login-hero-mobile.jpg` to `PUBLIC_PREFIXES`.
+
+### The bug caught before it shipped
+
+`proxy.ts`'s auth middleware redirects any unauthenticated request for a path not in its `PUBLIC_PREFIXES` allowlist to `/login` — returning an HTML page instead of the requested asset's bytes. `/login-hero.jpg`/`/login-hero-mobile.jpg` are `<img>` sources ON the login page itself, requested before any auth cookie exists — without adding them to the allowlist, both images would have rendered as broken images for every unauthenticated visitor, i.e. every real user hitting `/login` for the first time. This is the EXACT SAME bug class documented in this file's own FMP-UI-11-fix entry (the RECAFCO logo and favicon were originally missing from this same allowlist). Caught by re-reading `proxy.ts` immediately after adding the images, before considering the unit done.
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks (re-run after the `proxy.ts` fix) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No changes to `LoginForm`, `loginAction`, session/cookie logic, the welcome-screen redirect, or theme storage — this unit only touched `login/page.tsx` (presentational) and `proxy.ts` (one allowlist addition, no logic change to the auth-check itself).
+- Light/Dark/System theming needed no changes on the right panel (card/footer, unchanged tokens); the left panel's photo+overlay is intentionally NOT theme-reactive, consistent with the `--color-nav*` tokens it's built on already being permanently-dark regardless of site theme (same as the sidebar).
+- The 2 derived image files are committed as regular repo assets (not generated at build or request time) — resizing was a one-time step done with `sharp` directly via a throwaway Node script, not a new build dependency or pipeline step.
+
+## FMP-UI-18B — Full-Screen Login Background (Completed 2026-09-26)
+
+### Summary
+
+Direct follow-up to FMP-UI-18, on explicit user feedback after seeing a screenshot: "add background image for the entire screen not for just one side." FMP-UI-18's photo only covered the left panel; this unit moved it to a single shared `fixed inset-0` layer behind BOTH panels, so it now covers the whole page at every breakpoint. No backend/auth/theme changes.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Added one shared background layer: `<div className="fixed inset-0 z-0 overflow-hidden">` containing 2 swapped `<img>`s (`hidden lg:block` → `login-hero.jpg`, `lg:hidden` → `login-hero-mobile.jpg`, so mobile still downloads only the smaller file) plus the same navy gradient overlay used before.
+  - Left panel: removed its own `bg-nav` and its own copy of the photo+overlay (now provided by the shared layer); kept the 2 corner registration marks and the 1 red glow, still scoped to this panel; added `relative z-10` so its content paints above the shared background.
+  - Right panel: removed `bg-background`, added `relative z-10` — the photo now shows through the space around the login card there too. The card itself (`bg-surface`) is unchanged and stays fully opaque.
+  - Mobile/tablet compact branding block: removed its own separate photo band entirely (would have doubled up with the new shared background) — now just the logo chip + white text sitting directly on the shared photo+overlay.
+  - Footer: text color switched from `text-text-secondary`/`text-text-muted` to `text-white/80`/`text-white/60`, since it now sits directly over the photo+overlay instead of the page's own plain surface color.
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No changes to `LoginForm`, `loginAction`, `proxy.ts`, session/cookie logic, the welcome-screen redirect, or theme storage — this unit only touched `login/page.tsx`.
+- The login card remains fully opaque (`bg-surface`, unchanged) regardless of the photo now showing behind everything else — the actual form never loses contrast, only the space around it changed.
+- `object-position` unified to `60% 40%` (was `75% 45%` when the crop only needed to fit a narrow 45%-wide panel) — now that the same crop spans the FULL viewport width at desktop, a gentler bias keeps both the crane (left of frame) and the RECAFCO signage (right of center) reasonably in view, rather than over-cropping toward one edge.
+
+## FMP-UI-18C — Login Logo Size/Position Tweak (Completed 2026-09-26)
+
+### Summary
+
+Direct user feedback on a screenshot: "the logo you can place little bit top and also increase the size." Small, scoped tweak to `login/page.tsx`'s left panel only.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx`: logo image `h-16`→`h-20`, chip padding `p-3.5`→`p-4`. The left panel's content block padding changed from even `py-16` to asymmetric `pt-10 pb-20`, biasing the whole logo/title/tagline/description/tags block upward within the panel's vertical centering (rather than repositioning the logo alone, which would have separated it from the title/tagline directly below it).
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+## FMP-UI-18D — Login Design Review Polish: Glass Card, Footer Contrast, Even Tag Rows (Completed 2026-09-26)
+
+### Summary
+
+User asked "how can I improve this professionally" on a screenshot of the FMP-UI-18B/18C result; recommended 3 specific fixes (card felt like a flat sticker on the photo, footer contrast depended on what photo detail sat behind it, module tags reflowed unevenly), user approved all 3, implemented as one unit.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Login card: `bg-surface` → `bg-surface/90 backdrop-blur-xl` — a frosted-glass treatment so the card reads as floating within the photo scene rather than pasted flat on top of it. Border/shadow/top-accent-bar/sheen all unchanged.
+  - Footer: wrapped in a new `rounded-2xl bg-black/25 backdrop-blur-sm px-5 py-3` backing — contrast is now guaranteed regardless of which part of the (busy, lower-right-heavy) photo happens to sit behind it, rather than relying solely on the shared overlay gradient's own darkness at that point. Text bumped `white/80`→`white/90` and `white/60`→`white/70` slightly since the guaranteed dark backing means the text can afford to be a touch brighter/crisper.
+  - Module tags: `MODULE_TAGS` now renders as 2 explicit rows of 4 (`.slice(0, 4)` / `.slice(4)`) instead of one `flex-wrap` row left to reflow wherever the browser happens to break it — this guarantees an even, deliberate-looking split (Contracts/Technical/Erection/QA-QC, then Storage Yard/Safety/Maintenance/Tasks) instead of "7 tags then Tasks stranded alone."
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `bg-surface/90` and `bg-black/25` are standard Tailwind opacity-modifier utilities on top of this app's existing color tokens/palette — not the inline `var()`-in-`style` pattern that caused the historical "invisible button" issue elsewhere in this app; this is the same safe mechanism already used for `border-border/60`, `bg-white/60`, etc. throughout this codebase.
+- No changes to `LoginForm`, `loginAction`, session/cookie logic, the welcome-screen redirect, or theme storage.
+
+## FMP-UI-17D — Final Industrial Split-Screen Login Polish (Completed 2026-09-26)
+
+### Summary
+
+Final professional polish pass on the same photo+split-screen login direction (kept, per this unit's own explicit constraint). Addressed 7 specific issues from a design review: busy background behind the card, card feeling pasted-on rather than integrated, title too dominant, module chips needing refinement, a too-heavy footer pill, an over-prominent theme selector, and a "www.recafco.com" watermark baked into the source photo. No backend/auth/theme changes.
+
+### Files changed
+
+- `apps/web/public/login-hero.jpg` and `apps/web/public/login-hero-mobile.jpg` — regenerated from the original source photo via `sharp`, this time with a crop (`extract`, top 85% of the original height) removing the bottom ~15% of the frame — that region contained a "www.recafco.com" watermark baked into the photo itself, which this unit's spec asked to remove. Cropping the source is the only way to guarantee it's gone regardless of viewport/crop position. New desktop asset: 2400×1148 (~360KB); mobile: 1000×478 (~74KB). Verified visually (re-read the regenerated file) that the watermark is fully cropped out before finalizing — an earlier, less aggressive crop attempt (drop bottom 9%) was verified to still show a sliver of it and was redone at 15%.
+- `apps/web/src/app/login/page.tsx` (the only code file changed):
+  - Background: added a SECOND overlay gradient (`90deg`, transparent through ~40% from the left, ramping to a strong flat navy by the right edge) stacked on top of the existing diagonal wash. The diagonal alone left the right side (where the card sits) with the LEAST darkening of the whole page — backwards from what a calm card backdrop needs; this new layer specifically flattens/calms the photo detail behind the card without touching the left panel's own look.
+  - Login card: `bg-surface/90 backdrop-blur-xl` (FMP-UI-18D) → `bg-surface/95 backdrop-blur-lg` — stronger/more solid, per "should not feel transparent or washed out."
+  - Card header: icon+heading row `items-start` → `items-center` for cleaner alignment.
+  - Footer: removed the `bg-black/25 backdrop-blur-sm` "pill" backing (FMP-UI-18D) entirely — now plain centered text (`text-white/85`/`text-white/65`) directly on the background, relying on the new right-side overlay (above) for contrast instead of its own backing.
+  - Theme toggle wrapper: `scale-90 opacity-70` → `scale-75 opacity-55` (still restores to full size/opacity on hover/focus-within).
+  - Left panel title: `text-4xl xl:text-5xl` → `text-3xl xl:text-4xl`, `leading-tight` → `leading-[1.08]`.
+  - Description: `max-w-md` → `max-w-sm`.
+  - Module chips: explicit `h-9` (guaranteed consistent height), `border-white/15` → `border-white/12`, `bg-white/5` → `bg-white/6`, hover states eased to match.
+
+### Background/overlay changes
+
+Two navy gradients now stack: the original `135deg` diagonal wash (unchanged) plus a new `90deg` left-to-right gradient that's transparent through the left ~40% and ramps to a strong flat navy tint by the right edge. Net effect: the left panel's look is completely unchanged (the new gradient is transparent there), while the right side — where the login card and footer live — is now calmer and less busy, addressing "the right side should be calmer so the login card is easy to read" directly.
+
+### Login card polish summary
+
+Card background eased from 90% to 95% opacity (less transparent, "should not feel washed out") while blur eased from `xl` to `lg` (still enough to read as integrated with the scene, not pasted flat on top). Icon+heading alignment switched to `items-center` for a cleaner connected look. Red top accent bar, border, shadow, and all copy (title/subtitle/badge) unchanged.
+
+### Footer/theme selector changes
+
+Footer: the FMP-UI-18D "dark pill" backing is gone — back to plain, subtle, centered text, now readable thanks to the strengthened right-side overlay instead of its own backing. Theme selector: shrunk and faded further (`scale-75 opacity-55` at rest, full size/opacity on hover/focus) so it's less visually competing with the card, while remaining just as functionally accessible as before.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened this unit. Same server action, password eye toggle, focus rings, error handling throughout.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched; only the page's own wrapper around `<ThemeToggle />` changed (size/opacity), never the component or its `localStorage` behavior.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-26)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The "www.recafco.com" watermark was never a text element this page rendered — it was baked into the user-supplied source photo. Removing it required re-cropping the source image itself (via `sharp`), not a CSS/code change — verified by re-reading the regenerated file's actual pixels before finalizing, not assumed correct from the crop math alone (the first attempt, at a 9%-of-height crop, was insufficient and caught by this same visual check).
+- No new color tokens — the second overlay gradient reuses the exact same navy RGB already used by the first.
+- Mobile/tablet behavior unchanged structurally from FMP-UI-18B/18D (compact logo+text branding block, no separate photo band) — this unit's polish (card/footer/chips/toggle) applies identically there since it's all in the shared right-panel/left-panel code, not breakpoint-specific new code.
+
+## FMP-UI-17E — Fix Login Card Readability and Final Enterprise Polish (Completed 2026-09-27)
+
+### Summary
+
+Direct user feedback on the FMP-UI-17D result: the login card was "too transparent/dark," the background photo showed through it enough to hurt text readability, and the plain-text footer was "nearly invisible." This unit prioritizes readability over the frosted-glass look FMP-UI-18D/17D had been pursuing, while keeping the same photo background and split-screen layout (kept per this unit's own explicit constraint). No backend/auth/theme changes.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Login card: `bg-surface/95 backdrop-blur-lg` → `bg-surface/98 backdrop-blur-sm` — near-solid, minimal blur, so the card's own theme-correct surface color reliably dominates over the photo behind it.
+  - Right-side calming overlay (added in FMP-UI-17D): strengthened `rgba(23,32,51,0.55)/0.8` → `0.65/0.88`, working together with the card's own higher opacity for a calmer backdrop directly behind the form.
+  - Footer: replaced FMP-UI-17D's plain `text-white/85`/`text-white/65` text sitting directly on the photo with a small "clear footer area" — `rounded-2xl border border-border/60 bg-surface/85 backdrop-blur-md shadow-sm` — using this page's own normal `text-text-secondary`/`text-text-muted` tokens (theme-adaptive) instead of literal white. Deliberately NOT the FMP-UI-18D "heavy black pill" (`bg-black/25`, flat/opaque) — a lighter, softer, theme-aware strip that echoes the card's own material.
+  - Theme toggle wrapper: resting opacity `opacity-55` (FMP-UI-17D) → `opacity-65` — FMP-UI-17D's reduction read as slightly too faint as a baseline-visible state; still restores to full opacity/size on hover/focus-within, still quieter than its original FMP-UI-17C baseline (`opacity-70`).
+
+### Login card readability fix summary
+
+The card's opacity was the actual bug, not the semantic color tokens inside it — `text-text-primary`/`-secondary`/`-muted` were always theme-correct, but at 90–95% opacity plus heavy blur, enough of the busy photo bled through to undermine their contrast guarantees in practice. Settling at 98% opacity with only a light blur (`backdrop-blur-sm`) keeps a trace of "integrated with the scene" while making the card read as solidly opaque for real-world readability — directly answering "should not feel washed out or overly transparent" and "no dark text on a dark transparent background."
+
+### Footer visibility fix
+
+Replaced plain text-on-photo (illegible per user report) with a small, softly-bordered, backdrop-blurred surface-colored strip using this page's own standard text tokens — visible and readable without being a heavy, flat, high-contrast block. This satisfies both "footer is visible but subtle" and "do not use a heavy black pill" at once, by using an adaptive, lower-contrast material instead of either extreme.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened this unit. Same server action, password eye toggle, focus rings, error handling.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched; only the page's own wrapper around `<ThemeToggle />` changed (opacity), never the component or its `localStorage` behavior.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Left panel untouched this unit, per its own "keep mostly unchanged" instruction — no complaint was raised about left-side legibility.
+- Inputs (`LoginForm`) untouched — already white/clear with a strong border and the existing `focus:ring-nav` treatment; the password eye icon's alignment/behavior was never part of this unit's changes.
+- No new color tokens — every change is an opacity/blur adjustment on existing classes or a switch from literal white text to this page's own existing semantic text tokens.
+
+## FMP-UI-17F — Login Layout Composition Polish (Completed 2026-09-27)
+
+### Summary
+
+User-requested composition polish (not a full numbered spec with acceptance criteria, but following this project's own "update the tracker/registry after every meaningful UI change" convention): move the RECAFCO logo from a vertically-centered position to a true top-left brand mark, tighten the logo-to-heading gap, nudge the right panel's card slightly below dead-center, and pull the footer closer to the card. Spacing/alignment only — no new colors, copy, or mechanics.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Left panel content wrapper: `flex h-full flex-col justify-center gap-8 px-10 pb-20 pt-10` → `flex h-full flex-col gap-8 px-10 pb-12 pt-12 lg:pt-14` — removed `justify-center` (was vertically centering the whole block, which on tall viewports put the logo well below the true top edge) in favor of top-anchoring with generous top padding, so the logo lands as an actual top-left brand mark.
+  - Title's top margin (gap from logo): `mt-8` → `mt-5`, per "reduce the empty vertical gap between logo and heading."
+  - Right panel's centered content wrapper: `w-full max-w-md` → `w-full max-w-md pt-8 lg:pt-12` — adds top padding inside the still-`justify-center` parent, so the mobile-branding/card/footer group centers slightly below true dead-center rather than exactly in the middle.
+  - Footer's top margin (gap from card): `mt-8` → `mt-5`, per "place it closer to the form for better visual grouping."
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change; unrelated Prisma major-version-upgrade notice, not acted on) |
+
+### Key Implementation Notes
+
+- Content order unchanged on both sides: left panel is still logo → title/tagline → description → module tags (2 rows); right panel is still mobile branding (below `lg`) → card → footer.
+- No changes to `LoginForm`, `loginAction`, session/cookie logic, the welcome-screen redirect, or theme storage. The card's own readability treatment (FMP-UI-17E's `bg-surface/98 backdrop-blur-sm`), the footer's "clear footer area" styling, the theme toggle, and the background photo/overlays are all untouched by this unit — only outer spacing/positioning changed.
+- Mobile/tablet: the left panel is still `hidden` below `lg`, so this unit's left-panel changes only affect desktop; the right panel's `pt-8 lg:pt-12` nudge applies at every breakpoint (a smaller `pt-8` below `lg`, since that's also where the mobile branding block adds its own height above the card).
+
+## FMP-UI-17G — Login Card "Welcome Back" Enterprise Polish (Completed 2026-09-27)
+
+### Summary
+
+User compared the login card against a reference design (large circular icon, "Welcome Back" heading, softer polished structure) and asked for that STRUCTURE while explicitly keeping RECAFCO's own red/navy identity, never the reference's blue HRMS styling. Card-header-only redesign — form fields, card surface, footer, left panel, and theme toggle are all untouched.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Icon import: `ShieldCheck` → `ShieldUser` (lucide-react's actual "shield with a person" icon — a closer literal match for "secure user access" than a plain shield).
+  - Card header layout: replaced the FMP-UI-17C/17D `flex items-center gap-3` row (small `size-12 rounded-2xl` icon beside a left-aligned heading+subtitle) with a centered `flex flex-col items-center text-center` column: a large `size-16 sm:size-20 rounded-full` circular icon badge, then the heading, then the supporting line, then the "Authorized Company Access" badge — all centered, all stacked.
+  - Copy: "Secure Sign in" → "Welcome Back"; "Use your RECAFCO account to access factory operations." → "Secure access to RECAFCO Factory Operations System."
+  - Colors: unchanged — still `bg-accent-light`/`text-accent` (RECAFCO red), just applied to a larger circular badge instead of a small square one.
+
+### Login card header before/after summary
+
+**Before:** small square icon badge (`size-12 rounded-2xl`) sitting beside a left-aligned "Secure Sign in" heading and subtitle, with the "Authorized Company Access" badge below that row.
+**After:** large circular icon badge (`size-16 sm:size-20 rounded-full`) centered above "Welcome Back," with the supporting line and badge centered beneath it in the same column — the reference card's friendly, centered structure, RECAFCO's own colors and wording throughout.
+
+### Icon/badge placement summary
+
+`ShieldUser` icon sits inside the large circular badge at the very top of the header column. "Authorized Company Access" sits directly below the supporting text, centered, in its own row — not floating separately, not competing with the icon or heading for attention.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened this unit. Same server action, password eye toggle, focus rings, error handling, field spacing/height/labels.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched at all this unit (not even the wrapper).
+- Card surface (background opacity/blur, border, shadow, top accent line), footer, and left panel — all untouched; this unit's diff is scoped entirely to the header markup inside the existing card.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `ShieldUser` was confirmed to exist in this project's installed `lucide-react` version (`shield-user.mjs`) before use — not assumed from the icon's plausible name alone.
+- No new color tokens — the enlarged circular badge reuses the exact same `bg-accent-light`/`text-accent` pair the previous smaller square badge already used.
+- Sign-in button, inputs, password eye icon, and their spacing/focus states are all exactly as FMP-UI-17E left them — this unit's spec asked to "keep" them, and nothing in the diff touches `LoginForm` at all.
+
+## FMP-UI-17H — Increase Left Branding Typography on Login Page (Completed 2026-09-27)
+
+### Summary
+
+With the login card now reading as a strong, premium element (FMP-UI-17G's "Welcome Back" redesign), the user reported the left-side branding text had fallen behind it in visual weight. This unit increases the left panel's typography (title, subtitle, description) and rebalances chip/group spacing to match — card, footer, theme toggle, background, and layout structure are all untouched.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Title: `text-3xl xl:text-4xl` → `text-4xl xl:text-5xl 2xl:text-6xl`; `leading-[1.08]` → `leading-[1.05]`. Scaled across 3 responsive steps (not straight to `text-6xl` everywhere) because this `<h1>` only ever renders inside `hidden lg:block` — its narrowest real width is exactly the `lg` breakpoint (1024px, left panel ≈460px minus padding), where `text-5xl`/`text-6xl` risked wrapping "Management Platform" onto a 3rd line; the largest sizes only apply from `xl`/`2xl` where there's genuinely enough width.
+  - Subtitle ("Factory Operations System"): `text-xs font-semibold text-white/60` → `text-sm font-medium text-white/70`; gap below the title group bumped `mt-3`→`mt-4`.
+  - Description: copy replaced with this unit's own exact new text ("Secure access for contracts, technical approvals, erection workflows, production, safety and maintenance."); `max-w-sm text-sm` → `max-w-lg text-base` (~512px, the closest standard Tailwind utility to the requested ~520px).
+  - Module chips: `h-9`/`px-3.5` → `h-10`/`px-4`; row gap `gap-2.5`→`gap-3`; row spacing `space-y-2.5`→`space-y-3` — proportional to the larger title/description, still exactly 2 rows of 4.
+  - The 3 main content groups' own gap eased `gap-8`→`gap-6`, to help offset the larger title's added height and keep the tags from being pushed too far down the panel on shorter viewports.
+
+### Typography changes summary
+
+Title up 1 full step at every breakpoint it renders at (`3xl→4xl` at `lg`, `4xl→5xl` at `xl`, new `6xl` tier at `2xl`), tighter line-height. Subtitle up one size step with a lighter weight and slightly higher opacity, per this unit's own "medium weight... slightly more visible" wording. Description up one size step, widened measure, and given entirely new copy per this unit's own exact requested text.
+
+### Responsive behavior summary
+
+The left panel is unchanged in visibility (`hidden lg:block`) — it never renders below `lg`, so "tablet/mobile" behavior for this branding is already handled by the separate, smaller mobile compact-branding block in the right panel (untouched this unit). Within the `lg`+ range where this title DOES render, the 3-step responsive scale (`lg`→`xl`→`2xl`) is itself the "no overflow" safeguard — the biggest size is reserved for the width tier that can actually fit it.
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` and `login-form.tsx` — not opened this unit.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle`/`ThemeProvider`/`theme.ts` — not touched, including the wrapper.
+- Login card (header, surface, form) and footer — not touched at all this unit; the diff is scoped entirely to the left panel's text/spacing.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No new color tokens — subtitle/description opacity changes are on the same `white/*` scale already used throughout this panel.
+- Title still renders as exactly 2 lines via the same 2 explicit `<span className="block">` elements from FMP-UI-17C — this unit only changed their font size/line-height, not the line-split structure itself.
+- No browser/visual testing available in this environment — the responsive breakpoint choices (`lg`/`xl`/`2xl` for the 3 title sizes) are based on computed panel-width-at-breakpoint reasoning (documented in the file's own top-of-file comment), not a live rendered check.
+
+## FMP-UI-15B — Remove Executive Dashboard Summary Strip and Clean Hero Area (Completed 2026-09-27)
+
+### Summary
+
+Direct feedback that the Executive Dashboard's hero helper line and summary chip strip (added in FMP-UI-15) read as clutter — the module cards already explain what's available, and the sidebar already provides navigation, so neither line was adding information a manager didn't already have. Removed both; title + tagline are now the whole hero. UI-only; no metric/route/permission changes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/page.tsx` (the only file changed):
+  - Removed the `findMetricValue()` helper function and the `SummaryChip()` component entirely (both were introduced solely for the summary strip being removed here).
+  - Removed the `totalContracts`/`erectionContracts`/`overdueTasks` local variables (their only consumer was the removed chip strip).
+  - Removed the `PlatformModuleCard` type import (`findMetricValue` was its only use in this file) — `PlatformModuleCode` import kept, still used by `CARD_ICONS`/`CARD_ACCENTS`.
+  - Removed the helper line ("Select a module to view status, pending actions, and operational details.") and the entire summary chip strip JSX (`10 Modules` / `Executive View` / `Updated Today` / `Total Contracts` / `Erection Contracts` / `Overdue Tasks`).
+  - Tightened the hero-to-grid gap: the flex column's `space-y-3` → `space-y-2`, now that the hero itself is shorter (title + tagline only) — this is what actually moves the cards closer to the title, rather than just leaving more blank space evenly split above/below in the still-centered layout.
+
+### Removed hero helper/chip strip summary
+
+Removed: the "Select a module..." helper paragraph, and all 6 summary chips (`{cards.length} Modules`, `Executive View`, `Updated Today`, `Total Contracts`, `Erection Contracts`, `Overdue Tasks`) along with the `SummaryChip` component and `findMetricValue` lookup helper that computed the last 3 of them. Kept: the `<h1>RECAFCO Factory Management Platform</h1>` title and the `Factory Operations Control Center` tagline directly beneath it — nothing else in the hero.
+
+### Confirmation card metrics/routes unchanged
+
+- `ExecutiveModuleCard`'s props (`title`, `description`, `href`, `icon`, `metrics`, `accent`) are passed exactly as before — this unit only removed code ABOVE the card grid; the `cards.map(...)` block itself is byte-for-byte unchanged.
+- No changes to card metrics, routes, permissions, status badges, or buttons — none of that code was touched.
+- Sidebar untouched — not part of this file.
+
+### Confirmation no backend/permission/schema changes
+
+- `apps/api` — not opened. `platformApi.dashboard()` call and its data shape are unchanged; the removed summary strip only ever read metrics already present on the fetched `cards` array (no separate API call existed to remove).
+- No permission checks changed — `isContractManagementOnlyAccess(permissions)` gate is untouched.
+- No `prisma/migrations` changes; `pnpm db:migrate:status` confirms 46 migrations, unchanged.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- All 10 module cards remain visible, same order, same 1/2/3/5-column responsive breakpoints — no grid/count changes.
+- Light/Dark/System theming needed no changes — the only classes touched were spacing (`space-y-3`→`space-y-2`) and removed JSX; no colors were introduced or removed.
+- This closes the loop on FMP-UI-15's own "optional real-data chips" feature — it was explicitly optional/additive when introduced, and removing it here doesn't reduce any REQUIRED information, since the chips were always supplementary to the module cards themselves.
+
 ## Risks
 
 - Incomplete module requirements

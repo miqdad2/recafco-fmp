@@ -16,32 +16,9 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
 import { platformApi } from '@/lib/platform-api';
-import type { PlatformModuleCard, PlatformModuleCode } from '@/lib/platform-api';
+import type { PlatformModuleCode } from '@/lib/platform-api';
 import { isContractManagementOnlyAccess } from '../_lib/module-visibility';
 import { ExecutiveModuleCard, type ModuleAccent } from './_components/executive-module-card';
-
-// FMP-UI-15 — the executive summary strip reads a handful of already-
-// fetched card metrics by (code, label) rather than requesting anything
-// new from the API: `Total` on the Contract Management card and
-// `Contracts` on the Erection card are the exact same numbers those cards'
-// own metric tiles already show, and `Overdue` on the Task Management card
-// is the same "Overdue" tile that card renders too. If a user can't see
-// that module (its card is simply absent from `cards`) or the API hasn't
-// been able to compute that value yet (`null`), the matching chip below
-// just doesn't render — never a guessed or zeroed value.
-function findMetricValue(cards: PlatformModuleCard[], code: PlatformModuleCode, label: string): number | null {
-  const card = cards.find((c) => c.code === code);
-  return card?.metrics.find((m) => m.label === label)?.value ?? null;
-}
-
-function SummaryChip({ value, label }: { value?: number; label: string }): React.JSX.Element {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-secondary px-3 py-1 text-xs font-semibold text-text-secondary">
-      {value !== undefined && <span className="font-bold text-text-primary">{value}</span>}
-      {label}
-    </span>
-  );
-}
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -97,12 +74,6 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
 
   const cards = dashboard?.cards ?? [];
 
-  // FMP-UI-15 — real values only, sourced from metrics already present on
-  // the fetched cards (see `findMetricValue`'s own doc comment above).
-  const totalContracts = findMetricValue(cards, 'CONTRACTS_MANAGEMENT', 'Total');
-  const erectionContracts = findMetricValue(cards, 'ERECTION', 'Contracts');
-  const overdueTasks = findMetricValue(cards, 'FACTORY_TASKS', 'Overdue');
-
   return (
     // FMP-UI-04B — the large hero card (title/subtitle/welcome-and-meta strip)
     // was removed entirely and the title moved to TopHeader.
@@ -134,19 +105,26 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
     // (pt-2→pt-1, lg:pt-3→lg:pt-2) to reclaim a little of the room the new
     // heading needs.
     <div className="mx-auto flex min-h-full max-w-7xl flex-col px-5 pt-1 pb-3 lg:px-6 lg:pt-2 lg:pb-4">
-      <div className="flex flex-1 flex-col justify-center space-y-3">
+      <div className="flex flex-1 flex-col justify-center space-y-2">
         {/* FMP-UI-14 — the main dashboard hero title, replacing the one that
             used to live in TopHeader. Always shown (even on an error/empty
-            state, same as any page's own title would be); the helper line
-            and summary strip below only make sense once there's actually a
-            grid to describe, so both keep the original `cards.length > 0`
-            gating.
+            state, same as any page's own title would be).
             FMP-UI-15 — added a "Factory Operations Control Center" tagline
-            between the title and the helper line (same small-caps treatment
-            the login page already uses for its own tagline, for a
-            consistent "official platform" voice across both screens), and
-            an executive summary strip below the helper line — small,
-            honest, real-data-only chips, never a second heading. */}
+            (same small-caps treatment the login page uses for its own
+            tagline) plus a helper line and an executive summary chip strip
+            below it.
+            FMP-UI-15B — removed the helper line ("Select a module to view
+            status...") and the entire summary chip strip (Modules /
+            Executive View / Updated Today / Total Contracts / Erection
+            Contracts / Overdue Tasks) per direct feedback that they read as
+            clutter — the module cards below already explain what's
+            available, and the sidebar already provides navigation, so
+            neither was adding information a manager didn't already have.
+            Title + tagline are the whole hero now. The parent's own
+            `space-y-3`→`space-y-2` (hero → grid gap) also tightened now
+            that the hero is shorter, so the cards sit closer to the title
+            instead of the centered block just leaving more blank space
+            above/below evenly. */}
         <div className="text-center">
           <h1 className="text-3xl font-extrabold tracking-tight text-text-primary lg:text-4xl">
             RECAFCO Factory Management Platform
@@ -154,21 +132,6 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
           <p className="mt-1.5 text-xs font-semibold uppercase tracking-widest text-text-muted">
             Factory Operations Control Center
           </p>
-          {!loadError && cards.length > 0 && (
-            <>
-              <p className="mt-2 text-sm text-text-secondary">
-                Select a module to view status, pending actions, and operational details.
-              </p>
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                <SummaryChip value={cards.length} label="Modules" />
-                <SummaryChip label="Executive View" />
-                <SummaryChip label="Updated Today" />
-                {totalContracts !== null && <SummaryChip value={totalContracts} label="Total Contracts" />}
-                {erectionContracts !== null && <SummaryChip value={erectionContracts} label="Erection Contracts" />}
-                {overdueTasks !== null && <SummaryChip value={overdueTasks} label="Overdue Tasks" />}
-              </div>
-            </>
-          )}
         </div>
 
         {loadError && (
