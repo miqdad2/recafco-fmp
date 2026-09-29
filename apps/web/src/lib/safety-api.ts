@@ -128,6 +128,16 @@ export interface InspectionSummary {
 
 export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
 
+export interface SafetyNeedsAttentionItem {
+  id: string;
+  inspectionId: string;
+  inspectionReferenceNumber: string;
+  title: string;
+  severity: FindingSeverity;
+  status: FindingStatus;
+  dueAt: string | null;
+}
+
 export interface SafetyDashboardData {
   scope: { type: DashboardScopeType; departmentNames: string[] };
   metrics: {
@@ -138,7 +148,10 @@ export interface SafetyDashboardData {
     overdueFindings: number;
     completedInspections: number;
   };
-  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  /** FMP-UI-21D — `departmentName`/`scheduledAt` added for the "Latest Safety Records" section. */
+  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string; departmentName: string | null; scheduledAt: string | null }[];
+  /** FMP-UI-21 — real critical/overdue findings for the Safety Control Center's "Needs Attention" section (see safety.service.ts's own getDashboard() doc comment). */
+  needsAttention: SafetyNeedsAttentionItem[];
 }
 
 export interface ListResponse<T> {
@@ -284,4 +297,16 @@ export const safetyApi = {
 
   people: (search?: string) =>
     apiFetch<UserRef[]>(`/safety-compliance/people${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+
+  // FMP-UI-21C — active departments/plants for the New Safety Inspection
+  // form's own dropdowns, gated by `safety.read` (the same permission this
+  // whole module already requires) instead of the admin-only
+  // `org.departments.read` / `org.plants.read` that `organizations-api.ts`'s
+  // `departments.list()`/`plants.list()` require — see safety.service.ts's
+  // own doc comment for the root cause this fixes.
+  departments: () =>
+    apiFetch<OrgRef[]>('/safety-compliance/departments'),
+
+  plants: () =>
+    apiFetch<OrgRef[]>('/safety-compliance/plants'),
 };

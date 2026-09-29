@@ -73,6 +73,26 @@ export class SafetyController {
     return { data: people, meta: meta(), error: null };
   }
 
+  // FMP-UI-21C — active departments/plants for the New Safety Inspection
+  // form's own dropdowns, gated by `safety.read` (not the admin-only
+  // `org.departments.read`/`org.plants.read`) — same fix, same reasoning,
+  // as factory-tasks.controller.ts's own `/departments`/`/plants`
+  // (FMP-UI-20D). Declared before /:id, same reason as /summary,
+  // /dashboard, /people above.
+  @Get('departments')
+  @Permissions('safety.read')
+  async departments(): Promise<ApiSuccessResponse<{ id: string; name: string; code: string }[]>> {
+    const data = await this.safetyService.listDepartments();
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get('plants')
+  @Permissions('safety.read')
+  async plants(): Promise<ApiSuccessResponse<{ id: string; name: string; code: string }[]>> {
+    const data = await this.safetyService.listPlants();
+    return { data, meta: meta(), error: null };
+  }
+
   @Get()
   @Permissions('safety.read')
   async list(

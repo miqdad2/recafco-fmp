@@ -9968,6 +9968,1826 @@ Removed: the "Select a module..." helper paragraph, and all 6 summary chips (`{c
 - Light/Dark/System theming needed no changes — the only classes touched were spacing (`space-y-3`→`space-y-2`) and removed JSX; no colors were introduced or removed.
 - This closes the loop on FMP-UI-15's own "optional real-data chips" feature — it was explicitly optional/additive when introduced, and removing it here doesn't reduce any REQUIRED information, since the chips were always supplementary to the module cards themselves.
 
+## FMP-UI-17I — Login Form Label and Placeholder Polish (Completed 2026-09-27)
+
+### Summary
+
+Small, scoped clarity improvement to the login form: the username field's label and a new placeholder on both fields, so users without a separate username know the field also accepts their email. No auth/validation/submission logic touched.
+
+### Files changed
+
+- `apps/web/src/app/login/_components/login-form.tsx` (the only file changed):
+  - Username label: "Username" → "Email / Username".
+  - Username input: added `placeholder="Enter email ID or username"` and `placeholder:text-text-muted` (subtle, matches the field's own icon color).
+  - Password input: added `placeholder="Enter password"` and the same `placeholder:text-text-muted` styling.
+  - No other attributes changed — `id`, `name`, `type`, `required`, `autoComplete`, `autoFocus` on both fields, and the password eye-icon toggle button, are all byte-for-byte unchanged.
+
+### Label/placeholder changes
+
+| Field | Before | After |
+|---|---|---|
+| Username label | "Username" | "Email / Username" |
+| Username placeholder | none | "Enter email ID or username" |
+| Password placeholder | none | "Enter password" |
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/actions.ts` — not opened this unit. Same server action, same field names (`username`/`password`) read from `formData`, same credential check, same redirect logic.
+- The password eye-icon toggle (`showPassword` state, `Eye`/`EyeOff` icons, the `type="button"` toggle) — untouched; only the sibling `<input>`'s own `placeholder` attribute changed, not the toggle button or the input's `type` logic.
+- `welcome/page.tsx`/`welcome-transition.tsx`/`ThemeToggle` — not touched at all.
+- No schema/migration changes; no changes to `apps/api`.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `placeholder` is a native HTML attribute, not a `value` — the fields remain the same uncontrolled inputs (no `value`/`onChange`), so this introduces zero risk of interfering with autofill/autocomplete or the existing `useActionState` submission flow.
+- No layout shift — placeholder text renders inside the input's existing fixed `h-12` box; icon alignment (`absolute left-3.5`/`right-3.5`) is unaffected since neither icon's position depends on the input's text content.
+- No new color tokens — `placeholder:text-text-muted` reuses the same muted token already used for the leading icons on both fields.
+
+## FMP-UI-17J — Make Login Module Chips Non-Interactive Labels (Completed 2026-09-27)
+
+### Summary
+
+The 8 module chips on the login page's left branding panel (Contracts, Technical, Erection, QA/QC, Storage Yard, Safety, Maintenance, Tasks) were already structurally non-interactive (`<span>`, no `onClick`/`href`/`tabIndex`), but their `hover:*` classes made them visually LOOK clickable. Removed all hover/transition affordances, eased contrast one notch, added `cursor-default`, and added a small subtle "System Modules" label above the rows.
+
+### Files changed
+
+- `apps/web/src/app/login/page.tsx` (the only file changed):
+  - Removed `transition-colors hover:border-white/25 hover:bg-white/12 hover:text-white` from the chip `<span>` className entirely — no hover state at all now.
+  - Added `cursor-default` to the chip className.
+  - Eased base contrast one notch: `text-white/80` → `text-white/70`, `border-white/12` → `border-white/10` (still `bg-white/6`, unchanged).
+  - Added a small uppercase "System Modules" label (`text-[11px] font-semibold uppercase tracking-widest text-white/45`) above the 2 chip rows.
+  - Wrapped the label + existing 2-row chip block in a new outer `space-y-2.5` div (was previously the chip block's own top-level `space-y-3` div).
+
+### Module chip behavior before/after
+
+| Aspect | Before | After |
+|---|---|---|
+| Hover background | `hover:bg-white/12` (visibly lightened) | none |
+| Hover border | `hover:border-white/25` (visibly brightened) | none |
+| Hover text color | `hover:text-white` (visibly brightened) | none |
+| Cursor | default browser cursor (text/inherit) | `cursor-default` explicit |
+| Base text contrast | `text-white/80` | `text-white/70` |
+| Base border contrast | `border-white/12` | `border-white/10` |
+| Heading above chips | none | "System Modules" (subtle, small-caps) |
+| Element type / focusability | plain `<span>`, no `onClick`/`href`/`tabIndex` | unchanged — still plain `<span>`, no `onClick`/`href`/`tabIndex` |
+
+### Confirmation chips are static/non-interactive
+
+- Chips were already plain `<span>` elements with no `onClick`, no anchor/`href`, and no `tabIndex` before this unit — never actually clickable or keyboard-focusable. This unit only removed the visual hover cues that contradicted that reality; no markup change was needed to satisfy "not a button, not a link, no keyboard focus."
+
+### Confirmation auth/password/welcome/theme unchanged
+
+- `login/_components/login-form.tsx`, `login/actions.ts` — not touched.
+- `welcome/page.tsx`/`welcome-transition.tsx` — not touched.
+- `ThemeToggle` and Light/Dark/System theme logic — not touched.
+- Only the module-tags block inside `login/page.tsx` changed; the login card, footer, hero background, and left-panel title/tagline/description are all unchanged.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks, `/login` prerendered successfully |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No new color tokens — `white/45`, `white/70`, `white/10` are the same opacity-modifier pattern already used throughout this panel (see [[ui-registry.md]] login page entry).
+- The "already non-interactive at the markup level, but visually implied otherwise via hover styling" gap is worth remembering for any other decorative `<span>` on this page (e.g. future badges) — see reusable takeaway added to `ui-registry.md`.
+
+## FMP-UI-18 — Improve Header Sign Out Button Visibility (Completed 2026-09-27)
+
+### Summary
+
+The header's Sign out button used a neutral outline style (`border-border`/`bg-surface`/`text-text-secondary`) that read as just another quiet control, easy for older managers to miss. Restyled it with RECAFCO-red badge tokens already used app-wide for red status badges — a soft tinted button, not an alarming destructive-delete look.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/top-header.tsx` (the only file changed) — the Sign out `<button>`'s className only; the surrounding `<form action={logoutAction}>` wiring is untouched.
+
+### Sign out button before/after
+
+| Aspect | Before | After |
+|---|---|---|
+| Border | `border-border` (neutral gray) | `border-accent/30` (soft red) |
+| Background | `bg-surface` (plain) | `bg-accent-light` (very light red tint) |
+| Text | `text-text-secondary`, no weight class | `text-accent` (RECAFCO red), `font-semibold` |
+| Corner radius | `rounded-md` | `rounded-lg` |
+| Hover | `hover:bg-surface-secondary hover:text-text-primary` (barely different) | `hover:border-accent hover:bg-accent hover:text-accent-foreground` (solid red fill, white text — an unambiguous pressed-state cue) |
+| Focus ring | `focus:ring-focus` (no offset) | `focus:ring-focus focus:ring-offset-2` (same standard app-wide focus token, now with an offset ring matching every other header/executive button) |
+| Padding | `px-3` | `px-4` (slightly roomier, easier target) |
+
+### Confirmation logout/auth unchanged
+
+- `logoutAction` (imported from `../actions`) — not opened, not modified. The button is still a plain `type="submit"` inside the same `<form action={logoutAction}>`.
+- No changes to session/cookie logic, `proxy.ts`, or any auth-related file.
+- User role/name display (`user.displayName`/`user.roleName`) — untouched, still rendered exactly as before beside the button.
+- No backend, schema, or migration changes.
+
+### Dark mode
+
+- `bg-accent-light`/`text-accent` are the same tokens already used for red status badges throughout the app (e.g. `workflow-task-priority-badge.tsx`'s CRITICAL badge) and are deliberately NOT re-tinted between themes (documented in `globals.css`'s own FMP-UI-11 comment) — this button now renders identically consistent with every other red badge already shipping in dark mode, with no new washed-out/overly-bright regression introduced.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Deliberately used `--color-accent` (RECAFCO red) rather than `--color-error` (a more "problem"-oriented brick red already reserved for actual error banners) — Sign out is a normal action, not a fault state, matching the task's own "not too aggressive like a destructive delete button" requirement.
+- Reused the exact same `bg-accent-light`/`text-accent` badge convention already established across dozens of components (status/priority badges) instead of inventing a new token or a first-ever `dark:` Tailwind variant — keeps this button consistent with the rest of the design system rather than a one-off treatment.
+- Focus ring intentionally kept on `ring-focus` (this app's one standard focus token), not `ring-accent` — so a normal keyboard focus pass on this button never visually reads as an error state, same reasoning already applied to the login form's inputs (see [[ui-registry.md]]).
+
+## FMP-UI-19 — Build Simple Erection Workflow Status Dashboard (Completed 2026-09-27)
+
+### Summary
+
+Ground-up redesign of the CM-71B "Erection Manager Dashboard" (`/contracts/erection-dashboard`) into a simple "Erection Workflow Status Dashboard" per direct user feedback that the old page — an 8-card KPI strip, a 23-column work-queue table, and 4 side panels — was too confusing for normal users to read. Same data source, same access rules, same links out to the real guided workflow screens — only the presentation was reshaped. No new table, no new permission, no workflow save/submit logic added.
+
+### Dashboard purpose
+
+Answers the 5 questions the brief specified, all from the existing `contractsApi.erectionDashboard()` payload:
+1. Which contracts have Erection scope? → Erection Contracts overview card + table.
+2. Which step is each contract currently in? → "Current Step" column (table) / Workflow Status section (aggregate).
+3. What is pending now? → Workflow Status section's per-step counts.
+4. What is delayed or needs attention? → Needs Attention section + overview card.
+5. What should the user open next? → "Next Action" text + "Open Workflow" button, per row.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/contracts/erection-dashboard/page.tsx` — full rewrite: new title/subtitle, 4 overview cards, Workflow Status section, Needs Attention section, simplified Erection Contracts table, a conditional "View My Erection Tasks" shortcut, and a collapsed "Recent Updates" `<details>` section. Also now fetches `authApi.me(accessToken)` (same cookie/pattern as `dashboard/page.tsx`) to identify the current viewer for the My Tasks shortcut.
+- `apps/web/src/app/(protected)/contracts/_lib/contract-erection-dashboard-helpers.ts` — rewritten: removed the old 5 per-step display-label/badge-class maps and the work-queue filter/search helpers (confirmed unused anywhere else first); added `computeErectionWorkflowStepKey`/`summarizeErectionWorkflowSteps` (7-step aggregate, mirrors the API's own gate order), `selectErectionNeedsAttention`, `erectionNextActionText`. Kept `ERECTION_ATTENTION_LABELS`/`_BADGE_CLASSES` as-is (still used).
+- `apps/web/src/app/(protected)/contracts/_lib/contract-erection-dashboard-helpers.test.ts` — rewritten to match (16 tests, was 17 — same coverage depth, new functions).
+- New components: `erection-overview-cards.tsx`, `erection-workflow-status-grid.tsx`, `erection-needs-attention-panel.tsx`, `erection-contracts-table.tsx`, `erection-my-tasks-shortcut.tsx`.
+- `erection-dashboard-panels.tsx` — trimmed to keep only `ErectionRecentActivityPanel` (now heading-less, since the page's own `<details><summary>` supplies "Recent Updates").
+- Deleted (confirmed unused anywhere else before removal): `erection-kpi-grid.tsx`, `erection-work-queue-table.tsx`, `erection-method-statement-status-badge.tsx`, `erection-schedule-status-badge.tsx`, `erection-delivery-start-status-badge.tsx`, `erection-start-status-badge.tsx`, `erection-checklist-status-badge.tsx`.
+- Kept as-is: `erection-empty-state.tsx` (`ErectionEmptyState`, exact "No erection contracts found" wording already matched this unit's own empty-state requirement), `erection-attention-badge.tsx` (`ErectionAttentionBadge`, still used by the table's Status column and reused inline in the Needs Attention panel).
+
+### Overview cards
+
+4 cards (was 8): Erection Contracts (`kpis.totalErectionContracts`), Ready for Erection (`kpis.readyForErection`), In Progress (`kpis.erectionInProgress`), Needs Attention (a NEW client-computed count — `selectErectionNeedsAttention(workQueue).length`, i.e. every row with `attention !== 'ON_TRACK'` — deliberately NOT the server's `kpis.delayedAttentionRequired`, which only counts `OVERDUE`; this keeps the card's number consistent with what the Needs Attention section directly below it actually lists).
+
+### Workflow Status summary
+
+7 step cards (Method Statement → Approval → Schedule → Delivery → Erection Start → Checklist → Payment). Steps 1–6 show a real, honest count of contracts currently gated at that step, computed by `computeErectionWorkflowStepKey()` — a pure function that mirrors the API's own `computeCurrentErectionStepLabel()` gate order exactly (same 6 checks, same order) but returns a typed step key instead of string-matching the human label. Status text: "Pending" (amber) when count > 0, "None pending" (neutral gray) when 0 — never fabricated. Payment (Step 7) always shows a fixed "— / Not built yet" (neutral gray), matching `kpis.paymentPendingAfterErectionAvailable`'s literal `false` type — there is still no dedicated Step 7 model/screen.
+
+### Needs Attention summary
+
+One unified list (was 3 separate panels: Today's Actions / Pending Approval / Overdue Attention). Filters the same work queue to `attention !== 'ON_TRACK'`. Each item shows Project Name, Contract Reference, "Current step: {currentErectionStep}", "Reason: {the row's real attention label}" (Overdue / Awaiting Approval / Needs Planning — never an invented reason string), and one action button — "Open Workflow" (actionable/monitoring viewers) or "View Contract" (strictly read-only viewers, so the button is never a dead end). Empty state: "No erection items need attention." (exact wording from the brief).
+
+### Erection Contracts summary
+
+New 7-column table (was 23 columns): Contract No. · Project · Client · Current Step · Status · Next Action · Action. "Status" reuses the same real `attention` badge the Needs Attention section is built from. "Next Action" is descriptive text only (`erectionNextActionText()` — the same ACT/MONITOR/READ_ONLY viewer-relative downgrade CM-71H already established, extracted into a pure/tested helper). "Action" is the real button(s) — "Open Workflow" (hidden for read-only viewers) plus "View Contract" (always present). No client-side filter/search bar — this is a monitoring page, not a work-queue tool; the full Contract List already covers filtering. Empty state reuses the existing `ErectionEmptyState` component verbatim.
+
+### My Tasks shortcut / Recent Updates
+
+"View My Erection Tasks" — a single small link (never a section/card), shown only when the current viewer's id matches an `assignedToUserId` in the already-fetched work queue (a real formal `ContractErectionWorkflowAssignment`, no new fetch). Links to `/contracts/workflow?mode=my-tasks&team=ERECTION` — both query params already supported by the existing generic Workflow page, so no new route was needed. Recent Updates: the same real `ContractActivity` rows as before, now inside a closed-by-default `<details>`/`<summary>` disclosure (same zero-JS pattern already used by `executive-module-nav.tsx`'s "Switch module" row) instead of always-open — raw event keys are still converted to readable labels via the existing `ACTIVITY_EVENT_LABELS` map, never shown raw.
+
+### Confirmation no workflow forms added
+
+Every action on this page is a `<Link>` out to an existing screen (`/contracts/{id}/workflow/...` guided steps, or `/contracts/{id}` for View Contract, or `/contracts/workflow?mode=my-tasks&team=ERECTION` for My Tasks) — there is no `<form>`, no input field, no save/submit button anywhere on this page. The 7 CM-71A–G guided workflow screens themselves were not touched.
+
+### Confirmation no backend/schema/permission changes
+
+- `apps/api/src/contracts/contract-erection-dashboard.service.ts` — not opened, not modified. Same endpoint (`/contracts/erection/dashboard`), same response shape, same department-scoped visibility/`contracts.read` permission check as before.
+- No Prisma schema/migration changes.
+- No new role, permission code, or access-scope change.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `computeErectionWorkflowStepKey()` deliberately mirrors the backend's typed status-field gate checks rather than string-matching `currentErectionStep`'s human-readable label — more robust to future copy changes on either side, and testable in isolation without a live API.
+- The overview "Needs Attention" card and the Needs Attention section below it are guaranteed to agree because both are computed from one single `selectErectionNeedsAttention()` call on the same fetched `data.workQueue` — never two independently-computed numbers that could drift apart.
+- Light/Dark/System theming needed no new tokens — every new component reuses existing semantic tokens already used elsewhere on this same dashboard (`bg-warning-light`/`text-warning`, `bg-error-light`/`text-error`, `bg-surface-secondary`/`text-text-muted`, etc.).
+
+## FMP-UI-19B — Make Executive Manager Erection Page Use the New Workflow Status Dashboard (Completed 2026-09-27)
+
+### Summary
+
+A real user report: after FMP-UI-19 rebuilt the Erection dashboard, logging in as Executive Manager and opening Erection still showed the OLD layout (old KPI grid, narrower Needs Attention, and a Recent Activity list rendering raw technical event keys like `erection_delivery_start_confirmed` verbatim). Root cause: Executive Manager's Erection entry point is a *separate* page (`/contracts/erection-executive`, FMP-UI-07's Executive Module Landing Page) that was never touched by FMP-UI-19 — that unit only rebuilt `/contracts/erection-dashboard`, a different route. Fixed by extracting the FMP-UI-19 dashboard body into one shared component and rendering it from both routes — Option A (replace content in place), no href changed anywhere.
+
+### Audit — every Erection entry point (all converge on one route)
+
+| Entry point | File | href |
+|---|---|---|
+| Executive Dashboard card | `apps/api/src/platform/platform-dashboard.service.ts:271` | `/contracts/erection-executive` |
+| Executive sidebar item | `apps/web/src/app/(protected)/_components/sidebar.tsx:196` (`EXECUTIVE_SIDEBAR_ITEMS`, Executive Manager persona only) | `/contracts/erection-executive` |
+| Executive Module Nav Previous/Next/Switch module | `apps/web/src/app/(protected)/_lib/executive-modules.ts:50` (`landingHref`) | `/contracts/erection-executive` |
+| Contract Manager/Staff sidebar item ("Erection"/"Erection Dashboard") | `sidebar.tsx:85,112,154,166` | `/contracts/erection-dashboard` (unaffected, already correct) |
+
+All 3 Executive Manager entry points already agreed on the single route `/contracts/erection-executive` — no link/href anywhere needed to change; only what that one route renders needed to change.
+
+### Old page identified
+
+`apps/web/src/app/(protected)/contracts/erection-executive/page.tsx` (`ErectionExecutivePage`, FMP-UI-07) — rendered its own separate "Summary" KPI grid (`ExecutiveKpiGrid`, 7 metrics), a narrower "Needs Attention" (`ExecutiveAttentionPanel`, only `data.overdueAttention` — not the full "any non-ON_TRACK" set the new dashboard uses), and a hand-rolled Recent Activity `<ul>` that rendered `{row.event}` directly with **zero label mapping** — the exact raw-technical-key bug reported, since this page never shared any code with `erection-dashboard-panels.tsx`'s `ACTIVITY_EVENT_LABELS` map that already fixed this for the other route.
+
+### Files changed
+
+- **New:** `apps/web/src/app/(protected)/contracts/erection-dashboard/_components/erection-workflow-status-dashboard.tsx` — the ONE shared component (Erection Overview → Workflow Status → Needs Attention → Erection Contracts), computing `status`/`selectErectionNeedsAttention()` internally from a single `data: ErectionDashboardData | null` prop. Also added an explicit "Erection Overview" `<h2>` above the 4 overview cards (this unit's own section-naming requirement), applied to both routes uniformly since both now render this one component.
+- `apps/web/src/app/(protected)/contracts/erection-dashboard/page.tsx` — slimmed to: header, the shared component, the "View My Erection Tasks" shortcut, and the collapsed "Recent Updates" section (unchanged behavior, just now built on the shared body).
+- `apps/web/src/app/(protected)/contracts/erection-executive/page.tsx` — rewritten: dropped `ExecutiveKpiGrid`/`ExecutiveAttentionPanel`/`ExecutiveQuickLinks`/the raw Recent Activity list/the "View Erection Work Queue" button entirely; now renders `ExecutiveModuleNav` (unchanged) + `ExecutiveModuleTitle` (title changed to "Erection Dashboard", description changed to the exact FMP-UI-19 subtitle) + the same `ErectionWorkflowStatusDashboard` shared component. No Recent Activity and no My Tasks shortcut on this route — both stay specific to the full dashboard.
+
+### Whether /executive/erection was replaced or redirected
+
+There is no `/executive/erection` route (the Erection executive route has always been `/contracts/erection-executive`, alongside `/contracts/erection-dashboard` — both live under `/contracts` since Erection is a Contract Management sub-module, unlike QA/QC or Storage & Delivery which do have real `/executive/*` routes). **Replaced in place (Option A)** — same route, same URL, content swapped to the shared dashboard component. No redirect was added; none was needed since only one page ever needed to change.
+
+### Confirmation Executive dashboard card/sidebar now point to correct Erection dashboard
+
+Neither the platform dashboard card's route nor the sidebar's href needed to change — both already pointed at `/contracts/erection-executive`, and that route now renders the correct (new) dashboard content. Verified by grepping the full codebase for every `erection-executive`/`erection-dashboard` reference before making any change (see audit table above) — no other hidden entry point exists.
+
+### Confirmation no backend/schema/permission changes
+
+- `apps/api/src/platform/platform-dashboard.service.ts` — not opened, not modified. Same card route, same card metrics.
+- `apps/api/src/contracts/contract-erection-dashboard.service.ts` — not opened, not modified. Same endpoint, same response shape, same `contracts.read` permission check (still enforced via the page's own `if (!permissions.includes('contracts.read')) notFound()`, unchanged), same department-scoped visibility.
+- No Prisma schema/migration changes. No new role/permission/access-scope.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `ExecutiveKpiGrid`/`ExecutiveAttentionPanel`/`ExecutiveQuickLinks` were NOT deleted — confirmed (via grep) they're still used by 7 other Executive Module Landing Pages (Contract Management, Technical, Factory Tasks, Incidents, Maintenance, Production, Safety & Compliance); only this one page stopped importing them.
+- Both routes' hrefs inside the shared table/panel (`Open Workflow`, `View Contract`, per-row links) are always absolute (`/contracts/{id}/...`), so they work identically regardless of which page embeds the shared component — no route-relative link risk from sharing it.
+- Reusable takeaway: when a module has 2 pages built from the SAME underlying data (a "full manager dashboard" and a "simplified executive landing page"), a redesign of one is invisible to the other unless they share the actual rendering code, not just the same API call — this is exactly what let the executive page silently drift back to the old design after FMP-UI-19. Extracting one shared presentational component (not just a shared data-fetch helper) is the fix, and the one to reach for first next time a 2-page-same-module pattern like this needs a redesign.
+
+## FMP-UI-19D — Make Erection Dashboard One-Screen Summary Without Scrolling (Completed 2026-09-27)
+
+### Summary
+
+Direct user feedback: the FMP-UI-19/19B Erection Dashboard (both the full route and the Executive Manager route, which share one component) still required scrolling, had a table that could scroll horizontally, and used labels that read as generic rather than business-specific. Redesigned into a compact one-screen summary: 2-column Workflow Status/Needs Attention layout, top-3 previews with "View all" links instead of long lists, a card/list layout replacing the wide table, renamed overview cards, step-based actionable "Next Action" wording, and Recent Activity removed entirely from both routes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/contracts/_lib/contract-erection-dashboard-helpers.ts` — removed the old viewer-mode-based `erectionNextActionText()`; added `ERECTION_NEXT_ACTION_LABELS`/`erectionNextActionLabel()` (one fixed actionable phrase per workflow step, independent of viewer mode).
+- `apps/web/src/app/(protected)/contracts/_lib/contract-erection-dashboard-helpers.test.ts` — updated to match (20 tests, was 16).
+- `erection-dashboard/_components/erection-overview-cards.tsx` — relabeled all 4 cards, switched to `DashboardKpiCard`'s `dense` layout.
+- `erection-dashboard/_components/erection-workflow-status-grid.tsx` — compact 4-column (4+3) grid with an explicit "Step N" prefix per card, no truncated labels.
+- `erection-dashboard/_components/erection-needs-attention-panel.tsx` — single-column list (was `lg:grid-cols-2`, no longer needed in a half-width column); new `limit`/`viewAllHref` props cap it to the top 3 with a "View all attention items" link.
+- **New:** `erection-dashboard/_components/erection-contracts-summary.tsx` — card/list layout (no `<table>`, no horizontal scroll), same `limit`/`viewAllHref` pattern, replacing the deleted `erection-contracts-table.tsx`.
+- `erection-dashboard/_components/erection-empty-state.tsx` — text updated to "No contracts in Erection workflow"; padding trimmed.
+- `erection-dashboard/_components/erection-workflow-status-dashboard.tsx` (the ONE shared component both routes render) — added a 2-column `lg:grid-cols-2` row for Workflow Status/Needs Attention; added `showAll`/`viewAllHref` props threaded through to both list sections; renamed the Contracts section heading to "Contracts in Erection Workflow"; tightened all section spacing.
+- `erection-dashboard/page.tsx` — now reads `searchParams.view` (`?view=full` shows every row in place via `showAll`, with a "Show top 3 summary only" link back); header trimmed (`text-3xl`→`text-2xl`, shorter subtitle, `py-6`→`py-5`, `space-y-6`→`space-y-4`); shows "No assigned erection tasks" text when the viewer has none (was: nothing rendered); Recent Updates section removed entirely.
+- `erection-executive/page.tsx` — subtitle shortened to match; passes `showAll={false}` always (its own "View all…" links route out to `/contracts/erection-dashboard?view=full`, so there's still exactly one place a full list lives); spacing trimmed to match.
+- **Deleted** (confirmed unused anywhere else first): `erection-contracts-table.tsx` (the old wide `<table>`), `erection-dashboard-panels.tsx` (`ErectionRecentActivityPanel`, now unused on both routes).
+
+### One-screen layout summary
+
+Header (compact, 2-line) → Erection Overview (4 dense cards, one row) → a `lg:grid-cols-2` row with Workflow Status (left) and Needs Attention (right, top 3) → Contracts in Erection Workflow (top 3, full width, card/list). All vertical gaps tightened (`space-y-6`→`space-y-4` at the page level, `mb-3`→`mb-2` under section headings). On a normal desktop viewport this fits without scrolling for the common case (≤3 attention items, ≤3 contracts); when either list is genuinely longer, only that section's own "View all…" link is needed — the page itself never grows past the same fixed shape.
+
+### Overview card changes
+
+| Before | After |
+|---|---|
+| "Erection Contracts" | "Contracts in Erection Workflow" |
+| "Ready for Erection" | "Ready to Start Erection" |
+| "In Progress" | "Erection In Progress" |
+| "Needs Attention" | "Needs Attention" (unchanged) |
+
+All 4 switched to `DashboardKpiCard`'s existing `dense` layout (icon-left, value+label-right) — no new card component, no new token; the 4-card row is noticeably shorter than before.
+
+### Workflow Status layout changes
+
+7 cards in a compact `grid-cols-2 sm:grid-cols-4` grid (4 on the first row, 3 wrapping to a second — the brief's own "2-row compact grid" option), each labeled "Step N" + the full step name (no truncation anywhere, `leading-tight` allows wrap rather than clip), plus the same honest count + status word + color indicator from FMP-UI-19 (unchanged computation, `computeErectionWorkflowStepKey`/`summarizeErectionWorkflowSteps`). Payment (Step 7) still shows a fixed "— / Not built yet".
+
+### Needs Attention limit/behavior
+
+Right column of the new 2-column row. Shows the top 3 items by default (Project, Contract No., Current step, Reason, Open Workflow/View Contract button — unchanged from FMP-UI-19), with "View all attention items (N)" when there are more, linking to `/contracts/erection-dashboard?view=full`. Empty state unchanged: "No erection items need attention."
+
+### Contracts summary limit/behavior
+
+Full-width section below the 2-column row, renamed "Contracts in Erection Workflow". Replaced the old 7-column `<table>` (which needed `overflow-x-auto`/`min-w-[960px]`, i.e. real horizontal scroll on narrower screens) with a `flex flex-wrap` card/list — Contract No. + Client, Project + Current Step, Status badge, a fixed actionable Next Action phrase, Open Workflow + View Contract. Shows the top 3 by default, "View all erection workflow contracts (N)" link when there are more. Empty state: "No contracts in Erection workflow."
+
+### Confirmation no Recent Activity / raw technical keys
+
+Recent Activity is not rendered anywhere on either route anymore — the collapsed "Recent Updates" section on the full dashboard route was removed outright (not just hidden), and `ErectionRecentActivityPanel`/`erection-dashboard-panels.tsx` (the only place `row.event` was ever rendered) were deleted after confirming nothing else imports them. No raw technical event key (e.g. `erection_delivery_start_confirmed`) can appear on this dashboard because there is no code path left that renders one.
+
+### Confirmation no backend/schema/permission changes
+
+No files under `apps/api` were opened or modified. Same `contractsApi.erectionDashboard()` call, same response shape, same `contracts.read` permission check, same department-scoped visibility. No Prisma schema/migration changes. No new role/permission/access-scope.
+
+### Confirmation no fake data
+
+Every number on the redesigned dashboard is a real tally over the already-fetched `data.workQueue` (`ERECTION_WORKFLOW_STEP_ORDER`/`computeErectionWorkflowStepKey`, `selectErectionNeedsAttention`, `.length` counts) or a real field already returned by the API (`kpis.totalErectionContracts`, `kpis.readyForErection`, `kpis.erectionInProgress`). "Next Action" text is a fixed phrase keyed off the contract's own real current step, never invented per-contract copy. Payment (Step 7) still honestly reads "Not built yet" rather than a fabricated count.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 938/938 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- "What's next" (an objective fact about the contract's current step) and "who can act on it" (a viewer-relative fact) are now 2 separate concerns: `erectionNextActionLabel()` never varies by `viewerActionMode`, only the Action button (Open Workflow vs View Contract) does — see the helper's own doc comment for why blending the two into one string was the wrong shape.
+- The `?view=full` query-param toggle keeps "show me everything" on the SAME route rather than inventing a second list page — consistent with FMP-UI-19B's own "one clear Erection dashboard experience" principle, just extended to cover top-3-vs-full as well as manager-vs-executive.
+- Light/Dark/System theming needed no new tokens — every new/changed class reuses existing semantic tokens already used elsewhere on this same dashboard.
+
+## FMP-UI-19E — Polish Erection Workflow Summary Dashboard for Management Review (Completed 2026-09-27)
+
+### Summary
+
+FMP-UI-19D got the Erection Dashboard's structure right (one-screen, 4 sections) but it still "looked functional rather than polished." This unit is a pure visual polish pass on top of that structure — no section added/removed/reordered, no data/permission/logic change — targeting management-ready presentation: consistent card sizing, a soft red "Needs Attention" treatment, a numbered stepper-style Workflow Status, real buttons instead of text links, and a premium header card.
+
+### Files changed
+
+- **New:** `erection-dashboard/_components/erection-overview-card.tsx` — a bespoke overview-card component (icon size/card height/value hierarchy all consistent, plus a soft-red `attention` tone) replacing `DashboardKpiCard`'s generic `dense` layout for this page only — `DashboardKpiCard` itself was not touched (it's shared by 10+ other dashboards).
+- `erection-dashboard/_components/erection-overview-cards.tsx` — now built on `ErectionOverviewCard`; "Needs Attention" passes `attention` for the soft red card tone.
+- `erection-dashboard/_components/erection-workflow-status-grid.tsx` — each card now leads with a numbered circular badge (1–7, solid amber when that step has a real pending count, neutral gray otherwise) instead of a plain "Step N" text line; cards gained `rounded-xl`/`shadow-sm`.
+- `contract-erection-dashboard-helpers.ts` (+ test) — `summarizeErectionWorkflowSteps()`'s status wording: "In progress" for `ERECTION_START` specifically (a label-only change, not a new computation — see its own doc comment for why); added `ERECTION_PRIMARY_ACTION_BUTTON_CLASS`/`ERECTION_SECONDARY_ACTION_BUTTON_CLASS`, one shared button style pair reused by both list sections.
+- `erection-dashboard/_components/erection-needs-attention-panel.tsx` — "Reason" is now the same colored pill the Status column already uses (was plain text); "Open Workflow"/"View Contract" are now real buttons (was a text link).
+- `erection-dashboard/_components/erection-contracts-summary.tsx` — restructured into 3 explicit zones (left: identity, middle: step/status/next action, right: actions); both actions are now real buttons.
+- `erection-dashboard/page.tsx` — header wrapped in a bordered card with an icon badge (reusing `ACCENT_PALETTE.erection`, the same tokens `ExecutiveModuleTitle` already uses).
+- `erection-dashboard/_components/erection-workflow-status-dashboard.tsx` — section headings switched to the uppercase/tracked-wide "eyebrow" style used elsewhere in the app.
+
+### Header/overview polish summary
+
+Header: plain `<h1>` → a `rounded-xl border bg-surface shadow-sm` card with an amber `HardHat` icon badge (same `ACCENT_PALETTE.erection` tokens `ExecutiveModuleTitle` already uses elsewhere — visual consistency, not a new pattern), title bumped to `font-bold`. Title/subtitle text unchanged (still "Erection Dashboard" / "Summary of erection workflow status, pending actions and site readiness."). Overview cards: switched to a bespoke `ErectionOverviewCard` — identical icon size (`size-11`) and height across all 4, a clearer `text-2xl` bold value over a `text-xs` label over an `text-[11px]` helper line, and "Needs Attention" now sits on a soft `bg-error-light/60`/`border-error/30` card with a red value — visually distinct from the other 3 without being alarming.
+
+### Workflow Status visual changes
+
+Each of the 7 cards now leads with a small numbered circular badge (1–7) that is solid amber when that step has a real pending count and neutral gray otherwise — the same number that orders the steps also carries the status color, so "which step, what state" reads in one glance. Cards gained `rounded-xl`/`shadow-sm` for a calmer, more premium card language. Status vocabulary expanded honestly: "None pending" / "Pending" / "In progress" (Erection Start only) / "Not built yet" (Payment) — the brief's exact 4-word vocabulary. Still a compact `grid-cols-2 sm:grid-cols-4` layout (kept from FMP-UI-19D, since a literal connected-line stepper risked truncating labels inside the dashboard's half-width column) — no truncated labels anywhere.
+
+### Needs Attention polish
+
+"Reason" is now a colored pill (`ERECTION_ATTENTION_BADGE_CLASSES` — the exact same tokens the Status column elsewhere uses), not plain text after a colon. "Open Workflow" is now a solid filled button (`ERECTION_PRIMARY_ACTION_BUTTON_CLASS`), not a red text link — matches the brief's own "should look like a real button, not only a red text link." Item layout now matches the brief's own example order exactly: Project name → Contract number → Current step → Reason (badge) → Open Workflow (button). Empty state unchanged: "No erection items need attention."
+
+### Contracts summary polish
+
+Restructured each row into the 3 recommended zones: left (Contract No. + Project + Client), middle (Current Step + Status badge + Next Action text), right (Open Workflow + View Contract, both now real buttons via the same shared button-class pair Needs Attention uses). Still a `flex flex-wrap` card/list — no `<table>`, no horizontal scroll, unchanged from FMP-UI-19D. Still caps to the top 3 with the same "View all erection workflow contracts" link.
+
+### Confirmation no Recent Activity / raw technical keys
+
+Not touched — Recent Activity was already fully removed in FMP-UI-19D (the component/file no longer exist), and this unit added no new activity/event rendering anywhere.
+
+### Confirmation no backend/schema/permission changes
+
+No files under `apps/api` were opened or modified. Same `contractsApi.erectionDashboard()` call, same response shape, same permission check, same department-scoped visibility. No Prisma schema/migration changes. No new role/permission/access-scope.
+
+### Confirmation no fake data
+
+Every value shown is the same real field/count as before this unit — only its presentation (card style, badge, button, wording) changed. The one wording change to actual data-derived text ("Pending"→"In progress" for `ERECTION_START`) is a label swap on an already-real count, not a new or fabricated number.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 939/939 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Deliberately did NOT modify `DashboardKpiCard` (CM-54/CM-58B, shared by 10+ dashboards) to get this page's bespoke card treatment — a one-page visual need doesn't belong in a widely-shared component; `ErectionOverviewCard` is local to this page only.
+- Reused `ACCENT_PALETTE.erection` (literal hex, per that file's own documented reasoning about CSS custom-property resolution) for the header icon badge — the same tokens already used by every Executive Module Landing Page's own header — rather than inventing a new color.
+- Light/Dark/System theming needed no new tokens — every new class (`bg-error-light/60`, `border-warning`, `bg-warning`, etc.) reuses existing semantic tokens already used elsewhere in this app.
+
+## FMP-UI-20 — Redesign Task Management Page as Task Control Center (Completed 2026-09-27)
+
+### Summary
+
+The Task Management page (`/factory-tasks/executive`, the Executive Manager's landing page for the Factory Tasks module) was a generic Executive Module Landing Page — a Summary KPI grid, Needs Attention, Recent Activity, Quick Links, and a single "View Tasks" button — that never clearly guided anyone to create, assign, track, or close a task. Redesigned into a genuine Task Control Center: a prominent New Task button, 4 real overview cards, 5 tabs with real compact previews, and a per-row "what's next" action hint — all reusing existing task data/routes, plus one small, precedented backend addition (an "Assigned by Me" filter/metric) needed to make that tab honest rather than a client-side guess over a possibly-incomplete page.
+
+### Files changed
+
+**Backend (small, additive — not a schema change):**
+- `apps/api/src/factory-tasks/dto/task-list-query.dto.ts` — added optional `createdByUserId` (mirrors the existing `assignedToUserId`, including "me" resolution).
+- `apps/api/src/factory-tasks/factory-tasks.service.ts` — `buildListWhere()` resolves `createdByUserId` the same way; new `findAssignedByMe()` method (mirrors `findMy()` exactly, not department-scoped); `getDashboard()` gained a real `assignedByMe` metric (mirrors `assignedToMe` exactly, keyed on `createdByUserId`).
+- `apps/api/src/factory-tasks/factory-tasks.controller.ts` — new `GET /factory-tasks/assigned-by-me` endpoint (same `tasks.read` permission, declared before `:id` like `/my` already is).
+- `apps/api/src/factory-tasks/factory-tasks.service.test.ts` — updated the existing `getDashboard` test for the new metric; added `findAssignedByMe` and `createdByUserId` filter tests (57 tests, was 52).
+
+**Frontend:**
+- `apps/web/src/lib/factory-tasks-api.ts` — `TaskDashboardData.metrics.assignedByMe`, `TaskListQuery.createdByUserId`, `tasksApi.assignedByMe()`.
+- **New:** `factory-tasks/_lib/task-control-center-helpers.ts` (+ test, 18 tests) — `isTaskRowOverdue`, the 5-tab config (`TASK_CONTROL_CENTER_TABS`), `getVisibleTaskControlCenterTabs`/`isValidTaskControlCenterTab` (permission-gated), `computeTaskActionHint`.
+- **New:** `factory-tasks/_components/task-control-center-list.tsx` — the shared compact preview table used by all 5 tabs.
+- **New:** `factory-tasks/assigned-by-me/page.tsx` — the "Assigned by Me" tab's own dedicated full-list page, mirroring `factory-tasks/my/page.tsx` exactly.
+- `factory-tasks/executive/page.tsx` — rewritten into the Task Control Center (see below).
+- `factory-tasks/page.tsx` (the existing full "All Tasks" list — additive only): `createdByUserId` query passthrough, a "Created by" column, and 2 more quick-filter chips ("Completed", "Assigned by me →").
+
+### Task Management structure summary
+
+Header (`ExecutiveModuleNav` unchanged, then a bordered card wrapping `ExecutiveModuleTitle` with a "+ New Task" button in its own `actions` slot) → Overview (4 cards) → Tasks (5 tabs + a top-8 preview of whichever tab is active + a "View all" link to that tab's own real full-list page). No Recent Activity, no Quick Links, no generic Needs Attention section — removed per the brief's own "remove confusing sections" instruction.
+
+### Overview cards summary
+
+My Open Tasks (`assignedToMe`, links to `/factory-tasks/my`), Assigned by Me (`assignedByMe`, links to `/factory-tasks/assigned-by-me`), Overdue (`overdueTasks`, links to `/factory-tasks?overdue=true`), Due Today (`dueToday`, informational only — no link, since the existing `dueFrom`/`dueTo` date-range filter's inclusive-boundary behavior would silently exclude same-day-later tasks; linking to a subtly wrong filter would be worse than no link).
+
+### Tabs behavior
+
+5 tabs in the required order. My Tasks / Assigned by Me / Overdue / Completed are always visible to any `tasks.read` holder (each is scoped to the viewer's own tasks or a status/date filter, exactly like the existing dedicated pages already are). **All Tasks is hidden unless the viewer holds `tasks.manage`** — the one existing manager-tier permission `task-transitions.tsx` already uses for broader oversight (cancel any task, reopen a closed one) — satisfying "All Tasks: visible only if current user has permission to view all tasks" without inventing a new permission. A deep-linked `?tab=all` from a viewer without `tasks.manage` falls back to `my`, never renders. Each tab fetches a real top-8 preview from its own real endpoint (`tasksApi.my`/`.assignedByMe`/`.list({overdue:true})`/`.list({status:'COMPLETED,CLOSED'})`/`.list()`), with a "View all" link to that same tab's existing dedicated page.
+
+### Task list/action behavior
+
+Columns: Task (title + reference + short description) / Assigned To / Created By / Department / Priority / Due Date (red + "(overdue)" when applicable) / Status / Action. "Action" is one real "Open" button (always links to the task's own detail page, where every real transition — assign/start/block/complete/close/reopen/comment — already lives, fully permission- and state-gated by the existing `TaskTransitionsPanel`) plus a computed, honest hint line ("Mark complete", "Reassign", "Unblock", "Close task", "View", …) from `computeTaskActionHint()` — never a second, duplicate action system, never a disabled button.
+
+### New Task entry point behavior
+
+The "+ New Task" button links to the existing, already fully-working `/factory-tasks/new` create form (title/description/priority/department/plant/due date/incident link, wired to the real `createTaskAction`) — no new form was built. "Assign to user" is deliberately NOT on the create form: this app's real workflow creates a task as an unassigned DRAFT, then assigns it as a separate step once opened (`task-transitions.tsx`'s own "Assign" panel) — adding a fake "assign on create" field would contradict the real business workflow, so per this unit's own "if not fully supported, show honest limitation, do not fake save" instruction, the existing 2-step flow was kept as-is.
+
+### Confirmation permissions not broadened
+
+No new permission was created. The one new backend capability (`createdByUserId` filter, `/factory-tasks/assigned-by-me`) is gated by the SAME `tasks.read` every other task endpoint already requires. The "All Tasks" tab's gate (`tasks.manage`) reuses an existing permission already tied to broader task oversight — it was never previously required to reach `/factory-tasks/executive` at all, but it was already required for the STRICTLY MORE PRIVILEGED actions (cancel/reopen any task) that permission unlocks elsewhere, so gating a read-only "see everyone's tasks" tab behind it is a narrower ask, not a broader one.
+
+### Confirmation no fake data
+
+Every number/row shown is a real API response — `assignedByMe` is a real Prisma `count()` (mirrors `assignedToMe`'s own query shape exactly), `findAssignedByMe` is a real `findMany()`/`count()` pair (mirrors `findMy()` exactly). The "Due Today" card intentionally has no link rather than one built on a filter with known inclusive-boundary gaps. `computeTaskActionHint()` never invents an action the viewer's real permissions/task state don't already support — it mirrors `task-transitions.tsx`'s own real gating logic.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 957/957 tests |
+| `pnpm --filter @recafco/api test` | ✓ 1654/1654 tests |
+| `pnpm --filter @recafco/api build` | ✓ 0 errors |
+| `pnpm build` | ✓ 8/8 tasks (all `/factory-tasks/*` routes compiled, including the new `assigned-by-me`) |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The "Assigned by Me" backend addition is the one exception to this unit's own "UI-first" preference — justified because client-side filtering an already-fetched, paginated list by `createdByUserId` would silently miss tasks beyond whatever page happened to be fetched, which is itself a form of showing incomplete data as complete. A real, permission-safe server-side filter (mirroring an already-established pattern in the same file) was the more honest choice.
+- `ExecutiveModuleTitle`'s own `actions` slot (added in FMP-UI-16, since left unused elsewhere after Contract Management moved to its own bespoke header) is exactly the mechanism this unit needed for "+ New Task near the title" — reused as originally designed rather than building a new header pattern.
+- `ExecutiveKpiGrid`/`ExecutiveAttentionPanel`/`ExecutiveQuickLinks`/`DashboardRecentTable` were NOT deleted — confirmed they're still used by 6+ other Executive Module Landing Pages; only this one page stopped importing them.
+
+## FMP-UI-20B — Improve New Task Creation Page UX (Completed 2026-09-27)
+
+### Summary
+
+The New Task page (`/factory-tasks/new`) worked but read as too basic: unclear title, "saved as draft" as the very first confusing message, no visible way to assign the task to anyone, one long unsectioned form, and a submit button that didn't say what it actually did. Redesigned into a grouped, professional creation form — and, unlike FMP-UI-20's own decision to leave assignment as a strictly separate step, this unit makes "Assign To User" genuinely work at creation time by chaining 3 already-existing, already-permission-gated endpoints (create → open → assign), for viewers who hold the real `tasks.assign` permission. No backend schema change — the assignment column and every endpoint used already existed.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/factory-tasks/_components/task-form.tsx` — rewritten: 4 section cards (Task Details / Assignment / Priority & Schedule / Additional Details), a real "Assign To User" field (only when `canAssign` is true), updated help text throughout, a visible footer action row (Cancel / Save as Draft / Create & Assign Task), and the draft note moved out of the header into a small line near the footer. The edit form (`isEdit` branch) is otherwise unchanged in substance — same fields, same "Save changes" button, no assignment section (editing only applies to a task's own DRAFT fields, never assignment).
+- `apps/web/src/app/(protected)/factory-tasks/actions.ts` — `createTaskAction` extended (same exported name/signature, same underlying `POST /factory-tasks` call): reads which footer button was clicked (`intent`, carried via the button's own `name`/`value`, not a second server action); new field validations (see below); when `intent === 'assign'`, chains `POST /:id/open` then `POST /:id/assign` after a successful create, using the exact same endpoints `task-transitions.tsx`'s own Assign panel already calls. Always redirects to the created task's detail page once creation itself succeeds, even if a later chained step fails — the task already exists for real at that point, so the user lands where they can see/finish it, never on a stale form referring to an unreachable draft.
+- `apps/web/src/app/(protected)/factory-tasks/new/page.tsx` — title changed to "Create New Task", subtitle to "Create a task, assign responsibility, set priority and due date."; computes `canAssign = permissions.includes('tasks.assign')` and only then fetches `tasksApi.people()` (the same endpoint `task-transitions.tsx`'s Assign panel already uses) to pass to the form.
+
+### New Task page layout summary
+
+4 section cards: **Task Details** (Title, Description) → **Assignment** (Assign To User when `canAssign`, else an honest one-line explanation; Responsible Department *, Requesting Department, Plant / Location) → **Priority & Schedule** (Priority, Due Date / Time) → **Additional Details** (incident link when `incidents.read`; an honest note that attachments aren't available yet and comments become available after creation). A small "Tasks can be saved as draft before opening or assigning." note sits near the footer, not at the top. Footer: Cancel (left) / Save as Draft + Create & Assign Task (right) — a clearly visible bottom action row, not sticky (this is a plain page, not a modal, so a genuine `position: sticky` footer risked fighting the app shell's own scroll container for no real benefit over a well-separated, bordered row).
+
+### Assignment field behavior
+
+**"Assign To User" now genuinely works** for a viewer with `tasks.assign` — it is not cosmetic. Selecting a user and clicking "Create & Assign Task" creates the task, then calls the real `open` and `assign` endpoints in sequence, so the task lands as ASSIGNED with the chosen user, exactly as if a manager had used the existing Assign panel manually right after creating it. For a viewer WITHOUT `tasks.assign`, the field and the "Create & Assign Task" button are never rendered at all — only "Save as Draft" (labelled "Create Draft" via `submitLabel`) exists, and a one-line note explains why, so nothing on the page ever implies assignment works when it can't.
+
+### Button behavior
+
+"Cancel" links back to `/factory-tasks/executive` (the Task Control Center). "Save as Draft" always creates an unassigned DRAFT — today's exact original behavior, unchanged. "Create & Assign Task" (hidden unless `canAssign`) requires a selected assignee (validated both by the required error message and server-side) and performs the create→open→assign chain. Both footer buttons submit the SAME form/server action (distinguished by the clicked button's own `intent` value), so they share one pending/error state — no second, parallel action to keep in sync.
+
+### Confirmation whether user-level assignee is supported or not
+
+**Supported, for real, for viewers with `tasks.assign`.** `CreateTaskDto` still has no `assignedToUserId` field (unchanged, no schema/DTO change) — assignment happens via the SAME pre-existing `POST /:id/open` and `POST /:id/assign` endpoints every other assignment in this app already uses, called in sequence from the frontend server action. For a viewer without `tasks.assign`, assignment is honestly unavailable on this page (clearly stated, never faked) — they still create an unassigned draft, exactly as before this unit.
+
+### Confirmation no fake fields/data
+
+No attachment field was added (confirmed nowhere in the API); the form says so honestly instead. No comment field was added to the create form (a task must exist before it can have comments — the existing `[id]/page.tsx` already provides that once created). "Responsible Department is required" and "Due date must be valid" are enforced by the same frontend server-action validation pattern `title` already used — no backend DTO change, since making it a hard backend rule was judged unnecessary for a UI-first task with only one real caller of `create()`.
+
+### Confirmation permissions unchanged
+
+No permission was added, removed, or changed. `tasks.assign` (checked client-side via the JWT payload to decide whether to render the field, and enforced for real server-side by the pre-existing `assign` endpoint's own `@Permissions('tasks.assign')` guard) is the exact same permission `task-transitions.tsx` already required for assignment — this page just surfaces it one step earlier in the workflow.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 957/957 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Both footer buttons submit through ONE `useActionState`-bound action, distinguished by the clicked button's own `name="intent"`/`value` pair — the standard, framework-native way to support 2 submit intents from 1 form without a second action function or client-side state duplicating what the server already needs to decide.
+- Deliberately did NOT make `responsibleDepartmentId` required in `CreateTaskDto` (the backend) — the exact same user-facing "cannot submit without it" outcome is achieved at the frontend server-action layer, matching how `title` was already enforced there, keeping this unit's backend footprint at zero.
+- No backend files were opened or modified in this unit.
+
+## FMP-UI-20C — Fix New Task Button Wording and Remove Draft Confusion (Completed 2026-09-27)
+
+### Summary
+
+FMP-UI-20B's New Task form had 2 footer buttons ("Save as Draft" and, for `tasks.assign` viewers, "Create & Assign Task"/"Create Draft") plus several sentences exposing internal DRAFT-lifecycle wording — confusing for normal users who just want to create a task. Collapsed to ONE footer button, always labelled "Create Task," with every draft-lifecycle sentence removed. Whether the created task ends up assigned is now decided purely by whether "Assign To User" was filled in, never by which button was clicked — and that field (added for real in FMP-UI-20B, for viewers with `tasks.assign`) was kept working, per explicit user confirmation, rather than removed outright.
+
+Before touching anything, this unit surfaced a real conflict to the user: the ticket's own framing ("user-level assignment is not currently available on this form") contradicted FMP-UI-20B's real, working `tasks.assign`-gated assignment. The user confirmed: keep it working for permitted viewers; just fix the confusing wording for everyone.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/factory-tasks/_components/task-form.tsx` — footer collapsed to Cancel + one "Create Task"/`submitLabel` button (no more `name="intent"` value/2-button split); removed the "Tasks can be saved as draft before opening or assigning." note; replaced the non-`canAssign` Assignment-section fallback text with "This task will be created under the selected responsible department."; removed the now-unused `assignedToUserId` field error slot (that validation no longer exists).
+- `apps/web/src/app/(protected)/factory-tasks/actions.ts` — `createTaskAction` no longer reads an `intent` field or requires `assignedToUserId`; the create→open→assign chain now runs whenever `assignedToUserId` is present in the submission, full stop — assignment is optional data, not a button choice.
+- `apps/web/src/app/(protected)/factory-tasks/new/page.tsx` — subtitle updated to "Create a task, define responsibility, set priority and due date."; `submitLabel` changed from `"Create Draft"` to `"Create Task"`.
+
+### Button wording before/after
+
+| Viewer | Before (FMP-UI-20B) | After (FMP-UI-20C) |
+|---|---|---|
+| Has `tasks.assign` | Cancel · Save as Draft · Create & Assign Task | Cancel · **Create Task** |
+| Without `tasks.assign` | Cancel · Save as Draft · Create Draft | Cancel · **Create Task** |
+
+### Draft wording removed/updated
+
+- Removed: "Tasks can be saved as draft before opening or assigning." (footer note).
+- Removed/replaced: "You don't have permission to assign this task to another user yet — it will be saved as a draft, and someone with assignment permission can assign it afterward." → **"This task will be created under the selected responsible department."**
+- Subtitle: "Create a task, assign responsibility, set priority and due date." → **"Create a task, define responsibility, set priority and due date."**
+- Kept as-is (not draft-lifecycle wording, still accurate): the Additional Details note that attachments aren't available yet and comments come after creation.
+
+### Confirmation existing create behavior unchanged
+
+`createTaskAction` still calls the same `POST /factory-tasks` endpoint with the same body shape, still redirects to the created task's own detail page on success (unchanged since before FMP-UI-20B). The only behavior change is HOW the create→open→assign chain is triggered (an `assignedToUserId` value present vs. a distinct `intent="assign"` button click) — the chain itself, and every endpoint it calls, is identical to FMP-UI-20B's.
+
+### Confirmation no backend/schema/permission changes
+
+No files under `apps/api` were opened or modified in this unit. No permission was added, removed, or changed — `tasks.assign` still gates the same field exactly as it did in FMP-UI-20B.
+
+### Verification Results (2026-09-27)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 957/957 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Flagged a real spec/reality conflict to the user before implementing rather than silently picking a side — this ticket's own framing assumed assignment wasn't available at all, which would have meant either misdescribing working functionality as a limitation, or quietly deleting a feature the user might not have known existed. Asked; user chose to keep it working.
+- Collapsing "which button did you click" into "did you fill in this field" removed an entire error case (the old "Assign To User is required" validation) for free — a smaller surface always beats a bigger one when the extra state wasn't actually needed.
+
+## FMP-UI-20D — Fix Department Dropdown Empty on New Task Page (Completed 2026-09-28)
+
+### Summary
+
+The Responsible Department dropdown on the New Task page opened with only "Select a department…" — no real departments, blocking task creation since the field is required. Root cause: the page called the ADMIN-gated `organizations-api.ts` (`GET /organizations/departments`, requires `org.departments.read`) instead of a module-scoped reference endpoint gated by `tasks.read` (the permission this page already requires). A normal task-creating user (e.g. `tasks.create` only, no `org.departments.read`) got a 403 that `Promise.allSettled` silently swallowed into an empty array — no error, no explanation, just a dropdown with nothing in it. Fixed by adding `GET /factory-tasks/departments`/`/plants`, mirroring the EXACT existing pattern `contracts.service.ts`'s own `listDepartments()`/`listPlants()` (and `production`'s `/production/departments`) already established for this same class of problem elsewhere in the app.
+
+### Exact root cause
+
+`factory-tasks/new/page.tsx` (and, identically, `factory-tasks/[id]/edit/page.tsx`) called `departments.list({ isActive: true })` / `plants.list({ isActive: true })` from `apps/web/src/lib/organizations-api.ts`, which hit `GET /organizations/departments` / `GET /organizations/plants` — both gated by `@Permissions('org.departments.read')` / `@Permissions('org.plants.read')` (`apps/api/src/organizations/departments/departments.controller.ts`, `plants.controller.ts`), an ADMINISTRATION-tier permission. A viewer with only `tasks.create`/`tasks.read` (the normal task-creator profile) doesn't hold it, so the call rejected with a 403. Both pages fetched via `Promise.allSettled` and fell back to `[]` on rejection with zero error surfaced — the dropdown rendered, just with nothing in it.
+
+### Files changed
+
+**Backend (small, additive — reuses existing `Department`/`Plant` tables, no schema change):**
+- `apps/api/src/factory-tasks/factory-tasks.service.ts` — new `listDepartments()`/`listPlants()`, mirroring `contracts.service.ts`'s own methods of the same name exactly (`findMany({ where: { isActive: true } }, select: {id,name,code}, orderBy: {name:'asc'}`).
+- `apps/api/src/factory-tasks/factory-tasks.controller.ts` — new `GET /factory-tasks/departments` and `GET /factory-tasks/plants`, both `@Permissions('tasks.read')` (declared before `:id`, same reason as `/my`/`/people`).
+- `apps/api/src/factory-tasks/factory-tasks.service.test.ts` — added `listDepartments`/`listPlants` tests (62 tests, was 57); added a `plant.findMany` mock.
+
+**Frontend:**
+- `apps/web/src/lib/factory-tasks-api.ts` — `tasksApi.departments()`/`tasksApi.plants()`.
+- `factory-tasks/new/page.tsx` — switched from `organizations-api.ts` to `tasksApi.departments()`/`.plants()`; tracks `deptsFailed`/`plantsFailed` (fetch genuinely failed) separately from an empty-but-successful list, and passes both through to the form.
+- `factory-tasks/[id]/edit/page.tsx` — same fix (this page had the identical bug for its own Responsible Department/Plant dropdowns).
+- `factory-tasks/_components/task-form.tsx` — new `DepartmentAndPlantFields` shared sub-component (previously duplicated verbatim between the create and edit Assignment cards) with real loading/error/empty-state handling; submit button disabled when Responsible Department is required but genuinely unselectable.
+
+### Department data source used
+
+`GET /factory-tasks/departments` / `GET /factory-tasks/plants` (new), gated by `tasks.read` — the exact permission this whole page already requires to be reached at all. Same underlying `Department`/`Plant` Prisma tables the admin-gated endpoints already read from — just exposed through a module-scoped reference endpoint, the same architecture Contract Management (`/contracts/departments`) and Production (`/production/departments`) already use for their own create/edit forms.
+
+### Responsible Department behavior
+
+Real active departments now load and display (`{name} ({code})`), submitting the real department `id`. 3 distinct states, never a silent empty dropdown: (1) fetch failed → "Unable to load departments. Try again or contact admin." (`role="alert"`); (2) fetch succeeded but zero active departments exist → "No active departments found. Please create departments in Administration first."; (3) real options → normal `<select>`, unchanged behavior. In cases (1)/(2), if there's no existing value to fall back to (create mode, or an edit whose task has no department yet), the exact required message "Responsible Department is required, but no active departments are available." also appears and the Create Task/Save changes button is disabled — matching the acceptance criteria's "disable Create Task **or** show a clear validation message" with both, since disabling alone can look like a broken button without an explanation.
+
+### Requesting Department behavior
+
+Reuses the same real `departments` array; "Same as responsible / not specified" is kept as the first option exactly as before. When the list is empty/failed, this field simply has only that one static option — non-blocking, since Requesting Department was never required.
+
+### Plant / Location behavior
+
+Same real-data fix applied (`tasksApi.plants()`). Placeholder text stays honest: "Select plant or location" when real plants exist, "Not specified" when the list is genuinely empty (matching the pre-existing convention) — never blocks submission, since Plant/Location isn't required. A genuine fetch failure shows "Unable to load plants. Try again or contact admin." instead of a silently empty select.
+
+### Confirmation no fake data
+
+No hardcoded department/plant names anywhere. Both new endpoints are real `findMany({ where: { isActive: true } })` queries against the existing `Department`/`Plant` tables — the exact same data an admin sees in Administration → Departments/Plants, just reachable by a `tasks.read` holder now. Zero real rows renders as an honest empty state, never a fabricated option.
+
+### Confirmation task creation still works
+
+`createTaskAction`'s body shape, validation, and the create→open→assign chain (FMP-UI-20B/20C) are all unchanged — only WHERE the department/plant options come from changed. Submitting a task with a real `responsibleDepartmentId` selected behaves exactly as before.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1658/1658 tests |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 957/957 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Also fixed the edit page (`[id]/edit/page.tsx`), which shared the exact same root cause for its own Responsible Department/Plant dropdowns — leaving it broken while fixing only the New Task page would have been an inconsistent half-fix of the same underlying bug.
+- When a field is required but genuinely unselectable (list failed/empty AND no existing value), the field is omitted from the DOM entirely rather than rendered as a `<select>` with only a blank placeholder option — on the edit form this guarantees `updateDraftTaskAction`'s partial-PATCH semantics leave the existing value untouched (the field is simply absent from FormData) instead of risking a silent overwrite with an empty string.
+
+## FMP-UI-20E — Polish Task Management List and Task Detail UX (Completed 2026-09-28)
+
+### Summary
+
+Polished the Task Control Center's list rows and the task detail page, per direct feedback that the list didn't clearly separate assignment/status/next action (with "Assign task" hidden as small text under "Open"), and that the detail page "felt too empty" — most concretely, a viewer with sparse permissions could see an Actions panel with literally nothing in it (previously rendered as an empty fragment) or, for others, just "Cancel task" with no framing. UI-only; every action shown was already real and permission-gated — this unit only changed how clearly that reality is presented, plus fixed the ONE place the panel could render as silently empty.
+
+### Files changed
+
+- `factory-tasks/_lib/task-control-center-helpers.ts` (+ test) — `computeTaskActionHint` renamed to `computeTaskNextActionText` with the brief's required vocabulary ("Assign Task"/"Start Task"/"Complete Task"/"Close Task"/"No action needed", extended consistently for the other real states); new `computeTaskQuickAction` (the ONE extra Actions-column button per row); 2 tab empty-state messages corrected to the exact required wording ("No tasks assigned by you.", "No completed tasks.").
+- `factory-tasks/_components/task-control-center-list.tsx` — rebuilt columns: Task / Assignment / Department / Priority / Due Date / Status / Next Action / Actions (dropped "Created By"); "Unassigned" → "Not assigned"; Actions now shows "Open Task" (secondary) plus, when applicable, ONE clearly-visible primary button (Assign/Complete link to the detail page; Close is a real one-click form via a new inline server action, `closeTaskQuickAction`).
+- `factory-tasks/_components/task-activity-timeline.tsx` — phrasing changed from "{actor} {event label}" to "{event label} by {actor}" (e.g. "Task created by manager").
+- `factory-tasks/_components/task-transitions.tsx` — the Actions panel's empty case no longer renders nothing; shows "No actions available to you on this task right now." instead.
+- `factory-tasks/[id]/page.tsx` — rebuilt into the required 2-column layout: left = Task Summary (new labeled card) → Description → Blocked reason → Completion summary → Progress notes → Comments & activity; right = Available Actions (renamed from "Actions") → Assignment Details (new, split out) → Dates (new, split out). Same data, same route, same permissions.
+- `factory-tasks/my/page.tsx`, `factory-tasks/assigned-by-me/page.tsx` — empty-state/"Unassigned" wording aligned with the same corrected text used everywhere else in the module.
+
+### Task list changes
+
+Columns: Task (ref + title + short description) / Assignment ("Not assigned" or the real assignee) / Department / Priority / Due Date / Status / Next Action (plain text) / Actions (real buttons). "Next Action" and "Actions" are now 2 separate columns — previously one combined cell mixed a button with small hint text underneath it. Actions always shows "Open Task"; when the current viewer can genuinely Assign/Complete/Close right now, ONE additional, clearly-styled primary button appears for exactly that action — never more than one, never one the viewer can't use.
+
+### Task detail layout changes
+
+New "Task Summary" card leads the left column: reference number, title, then a labeled `Status: / Priority: / Assigned to: / Responsible department: / Due:` grid (badges kept for Status/Priority, same real data the old floating badge row already showed — just organized as a proper summary). The old single "Details" sidebar panel is split into "Assignment Details" (Assigned To, Created By, Requested By, Responsible/Requesting Department, Plant / Location) and "Dates" (Created, Due, Blocked, Completed, Closed, Linked Incident) — same fields as before, grouped so each panel answers one question. "Actions" renamed "Available Actions."
+
+### Action behavior summary
+
+Every button/link shown was already a real, working, permission-gated action before this unit (Open/Assign/Complete/Close in the list all route to logic `task-transitions.tsx` already implements) — this unit changed VISIBILITY and FRAMING, not capability, with one addition: "Close" in the list is now a genuine one-click action (no extra input required, so no navigation needed) via a small inline Server Action (`closeTaskQuickAction`) that calls the existing `closeTaskAction` — not a new capability, just a shorter path to an action that already existed. The detail page's Actions panel, which could previously render as a completely empty, unexplained gap for some viewers, now always shows either real buttons or an honest one-line explanation.
+
+### Assignment display behavior
+
+"Unassigned" → "Not assigned" everywhere in the module (list, detail Task Summary, detail Assignment Details panel, My Tasks page, Assigned by Me page) — the exact wording change requested, applied consistently rather than in just one place.
+
+### Confirmation no fake/unsupported actions added
+
+No new mutation logic was introduced — `closeTaskQuickAction` is a 3-line wrapper around the pre-existing `closeTaskAction`, required only because a `<form action>` target needs its own Server Action reference (`Promise<ActionResult>` isn't assignable to a form action's `void | Promise<void>`). Assign/Complete in the list still link to the real detail-page panels rather than pretending to be one-click (assigning needs a person picker, completing needs a summary — neither is a genuine single click). Every condition gating a button/quick-action mirrors `task-transitions.tsx`'s own existing real gating logic exactly.
+
+### Confirmation no backend/schema/permission changes
+
+No files under `apps/api` were opened or modified in this unit. No new permission, no permission broadening — every gate reuses an existing task permission (`tasks.assign`, `tasks.complete`, `tasks.close`, `tasks.manage`, `tasks.start`, `tasks.block`) exactly as `task-transitions.tsx` already required them. No Prisma schema/migration changes.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 961/961 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- A function passed to `<form action={...}>` must itself be a recognized Server Action — a plain wrapper calling an existing `'use server'` function from a non-`'use server'` file needs its own function-level `'use server'` directive (`closeTaskQuickAction`) to qualify; this is a React/Next.js mechanics detail, not new business logic.
+- The detail page's previously-silent-empty Actions panel (`if (buttons.length === 0) return <></>;`) is very likely the literal root cause of "task detail page only shows 'Cancel task'" complaints for OTHER viewers on OTHER tasks — a sparse-permission viewer on certain states saw nothing at all, which reads as far more broken than one lone button. Fixed at the source component, not by adding a special case in the page.
+
+## FMP-UI-20F — Add Clear Navigation to Task Detail Page (Completed 2026-09-28)
+
+### Summary
+
+The Task Detail page (`/factory-tasks/[id]`) had no way back except the browser's own back button, per direct feedback ("users may feel stuck after opening a task"). Added a navigation row above the breadcrumb (Back to Platform Dashboard / Back to Task Management / Previous: Maintenance Management / Switch module) and upgraded the breadcrumb to 3 levels with consistent "Task Management" wording — reusing the exact same underlying module-order data `ExecutiveModuleNav` already uses elsewhere, without reusing that component wholesale (it bakes in its own 2-level breadcrumb, which would have duplicated/conflicted with the 3-level one this page needs).
+
+### Files changed
+
+- **New:** `factory-tasks/_components/task-detail-nav.tsx` — the nav row, reusing `getModuleNeighbors`/`getVisibleModules` from `_lib/executive-modules.ts` (the identical pure functions `ExecutiveModuleNav` itself calls) and the same button styling, minus a second breadcrumb.
+- `factory-tasks/[id]/page.tsx` — breadcrumb upgraded to 3 levels ("Platform Dashboard > Task Management > {reference}", was "Factory Tasks Management > {reference}" linking to the old `/factory-tasks` list); renders the new `TaskDetailNav` beneath it; Task Summary card gained a small "Task Detail" eyebrow label above the reference number.
+
+### Navigation buttons added
+
+- **Back to Platform Dashboard** → `/dashboard`.
+- **Back to Task Management** → `/factory-tasks/executive` (the Task Control Center — this page's own addition; `ExecutiveModuleNav` never needs this button since it only ever renders ON that landing page).
+- **Previous: Maintenance Management** → `/maintenance/executive`, since Task Management is last in `EXECUTIVE_MODULES` and only ever has a `prev` neighbor, never a `next` (no dead "Next" conditional was added).
+- **Switch module** — the same closed-by-default `<details>` disclosure `ExecutiveModuleNav` already uses, filtered to the current viewer's real visible modules via `getVisibleModules(permissions)`.
+
+### Breadcrumb wording changes
+
+"Factory Tasks Management > {reference}" (2 levels, linking to the old full task list) → "Platform Dashboard > Task Management > {reference}" (3 levels). "Task Management" is now the consistent user-facing label everywhere on this page — the underlying route (`/factory-tasks/[id]`), permission (`tasks.read`), and every internal file/variable name are unchanged; only what's shown to the user changed.
+
+### Route behavior confirmation
+
+- Back to Task Management → `/factory-tasks/executive` (the current Task Control Center with its My Tasks/Assigned by Me/All Tasks/Overdue/Completed tabs) — never the old `/factory-tasks` list route.
+- Back to Platform Dashboard → `/dashboard`, exactly as specified.
+- Previous/Switch module → the same real landing-page routes every other Executive Module Landing Page's own nav already uses.
+
+### Confirmation task lifecycle/auth unchanged
+
+No task status transition, permission check, or server action was touched. `TaskDetailNav` is a pure presentational component — it reads `permissions` (already computed by the page from the existing JWT payload) and renders links; it calls no API, mutates nothing, and adds no new permission gate.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 961/961 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Reusing `ExecutiveModuleNav` wholesale wasn't "safe" here — its own hardcoded 2-level breadcrumb would have either duplicated or conflicted with the 3-level task-specific one this page needs. Reusing the underlying PURE DATA functions (`getModuleNeighbors`/`getVisibleModules`) instead of the whole component let this page get the identical Previous/Switch-module behavior without a second breadcrumb.
+- No files under `apps/api` were opened or modified in this unit.
+
+## FMP-UI-20G — Improve Task Detail Clarity, Next Step, and Action Wording (Completed 2026-09-28)
+
+### Summary
+
+The Task Detail page had navigation now (FMP-UI-20F) but was still unclear about WHAT TO DO NEXT, per direct feedback: "Open task" read as confusing since the user is already on the task page, Draft lifecycle wasn't explained, and the header didn't surface a next action. Added a "Next Action" row + a "Next Step" guidance callout to the Task Summary card (both keyed on real status/permissions, never fabricated), renamed "Open task" → "Open for Work" (same `openTaskAction` call, same permission), wrapped Description/Comments & Activity in cards with an honest empty state, reordered the nav row, and unified card styling across the whole page.
+
+### Files changed
+
+- `factory-tasks/_lib/task-control-center-helpers.ts` (+ test) — `computeTaskNextActionText`'s DRAFT case renamed `'Open Task'` → `'Open for Work'`; new `computeTaskNextStepGuidance(status, hasAssignee)` — one plain sentence per real status, using the brief's own 3 exact sentences (Draft / Open-unassigned / Completed-Closed-Cancelled) plus honest extensions for Assigned/In Progress/Blocked/Open-with-assignee so the box is never blank for a valid task.
+- `factory-tasks/_components/task-transitions.tsx` — "Open task" → "Open for Work" (DRAFT branch only, with a new one-line helper "Moves this task from Draft to Open." underneath); "Cancel task" → "Cancel Task" and "Edit draft" → "Edit Draft" (Title Case, all occurrences, including the Cancel panel's own header) — same `openTaskAction`/`cancelTaskAction` calls, same permission gates, label only.
+- `factory-tasks/_components/task-detail-nav.tsx` — "Back to Task Management" now comes BEFORE "Back to Platform Dashboard" (was the other order).
+- `factory-tasks/[id]/page.tsx` — Task Summary card gained a "Next Action:" row and a "Next Step" guidance callout; "Due:" now shows date AND time (was date-only); Description and Comments & Activity wrapped in the same card style as the rest of the page, with an honest "No description provided." empty state (was: the whole section hidden when blank); all right-side panels (Available Actions/Assignment Details/Dates) unified to the same `rounded-xl ... shadow-sm p-5` card style as the left column's cards.
+
+### Navigation changes
+
+`TaskDetailNav`'s button order: **Back to Task Management** (first) → Back to Platform Dashboard → Previous: Maintenance Management → Switch module. Breadcrumb unchanged from FMP-UI-20F ("Platform Dashboard > Task Management > {reference}").
+
+### Header/Next Step changes
+
+Task Summary now shows: reference + title → Status: / Priority: / Assigned to: / Responsible department: / Due: (date + time) / **Next Action:** (new, real text from `computeTaskNextActionText()` — the SAME function the Task Control Center's list already uses, one source of truth) → a highlighted **Next Step** callout with one honest sentence explaining what the current status means (e.g. for a Draft task: "This task is still in draft. Open it for work when it is ready to be tracked and assigned.").
+
+### Action wording before/after
+
+| Before | After |
+|---|---|
+| "Open task" | "Open for Work" (+ helper text: "Moves this task from Draft to Open.") |
+| "Cancel task" | "Cancel Task" |
+| "Edit draft" | "Edit Draft" |
+| Next Action text for Draft: "Open Task" | "Open for Work" (matches the button) |
+
+All 3 renamed DRAFT-state buttons (Edit Draft / Open for Work / Cancel Task) keep their pre-existing distinct styling — neutral/secondary, primary/accent-red, and outline/danger-light respectively — already satisfying "don't make all actions look equal" before this unit; no style change was needed there.
+
+### Description/activity card changes
+
+Description: now always rendered inside a `rounded-xl border shadow-sm` card with a "Description" heading; shows "No description provided." instead of vanishing when the field is empty. Comments & Activity: same card treatment. Activity phrasing itself was already fixed in FMP-UI-20E ("Task created by manager", etc.) — unchanged, still correct, still no raw technical event keys.
+
+### Confirmation backend lifecycle unchanged
+
+No files under `apps/api` were opened or modified. `openTaskAction`/`cancelTaskAction`/every other transition call in `task-transitions.tsx` is byte-for-byte unchanged — only the JSX text nodes around those calls changed. `computeTaskNextActionText`/`computeTaskNextStepGuidance` are pure, read-only functions over already-fetched `task`/`permissions` data; neither calls an API or mutates anything.
+
+### Confirmation no fake actions added
+
+No new button, endpoint, or permission was introduced. "Next Action" and "Next Step" are both descriptive TEXT, not clickable actions — the actual buttons a viewer can click are still exactly the ones `TaskTransitionsPanel` already computes from real status/permission/ownership, unchanged by this unit.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- "Next Action" (objective, from `computeTaskNextActionText()`) and "Next Step" (a plain-English explanation of the current status, from the new `computeTaskNextStepGuidance()`) are 2 deliberately separate pieces of text answering 2 different questions ("what's the next button?" vs. "why does this task need that?") — not merged into one sentence, matching the same "next action text vs. real buttons are separate concerns" principle already established for the Task Control Center's list (FMP-UI-20E) and Erection's dashboard (FMP-UI-19E).
+- The brief's literal "completed/cancelled tasks: closed, no further action required" message was applied to COMPLETED as well as CLOSED/CANCELLED, even though a COMPLETED task technically still has a pending "Close (accept completion)" action for a `tasks.close` holder — the guidance BOX is an intentionally simplified summary per the brief's own explicit grouping; the Actions panel itself still shows the real Close/Reopen buttons regardless, so no actual capability is hidden.
+
+## FMP-UI-20H — Fix Task Detail Navigation Spacing and Header Layout (Completed 2026-09-28)
+
+### Summary
+
+The nav row (breadcrumb + `TaskDetailNav`) on the Task Detail page read as visually attached to the Task Summary card below it, per direct feedback ("feels cramped and visually unfinished"). Increased the gap between the nav row and the content grid, and made the breadcrumb-to-nav spacing explicit and deterministic rather than relying on CSS margin-collapsing between 2 separately-styled elements.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/factory-tasks/[id]/page.tsx` — the only file changed.
+
+### Spacing/layout change summary
+
+- Nav row → content grid gap: `mt-6` (24px) → **`mt-8` (32px)** — deliberately above the top of this unit's own suggested 16–24px range, so the separation reads as clearly intentional.
+- Breadcrumb → `TaskDetailNav` gap: previously relied on CSS margin-collapsing between the `Breadcrumbs` component's own default `mb-4` and the wrapper `<div>`'s `space-y-2` top-margin (technically correct, but indirect). Now the `Breadcrumbs` call passes `className="mb-0"` explicitly, and the wrapper's own `space-y-3` sets that gap directly and unambiguously.
+- No other spacing, card content, or layout structure was touched — the Task Summary card, right-side panels, and every other section from FMP-UI-20E–20G are unchanged.
+
+### Confirmation task actions/lifecycle unchanged
+
+No import, function call, server action, or button was touched. This is a pure Tailwind className change on 2 wrapper `<div>`s and one component prop (`Breadcrumbs`' `className`) — no logic, no data, no route.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No files under `apps/api` were opened or modified in this unit.
+- The build's disk-cache write step logged a low-disk-space warning (C: drive had ~460MB free at the time) but the build itself still completed successfully (exit 0, 8/8 tasks) — flagged to the user as an environment heads-up, not a build failure; worth monitoring if it recurs or worsens on a future run.
+
+## FMP-UI-20I — Add Navigation and Clear Wording to Task List Page (Completed 2026-09-28)
+
+### Summary
+
+The Task List page (`/factory-tasks`) had no way back to Task Management or the Platform Dashboard except the browser's own back button, and repeated "Factory Tasks Management" as both its single-level breadcrumb and its page title, per direct feedback. Added the same `TaskModuleNav` navigation row the Task Detail page already has (FMP-UI-20F–20H), a 3-level breadcrumb, a clearer title/subtitle, and aligned the "Assigned to" empty-cell wording with the rest of the module. The nav component (`TaskDetailNav`) was renamed to `TaskModuleNav` since it is now reused by 2 pages, not 1, and was always fully generic.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/factory-tasks/_components/task-module-nav.tsx` — new file; renamed from `task-detail-nav.tsx` (component `TaskDetailNav` → `TaskModuleNav`). No logic changed, only the file/component name.
+- `apps/web/src/app/(protected)/factory-tasks/_components/task-detail-nav.tsx` — deleted (superseded by the renamed file above).
+- `apps/web/src/app/(protected)/factory-tasks/[id]/page.tsx` — import/JSX usage updated to `TaskModuleNav`/`task-module-nav`; no other change.
+- `apps/web/src/app/(protected)/factory-tasks/page.tsx` — added `TaskModuleNav` row + 3-level breadcrumb; title/subtitle changed; "Assigned to" empty-cell wording fixed. The only file with a real content change in this unit.
+
+### Navigation added
+
+- `TaskModuleNav` row on the Task List page: Back to Task Management (`/factory-tasks/executive`) → Back to Platform Dashboard (`/dashboard`) → Previous: Maintenance Management → Switch module — identical shape/order to the Task Detail page's own nav row (FMP-UI-20F–20H).
+
+### Breadcrumb/title wording changes
+
+- Breadcrumb: "Factory Tasks Management" (1 level, no `href`) → "Platform Dashboard > Task Management > Task List" (3 levels, first 2 linked).
+- Title: "Factory Tasks Management" → "Task List".
+- Subtitle: "Manage and track operational tasks across all factory facilities." → "View, filter, and open operational tasks."
+- "Assigned to" empty table cell: bare "—" → "Not assigned" (matches Task Control Center list and Task Detail page wording, per FMP-UI-20E's own precedent).
+
+### Confirmation filters/table behavior unchanged
+
+Every quick-filter chip (Active/Overdue/Blocked/Completed/My tasks →/Assigned by me →), the full filter `<form>` (Search/Status/Priority/Due from/Due to/Filter/Clear), the empty state, the table's other 7 columns (Reference, Title, Priority, Status, Due, Created by, Department), Reference/task-title links, and pagination are all byte-for-byte unchanged from before this unit. The "+ New Task" button (gated on `tasks.create`, same route) is untouched.
+
+### Confirmation no backend/schema/permission changes
+
+No file under `apps/api` or `packages/database` was opened or modified. No permission code was added, removed, or changed. `pnpm db:migrate:status` confirms 0 schema drift.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No files under `apps/api` were opened or modified in this unit.
+- The build's disk-cache write step logged the same recurring low-disk-space warning (`os error 112`) as FMP-UI-20H, and again exited 0 with 8/8 tasks — same environment heads-up as before, still not a build failure, still worth monitoring.
+
+## FMP-UI-21 — Simplify Safety & Compliance Dashboard and Add Clear Create Actions (Completed 2026-09-28)
+
+### Summary
+
+The Safety & Compliance Executive Module Landing Page (`/safety-compliance/executive`) was a generic Summary KPI grid + a counts-only Needs Attention panel + Recent Activity + Quick Links + one "View Safety Records" button — it never clearly guided anyone to create an inspection, record a finding, or see what actually needed action. The Safety Records list page (`/safety-compliance`) had filters/search and (already) a working create button, but no way back to the Safety Dashboard or Platform Dashboard, and a bare, unhelpful empty state. Redesigned both into a genuine "Safety Control Center" experience, following the exact same pattern already established for Task Management (FMP-UI-20/20I).
+
+### Files changed
+
+- `apps/api/src/safety/safety.service.ts` — `getDashboard()` extended with a new `needsAttention` array (real critical/overdue findings, 8 max, with parent inspection reference number). Additive service logic only — no schema/migration change.
+- `apps/api/src/safety/safety.service.test.ts` — `getDashboard` test extended to cover `needsAttention`; new test for the empty case.
+- `apps/web/src/lib/safety-api.ts` — new `SafetyNeedsAttentionItem` type; `SafetyDashboardData.needsAttention` field added.
+- `apps/web/src/app/(protected)/safety-compliance/_components/safety-needs-attention-list.tsx` — new; itemized Needs Attention list with "Open Record" buttons.
+- `apps/web/src/app/(protected)/safety-compliance/_components/safety-module-nav.tsx` — new; List-page nav row (mirrors `TaskModuleNav`, but handles both `prev` AND `next` since Safety & Compliance is not last in `EXECUTIVE_MODULES`).
+- `apps/web/src/app/(protected)/safety-compliance/executive/page.tsx` — redesigned into the Safety Control Center (see below).
+- `apps/web/src/app/(protected)/safety-compliance/page.tsx` — nav row + breadcrumb + title/subtitle + button wording + empty state improved (see below).
+
+### Safety dashboard changes
+
+- Title/subtitle kept/set exactly as specified: "Safety & Compliance" / "Manage safety inspections, findings, corrective actions, and compliance status."
+- Top actions: "+ New Safety Inspection" (gated `safety.create`, routes to the existing `/safety-compliance/new`) and "View Safety Records" (routes to `/safety-compliance`). No "Record Finding" button — see Create Action Audit Result below.
+- Overview: 6 cards — Scheduled Inspections, In Progress, Open Findings, Critical Findings, Overdue Findings, Completed Inspections — all 6 fields already existed on `getDashboard()`'s metrics; no new metric needed.
+- Needs Attention: now shows real per-finding records (parent inspection reference number, title, severity badge, status badge, due date if set, "Open Record" button linking to that inspection's detail page) via the new `needsAttention` array, instead of 2 bare counts. Empty message: "No critical or overdue safety items right now." (exact wording from the brief).
+- Recent Activity: removed entirely (the brief's own "Preferred" option) — it only ever showed generic recent inspections, not human-readable safety updates.
+- Quick Links → Quick Filters: Scheduled Inspections / In Progress / Completed / Open Findings, same 4 real destinations the old Quick Links had (minus a redundant link to the module's OTHER, older dashboard page, `/safety-compliance/dashboard`, which this page's own nav row already supersedes).
+
+### Safety Records list changes
+
+- Added `SafetyModuleNav`: Back to Safety Dashboard (`/safety-compliance/executive`) → Back to Platform Dashboard (`/dashboard`) → Previous/Next neighbor module → Switch module.
+- Breadcrumb: "Safety & Compliance" (1 level, no `href`) → "Platform Dashboard > Safety & Compliance > Safety Records" (3 levels, first 2 linked).
+- Title: "Safety & Compliance" → "Safety Records". Subtitle → "View, search, and open safety inspections and findings."
+- Create button relabeled "+ New Safety Inspection" (was "New Inspection" / "Create first inspection") — same route, unchanged.
+- Empty state: when no create permission → "No safety inspections in your current scope." (new). When create permission exists and truly no data → "No safety inspections yet." + "Create the first safety inspection to start tracking compliance." + "+ New Safety Inspection" button (was a bare "No safety inspections yet." + "Create first inspection"). The filtered-empty case ("No inspections match the current filters.") is unchanged.
+- All existing filters (All/Scheduled/In Progress/Completed), search, table columns, and pagination are unchanged.
+
+### Create action audit result
+
+- **New Safety Inspection**: route/API already exists and already works — `POST /safety-compliance` (gated `safety.create`), form at `/safety-compliance/new`. Wired to the real route on both pages (was already wired on the list page under the old "New Inspection" label; newly added to the dashboard page).
+- **Record Finding**: audited `apps/api/src/safety/safety.controller.ts` — finding creation is `POST /safety-compliance/:id/findings` (gated `safety.finding_create`), which requires an inspection ID and is only reachable from within a specific inspection's own detail page once that inspection is IN_PROGRESS or COMPLETED (`apps/web/.../safety-compliance/[id]/page.tsx`). **There is no standalone/global route to record a finding without first choosing an inspection.** Per the brief's own explicit instruction, no fake "Record Finding" button was added anywhere. If a standalone finding-creation flow is wanted, it needs its own future unit (e.g. an inspection-picker step before the existing finding form) — not invented here.
+
+### Confirmation no fake actions added
+
+Every button shown links to a route/API that already exists and that the current viewer already has permission for. "Record Finding" is not shown anywhere in this unit's changes.
+
+### Confirmation filters/search unchanged
+
+Safety Records list: All/Scheduled/In Progress/Completed quick filters, the search form, table columns, and pagination all behave exactly as before — none of that code was touched, only the surrounding nav/header/empty-state.
+
+### Confirmation no backend/schema/permission changes
+
+No Prisma schema file touched, `pnpm db:migrate:status` confirms 0 drift. No permission code added, removed, or changed — `safety.create`/`safety.read`/`safety.finding_create` are used exactly as they already were. The only backend change is additive application logic inside `getDashboard()` (a new Prisma query, no new endpoint, no DTO change).
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1659/1659 tests |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Discovered but NOT fixed in this unit (out of scope — a separate, pre-existing issue, not requested by this ticket): `/safety-compliance/new`'s department/plant dropdowns are sourced from `organizations-api.ts`'s admin-gated `departments.list()`/`plants.list()` — the exact same root cause fixed for Factory Tasks in FMP-UI-20D (a `safety.create`-only user would see an empty dropdown with no error). The Safety & Compliance module has no module-scoped `/safety-compliance/departments`/`/plants` reference endpoints yet, unlike `factory-tasks`, `contracts`, and `production`. Flagged here as a candidate for its own future unit, matching FMP-UI-20D's precedent exactly.
+- `needsAttention` items are capped at 8, ordered by severity desc then due date asc, matching the existing `recent` array's own cap/style.
+
+## FMP-UI-21B — Fix New Safety Inspection Server Action Crash and Form Submission (Completed 2026-09-28)
+
+### Summary
+
+Submitting the New Safety Inspection form crashed with `Cannot read properties of undefined (reading 'get')` inside `createInspectionAction`. Root cause confirmed by audit: NOT the action's own signature (it was already correctly `(prevState, formData)`) — the bug was in how `new/page.tsx` wired the form. It rendered a plain `<form action={action as unknown as string}>` with no `useActionState`, so React called the action with a single argument (`formData`), which landed in the `prevState` parameter — leaving the real `formData` parameter `undefined` inside the function body. Fixed by extracting the form into a proper client component using `useActionState`, the same pattern every other create/edit form in this app already uses.
+
+### Exact root cause
+
+`apps/web/src/app/(protected)/safety-compliance/new/page.tsx`'s own inline `SafetyInspectionForm` function component rendered:
+```tsx
+<form action={action as unknown as string}>
+```
+with `action = createInspectionAction`, a function whose real signature is `(prevState: ActionResult, formData: FormData) => Promise<ActionResult>`. A plain `<form action={fn}>` (no `useActionState`) calls `fn(formData)` — exactly ONE argument. That single argument fills the FIRST parameter (`_prev`), so the SECOND parameter (`formData`) is `undefined` when the function body runs `formData.get('title')` — hence the crash. The `as unknown as string` type cast is what let this compile at all: it forced an incompatible value through the `action` prop's real type instead of TypeScript catching the mismatch.
+
+The ticket's own hypothesis (wrong action signature) did not match reality — `createInspectionAction` was already shaped correctly for `useActionState`. The defect was purely in how the form called it.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/safety-compliance/_components/safety-inspection-form.tsx` — new; client component (`'use client'`), `useActionState(action, { error: null })`, `<form action={dispatch}>`. Same fields as before (title/summary/departmentId/plantId), plus a real error banner (`state.error`, previously never rendered) and a disabled/"Creating…" pending state.
+- `apps/web/src/app/(protected)/safety-compliance/new/page.tsx` — removed the broken inline `SafetyInspectionForm` function and its `action={... as unknown as string}` cast entirely; now imports and uses the new shared client component.
+- `apps/web/src/app/(protected)/safety-compliance/actions.ts` — `createInspectionAction` gained a defensive guard: `if (!(formData instanceof FormData)) return { error: 'Unable to submit inspection form. Please try again.' }`, before any `formData.get(...)` call.
+
+### Action signature before/after
+
+- Before (already correct, not the bug): `createInspectionAction(_prev: ActionResult, formData: FormData): Promise<ActionResult>` — unchanged, still correct.
+- After: same signature, with one added guard clause at the top (see above). The actual fix was 100% in HOW the form calls it (`new/page.tsx` + the new `safety-inspection-form.tsx`), not in the signature itself.
+
+### Form field name verification
+
+Confirmed `name="title"`, `name="summary"`, `name="departmentId"`, `name="plantId"` on the form inputs/selects match `formData.get('title')`/`'summary'`/`'departmentId'`/`'plantId'` in `createInspectionAction` exactly — no renames were needed on either side.
+
+### Submit behavior confirmation
+
+Unchanged from before this unit's fix (once the crash itself is gone): validates `title` is required (client-side via the `required` HTML attribute, and server-side — empty title still returns `{ error: 'Title is required' }`); `summary`/`departmentId`/`plantId` remain optional, matching existing business rules (no rule required them); on success, `POST /safety-compliance` still runs, `revalidatePath('/safety-compliance')` still runs, and it still redirects to `/safety-compliance/{id}` (the created inspection's own detail page) when the API returns an id, falling back to `/safety-compliance` otherwise — identical redirect logic to before, now actually reachable since the form no longer crashes before getting there.
+
+### Hydration warning note
+
+Hydration warning appears extension-related due bis_skin_checked attribute. Functional crash was server action formData issue.
+
+### Confirmation no backend/schema/permission changes
+
+No file under `apps/api` or `packages/database` was opened or modified. No permission code touched — `safety.create` is checked exactly as before (server-side, via the existing `POST /safety-compliance` endpoint's own `@Permissions('safety.create')` guard). `pnpm db:migrate:status` confirms 0 schema drift.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1659/1659 tests |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Discovered but NOT fixed in this unit (out of scope — the ticket named only the New Safety Inspection page): `apps/web/src/app/(protected)/safety-compliance/[id]/edit/page.tsx` has the IDENTICAL bug pattern — `action={boundAction as unknown as string}` on a plain `<form>`, wired to `updateInspectionDraftAction.bind(null, id)` (also a `(prevState, formData)`-shaped action). Submitting the Edit Inspection form would crash the same way. Flagged here as a strong candidate for its own immediate follow-up unit, since it is the exact same defect, just on a second page — not fixed here to stay within this ticket's explicit scope (New Safety Inspection only).
+- No new automated test was added — this module has no existing test files for `actions.ts` or its pages (unlike the pure-logic `_lib` helpers elsewhere in the app, which are unit-tested), and the fix is a wiring/calling-convention correction with no new business logic to unit-test.
+
+## FMP-UI-21C — Fix New Safety Inspection Dropdowns and Create Inspection Submit (Completed 2026-09-28)
+
+### Summary
+
+The New Safety Inspection page's Department and Plant dropdowns only ever showed "— None —", and the reported "Create Inspection doesn't create anything" symptom traced back to the same root cause combined with FMP-UI-21B's fix not yet having reached the environment being tested. Audited every layer end-to-end per this ticket's own checklist: the dropdown root cause was confirmed and fixed with a real, minimal, additive backend change (module-scoped reference endpoints, same precedent as FMP-UI-20D); the create/submit chain (signature, field names, validation, redirect, revalidation) was re-verified correct — FMP-UI-21B already fixed the crash — and extended with dashboard revalidation per this ticket's own requirement 8.
+
+### Exact root cause for empty Department dropdown
+
+`new/page.tsx` called the ADMIN-gated `organizations-api.ts` (`departments.list()`, `GET /organizations/departments` — requires `org.departments.read`). A `safety.create`-only user does not hold that permission; the resulting 403 was silently swallowed by `Promise.allSettled`, leaving `depts` as `[]` with no visible error — the dropdown rendered only its own hardcoded "— None —" option. Confirmed via direct query against the dev database: **1 real active department exists** (`deptCount: 1`), so this was a genuine loading bug, not missing data.
+
+### Exact root cause for empty Plant dropdown
+
+Same root cause/mechanism as Department (`organizations-api.ts`'s admin-gated `plants.list()`, `GET /organizations/plants` — requires `org.plants.read`). However, a direct query against the dev database confirmed **zero plant records exist at all** (`plantTotal: 0`, not just 0 active) — so even after fixing the loading mechanism, the Plant dropdown correctly shows only "— None —" today. Both facts are true: loading WAS broken (same admin-gate bug as Department), AND no plant data exists yet to show even once loading is fixed. Per this ticket's own instruction ("it is okay to show only '— None —'" when no plants exist), no additional UI was forced here — a small note now clarifies for the viewer that plants haven't been added yet, rather than implying something failed.
+
+### Exact root cause for "Create Inspection" not creating
+
+This was already fixed by **FMP-UI-21B** (same day, earlier unit): the crash was `new/page.tsx`'s own inline form rendering `<form action={action as unknown as string}>` with no `useActionState`, so the real `formData` parameter arrived `undefined` inside `createInspectionAction`. Re-audited the full chain in this unit per the ticket's own checklist (signature, FormData receipt, field names, validation, API call, redirect) and found it ALL correct and unchanged from FMP-UI-21B — no second, separate defect was found in the create/submit path itself. The most likely explanation for this ticket being filed after that fix is a stale running dev process (this repo's API/web dev scripts have no file-watch/auto-reload — a manual restart is required to pick up server-side changes, as already noted after FMP-UI-21B's fix and again after the FMP-UI-21 `getDashboard()` change). Added one real, additional improvement per requirement 8: `createInspectionAction` now also revalidates `/safety-compliance/executive` (the Safety Dashboard), not just `/safety-compliance` — those are 2 separate routes, and only the first was covered before.
+
+### Files changed
+
+- `apps/api/src/safety/safety.service.ts` — new `listDepartments()`/`listPlants()` methods (mirrors `factory-tasks.service.ts`'s own FMP-UI-20D fix exactly: `{isActive: true}`, `{id, name, code}`, ordered by name). No schema change.
+- `apps/api/src/safety/safety.controller.ts` — new `GET /safety-compliance/departments`, `GET /safety-compliance/plants`, both `@Permissions('safety.read')`, declared before `:id`.
+- `apps/api/src/safety/safety.service.test.ts` — `plant` model added to the mock client; 4 new tests for `listDepartments`/`listPlants`.
+- `apps/web/src/lib/safety-api.ts` — new `safetyApi.departments()`/`.plants()`.
+- `apps/web/src/app/(protected)/safety-compliance/new/page.tsx` — switched from `organizations-api.ts` to `safetyApi.departments()`/`.plants()`; `deptsFailed`/`plantsFailed` tracked and passed through.
+- `apps/web/src/app/(protected)/safety-compliance/_components/safety-inspection-form.tsx` — added `deptsFailed`/`plantsFailed` props and 3-state rendering (fetch-failed error / genuinely-empty message / real select) for both dropdowns.
+- `apps/web/src/app/(protected)/safety-compliance/actions.ts` — `createInspectionAction` now also calls `revalidatePath('/safety-compliance/executive')`.
+
+### Department data source used
+
+`GET /safety-compliance/departments` (new, gated `safety.read`) → `SafetyService.listDepartments()` → `Department` table, `where: { isActive: true }`. Same table, same filter, same shape as `organizations-api.ts` used — only the PERMISSION GATE changed (module-scoped `safety.read` instead of admin-only `org.departments.read`).
+
+### Plant data source used
+
+`GET /safety-compliance/plants` (new, gated `safety.read`) → `SafetyService.listPlants()` → `Plant` table, `where: { isActive: true }`. Same fix shape as Department; confirmed genuinely empty today (0 total plant rows in the dev database), not a loading failure once this fix is applied.
+
+### createInspectionAction before/after behavior
+
+- Signature: unchanged (`(prevState: ActionResult, formData: FormData): Promise<ActionResult>`) — already correct as of FMP-UI-21B.
+- Before this unit: revalidated only `/safety-compliance` on success.
+- After this unit: revalidates both `/safety-compliance` AND `/safety-compliance/executive` on success — everything else (validation, API call, redirect) is unchanged.
+
+### Validation behavior
+
+Unchanged and confirmed correct: `title` required (client `required` attribute + server-side `if (!title) return { error: 'Title is required' }`); `summary`/`departmentId`/`plantId` remain optional, matching `CreateInspectionDto`'s own `@IsOptional()` decorators — neither field was made required, per this ticket's own instruction not to tighten business rules beyond what already exists.
+
+### Success redirect/revalidation behavior
+
+Unchanged redirect logic: on success, redirects to `/safety-compliance/{id}` (the created inspection's own detail page) when the API returns an id, falling back to `/safety-compliance` otherwise. Revalidation extended as described above.
+
+### Confirmation created inspection appears in list
+
+The Safety Records list (`/safety-compliance`) and the created inspection's own detail page (`/safety-compliance/{id}`) both read live, uncached data on every request (`safetyApi.list()`/`.get()` use `cache: 'no-store'`) — a newly created inspection is visible immediately regardless of revalidation, which is what `revalidatePath` additionally guarantees on the client-side router cache for the redirect target and the list page. Not independently re-verified via a live browser session in this unit (no browser tooling available) — verified by full code-path audit and the passing test suite instead.
+
+### Confirmation no fake data
+
+No hardcoded department/plant options were added anywhere. Both dropdowns are backed by real `Department`/`Plant` table queries, gated correctly. The 1 real department and 0 real plants reported above were read directly from the dev database, not assumed.
+
+### Confirmation no backend/schema/permission changes
+
+No Prisma schema file touched (`db:migrate:status` — 46 migrations, up to date). No permission code added, removed, or changed — `safety.read` and `safety.create` are used exactly as they already were; the new endpoints reuse the existing `safety.read` gate the whole module already requires.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1663/1663 tests |
+| `pnpm --filter @recafco/web test` | ✓ 963/963 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Still discovered but NOT fixed in this unit (out of scope, same as flagged after FMP-UI-21 and FMP-UI-21B): `safety-compliance/[id]/edit/page.tsx` still uses the admin-gated `organizations-api.ts` for its own Department/Plant dropdowns, AND still has the `action={boundAction as unknown as string}` crash pattern. Both are the exact same defects as this unit and FMP-UI-21B fixed on the New Inspection page — a strong candidate for one more immediate follow-up unit that applies both fixes to the Edit page in one pass.
+- Confirmed directly against the dev database (read-only query, no data modified): 1 active department, 0 plants total. These are real counts, not estimates.
+
+## FMP-UI-21D — Polish Safety & Compliance Dashboard and Inspection Detail UX (Completed 2026-09-28)
+
+### Summary
+
+Polished both the Safety Control Center dashboard and the Safety Inspection Detail page. The audit surfaced 2 real, previously-undiscovered functional bugs beyond pure polish: the Detail page's Start/Close/Schedule/Complete/Reopen/Cancel transitions were wired to a raw `<form action="/safety-compliance/{id}/start" method="POST">` — a plain HTML form posting to the WEB APP's own origin, not the API — so they never actually worked; and `createFindingAction` (dead code, never called by any page before this unit) sent a field (`assignedToUserId`) the real `CreateFindingDto` doesn't declare, which the API's `forbidNonWhitelisted: true` ValidationPipe would have rejected with a 400 the first time anyone actually used it. Both are fixed as part of wiring the real "Available Actions"/"Record Finding" panels this unit's own brief required.
+
+### Files changed
+
+**Backend (additive only, no schema change):**
+- `apps/api/src/safety/safety.service.ts` — `getDashboard()`'s `recent` array gained `departmentName`/`scheduledAt` (for the new Latest Safety Records section).
+- `apps/api/src/safety/safety.service.test.ts` — `getDashboard` test updated for the 2 new `recent` fields.
+
+**Frontend:**
+- `apps/web/src/lib/safety-api.ts` — `SafetyDashboardData.recent` type extended to match.
+- `apps/web/src/app/(protected)/safety-compliance/actions.ts` — `createFindingAction`'s stray `assignedToUserId` field removed (real bug fix); `scheduleInspectionAction`/`startInspectionAction`/`completeInspectionAction`/`closeInspectionAction`/`reopenInspectionAction`/`cancelInspectionAction`/`createFindingAction`/`addCommentAction` all now `redirect()` back to the acting page on success (needed since these are called directly from client components via `useTransition`, not via a `<form>` submit, so nothing else would force a fresh render).
+- `apps/web/src/app/(protected)/safety-compliance/executive/page.tsx` — Overview cards split into 2 labeled sub-groups (Inspections / Findings); Quick Filters section removed entirely; new "Latest Safety Records" section added.
+- `apps/web/src/app/(protected)/safety-compliance/[id]/page.tsx` — full rebuild: nav, breadcrumb, Inspection Summary card, Next Step callout, real Available Actions, always-rendered Summary card, real Record Finding/Add Comment, human-readable Activity, Details panel wording.
+- New: `_components/safety-latest-records-list.tsx`, `_components/safety-detail-nav.tsx`, `_components/safety-inspection-transitions.tsx`, `_components/safety-finding-form.tsx`, `_components/safety-comment-form.tsx`, `_components/safety-activity-timeline.tsx`, `_lib/safety-detail-helpers.ts` (+ test file).
+
+### Safety Dashboard changes
+
+- Header/actions/6 overview cards unchanged in substance, per the brief's own "keep" instructions — cards regrouped under 2 sub-headings ("Inspections": Scheduled/In Progress/Completed; "Findings": Open/Critical/Overdue) for clearer hierarchy, using `MetricCard`'s existing `dense` prop.
+- Needs Attention unchanged (already real per-finding data since FMP-UI-21).
+- New "Latest Safety Records" section: top 3 of `data.recent` (already fetched, no new request), each showing reference/title/status/department/scheduled date + "Open Record". Empty state: "No safety inspections yet." + "Create your first safety inspection." when `canCreate`.
+
+### Quick Filters decision
+
+Removed entirely (the brief's own "Preferred" option) — all 4 links (Scheduled/In Progress/Completed/Open Findings) were duplicates of "View Safety Records" (a pre-filtered view of the same list), and removing the section also resolved the "large empty gaps" / "lonely last section" complaint directly.
+
+### Latest Safety Records behavior
+
+Reuses `safetyApi.dashboard()`'s existing `recent` array (extended with `departmentName`/`scheduledAt`, see Files changed) — no new API call. Capped to 3 in the component regardless of how many the backend returns (still 8, matching `needsAttention`'s own cap).
+
+### Safety Detail navigation changes
+
+New `SafetyDetailNav`: Back to Safety Dashboard (`/safety-compliance/executive`) / Back to Safety Records (`/safety-compliance`) / Back to Platform Dashboard (`/dashboard`) — a dedicated 3-button component (not a reuse of `SafetyModuleNav`, which has no "back to records" button of its own since that would be circular on the List page it's built for). Breadcrumb: "Platform Dashboard > Safety & Compliance > {reference}" (3 levels, was 1 level with no `href`), matching the List page's own "Safety & Compliance" → `/safety-compliance/executive` convention.
+
+### Safety Detail header/next step changes
+
+Old plain title row replaced with an Inspection Summary card: eyebrow "Safety Inspection", reference number, title, status badge, then a Status/Department/Inspector/Scheduled/Created By/Next Step grid, then a separate highlighted Next Step callout with the full sentence (`computeInspectionNextStep()`) — the grid's own "Next Step" row shows a short action label (`computeInspectionNextStepLabel()`), mirroring the exact short-label-plus-long-sentence split Factory Tasks already established (FMP-UI-20G's `computeTaskNextActionText`/`computeTaskNextStepGuidance`). Exact wording for DRAFT/SCHEDULED/COMPLETED matches the brief; IN_PROGRESS/CLOSED/CANCELLED are honest extensions in the same voice, each naming only a real action this page's own Available Actions panel can perform.
+
+### Available Actions behavior
+
+Real actions only, computed exactly as before (same permission/status/ownership logic, unchanged): Edit Inspection (moved in from the old floating header button), Schedule Inspection, Start Inspection, Complete Inspection, Close Inspection, Reopen Inspection, Cancel Inspection — each wired to the real, already-implemented server action in `actions.ts` (all previously dead code except Start/Close, which were wired to a broken same-origin raw HTML form). When no action applies to the current viewer/status: "More actions will appear when available for this inspection status." — never "use the API" or "will be extended", both explicitly forbidden by the brief.
+
+### Activity wording changes
+
+Raw `"{actor} — INSPECTION_CREATED → DRAFT"`-style lines replaced with `SafetyActivityTimeline`, driven by `formatActivityEventLabel()` (15 known real event keys mapped to human sentences, e.g. `INSPECTION_CREATED` → "Inspection created") and `toTitleCase()` for the resulting status line — matching the brief's own exact example: "Inspection created by manager / Status: Draft / 28 Sept 2026, 11:30".
+
+### Confirmation no fake actions added
+
+Every action shown (Schedule/Start/Complete/Close/Reopen/Cancel/Edit/Record Finding/Add Comment) calls a real, already-implemented, already-permission-gated server action against a real API endpoint — none were invented. The 2 real bugs found (broken same-origin form posts; `createFindingAction`'s stray field) were both FIXED, not papered over, specifically because this unit made them load-bearing for the first time.
+
+### Confirmation no backend/schema/permission changes
+
+No Prisma schema file touched (`db:migrate:status` — 46 migrations, up to date). No permission code added, removed, or changed — every gate (`safety.schedule`/`safety.inspect`/`safety.close`/`safety.manage`/`safety.finding_create`/`safety.comment`) is used exactly as it already was.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1663/1663 tests |
+| `pnpm --filter @recafco/web test` | ✓ 969/969 tests (+6 new, `safety-detail-helpers.test.ts`) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- The multi-panel Available Actions component (`safety-inspection-transitions.tsx`) uses `useTransition` + manually-constructed `FormData` objects to call the existing `(id, prevState, formData)`-shaped actions — NOT `useActionState`, matching the established codebase-wide convention for multi-panel transition components (`factory-tasks/_components/task-transitions.tsx`, `incidents/_components/incident-transitions.tsx`), neither of which uses `useActionState` either. `safety-comment-form.tsx` (a single simple field) DOES use `useActionState`, matching every real create/edit FORM elsewhere in the app — the 2 different hook patterns are both established precedent, chosen per the shape of what's being built, not arbitrarily.
+- Still discovered but NOT fixed in this unit (out of scope — a different page, flagged 3 units running now): `safety-compliance/[id]/edit/page.tsx` still has both the admin-gated dropdown bug and the broken same-origin-form-post crash pattern its own Edit form uses. Strong, repeatedly-flagged candidate for a follow-up unit.
+
+## FMP-UI-22 — Redesign Incident Report Dashboard and Add Incident Evidence Upload UX (Completed 2026-09-28)
+
+### Summary
+
+Redesigned the Incident Report Executive Landing Page into an Incident Control Center (same shape as Task Management's FMP-UI-20 and Safety & Compliance's FMP-UI-21), added navigation to the All Incidents list and Incident Detail pages, and fixed the same admin-gated Plant/Department dropdown bug already fixed twice before (FMP-UI-20D, FMP-UI-21C) — this time on the Report Incident form, plus its sibling Edit Draft form. The Incident Report module's list/detail pages and transition/investigation/action/comment components were already real and working BEFORE this unit (unlike Safety & Compliance's state before FMP-UI-21D) — the audit confirmed this, so no broken-form-post bugs were found or needed fixing here. Evidence Attachments (Part B/C's own centerpiece ask) were audited and confirmed to have **no backend support at all** — per the brief's own explicit instruction, no upload/camera-capture UI was added; a backend proposal is included below instead.
+
+### Files changed
+
+**Backend (additive only, no schema change):**
+- `apps/api/src/incidents/incidents.service.ts` — `getDashboard()` gained a `needsAttention` array (critical + open incidents) and `recent` gained `severity`/`createdAt`; new `listDepartments()`/`listPlants()`/`listLocations()`.
+- `apps/api/src/incidents/incidents.controller.ts` — new `GET /incidents/departments`, `/plants`, `/locations`, all `@Permissions('incidents.read')`.
+- `apps/api/src/incidents/incidents.service.test.ts` — `getDashboard` tests extended; 3 new tests for the list methods; `plant`/`location` added to the mock client.
+
+**Frontend:**
+- `apps/web/src/lib/incidents-api.ts` — `IncidentDashboardData` extended (`needsAttention`, `recent.severity`/`.createdAt`); new `incidentsApi.departments()`/`.plants()`/`.locations()`.
+- `apps/web/src/app/(protected)/incidents/executive/page.tsx` — rebuilt into the Incident Control Center.
+- `apps/web/src/app/(protected)/incidents/page.tsx` — nav/breadcrumb/title/empty-state added.
+- `apps/web/src/app/(protected)/incidents/new/page.tsx` — switched to module-scoped reference data; wording updated.
+- `apps/web/src/app/(protected)/incidents/[id]/edit/page.tsx` — same dropdown fix applied (see Files changed rationale below); updated for `IncidentForm`'s new props.
+- `apps/web/src/app/(protected)/incidents/[id]/page.tsx` — `IncidentDetailNav` + 3-level breadcrumb added; core structure otherwise unchanged (already real).
+- `apps/web/src/app/(protected)/incidents/_components/incident-form.tsx` — rebuilt into 3 sections (Incident Details / Immediate Response / Location); new Location field; draft note moved near submit.
+- `apps/web/src/app/(protected)/incidents/actions.ts` — `createIncidentAction` gained `revalidatePath` for `/incidents`, `/incidents/executive`, and `/dashboard`.
+- New: `_components/incident-needs-attention-list.tsx`, `_components/incident-recent-list.tsx`, `_components/incident-module-nav.tsx`, `_components/incident-detail-nav.tsx`.
+
+### Incident dashboard changes
+
+Title/subtitle kept per the brief ("Incident Report" / "Report, investigate, track, and close incidents and near-misses."). Top actions: "+ Report Incident" (gated `incidents.create`, → `/incidents/new`) and "All Incidents" (→ `/incidents`). 5 overview cards (Open Incidents / Critical Open / Under Investigation / Resolved This Month / Closed Total — all 5 fields already existed on `getDashboard()`). Needs Attention now shows real critical-and-open incident records (reference/title/severity/status/reported date + "Open Incident"), not just a count. Recent Activity replaced with "Recent Incidents" (max 3, reused from the same already-fetched `data.recent`).
+
+### Incident list/navigation changes
+
+Added `IncidentModuleNav` (Back to Incident Dashboard / Back to Platform Dashboard / Previous / Next / Switch module — both prev and next exist, since `INCIDENT_REPORT` sits mid-array in `EXECUTIVE_MODULES`) + 3-level breadcrumb ("Platform Dashboard > Incident Report > All Incidents") to the list page; title → "All Incidents", subtitle → "View, search, and open incident reports." Detail page got `IncidentDetailNav` (3 fixed buttons: Back to Incident Dashboard / Back to All Incidents / Back to Platform Dashboard) + a 3-level breadcrumb. All existing filters (Search/Status/Severity/From/To), the transitions panel, investigation panel, action items, comments, and human-readable activity timeline are unchanged — they were already real before this unit.
+
+### Report Incident form changes
+
+Grouped into the brief's own 3 REAL sections: **Incident Details** (title/severity/occurredAt/description), **Immediate Response** (immediate action taken only), **Location** (Affected Plant / Affected Department / Location-Area — the last one newly exposed; `affectedLocationId` already existed on `CreateIncidentDto` and was already read by `createIncidentAction`, but the OLD form never rendered a field for it). "People involved/witnesses" and "Injury/damage indicators" (both brief-requested "if already supported") were NOT added — `CreateIncidentDto` has no fields for either. Title "Report Incident"; subtitle dropped the top-of-page "saved as draft" framing (moved to a small note near the submit button: "This report can be saved before final submission."); submit button relabeled "Save Incident Report" (was "Save as draft").
+
+### Attachment/camera support audit result
+
+Audited: `packages/database/prisma/schema.prisma` (no `IncidentAttachment` model — the `Incident` model has no attachment relation at all), `incidents.controller.ts`/`incidents.service.ts` (no upload endpoint), and the 9 existing `*-attachment-storage.service.ts` files under `apps/api/src/contracts/` (the only real attachment/upload pattern in this codebase — plain local-disk storage via `node:fs/promises`, random UUID filenames per parent-entity subfolder, 10MB max, PDF/PNG/JPEG/XLSX/DOCX only; **no MinIO or S3 usage anywhere in this codebase**).
+
+### Whether incident attachment backend exists
+
+**No.** Confirmed by schema, controller, and service audit above.
+
+### If attachment backend missing
+
+Per the brief's own explicit instruction, no upload UI, no camera-capture `<input capture>` markup, and no Evidence Attachments section were added anywhere — none would have had anything real to submit to. Proposed backend unit (not started, no code written): add an `IncidentAttachment` model (mirrors `ContractVariationAttachment` exactly — `id`/`incidentId`/`fileName`/`originalFileName`/`mimeType`/`fileSize`/`storagePath`/`uploadedByUserId`/`createdAt`), an `IncidentAttachmentStorageService` (mirrors `VariationAttachmentStorageService` exactly — local disk, random UUID filenames, path-traversal guard), `POST/GET/DELETE /incidents/:id/attachments` gated by `incidents.create`/`incidents.read`, and file-type/size rules widened from the Contract precedent's 10MB/PDF-PNG-JPEG-XLSX-DOCX to the brief's own requested set (images: jpg/jpeg/png/webp; video: mp4/mov/webm; documents: pdf/doc/docx/xls/xlsx) since site-reported evidence realistically includes phone photos/videos the Contract precedent was never sized for. Once that exists, the frontend's `<input type="file" accept="image/*" capture="environment">` / `accept="video/*" capture="environment"` pattern (per the brief's own implementation guidance) becomes straightforward to add — degrades to a plain file picker on desktop/unsupported browsers automatically, no separate code path needed.
+
+### Create/submit behavior
+
+Unchanged validation (title/severity/occurredAt/description required, with the exact messages the brief asked for — "Title is required.", "Severity is required.", etc. — already correct before this unit) and unchanged success redirect (`/incidents/{id}`, the created incident's own detail page).
+
+### Revalidation behavior
+
+`createIncidentAction` now calls `revalidatePath('/incidents')`, `revalidatePath('/incidents/executive')`, and `revalidatePath('/dashboard')` on success (previously called none) — the Platform Dashboard shows incident-related figures gated on `incidents.read` (confirmed via `platform-dashboard.service.ts`), so it's included per the brief's own "if counts are shown there" instruction.
+
+### Confirmation no fake upload/actions
+
+No upload button, camera input, or Evidence Attachments section exists anywhere in this unit's changes. Every button/link added routes to a real, already-working page or server action.
+
+### Confirmation no backend/schema/permission changes unless explicitly listed
+
+No Prisma schema file touched (`db:migrate:status` — 46 migrations, up to date). No permission code added, removed, or changed — `incidents.read`/`incidents.create` are used exactly as they already were; the 3 new endpoints reuse the existing `incidents.read` gate.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1666/1666 tests |
+| `pnpm --filter @recafco/web test` | ✓ 969/969 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 46 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `[id]/edit/page.tsx` was updated in this unit even though the brief didn't name it — `IncidentForm`'s own prop signature changed (new `locations`/`locationsFailed` props), so this shared call site had to be updated to keep compiling; since it was already being touched, the identical admin-gated dropdown bug on this page was fixed too rather than left half-broken next to its now-fixed sibling.
+- Unlike Safety & Compliance before FMP-UI-21D, the Incident Detail page's transitions/investigation/actions/comments/activity were ALL already real and working before this unit — confirmed by reading `incident-transitions.tsx`, `investigation-panel.tsx`, `add-action-form.tsx`, `add-comment-form.tsx`, and `activity-timeline.tsx` (already human-readable, no raw event keys) in full before making any change. No broken same-origin-form-post pattern was found here.
+- "Needs Attention" is scoped to critical-AND-open incidents only — Incidents have no due-date field of their own (unlike Safety findings' `dueAt`), so no "overdue incident" concept was invented for this unit.
+
+## FMP-INC-01 — Add Real Incident Evidence Attachments with File Upload and Camera Capture (Completed 2026-09-28)
+
+### Summary
+
+Built real, working Incident Evidence Attachments end-to-end — the backend feature FMP-UI-22 audited and confirmed did not exist. New `IncidentAttachment` Prisma model (additive migration only), `IncidentAttachmentStorageService` (reuses the exact same local-disk storage pattern every Contract attachment feature already uses — no MinIO/S3, confirmed none is configured anywhere in this codebase), 4 real endpoints (list/upload/download/delete), and a full frontend Evidence Attachments section on the Incident Detail page with multi-file upload, mobile camera capture (Take Photo / Record Video, both gracefully falling back to a plain file picker where unsupported), file-type/size validation, and a same-origin download proxy.
+
+### Files changed
+
+**Backend:**
+- `packages/database/prisma/schema.prisma` — new `IncidentAttachment` model (mirrors `ContractVariationAttachment` exactly); `attachments` relation on `Incident`; `incidentAttachmentsUploaded` relation on `User`.
+- `packages/database/prisma/migrations/20260928000000_add_incident_attachments/migration.sql` — new, additive-only (1 table, 1 index, 2 FKs). Hand-extracted via the established `prisma migrate diff --from-config-datasource --to-schema` workaround (the shadow database still fails `migrate dev` in this environment), trimmed of large unrelated pre-existing drift, applied via `prisma migrate deploy`.
+- `packages/database/src/index.ts` — `IncidentAttachment` type exported.
+- `packages/config/src/env/api.ts` — new `INCIDENT_ATTACHMENTS_DIR` env var (default `./storage/incident-attachments`), same pattern as every other `*_ATTACHMENTS_DIR`.
+- `apps/api/src/incidents/incident-attachment-storage.service.ts` — new; mirrors `ErectionMethodStatementAttachmentStorageService` (the one existing precedent that already supports `deleteFile()`).
+- `apps/api/src/incidents/incidents.service.ts` — 4 new methods (`listAttachments`/`createAttachment`/`getAttachmentForDownload`/`deleteAttachment`); constructor now takes `IncidentAttachmentStorageService`.
+- `apps/api/src/incidents/incidents.controller.ts` — 4 new endpoints; constructor now also injects `IncidentAttachmentStorageService` (for the download stream).
+- `apps/api/src/incidents/incidents.module.ts` — `IncidentAttachmentStorageService` registered as a provider.
+- `apps/api/src/incidents/incidents.service.test.ts` — 13 new tests (permission checks, MIME/size validation, upload/download/delete happy paths, ownership-vs-manager delete rule); mock client extended with `incidentAttachment`/`incidentActivity`.
+
+**Frontend:**
+- `apps/web/src/lib/incidents-api.ts` — `IncidentAttachment` type; `incidentsApi.listAttachments()`.
+- `apps/web/src/app/(protected)/incidents/actions.ts` — `uploadAttachmentAction(incidentId, file)`, `deleteAttachmentAction(incidentId, attachmentId)`.
+- `apps/web/src/app/(protected)/incidents/[id]/page.tsx` — fetches attachments; renders the new Evidence Attachments section between Immediate Action and Investigation.
+- `apps/web/src/app/(protected)/incidents/_components/incident-evidence-attachments.tsx` — new; the full upload/list/delete UI.
+- `apps/web/src/app/(protected)/incidents/_components/activity-timeline.tsx` — `EVIDENCE_UPLOADED`/`EVIDENCE_REMOVED` labels added; these 2 events render "{label} by {actor}" (matching the brief's exact required wording), every other existing event's own "{actor} {label}" order is untouched.
+- `apps/web/src/app/(protected)/incidents/[id]/attachments/[attachmentId]/download/route.ts` — new; same-origin download proxy, mirrors the Contract module's own identical pattern exactly (e.g. `contracts/[id]/(workspace)/variations/[variationId]/attachments/[attachmentId]/download/route.ts`).
+
+### Prisma model/migration summary
+
+`IncidentAttachment` — `id`, `incidentId` (→ `Incident`, `onDelete: Cascade`), `fileName` (on-disk random name), `originalFileName`, `mimeType`, `fileSize`, `storagePath`, `uploadedByUserId` (→ `User`, `onDelete: Restrict`), `createdAt`. Index on `[incidentId, createdAt desc]`. Migration is additive only — 1 `CREATE TABLE`, 1 `CREATE INDEX`, 2 `ADD CONSTRAINT` (foreign keys) — no drops, no destructive changes, no resets. `pnpm db:migrate:status` confirms 47 migrations, up to date, both before and after.
+
+### Storage path/pattern used
+
+Local disk, via `node:fs/promises` — the exact same pattern already used by all 9 existing Contract attachment features (no MinIO/S3 anywhere in this codebase, confirmed by FMP-UI-22's own prior audit and re-confirmed here). Files land at `{INCIDENT_ATTACHMENTS_DIR}/{incidentId}/{randomUUID}{ext}` (default dir `./storage/incident-attachments`, overridable via `INCIDENT_ATTACHMENTS_DIR` env var — same naming convention as `WORKFLOW_ATTACHMENTS_DIR`/`VARIATION_ATTACHMENTS_DIR`/etc.). The caller-supplied original filename is never used as the on-disk name (eliminates path-traversal/overwrite risk); it's only ever recorded in the DB for display/download. `deleteFile()` is best-effort and never throws — an orphaned file after a DB row is deleted is a cheap, recoverable cost; failing the user's delete request because a stray file couldn't be removed is not (same rule as the one existing precedent with real delete support).
+
+### Upload/download/delete endpoint summary
+
+- `GET /incidents/:id/attachments` — list (`incidents.read`).
+- `POST /incidents/:id/attachments` — upload, one file per request via `FileInterceptor('file')` (`incidents.create`).
+- `GET /incidents/:id/attachments/:attachmentId/download` — streams the file with real `Content-Type`/`Content-Disposition` headers (`incidents.read`).
+- `DELETE /incidents/:id/attachments/:attachmentId` — delete (`incidents.create` at the route gate; the service additionally enforces uploader-or-`incidents.manage`, mirroring `IncidentsService`'s own existing creator-or-manage ownership convention already used by `submit()`/`cancel()` — not a bespoke new rule).
+
+### File type and size rules
+
+Allow-list only (never a block-list) — the same architecture every existing attachment feature uses, so `.exe`/`.bat`/`.cmd`/`.ps1`/`.sh`/`.js`/`.mjs`/`.cjs`/`.html`/`.svg` are rejected by construction, never explicitly special-cased. Allowed: images (jpg/jpeg/png/webp), video (mp4/mov/webm), documents (pdf/doc/docx/xls/xlsx/csv/txt) — a wider real-world evidence set than any single existing Contract precedent (those only cover PDF/PNG/JPEG/XLSX/DOCX), so this unit defines its own `INCIDENT_ATTACHMENT_ALLOWED_MIME_TYPES` rather than importing a narrower one. Size limit: **25MB, uniform across every evidence type including video** — the brief's own explicit fallback instruction for exactly this situation ("otherwise keep one conservative limit and document it"), chosen because `FileInterceptor` buffers the whole upload into process memory before this service ever writes it to disk, and a differentiated 100MB video allowance on a shared on-prem server with unknown concurrent load is not a safe default to assume without a memory-budget review outside this unit's scope. Validated in 2 places: client-side (fail fast, real UX convenience) and server-side (the actual source of truth, both in the controller's `FileInterceptor` `fileFilter`/`limits` and independently inside the service).
+
+### Frontend Evidence Attachments behavior
+
+New section on the Incident Detail page, between Immediate Action and Investigation. Lists filename, friendly file type, size, uploaded-by, uploaded-date, and a "View" (download) action for every viewer with `incidents.read`; a "Delete" action appears only for the uploader themselves or an `incidents.manage` holder. Empty state: "No evidence files attached." Upload area (shown only when `incidents.create`): 3 selection buttons stage files into a local list (name + size, or a real validation error — "File type is not supported." / "File size is too large." — shown inline) with a remove button per staged file; nothing uploads until "Upload Evidence" is pressed; batch upload failures are collected and shown together, not silently dropped.
+
+### Camera capture behavior
+
+"Take Photo" (`accept="image/*" capture="environment"`) and "Record Video" (`accept="video/*" capture="environment"`) per the brief's own exact implementation guidance, plus a separate "Upload Files" button (`accept` set to the full allowed-extension list, `multiple`) for normal desktop/any-file selection. Camera is never forced — all 3 buttons are always visible side by side; `capture` is simply ignored by browsers/devices that don't support it, which fall back to their own normal file picker with no code branch needed on this app's side.
+
+### Permission behavior
+
+Upload gated on `incidents.create` (the same permission required to report the incident in the first place — deliberately not extended to `incidents.investigate`/`incidents.review`, which the brief never asked for). View/download gated on `incidents.read`. Delete gated on `incidents.create` at minimum, with the finer uploader-or-`incidents.manage` rule enforced inside the service. No existing incident permission was added, removed, or broadened.
+
+### Activity logging behavior
+
+`EVIDENCE_UPLOADED`/`EVIDENCE_REMOVED` activity rows created on every upload/delete (actor, incident, metadata with the attachment id/filename). Rendered by `ActivityTimeline` as "Evidence uploaded by {actor}" / "Evidence removed by {actor}" — the brief's own exact required wording — via a 2-event special case that doesn't touch the word order of any other, pre-existing activity event.
+
+### Confirmation no fake upload
+
+Every button in `IncidentEvidenceAttachments` calls a real server action against a real, newly-built, tested backend endpoint. No placeholder UI, no non-functional camera buttons — this is the real feature FMP-UI-22 explicitly declined to fake.
+
+### Confirmation existing incident flow still works
+
+No changes to `create()`/`updateDraft()`/any status-transition method, DTO, or controller route beyond the 4 new attachment ones. `IncidentsService`'s constructor gained one new dependency (`IncidentAttachmentStorageService`) — purely additive, does not change any existing method's signature or behavior. Full existing test suite (66 pre-existing incident tests) still passes unmodified alongside the 13 new ones.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/database run db:validate` | ✓ schema valid |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1679/1679 tests (+13) |
+| `pnpm --filter @recafco/web test` | ✓ 969/969 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date |
+
+### Key Implementation Notes
+
+- `@recafco/config` and `@recafco/database` were both rebuilt after their respective changes (`incidentAttachmentsDir` env field; new Prisma model) — required for `apps/api` to pick up the new types, same as every prior unit that touched either package.
+- MIME-type validation (both client and server) trusts the browser/multer-reported `file.mimetype` — the exact same security posture every existing attachment feature in this codebase already has (no magic-byte content sniffing anywhere); not a gap introduced by this unit, an inherited property of the reused pattern.
+- Upload/delete do not `redirect()` (unlike the transition actions) — a batch of several files needs to keep going after each individual upload, so the calling client component drives `router.refresh()` itself once the whole batch finishes, matching the established pattern already used by `contract-closeout-request-attachments.tsx`.
+
+## FMP-INC-01B — Show Evidence Upload Clearly After Incident Creation (Completed 2026-09-28)
+
+### Summary
+
+FMP-INC-01 built the real Evidence Attachments feature but only on the Incident Detail page (a real `incidentId` is required for the storage folder/DB rows, so it genuinely cannot exist on the create form) — per direct feedback, the Report Incident page gave no hint that evidence attachment exists at all. Added a real information section to the create form explaining evidence is attached after saving (never fake/disabled upload controls), and moved the Detail page's Evidence Attachments section up so it's always the 2nd section on the page, directly after Description.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/incidents/_components/incident-form.tsx` — new `showEvidenceNote` prop; renders a real "Evidence Attachments" info section (title + explanation + Take photo/Record video/Upload files bullet list) near the submit button when true.
+- `apps/web/src/app/(protected)/incidents/new/page.tsx` — passes `showEvidenceNote` (the create form only — `[id]/edit/page.tsx` does not, since editing a DRAFT already has a real, reachable incident detail page).
+- `apps/web/src/app/(protected)/incidents/[id]/page.tsx` — Evidence Attachments section moved to directly after Description (was after the conditionally-rendered Immediate Action block, meaning it could previously land 2nd or 3rd depending on whether `immediateAction` was set — now always 2nd, unconditionally).
+- `apps/web/src/app/(protected)/incidents/_components/incident-evidence-attachments.tsx` — empty-state wording updated to the brief's exact text ("No evidence files attached yet." + a hint naming the 3 real actions, shown only when the viewer holds `incidents.create`).
+
+### Create page evidence guidance added
+
+A real, static "Evidence Attachments" info section (not a form field, not a disabled control) appears near the bottom of the Report Incident form, before the submit button: "After saving this incident, you can attach photos, videos, and documents from the incident detail page." followed by a Take photo / Record video / Upload files bullet list — the exact text and structure the brief specified.
+
+### Detail page Evidence Attachments placement
+
+Moved from after the conditionally-rendered "Immediate action taken" section to directly after "Description" — now unconditionally the 2nd section on the page (previously 2nd or 3rd depending on whether the incident had an immediate action recorded), visible without scrolling far.
+
+### Upload/camera controls confirmation
+
+Unchanged from FMP-INC-01 — Take Photo (`accept="image/*" capture="environment"`), Record Video (`accept="video/*" capture="environment"`), Upload Files (normal picker, `multiple`), all calling the same real `uploadAttachmentAction`/`deleteAttachmentAction` against the same real backend endpoints built in that unit. No endpoint, permission, or validation rule changed.
+
+### Redirect behavior confirmation
+
+Unchanged and already correct — `createIncidentAction` already redirected to `/incidents/{id}` (the created incident's own detail page) on success, where the Evidence Attachments section (now positioned near the top) is immediately visible.
+
+### Confirmation no fake upload on create page
+
+The create page's Evidence Attachments section is pure information text — no file input, no disabled button, nothing that looks interactive but doesn't work. Real upload controls exist only on the detail page, where a real `incidentId` makes them genuinely functional.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1679/1679 tests |
+| `pnpm --filter @recafco/web test` | ✓ 969/969 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No files under `apps/api` or `packages/database` were opened or modified in this unit — purely a frontend wording/placement fix.
+- `showEvidenceNote` defaults to `false` so `[id]/edit/page.tsx` (which shares `IncidentForm` with `new/page.tsx`) renders exactly as before — this unit's change is scoped to the create flow only, per the brief's own explicit focus.
+
+## FMP-INC-01C — Optional Evidence Upload During Incident Creation (Completed 2026-09-28)
+
+### Summary
+
+FMP-INC-01B added an information-only note explaining that evidence attachment happens after saving; this unit makes it real — evidence files can now be selected on the Report Incident create form itself (optional, never blocking creation), staged with the same preview/remove/validation UI the Incident Detail page already has, and uploaded automatically right after the new incident is created, reusing the exact same backend upload endpoint/service from FMP-INC-01. No backend changes were needed or made — this is a frontend composition of 2 already-existing, already-tested server actions.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/incidents/_lib/evidence-validation.ts` — new; single source of truth for allowed MIME types, max size (25MB), `validateEvidenceFile()`, `stageEvidenceFiles()`, `formatEvidenceFileSize()`, `friendlyEvidenceFileType()` (+ test file, 7 tests).
+- `apps/web/src/app/(protected)/incidents/_components/evidence-file-picker.tsx` — new; the 3-button (Take Photo / Record Video / Upload Files) selection + staged-file-preview UI, extracted so the create form and the detail page share ONE implementation.
+- `apps/web/src/app/(protected)/incidents/_components/incident-evidence-attachments.tsx` — refactored to use `EvidenceFilePicker` + the shared `_lib/evidence-validation.ts` helpers; no behavior change on the detail page itself.
+- `apps/web/src/app/(protected)/incidents/_components/incident-form.tsx` — `showEvidenceNote` renamed to `showEvidenceUpload`; the static info box is replaced with a real `EvidenceFilePicker`-backed staging section; the form's submission wiring changed from `<form action={dispatch}>` to `onSubmit={handleSubmit}`, which merges staged `File`s into the FormData (as `evidenceFiles`) before calling `dispatch()` directly.
+- `apps/web/src/app/(protected)/incidents/new/page.tsx` — passes `showEvidenceUpload` (renamed).
+- `apps/web/src/app/(protected)/incidents/actions.ts` — `uploadAttachmentAction`'s core fetch logic extracted into a private `uploadIncidentAttachment()` helper (no `revalidatePath` of its own); `createIncidentAction` now reads `formData.getAll('evidenceFiles')` and uploads each valid file via that same helper right after the incident is created, before redirecting.
+- `apps/web/src/app/(protected)/incidents/[id]/page.tsx` — accepts `searchParams` now; reads an optional `evidenceIssue` query param and shows a real, non-fatal warning banner near the top when 1+ staged files failed to upload during creation.
+
+### Create-page evidence upload behavior
+
+The Report Incident form's "Evidence Attachments" section (shown only on create, `showEvidenceUpload`) is now a real, OPTIONAL `EvidenceFilePicker` — 3 selection buttons, a staged-files preview with per-file validation errors and remove buttons, and a small note ("You can also add more evidence after saving the incident."). No submit button of its own — staged files ride along inside the SAME "Save Incident Report" submit as the rest of the form; nothing uploads if the user selects zero files (identical behavior to before this unit).
+
+### Camera capture behavior
+
+Unchanged from FMP-INC-01/`EvidenceFilePicker` — Take Photo (`accept="image/*" capture="environment"`) and Record Video (`accept="video/*" capture="environment"`), plus a normal multi-file Upload Files button; camera is never forced, desktop always gets the plain picker, and unsupported browsers fall back automatically with no code branch needed.
+
+### Selected file preview/removal behavior
+
+Each staged file shows its name, size (or a validation error in place of the size when invalid), and a remove button — identical UI/behavior to the detail page's own staging area, since both now render the same `EvidenceFilePicker` component.
+
+### Validation rules
+
+Reused verbatim from FMP-INC-01 via the new shared `_lib/evidence-validation.ts`: jpg/jpeg/png/webp, mp4/mov/webm, pdf/doc/docx/xls/xlsx/csv/txt; 25MB per file. Messages updated to this unit's own exact wording ("File type is not supported." / "File is too large. Maximum size is 25MB.") — applied consistently to BOTH the create page and the detail page's own upload area (previously the detail page said "File size is too large." without the size detail; now both say the same thing). Invalid files are never included in the FormData sent on submit — only files with no validation error are appended.
+
+### Create action upload flow
+
+1. `createIncidentAction` validates/creates the incident exactly as before (unchanged).
+2. On success, reads every `File` appended under `evidenceFiles` in the submitted FormData.
+3. Uploads each one via `uploadIncidentAttachment()` (the same code path `POST /incidents/:id/attachments` already uses) — sequentially, collecting any per-file error messages without stopping the loop.
+4. Revalidates `/incidents`, `/incidents/executive`, `/incidents/{id}`, and `/dashboard`.
+5. Redirects to `/incidents/{id}` — or, if 1+ files failed, to `/incidents/{id}?evidenceIssue=<encoded summary>` so the detail page can show a real warning.
+
+### Reused backend/storage services
+
+No new backend code. The exact same `POST /incidents/:id/attachments` endpoint, `IncidentsService.createAttachment()`, `IncidentAttachmentStorageService`, MIME/size validation, and `EVIDENCE_UPLOADED` activity logging built in FMP-INC-01 — called one extra time (once per staged file) from `createIncidentAction`, via the same `uploadIncidentAttachment()` helper `uploadAttachmentAction` already used. Permission-wise, upload is still gated on `incidents.create` server-side — the SAME permission already required to create the incident in the first place, so there is no possible mismatch where a user can create an incident but be denied uploading evidence to their own just-created one (per the brief's own explicit concern in requirement 9 — confirmed, not just assumed).
+
+### Failure behavior
+
+- No files selected: incident creation behaves exactly as before this unit (unchanged code path).
+- Incident creation itself fails: no upload is attempted (the upload loop is unreachable on that path) — no change from before.
+- 1+ selected files fail to upload after incident creation succeeds: the incident is NOT rolled back or lost; the failure(s) are collected and surfaced via the `evidenceIssue` redirect param, rendered as a real warning banner on the detail page ("Incident created successfully, but some evidence could not be uploaded: ... You can try attaching it again below."). Never crashes.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1679/1679 tests |
+| `pnpm --filter @recafco/web test` | ✓ 976/976 tests (+7, `evidence-validation.test.ts`) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `useActionState`'s returned dispatch function can be called directly with any `FormData` (not only one a native form submission produced) — this is how the create form merges staged `File` objects (which live in React state, never in the DOM) into the same submit that also carries the ordinary text fields, without needing a hidden `<input>` + `DataTransfer` trick.
+- No files under `apps/api` or `packages/database` were touched — the brief's own "reuse the real backend" instruction was satisfiable entirely at the frontend composition layer, since the needed endpoint already existed and already accepted one file per request.
+
+## FMP-INC-01D — Fix Incident Create Future Date Validation UX and useActionState Submit Warning (Completed 2026-09-28)
+
+### Summary
+
+FMP-INC-01C's switch from `<form action={dispatch}>` to a manual `onSubmit` handler (needed to merge staged evidence files into the FormData) called `dispatch(formData)` directly, outside any transition — the exact cause of the reported console warning. Fixed with React's own documented "Approach B" (`startTransition(() => dispatch(formData))`). Also fixed: the backend's real, still-enforced `INCIDENT_OCCURRED_IN_FUTURE` rejection now maps to a friendly, field-level message instead of the raw `occurredAt cannot be in the future` string; a client-only `max` attribute (computed after mount, never during render, to avoid a hydration mismatch) gives most browsers a native UX hint; and the raw `datetime-local` input value is now converted to a real UTC ISO string before submission, closing a genuine (if previously unexercised) timezone bug where the server would have interpreted a naive local-time string in ITS OWN timezone rather than the user's.
+
+### Exact cause of useActionState warning
+
+`incident-form.tsx`'s `handleSubmit` (added in FMP-INC-01C) called `dispatch(formData)` — the action function `useActionState` returns — directly from a plain `onSubmit` event handler. `<form action={dispatch}>` (the pre-FMP-INC-01C wiring) works because React automatically wraps that call in a transition; a manual call from an event handler does not get that wrapping for free, which is exactly what React's "An async function with useActionState was called outside of a transition" warning is telling you. Fixed by wrapping the manual call in `startTransition(() => { dispatch(formData); })`.
+
+### Files changed
+
+- `apps/api/src/incidents/incidents.service.test.ts` — 5 new tests for `create()`'s `occurredAt` validation (past succeeds, near-now-within-tolerance succeeds, clearly-future rejects with the exact code/message, UTC-ISO parsing confirmed timezone-safe); `mockIncidentCreate` + `mockTransaction`'s default implementation added (this method had zero test coverage before this unit).
+- `apps/web/src/app/(protected)/incidents/actions.ts` — `createIncidentAction` and `updateDraftAction` both map `INCIDENT_OCCURRED_IN_FUTURE` to a real `fieldErrors.occurredAt` entry with the friendly message, instead of falling through to the raw backend string.
+- `apps/web/src/app/(protected)/incidents/_components/incident-form.tsx` — `handleSubmit` now (a) converts the raw `datetime-local` value to a UTC ISO string before it's sent, (b) wraps `dispatch(formData)` in `startTransition`; new `maxOccurredAt` state computed once in a `useEffect` (client-only, post-mount) and applied as the `occurredAt` input's `max`; a permanent helper line ("Date and time of occurrence cannot be in the future.") added under the field.
+
+### Validation message before/after
+
+- Before: raw backend string `occurredAt cannot be in the future`, shown as a generic top-of-form banner (the code path checked for `VALIDATION_ERROR`, but the real code thrown is `INCIDENT_OCCURRED_IN_FUTURE`, so it fell through to the generic "show whatever the server said" branch).
+- After: `Date and time of occurrence cannot be in the future.` — shown via the SAME `FieldError` mechanism every other required-field check already uses, directly under the Date and time of occurrence input. A second, permanent (non-error) helper line states the same rule proactively, before any submission attempt.
+
+### Date max behavior
+
+`max` is computed via `useEffect(() => setMaxOccurredAt(toLocalDatetime(new Date().toISOString())), [])` — runs once, after mount, entirely client-side. The FIRST render (both the server-rendered HTML and the initial client hydration pass) has no `max` attribute at all, so there is no server/client mismatch; a harmless follow-up render adds it purely in the browser. This is a UX helper only — most browsers' native `datetime-local` picker will decline to let a user scroll/select past `max`, but nothing here is a security boundary; the server's `validateOccurredAt()` remains the real, unbypassable check.
+
+### Submit flow before/after
+
+- Before (FMP-INC-01C): `<form onSubmit={handleSubmit}>` → `handleSubmit` builds FormData, appends staged files, calls `dispatch(formData)` directly → console warning, `pending` not reliably tracked.
+- After: identical FormData construction, PLUS the `occurredAt` conversion described above, then `startTransition(() => { dispatch(formData); })` — `pending` (`useActionState`'s own third return value) now correctly reflects the in-flight submission again, the submit button still disables correctly (`disabled={pending}`, unchanged), and no console warning.
+
+### Evidence upload behavior confirmation
+
+Unchanged and re-verified: files staged via `EvidenceFilePicker` are still appended to the FormData inside `handleSubmit` exactly as before (same lines, just now sitting alongside the `startTransition` wrapper); `createIncidentAction` still uploads them via `uploadIncidentAttachment()` after the incident is created; invalid files are still excluded from the FormData (only entries with `!error` are appended) so an unsupported/oversized file is never submitted even if the user leaves it staged.
+
+### Timezone/future-date handling confirmation
+
+The backend's `validateOccurredAt()` compares real `Date` instants (`date.getTime() > now.getTime() + 60_000`) — this was ALREADY timezone-correct on the server side, given a real ISO string with an explicit UTC offset. The actual gap was upstream: the client previously sent the RAW `datetime-local` string (no timezone marker at all), which `new Date(naiveString)` on the SERVER would parse as local time IN THE SERVER'S OWN TIMEZONE — a real bug whenever the server's timezone differs from the reporting user's. Fixed by converting to `.toISOString()` (always UTC, always unambiguous) in the browser, where `new Date(localValue)` correctly assumes the BROWSER's own local timezone — before the value is ever sent. Confirmed via 5 new backend tests (past/near-now/future + explicit UTC-ISO-parsing case).
+
+### Confirmation backend validation unchanged
+
+`IncidentsService.validateOccurredAt()` itself (the 1-minute clock-skew tolerance, the rejection threshold, the `INCIDENT_OCCURRED_IN_FUTURE` code) was not touched — still the real, authoritative, unbypassable check. Only the FRONTEND's handling of the error it returns, and the FRONTEND's construction of the value it sends, changed.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (+5) |
+| `pnpm --filter @recafco/web test` | ✓ 976/976 tests |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `IncidentsService.create()` had ZERO unit test coverage before this unit (confirmed by search — no `describe('IncidentsService.create'` block existed). Adding real tests required wiring `mockTransaction`'s default implementation (previously declared but never given a working implementation) and a new `mockIncidentCreate` mock — both added to `incidents.service.test.ts`'s shared fixtures, available for any future test in that file needing a real `create()` call to succeed.
+- `updateDraftAction` (Edit Draft page) got the identical friendly-message fix, since it shares the exact same backend rejection and — once `IncidentForm`'s `occurredAt` conversion was fixed — the same underlying timezone correctness, for free (both actions read the SAME form component's SAME converted field).
+
+## FMP-INC-01E — Polish Incident Detail Page and Make Evidence Upload Clearly Visible (Completed 2026-09-28)
+
+### Summary
+
+Full visual polish pass on the Incident Detail page, matching the same "Control Center" card-based redesign shape already established for Factory Tasks (FMP-UI-20G) and Safety & Compliance (FMP-UI-21D). Audited the Evidence Attachments section first: the 3 real upload controls (Take Photo/Record Video/Upload Files) already existed and worked as of FMP-INC-01/FMP-INC-01C — this unit's "not visible" complaint was about visual prominence, not missing functionality, confirmed by reading `incident-evidence-attachments.tsx` in full before touching anything. Fixed for real: a plain-title header replaced with an Inspection-Summary-style card + Next Step guidance; Description/Evidence/Immediate Action/Investigation/Corrective Actions/Comments/Activity are now uniform bordered cards; Comments and Activity split into 2 separate cards (previously one merged, interleaved section); Available Actions button labels renamed to Title Case with a real Submit helper line; the transitions panel's silent-empty-buttons bug (matching a pattern already fixed in 2 other modules) fixed; Incident Details sidebar panel now always shows Department/Plant/Location with "Not specified" instead of hiding the row.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/incidents/_lib/incident-detail-helpers.ts` — new; `computeIncidentNextStepLabel()`/`computeIncidentNextStep()` (+ test file, 5 tests).
+- `apps/web/src/app/(protected)/incidents/_components/activity-timeline.tsx` — dropped the `comments` prop entirely (activity-only now); added `STATUS_CHANGE_LABELS` (keyed by real `newStatus`) so every real transition gets a specific human label instead of the generic "Status changed"; standardized ALL activity lines to `"{label} by {actor}"` word order (previously only the 2 evidence events used that order).
+- `apps/web/src/app/(protected)/incidents/_components/incident-transitions.tsx` — Title Case button/panel-header renames throughout (Edit Draft / Submit Incident / Cancel Incident / Start Review / Assign Investigator / Change Severity / Begin Investigation / Request Corrective Actions / Resolve Incident / Close Incident / Reopen Incident); added a real helper line under Submit Incident; fixed the silent `return <></>` when no action applies to the current viewer/status.
+- `apps/web/src/app/(protected)/incidents/[id]/page.tsx` — full card-based restructure (see below).
+
+### Header/next step changes
+
+Replaced the plain title+badges row with a full Incident Summary card: eyebrow "Incident Report", reference number, title, status badge, severity badge, a Status/Severity/Occurred/Reported By/Next Step grid, and a separate highlighted Next Step callout with the full sentence. Exact wording for DRAFT/SUBMITTED/CLOSED matches the brief; UNDER_REVIEW/INVESTIGATION/ACTION_REQUIRED/RESOLVED/CANCELLED are honest extensions in the same voice, each naming only a real action `IncidentTransitionsPanel` can actually perform for that status.
+
+### Evidence upload visibility fix
+
+Audited first, confirmed the 3 real controls already existed and worked (built in FMP-INC-01, refactored onto the shared `EvidenceFilePicker` in FMP-INC-01C) — this was a prominence/framing fix, not a functionality fix. The section now sits in a real bordered card with a clear "Evidence Attachments" heading (with a live count badge), matching every other section's visual weight instead of reading as an afterthought.
+
+### Camera/file upload controls confirmation
+
+Unchanged and re-verified: Take Photo (`accept="image/*" capture="environment"`), Record Video (`accept="video/*" capture="environment"`), Upload Files (`multiple`, full allowed-extension `accept`) — all 3 call the real `uploadAttachmentAction`/`POST /incidents/:id/attachments` path from FMP-INC-01. Nothing about the controls themselves changed in this unit, only their visual container.
+
+### Description/comments/activity layout changes
+
+Description now always renders in a card ("No description provided." when empty, was previously always non-empty in practice but never had a real empty-state message). Comments and Activity are now 2 fully separate cards — `ActivityTimeline` no longer accepts a `comments` prop at all; the Comments card renders its own comment list + `AddCommentForm` directly in the page. Every real transition (submit/start review/begin investigation/request actions/resolve/close) now gets its own specific activity label (e.g. "Incident submitted") instead of the generic "Status changed" every one of them previously shared — the backend logs a single generic `STATUS_CHANGED` event for all of them, so this mapping lives in `STATUS_CHANGE_LABELS`, keyed by the real `newStatus` on each activity row.
+
+### Actions/details panel changes
+
+Available Actions: renamed to Title Case throughout; Submit → "Submit Incident" with a real helper line ("Submit this incident when the details and evidence are ready for review."); the previously-silent empty case now shows "No actions available to you on this incident right now." Incident Details: added Status/Severity rows (previously only in the header); Department/Plant/Location now always render with "Not specified" instead of being hidden when empty; renamed "Location" → "Location / Area" and "Reported to"/"Reported" wording to Title Case, matching the brief's exact field list.
+
+### Confirmation upload uses real endpoints
+
+Confirmed by re-reading `incident-evidence-attachments.tsx`/`evidence-file-picker.tsx`/`actions.ts` in full — every button calls `uploadAttachmentAction`/`deleteAttachmentAction`, both hitting the real `POST`/`DELETE /incidents/:id/attachments*` endpoints built in FMP-INC-01. Nothing in this unit touched those functions.
+
+### Confirmation no fake actions/data
+
+No new button, input, or displayed figure in this unit is fabricated — every card renders real fields already returned by `incidentsApi.get()`/`.listComments()`/`.listActivities()`/`.listActions()`/`.listAttachments()`, and every action button calls an already-real, already-tested server action.
+
+### Verification Results (2026-09-28)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged — no backend touched) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (+5, `incident-detail-helpers.test.ts`) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No files under `apps/api` or `packages/database` were opened or modified — purely a frontend visual/wording restructure.
+- The Investigation/Resolution/Corrective Actions sections (not explicitly named in this unit's own layout spec) were kept, in their existing logical order, wrapped in the same new card styling — none of their internal logic/components changed, only their visual container, so no real functionality was removed to make room for the brief's own explicitly-named sections.
+
+## FMP-UI-23 — Add Estimation Module and Reorder Executive Modules (Completed 2026-09-29)
+
+### Summary
+
+Added a new Estimation placeholder module (no real backend, same honest "Setup Pending" shape as QA/QC and Storage & Delivery) and reordered every module-listing surface in the app — the Platform Dashboard cards, the sidebar, the module switcher, and Previous/Next navigation — to the exact required sequence: Contract Management, Estimation, Technical, Erection, Safety & Compliance, Incident Management, Production & Planning, Maintenance Management, Storage Yard & Delivery, Quality Control, Task Management. Renamed 3 existing module labels everywhere user-facing ("Incident Report" → "Incident Management", "Production Planning" → "Production & Planning", "Quality Assurance & Control"/"QA/QC" → "Quality Control"). No route, permission, or schema change — every existing `code`/href/slug is untouched; only titles and array order moved.
+
+### Files changed
+
+- `apps/api/src/platform/platform-dashboard.service.ts` — added `buildEstimationCard()`; reordered `getDashboard()`'s card-push sequence; renamed `INCIDENT_REPORT`/`PRODUCTION_DASHBOARD`/`QA_QC` card titles; extended `PlatformModuleCard['code']` union with `'ESTIMATION'`.
+- `apps/api/src/platform/platform-dashboard.service.test.ts` — updated order assertions, added Estimation coverage.
+- `apps/web/src/lib/platform-api.ts` — added `'ESTIMATION'` to `PlatformModuleCode`.
+- `apps/web/src/app/(protected)/_lib/module-accent.ts` — added `'estimation'` accent (gold, `#a16207`/`#fefce8`).
+- `apps/web/src/app/(protected)/_lib/executive-modules.ts` — the single source of truth for Previous/Next + module switcher: reordered, renamed, added the Estimation entry.
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — `MAIN_GROUPS` Operations labels renamed; `EXECUTIVE_SIDEBAR_ITEMS` reordered, renamed, extended with Estimation.
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — `CARD_ICONS`/`CARD_ACCENTS` extended with `ESTIMATION`; grid eased `xl:grid-cols-5` → `xl:grid-cols-4` for a clean 11-card, 3-row (4+4+3) spread.
+- `apps/web/src/app/(protected)/executive/estimation/page.tsx` — new Executive Module Landing Page (coming-soon), mirrors `executive/qaqc/page.tsx`/`executive/storage-delivery/page.tsx` exactly.
+- `apps/web/src/app/(protected)/executive/qaqc/page.tsx` — title/metadata/coming-soon message renamed to "Quality Control".
+- `apps/web/src/app/(protected)/production/executive/page.tsx` — title/metadata/note renamed to "Production & Planning".
+- `apps/web/src/app/(protected)/incidents/executive/page.tsx`, `incidents/page.tsx`, `incidents/[id]/page.tsx`, `incidents/[id]/edit/page.tsx`, `incidents/new/page.tsx`, `incidents/dashboard/page.tsx` — every breadcrumb/title/eyebrow "Incident Report" renamed to "Incident Management"; the create form's `submitLabel` renamed "Save Incident Report" → "Save Incident" (matches the "Create {entity}" convention every sibling form's own submit button already uses — e.g. "Create Task", "Create inspection" — rather than repeating the deprecated module name).
+- `apps/web/src/app/(protected)/administration/users/_components/scope-utils.ts`, `module-access-panel.tsx`, `module-catalog.ts`, `new-user-wizard.tsx` — module label maps/descriptive text renamed to match (`INCIDENT_REPORT`/`PRODUCTION_DASHBOARD` display strings; slugs/codes unchanged).
+- `apps/web/src/app/login/page.tsx` — `MODULE_TAGS` "QA/QC" → "Quality Control".
+
+### 1–2. New Estimation module + sidebar placement
+
+Added a Platform Dashboard card and a sidebar entry, both positioned immediately after Contract Management. Card: title "Estimation", description "Cost estimation, quotations, and pre-contract costing.", no metrics (4 honest `null` values, rendering the same "Setup Pending / Module will be configured in a future unit." block every other placeholder card already uses — no new component logic needed, `ExecutiveModuleCard`'s existing `isPlaceholder` detection just works). Icon: `Calculator` (lucide-react). Accent: new `'estimation'` gold palette entry (`#a16207`/`#fefce8`), deliberately distinct from Erection's amber and Storage's slate.
+
+### 3. Estimation coming-soon page
+
+`GET /executive/estimation` — new page, byte-for-byte structural match to `executive/qaqc/page.tsx`: `ExecutiveModuleNav` (Back to Platform Dashboard / Previous / Next / Switch module, all computed automatically from the module's new position in `EXECUTIVE_MODULES`), `ExecutiveModuleTitle`, `ExecutiveComingSoon` with the message "Estimation will be configured in a future unit.", and a "Back to Platform Dashboard" button. Gated on `isExecutiveManagerOrAdminAccess` (no dedicated permission — see item 8 below).
+
+### 4. Dashboard card reorder + grid
+
+`PlatformDashboardService.getDashboard()`'s card-push order rewritten to match the required sequence exactly (see the service's own updated doc comment for the full reasoning — Estimation, Storage Yard & Delivery, and Quality Control are all placeholder-gated and no longer pushed as one adjacent block; Estimation now sits inside the `contracts.read` branch, between Contract Management and Technical/Erection). Frontend grid eased from `xl:grid-cols-5` to `xl:grid-cols-4` — 5 columns would leave the 11th card orphaned alone on a 3rd row (5+5+1); 4 columns gives a clean 4+4+3 spread with no column narrower than before, so `ExecutiveModuleCard`'s existing compact (FMP-UI-10C) text sizing needed no further shrinking to avoid overflow.
+
+### 5. Module switcher and Previous/Next reorder
+
+`EXECUTIVE_MODULES` in `_lib/executive-modules.ts` — the single array `getModuleNeighbors()`/`getVisibleModules()` both read from — reordered to the exact required sequence and extended with the Estimation entry. Every page using `ExecutiveModuleNav` (10 existing pages, unchanged) and `IncidentModuleNav` (which reads the same underlying functions) picked up the new order and the new Estimation chip automatically — no per-page edits needed for Previous/Next itself, only for the renamed titles that same array now returns.
+
+### 6. Label renames
+
+- "Incident Report" → "Incident Management": `executive-modules.ts`, `sidebar.tsx` (both Operations item and executive flat item), `incidents/executive/page.tsx` (metadata + title), `incidents/page.tsx` (breadcrumb), `incidents/[id]/page.tsx` (breadcrumb + eyebrow), `incidents/[id]/edit/page.tsx` (breadcrumb), `incidents/new/page.tsx` (breadcrumb), `incidents/dashboard/page.tsx` (metadata + breadcrumb + h1), `scope-utils.ts`, `module-access-panel.tsx`, `module-catalog.ts`, `new-user-wizard.tsx`'s Executive Manager description text.
+- "Production Planning" → "Production & Planning": `executive-modules.ts`, `sidebar.tsx`, `production/executive/page.tsx` (metadata + title + Needs Attention note), `scope-utils.ts`, `module-catalog.ts`, `new-user-wizard.tsx`.
+- "Quality Assurance & Control" / "QA/QC" → "Quality Control": `executive-modules.ts`, `sidebar.tsx`, `platform-dashboard.service.ts`, `executive/qaqc/page.tsx` (metadata + title + coming-soon message), `login/page.tsx`'s `MODULE_TAGS`.
+- Deliberately left unchanged: every "QA/QC" occurrence inside the Erection Checklist domain (`checklistType: 'QA/QC Verification Checklist'`, "Reviewed By (QA/QC)", `reviewedByQaqc` field, etc.) — that is an established erection-workflow checklist TYPE, unrelated to the top-level Quality Control platform module, and renaming it was never in scope. Also left unchanged: the Report Incident form's own breadcrumb-adjacent domain wording where "incident report" means the record being created, not module navigation (see the `submitLabel` rename above for the one place this line was actually crossed).
+
+### 7. Existing routes
+
+No route changed. `CONTRACTS_MANAGEMENT`/`TECHNICAL`/`ERECTION`/`SAFETY_COMPLIANCE`/`INCIDENT_REPORT`/`PRODUCTION_DASHBOARD`/`MAINTENANCE_REQUESTS`/`STORAGE_DELIVERY`/`QA_QC`/`FACTORY_TASKS` all keep their exact `code` and `landingHref`/route values; only `title` and array position changed. `/incidents`, `/incidents/executive`, `/production`, `/executive/qaqc` all confirmed unchanged and still building. No redirect alias was added for `/executive/quality-control` — the ticket offered it only as optional, and the existing `/executive/qaqc` route/link already work everywhere, so adding an unused alias would be pure surface area with no real requirement behind it.
+
+### 8. Permission/visibility for Estimation
+
+No new permission created. `isVisible: isExecutiveManagerOrAdminAccess` on the frontend `EXECUTIVE_MODULES` entry, and the identical `isExecutiveManagerOrAdminAccess(actor.permissions)` gate (`showPlaceholders` in `getDashboard()`) on the backend card — the exact same rule already governing QA/QC and Storage & Delivery: visible to an Executive-Manager-shaped actor (all 6 real operational read permissions) or any Admin/Super Admin-shaped actor (any `ADMINISTRATION_GATE_PERMISSIONS` code), invisible to every single/partial-module role. The sidebar's `EXECUTIVE_SIDEBAR_ITEMS` (including the new Estimation row) continues to render only under `isExecutiveManagerAccess` (pure Executive Manager, no admin permission) — the same pre-existing asymmetry QA/QC and Storage & Delivery already had between the sidebar (executive-only) and the dashboard/module-switcher (executive-or-admin), left unchanged and applied identically to Estimation.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged count — assertions extended, no new `it` blocks) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged — no new pure-function logic added) |
+| `pnpm build` | ✓ 8/8 tasks, `/executive/estimation` confirmed in route output |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Mid-unit, the local Turborepo build cache (`.turbo/cache`) had grown to 180GB over the course of this session's many builds and filled the C: drive to 0 bytes free, causing an `ENOSPC` write failure on an unrelated file edit. Cleared via `rm -rf .turbo/cache` (purely a regenerable build-output cache — no source code, no git history, no user data) — freed 181GB. Not a code change, but recorded here since it blocked mid-unit work and the same growth will recur over time; worth an occasional `rm -rf .turbo/cache` if a future unit hits the same `ENOSPC` symptom.
+- `PlatformDashboardService.getDashboard()`'s push order required a real restructure, not just reordering existing `if` blocks: Estimation's required position (between Contract Management and Technical/Erection) sits INSIDE what was previously a single `if (actor.permissions.includes('contracts.read'))` block that pushed all 3 contract-family cards from one `Promise.all` in one line. Estimation is gated on a completely different rule, so the block now pushes `contractCard` alone, then conditionally `buildEstimationCard()`, then `technicalCard, erectionCard` — preserving the original single `Promise.all` fetch (no extra queries) while still respecting the new required order, including the edge case of an admin actor who holds `isExecutiveManagerOrAdminAccess` but not literally `contracts.read` (handled by a parallel `else if` branch).
+- Confirmed via full-file audit that "QA/QC" appears in two structurally unrelated places in this codebase: the top-level platform module (renamed) and an Erection Checklist's own `checklistType` enum value / review-field labels (left unchanged, a different domain concept — an erection checklist's own QA verification step, not the Quality Control module).
+
+## FMP-UI-23B — Fix Missing Estimation Dashboard Card, Dashboard Labels, and No-Scroll Layout (Completed 2026-09-29)
+
+### Summary
+
+FMP-UI-23's own code (`PlatformDashboardService.getDashboard()`, `EXECUTIVE_MODULES`, `sidebar.tsx`) was already 100% correct — full re-audit against every acceptance criterion in this ticket confirmed the Estimation card, the required order, and every renamed label were all already present and already matched the approved sequence exactly, in source. **The root cause was NOT a code defect**: the API's dev process (`apps/api`'s `dev` script — plain `node -r ts-node/register src/main.ts`, no watch flag) had been running continuously since before the FMP-UI-23 edit was ever saved, so every live `/platform/dashboard` HTTP response the browser was actually seeing was still built from the OLD, pre-FMP-UI-23 compiled code (10 cards, old order, old titles) — the exact same class of bug already documented in this file as the FMP-UI-10B precedent ("check whether the RUNNING API process predates the source edit before assuming the code itself is still wrong"). The sidebar (a pure frontend array, picked up instantly via Next.js fast refresh) and the dashboard grid's own column count (also frontend) both looked correct live; only the API-sourced card data was stale — exactly the asymmetry FMP-UI-10B's own reusable takeaway predicts. Fixed by stopping the one stale API process and starting a fresh one from the identical command (`cd apps/api && node --env-file=../../.env -r ts-node/register -r tsconfig-paths/register src/main.ts`) — confirmed listening on port 4000 with no errors. On top of that root-cause fix, this unit ALSO did the genuinely new work the ticket separately requested: a real no-scroll layout compaction pass (`ExecutiveModuleCard`, `dashboard/page.tsx`) so the now-correct 11-card, 3-row (4+4+3) grid fits a normal 1920×1080 desktop viewport without the page scrolling.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx` — every size eased down one more notch (see the component's own new FMP-UI-23B doc comment for the full list): card floor, padding, icon, title, description, metric tiles, button all reduced; placeholder block kept deliberately shorter than the 2-row metrics grid so a setup-pending card never becomes the tallest one in its row.
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — title `text-3xl/lg:text-4xl` → `text-2xl/lg:text-3xl`, subtitle gap `mt-1.5` → `mt-1`, outer container padding trimmed further, hero→grid gap `space-y-2` → `space-y-1.5`, grid gap `gap-3` → `gap-2.5`.
+- `apps/api/src/platform/platform-dashboard.service.ts` — no functional change; added an explicit "this order is hand-duplicated from `EXECUTIVE_MODULES`, update both together" cross-reference comment per the ticket's own "prefer one single source of truth" instruction (a literal shared array isn't possible across the `apps/api`/`apps/web` package boundary — see that comment for the full reasoning, same shape as `isExecutiveManagerOrAdminAccess`'s own pre-existing cross-package duplication).
+- `apps/web/src/app/(protected)/_lib/executive-modules.ts` — matching cross-reference comment added on the frontend side.
+- No other files needed changes — the sidebar, `EXECUTIVE_MODULES`, and the backend push order were all re-verified byte-for-byte correct as of FMP-UI-23 and needed no edits.
+
+### Exact root cause
+
+The API dev process (PID 16632, confirmed via `Get-CimInstance Win32_Process`) had a `CreationDate` of 2026-09-28 14:42:08 — strictly earlier than `platform-dashboard.service.ts`'s own last-modified timestamp of 2026-09-28 15:21:04 (the FMP-UI-23 edit). `ts-node/register` compiles TypeScript to JS exactly once, at process startup, and never re-reads the file — so every request that process served after that point was still running the FMP-UI-23-era-BEFORE code: 10 cards, no Estimation, old titles ("Incident Report", "Production Planning", "Quality Assurance & Control"), and the old push order (QA/QC + Storage & Delivery right after Erection, before Safety & Compliance) — which matches this ticket's own reported symptom ("shows Storage Yard & Delivery before Safety & Compliance") exactly. The frontend (`sidebar.tsx`, `dashboard/page.tsx`'s grid classes) is served by Next.js dev, which recompiles Server Components per-request — so it correctly showed the new sidebar order/labels and the new 4-column grid, while still rendering only the STALE 10-card API payload inside that grid. Fix: stopped PID 16632, started a fresh API process from the same command; confirmed via `curl http://localhost:4000/platform/dashboard` returning `401` (healthy, unauthenticated — expected) rather than any connection/500 error.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+| API dev process restart | ✓ fresh PID, `api_started` log line, port 4000, `/platform/dashboard` returns 401 (not 500/refused) |
+
+### Key Implementation Notes
+
+- No password reset and no live authenticated HTTP verification was attempted, per this project's own established precedent (documented earlier in this file, CM-62/CM-62B/CM-70-era units): the dev database's only real accounts (`superadmin`/`managercontract`/`user1contract`/`user2contract`/`usercontract`) have no credentials known to this session. The exact scenario (Executive-Manager-shaped and Admin-shaped actors, full card list/order/titles) is covered by `platform-dashboard.service.test.ts`'s own assertions instead, which fully passed.
+- This is the SECOND time in this project's history the exact same "ts-node has no watch flag, so an edited API source file is silently ignored by an already-running dev process" bug has caused a reported symptom (first: FMP-UI-10B). `apps/api/package.json`'s `dev` script still has no watch mode — this class of bug will keep recurring for every future backend-only edit made while a dev process from before that edit is still running, until that script gains one (out of scope for this ticket to change).
+- The requested "prefer one single source of truth: `EXECUTIVE_MODULES`" was addressed via cross-referencing doc comments rather than a real code merge — `EXECUTIVE_MODULES` lives in `apps/web` (imports `lucide-react` icons, JSX-adjacent `isVisible` closures) and cannot be imported by `apps/api` (a separate NestJS package with no shared package boundary for this data today). Building a new shared package purely to host an 11-row order/title list was judged out of proportion to what this ticket actually needed (the two were already in sync; the bug was never a real divergence) — flagged here in case a future unit wants to invest in an actual `packages/shared`-hosted module registry.
+- **Post-unit incident (not part of the ticket itself, recorded for the operational record):** restarting the stale API process (above) was done by launching a detached `node ... src/main.ts` directly in the background rather than through the user's own `npm run dev`/`turbo dev` supervision — that process was never terminated afterward. When the user next ran `npm run dev` themselves, `apps/api`'s own dev task failed with `EADDRINUSE :::4000` (port already held by the orphan), which cascaded into turbo tearing down the whole pipeline (including the web server that had already printed "Ready"), producing a browser `ERR_CONNECTION_REFUSED`. Fixed by finding the orphan via `Get-NetTCPConnection -LocalPort 4000` → `Get-CimInstance Win32_Process` and stopping it, confirming both port 3000 and 4000 were free before the user retried. Lesson for any future "restart a stale dev process to pick up a code change" fix: prefer asking the user to restart their own supervised dev command over launching a new detached process — a detached process outlives the user's own terminal session/Ctrl+C and can silently block their next `npm run dev` attempt.
+
+## FMP-UI-23C — Simplify Platform Dashboard Heading to One Large Title (Completed 2026-09-29)
+
+### Summary
+
+Replaced the Platform Dashboard's 2-line hero (a bold "RECAFCO Factory Management Platform" title plus a small-caps "Factory Operations Control Center" tagline underneath) with a single large heading: "Factory Operations Control Center" alone, promoted from the small uppercase caption to the page's one `<h1>`. The full product name was removed from the center dashboard entirely (the sidebar already carries the RECAFCO FMP brand — logo + name — so repeating it here was redundant, per the ticket's own framing). No cards, order, routes, permissions, or backend logic touched.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — the 2-element hero block (`<h1>` + `<p>` tagline, wrapped in a `text-center` div) replaced with one `<h1>Factory Operations Control Center</h1>`.
+
+### Heading before/after
+
+- Before: `<h1 className="text-2xl font-extrabold tracking-tight text-text-primary lg:text-3xl">RECAFCO Factory Management Platform</h1>` + `<p className="mt-1 text-xs font-semibold uppercase tracking-widest text-text-muted">Factory Operations Control Center</p>`.
+- After: `<h1 className="text-center text-2xl font-extrabold tracking-tight text-text-primary sm:text-3xl lg:text-5xl">Factory Operations Control Center</h1>` — one line, no subtitle, no product name.
+
+### Font size/style update
+
+`text-2xl` (mobile) → `sm:text-3xl` (tablet) → `lg:text-5xl` (desktop), `font-extrabold`, `tracking-tight`, `text-center`, `text-text-primary`. Every breakpoint is now LARGER than the corresponding size the OLD title (not tagline) used — `lg:text-5xl` (48px) vs. the old title's `lg:text-3xl` (30px) — while the old tagline (`text-xs`, 12px) is gone entirely.
+
+### Spacing changes
+
+None needed beyond removing the tagline `<p>` and its `mt-1` gap — the single larger heading is still SHORTER overall than the old two-line title+tagline block it replaces (one bigger line vs. a big line plus a subtitle line), so the card grid does not get pushed down even at `lg:text-5xl`; the container's own FMP-UI-23B padding/gap values (`pt-0.5`/`pb-2 lg:pt-1/lg:pb-3`, `space-y-1.5`) were left unchanged since they were already correctly compact and remain more than sufficient.
+
+### Confirmation dashboard cards/order unchanged
+
+`ExecutiveModuleCard`, `CARD_ICONS`/`CARD_ACCENTS`, the grid's column classes, and `PlatformDashboardService.getDashboard()` were not opened — the 11-card Contract Management → Estimation → … → Task Management order and every label from FMP-UI-23/23B stand exactly as they were.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- No live authenticated verification was needed/attempted for this unit — it's a static text/class change with no data dependency, fully verified by typecheck + build (which renders/type-checks every page, including this one) and a direct read of the final JSX.
+- Learned from the FMP-UI-23B incident above: this unit's own verification did NOT include restarting or touching any running dev process — build/test/typecheck are sufficient for a pure presentational change, and the user's own dev server (once restarted on their own machine) will pick this up via Next.js's normal Server Component recompilation, no API restart involved at all since nothing here touches `apps/api`.
+
+## FMP-UI-23D — Increase Platform Dashboard Heading Size and Add Proper Gap Before Cards (Completed 2026-09-29)
+
+### Summary
+
+Follow-up polish on FMP-UI-23C's new single-heading hero: the heading is now one step larger at the smaller breakpoints, and the hero→grid gap changed from a bare 6px (`space-y-1.5`) to a real 24px→32px (`gap-6 lg:gap-8`) flex gap, so the heading no longer reads as "attached to" the cards below it. No cards, order, sidebar, routes, permissions, or backend touched.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/page.tsx` — heading classes and the hero-wrapping flex container's spacing mechanism changed; nothing else.
+
+### Heading size before/after
+
+- Before (FMP-UI-23C): `text-2xl font-extrabold tracking-tight text-text-primary sm:text-3xl lg:text-5xl`.
+- After (FMP-UI-23D): `text-3xl font-extrabold tracking-tight text-text-primary sm:text-4xl lg:text-5xl` — exactly this unit's own recommended `text-3xl sm:text-4xl lg:text-5xl`. `lg:text-5xl` (the desktop/no-scroll-critical breakpoint) is UNCHANGED — already at FMP-UI-23C's ceiling and confirmed by this unit's own brief as "if it still fits well," which it already did — so no extra height comes from the heading itself at the breakpoint that matters most for the no-scroll requirement; only the mobile/tablet steps grew.
+
+### Spacing/gap before/after
+
+- Before: the hero and the grid (and the rare error/empty-state banner between them) were spaced via `space-y-1.5` on their shared flex-column parent — a bare 6px `margin-top` on non-first children.
+- After: replaced with `gap-6 lg:gap-8` (24px at base/tablet, 32px at desktop) using CSS flexbox `gap` instead of `space-y`'s margin trick — deliberately chosen because `gap` applies uniformly between EVERY adjacent pair of children (heading→banner, heading→grid, or banner→grid on the rare error/empty path), so the heading can never end up touching whatever renders directly below it in any state, not just the common one. Falls inside this unit's own recommended 24–32px range exactly.
+- Outer container padding (`pt-0.5 pb-2 lg:pt-1 lg:pb-3`, set by FMP-UI-23B) was left untouched — per this unit's own "keep top spacing compact" instruction, only the INNER hero→grid gap needed to grow, not the page's outer padding.
+
+### Confirmation dashboard cards/order unchanged
+
+`ExecutiveModuleCard`, `CARD_ICONS`/`CARD_ACCENTS`, the grid's own column classes (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`) and inter-card `gap-2.5`, and `PlatformDashboardService.getDashboard()` were not opened — the 11-card Contract Management → Estimation → … → Task Management order and every card label stand exactly as FMP-UI-23/23B left them. Sidebar order/branding also untouched.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm build` | ✓ 8/8 tasks |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `gap` on a flex container was chosen over bumping `space-y-*` specifically because `space-y` only adds margin-TOP to non-first children — it cannot add space "before" the first child's own successor uniformly across every possible sibling combination the way `gap` does automatically; this also quietly fixes a latent edge case (banner-to-grid spacing on the error/empty-cards path) that `space-y-1.5` technically covered too, but only at the old, cramped 6px value.
+- No dev-process restart involved — same reasoning as FMP-UI-23C: purely presentational, no `apps/api` dependency.
+
+## FMP-PERF-01 — Performance Audit and Safe Optimization (Completed 2026-09-29)
+
+### Summary
+
+Full audit of the 11 executive/dashboard/list pages named in the ticket plus their backing API services, Prisma schema indexes, and frontend bundle/loading structure. The codebase was already in good shape (dashboard services use `count()`/`select` correctly, no full-table over-fetching, every hot model already has status/createdAt/assignedTo/department composite indexes — confirmed by direct schema read, no index changes needed). Two real, safe, low-risk inefficiencies were found and fixed, both structural duplicate-work patterns rather than missing indexes or N+1s in the classic sense. No business logic, permission logic, auth model, routes, or UI behavior changed — every fix returns byte-identical data, just computed with fewer redundant round trips.
+
+Large amounts of unrelated in-progress work (incident attachments, erection dashboard redesign, task control center, safety module nav — none yet committed) were already sitting uncommitted in the tree at the start of this unit. Per this ticket's own "safe, low-risk only" and "no business logic broken" constraints, that WIP was left untouched — this unit's edits are confined to files that WIP does not touch (`auth-api.ts`, `department-access.service.ts`) plus small isolated single-block edits in service files where the WIP's own changes are unrelated to the edited block, verified by reading each file's current on-disk content (not git HEAD) before editing.
+
+### Root causes found
+
+1. **Redundant `/auth/me` calls per request.** `(protected)/layout.tsx` (every protected page's parent) and each page's own `page.tsx` (26 files) both independently call `authApi.me(accessToken)` — the layout to resolve `ShellUser` for the sidebar/header, each page again to resolve permissions for its own redirect/gating logic, because there is no shared per-request context to pass the layout's already-resolved profile down to page components in the App Router. `apps/web/src/app/(protected)/contracts/_lib/get-user-permissions.ts`'s two helpers added further independent calls on contract pages. Each call is a real network round trip to the API, which itself does a live DB-backed permission recomputation (correct and unchanged — see `get-user-permissions.ts`'s own comment: the access-token JWT deliberately carries no permissions claim, so this can never be resolved from the cookie alone).
+2. **Duplicate `userModuleAccess` query on every scoped dashboard.** `DepartmentAccessService.buildDeptFilter()` always calls `this.getScope()` internally to resolve the actor's department-access scope. Seven call sites (`incidents`, `factory-tasks`, `safety`, `maintenance`, `production-orders`, `users`, `contracts` — every module's own `getDashboard()`/list-scope method) already call `getScope()` separately (to report the scope label) and `buildDeptFilter()` together via `Promise.all(...)`, meaning the exact same `userModuleAccess.findUnique` row was queried twice per call, on every dashboard load and scoped list fetch across every module.
+
+### Files changed
+
+- `apps/web/src/lib/auth-api.ts` — `authApi.me` now points at a `cache()`-wrapped (React per-request memoization) resolver instead of a bare `apiGet` call. No other file needed to change: every existing `authApi.me(accessToken)` call site (layout, all 26 pages, `get-user-permissions.ts`) automatically shares one real `/auth/me` call per request instead of one each, since they all go through the same `authApi.me` reference. Same return shape, same live backend permission recomputation, same staleness (none — still one fresh DB-backed check per request, just not re-issued redundantly within that one request).
+- `apps/api/src/department-access/department-access.service.ts` — `buildDeptFilter()` gained an optional third `knownScope` parameter; when passed, it skips its own internal `getScope()` call instead of re-querying the same row.
+- `apps/api/src/incidents/incidents.service.ts`, `apps/api/src/factory-tasks/factory-tasks.service.ts`, `apps/api/src/safety/safety.service.ts`, `apps/api/src/maintenance/maintenance.service.ts`, `apps/api/src/production/production-orders.service.ts`, `apps/api/src/users/users.service.ts`, `apps/api/src/contracts/contracts.service.ts` — each of these 7 `getDashboard()`/scoped-list methods changed from `Promise.all([getScope(...), buildDeptFilter(...)])` (2 queries, 1 wasted) to a sequential `getScope()` then `buildDeptFilter(actor, module, scopeType)` (1 or 2 queries depending on scope, zero wasted) — same wall-clock latency in both the common case (ALL_DEPARTMENTS/OWN_DEPARTMENT: 1 round trip either way) and the SELECTED_DEPARTMENTS case (2 sequential round trips either way, since `buildDeptFilter`'s own internal calls were already sequential), strictly fewer real DB queries in both.
+
+### Audit findings not acted on (recommendations for a future unit)
+
+- **Login hero images are ~960KB each (`login-hero.jpg`, `login-hero-mobile.jpg`), served via a plain `<img>` tag, not `next/image`.** Real and worth fixing, but left untouched: the tree already contains untracked `login-hero1.jpg`/`login-hero-mobile1.jpg` (360KB/73KB) sitting alongside the current ones — clear evidence someone is already mid-replacement of these exact files. Touching `login/page.tsx` or the hero images now would collide with that in-progress work.
+- **`apps/web/src/app/(protected)/_components/sidebar.tsx`'s logo (`<img src="/recafco-logo.png">`, 157KB PNG, displayed at ~44px)** and a few other `<img>` usages (`welcome-transition.tsx`, an attachment-download route) are not `next/image`. Low priority — small/rare enough not to be the "feels slow when clicking around" complaint — but a clean `next/image` pass across the remaining raw `<img>` tags would still be a reasonable follow-up.
+- **`apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-card.tsx`'s `formatRelativeActivity()`** calls `Date.now()` directly inside a Client Component's render path (`'use client'`), which is server-rendered once at request time and again at hydration — a real, if narrow and rare, hydration-text-mismatch surface ("X ago" computed at two slightly different instants). Not touched: this file is inside the actively-changing contracts/workflow area and the risk of a visible mismatch is low (values are minute-rounded).
+- 81 of 93 route segments already use `export const dynamic = 'force-dynamic'`. This is not a bug — every protected page needs a live, DB-backed permission/session check per this app's own security model (`get-user-permissions.ts`'s own comment: never trust a decoded JWT for permissions) — so static optimization is structurally unavailable for almost the whole app. No change recommended; flagged only so a future unit doesn't mistake it for an oversight.
+- Only 7 of ~15 module route roots have their own `loading.tsx` (`administration`, `contracts`, `factory-tasks`, `incidents`, `maintenance`, `safety-compliance`, plus the top-level `(protected)/loading.tsx`). Every route still gets a Suspense fallback (Next.js `loading.tsx` boundaries apply to the whole subtree, so the top-level one covers routes like `/dashboard`, `/production/*`, `/executive/*` that lack their own), so this is not a "frozen blank screen" bug — just a coarser fallback for those routes. Adding scoped `loading.tsx` files for `production`, `dashboard`, and the `executive/*` landing pages would give a more specific skeleton but is cosmetic, not a fix.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged — dashboard/list behavior and returned data identical, only query count changed) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all 94 routes compiled (Next.js 16.2.9 / Turbopack) |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change — none needed, see DB index audit below) |
+
+### DB index audit
+
+Directly inspected `packages/database/prisma/schema.prisma` for `Incident`, `FactoryTask`, `SafetyInspection`, `SafetyFinding`, and cross-checked `Contract`/`ContractWorkflowTask`/`ProductionOrder` query call sites. Every model already has composite indexes covering the query patterns the audit ticket asked about: `[status, createdAt desc]`, `[priority/severity, status]`, `[assignedToUserId, status]`, plus single-column indexes on `departmentId`/`plantId`/`dueAt`/`scheduledAt`/etc. No missing index was found and none is proposed — the dashboard/list query patterns audited are already well-covered.
+
+### Key Implementation Notes
+
+- The `authApi.me` fix relies on React's `cache()` — per-request memoization scoped to a single server render, not a cross-request cache — so it cannot introduce stale permissions across requests or across users; it only prevents the SAME request from asking the API the same question twice. Confirmed no behavior change via the unchanged web test count and a full build (which renders/type-checks every page using this helper).
+- `DepartmentAccessService` is a NestJS singleton provider (default scope), which is why the fix could not memoize `getScope()` inside the service instance itself (that would leak one user's resolved scope into another user's concurrent request) — the `knownScope` parameter keeps the memoization explicit and request-local, passed by the caller, never stored on the service.
+- Did not attempt to eliminate the `authApi.me` call in `(protected)/layout.tsx` itself (e.g. by threading the resolved profile down via a shared context to every page) — that would require a larger routing/context restructure across all 26 pages, which this ticket's own "no risky refactors" constraint rules out. The `cache()` fix gets the same practical benefit (one real call per request) with a one-file change.
+- Did not run the app in a browser or capture real network-tab timings: the dev servers were already running under the user's own supervision (ports 3000/4000 listening) and this project's own prior units (see the FMP-UI-23B incident note above) document a concrete prior incident from a Claude-launched detached process colliding with the user's own `npm run dev` — so no new process was started against those ports. Audit evidence instead came from direct source/schema inspection, a full production build (confirms bundle compiles and every route's data-fetching code path is type-correct), and the full test suite.
+
 ## Risks
 
 - Incomplete module requirements

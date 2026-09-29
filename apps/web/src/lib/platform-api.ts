@@ -20,6 +20,7 @@ export interface PlatformMetric {
 
 export type PlatformModuleCode =
   | 'CONTRACTS_MANAGEMENT'
+  | 'ESTIMATION'
   | 'TECHNICAL'
   | 'ERECTION'
   | 'QA_QC'

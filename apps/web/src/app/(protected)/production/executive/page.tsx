@@ -13,7 +13,7 @@ import { ExecutiveAttentionPanel } from '../../_components/executive-attention-p
 import { ExecutiveQuickLinks } from '../../_components/executive-quick-links';
 import { DashboardRecentTable } from '../../_components/dashboard-recent-table';
 
-export const metadata: Metadata = { title: 'Production Planning — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Production & Planning — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 /**
@@ -43,7 +43,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
       <ExecutiveModuleNav code="PRODUCTION_DASHBOARD" permissions={permissions} />
 
       <ExecutiveModuleTitle
-        title="Production Planning"
+        title="Production & Planning"
         description="Production orders, schedules, and shop-floor readiness."
         icon={Factory}
         accent="production"
@@ -68,7 +68,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
         </h2>
         <ExecutiveAttentionPanel
           available={false}
-          note="Not available yet — Production Planning does not yet track a delayed or at-risk order state."
+          note="Not available yet — Production & Planning does not yet track a delayed or at-risk order state."
         />
       </section>
 

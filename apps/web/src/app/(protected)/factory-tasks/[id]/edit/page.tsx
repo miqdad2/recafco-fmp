@@ -4,7 +4,6 @@ import type { Metadata } from 'next';
 import { Breadcrumbs } from '../../../_components/breadcrumbs';
 import { TaskForm } from '../../_components/task-form';
 import { tasksApi } from '../../../../../lib/factory-tasks-api';
-import { departments, plants } from '../../../../../lib/organizations-api';
 import { updateDraftTaskAction } from '../../actions';
 
 interface PageProps {
@@ -41,8 +40,8 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
 
   const [taskRes, deptsRes, plantsRes, userInfo] = await Promise.allSettled([
     tasksApi.get(id),
-    departments.list({ isActive: true, pageSize: 200 }),
-    plants.list({ isActive: true, pageSize: 100 }),
+    tasksApi.departments(),
+    tasksApi.plants(),
     getUserInfo(),
   ]);
 
@@ -60,8 +59,13 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
   // Only creator or tasks.manage may edit
   if (!isCreator && !canManage) notFound();
 
-  const depts = deptsRes.status === 'fulfilled' ? deptsRes.value.items : [];
-  const plantsData = plantsRes.status === 'fulfilled' ? plantsRes.value.items : [];
+  // FMP-UI-20D — same fix as new/page.tsx: `tasksApi.departments()`/`.plants()`
+  // (tasks.read-gated) instead of the admin-gated `organizations-api.ts`
+  // equivalents, which silently returned an empty list for a non-admin editor.
+  const depts = deptsRes.status === 'fulfilled' ? deptsRes.value : [];
+  const deptsFailed = deptsRes.status === 'rejected';
+  const plantsData = plantsRes.status === 'fulfilled' ? plantsRes.value : [];
+  const plantsFailed = plantsRes.status === 'rejected';
   const canLinkIncident = info.permissions.includes('incidents.read');
 
   const boundAction = updateDraftTaskAction.bind(null, id);
@@ -84,7 +88,9 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
           action={boundAction}
           submitLabel="Save changes"
           departments={depts}
+          deptsFailed={deptsFailed}
           plants={plantsData}
+          plantsFailed={plantsFailed}
           canLinkIncident={canLinkIncident}
           defaultValues={task}
         />

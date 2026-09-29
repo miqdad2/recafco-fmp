@@ -9,6 +9,11 @@ import { IncidentStatus, IncidentActionStatus, IncidentSeverity, ModuleIdentifie
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { IncidentsRefService } from './incidents-ref.service';
+import {
+  IncidentAttachmentStorageService,
+  INCIDENT_ATTACHMENT_MAX_BYTES,
+  INCIDENT_ATTACHMENT_ALLOWED_MIME_TYPES,
+} from './incident-attachment-storage.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { CreateIncidentDto } from './dto/create-incident.dto';
 import type { UpdateIncidentDto } from './dto/update-incident.dto';
@@ -117,6 +122,7 @@ export class IncidentsService {
     private readonly db: DatabaseService,
     private readonly ref: IncidentsRefService,
     private readonly deptAccess: DepartmentAccessService,
+    private readonly attachmentStorage: IncidentAttachmentStorageService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -417,12 +423,32 @@ export class IncidentsService {
       /** FMP-UI-01 — Executive Dashboard's "Closed Incidents" card metric: all-time closed count, distinct from resolvedThisMonth's monthly/resolved-only window. */
       closedTotal: number;
     };
-    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+    /** FMP-UI-22 — `severity` added for the Incident Control Center's "Recent Incidents" section, which needs it alongside reference/title/status. */
+    recent: { id: string; referenceNumber: string; title: string; severity: IncidentSeverity; status: string; updatedAt: string; createdAt: string }[];
+    /**
+     * FMP-UI-22 — the Incident Control Center's "Needs Attention" section
+     * needs real per-incident records (reference, title, severity, status,
+     * reported date), not just the `criticalOpen` COUNT above. Top 8
+     * incidents that are both CRITICAL and currently open — mirrors the
+     * same real-records-not-just-counts fix already made for Safety &
+     * Compliance's own Needs Attention (FMP-UI-21). Incidents have no
+     * due-date field of their own (unlike Safety findings), so this
+     * deliberately does NOT invent an "overdue incident" concept — only
+     * the one real, already-computed condition (critical + open).
+     */
+    needsAttention: {
+      id: string;
+      referenceNumber: string;
+      title: string;
+      severity: IncidentSeverity;
+      status: string;
+      createdAt: string;
+    }[];
   }> {
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.INCIDENT_REPORT),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.INCIDENT_REPORT),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.INCIDENT_REPORT);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.INCIDENT_REPORT, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {
@@ -447,7 +473,7 @@ export class IncidentsService {
 
     const deptWhere = deptFilter !== null ? { affectedDepartmentId: deptFilter } : {};
 
-    const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, closedTotal, recentRaw] =
+    const [totalOpen, criticalOpen, underInvestigation, resolvedThisMonth, closedTotal, recentRaw, needsAttentionRaw] =
       await Promise.all([
         this.db.getClient().incident.count({ where: { ...deptWhere, status: { in: openStatuses } } }),
         this.db.getClient().incident.count({
@@ -466,7 +492,13 @@ export class IncidentsService {
           where: { ...deptWhere },
           take: 8,
           orderBy: { updatedAt: 'desc' },
-          select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+          select: { id: true, referenceNumber: true, title: true, severity: true, status: true, updatedAt: true, createdAt: true },
+        }),
+        this.db.getClient().incident.findMany({
+          where: { ...deptWhere, status: { in: openStatuses }, severity: IncidentSeverity.CRITICAL },
+          take: 8,
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, referenceNumber: true, title: true, severity: true, status: true, createdAt: true },
         }),
       ]);
 
@@ -477,8 +509,18 @@ export class IncidentsService {
         id: r.id,
         referenceNumber: r.referenceNumber,
         title: r.title,
+        severity: r.severity,
         status: r.status as string,
         updatedAt: r.updatedAt.toISOString(),
+        createdAt: r.createdAt.toISOString(),
+      })),
+      needsAttention: needsAttentionRaw.map((r) => ({
+        id: r.id,
+        referenceNumber: r.referenceNumber,
+        title: r.title,
+        severity: r.severity,
+        status: r.status as string,
+        createdAt: r.createdAt.toISOString(),
       })),
     };
   }
@@ -1020,6 +1062,154 @@ export class IncidentsService {
   }
 
   // ---------------------------------------------------------------------------
+  // Evidence Attachments (FMP-INC-01)
+  // ---------------------------------------------------------------------------
+  //
+  // Permission model (per this unit's own brief):
+  //   - list/download: incidents.read (same as every other read on an incident)
+  //   - upload: incidents.create (the same permission required to report the
+  //     incident in the first place — this unit deliberately does NOT extend
+  //     upload to incidents.investigate/incidents.review, which the brief
+  //     never asked for; "do not broaden access silently")
+  //   - delete: the uploader themselves, OR incidents.manage — mirrors this
+  //     SAME service's own existing creator-or-manage ownership convention
+  //     (see submit()/cancel() above), not a bespoke new rule. Gated at
+  //     incidents.create at minimum so a pure incidents.read viewer can never
+  //     even attempt a delete.
+
+  async listAttachments(incidentId: string, actor: AuthUser): Promise<unknown[]> {
+    await this.findOneOrThrow(incidentId, actor);
+    return this.db.getClient().incidentAttachment.findMany({
+      where: { incidentId },
+      orderBy: [{ createdAt: 'desc' }],
+      select: {
+        id: true,
+        incidentId: true,
+        originalFileName: true,
+        fileName: true,
+        mimeType: true,
+        fileSize: true,
+        uploadedByUserId: true,
+        createdAt: true,
+        uploadedByUser: { select: { id: true, displayName: true, username: true } },
+      },
+    });
+  }
+
+  async createAttachment(
+    incidentId: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    actor: AuthUser,
+  ): Promise<unknown> {
+    if (!actor.permissions.includes('incidents.create')) {
+      throw new ForbiddenException({ code: 'INCIDENTS_PERMISSION_DENIED', message: 'Missing incidents.create' });
+    }
+    await this.findOneOrThrow(incidentId, actor);
+
+    if (!(INCIDENT_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+      throw new UnprocessableEntityException({
+        code: 'INCIDENT_ATTACHMENT_INVALID_TYPE',
+        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, MP4/MOV/WEBM video, PDF/DOC/DOCX/XLS/XLSX/CSV/TXT documents.',
+      });
+    }
+    if (file.size > INCIDENT_ATTACHMENT_MAX_BYTES) {
+      throw new UnprocessableEntityException({
+        code: 'INCIDENT_ATTACHMENT_TOO_LARGE',
+        message: `File exceeds the ${INCIDENT_ATTACHMENT_MAX_BYTES / (1024 * 1024)}MB upload limit.`,
+      });
+    }
+
+    const { fileName, storagePath } = await this.attachmentStorage.save(incidentId, file.buffer, file.originalname);
+
+    const attachment = await this.db.getClient().incidentAttachment.create({
+      data: {
+        incidentId,
+        fileName,
+        originalFileName: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        storagePath,
+        uploadedByUserId: actor.id,
+      },
+      select: {
+        id: true,
+        incidentId: true,
+        originalFileName: true,
+        fileName: true,
+        mimeType: true,
+        fileSize: true,
+        uploadedByUserId: true,
+        createdAt: true,
+        uploadedByUser: { select: { id: true, displayName: true, username: true } },
+      },
+    });
+
+    await this.db.getClient().incidentActivity.create({
+      data: {
+        incidentId,
+        actorUserId: actor.id,
+        actorName: actor.displayName,
+        event: 'EVIDENCE_UPLOADED',
+        metadata: { attachmentId: attachment.id, fileName: file.originalname },
+      },
+    });
+
+    return attachment;
+  }
+
+  async getAttachmentForDownload(
+    incidentId: string,
+    attachmentId: string,
+    actor: AuthUser,
+  ): Promise<{ storagePath: string; originalFileName: string; mimeType: string }> {
+    await this.findOneOrThrow(incidentId, actor);
+
+    const attachment = await this.db.getClient().incidentAttachment.findFirst({
+      where: { id: attachmentId, incidentId },
+      select: { storagePath: true, originalFileName: true, mimeType: true },
+    });
+    if (!attachment) {
+      throw new NotFoundException({ code: 'INCIDENT_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
+    }
+
+    return attachment;
+  }
+
+  async deleteAttachment(incidentId: string, attachmentId: string, actor: AuthUser): Promise<void> {
+    if (!actor.permissions.includes('incidents.create')) {
+      throw new ForbiddenException({ code: 'INCIDENTS_PERMISSION_DENIED', message: 'Missing incidents.create' });
+    }
+    await this.findOneOrThrow(incidentId, actor);
+
+    const attachment = await this.db.getClient().incidentAttachment.findFirst({
+      where: { id: attachmentId, incidentId },
+      select: { id: true, storagePath: true, originalFileName: true, uploadedByUserId: true },
+    });
+    if (!attachment) {
+      throw new NotFoundException({ code: 'INCIDENT_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
+    }
+    if (attachment.uploadedByUserId !== actor.id && !actor.permissions.includes('incidents.manage')) {
+      throw new ForbiddenException({
+        code: 'INCIDENT_ATTACHMENT_NOT_OWNER',
+        message: 'You can only delete evidence you uploaded, unless you have incidents.manage',
+      });
+    }
+
+    await this.db.getClient().incidentAttachment.delete({ where: { id: attachmentId } });
+    await this.attachmentStorage.deleteFile(attachment.storagePath);
+
+    await this.db.getClient().incidentActivity.create({
+      data: {
+        incidentId,
+        actorUserId: actor.id,
+        actorName: actor.displayName,
+        event: 'EVIDENCE_REMOVED',
+        metadata: { attachmentId, fileName: attachment.originalFileName },
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // People picker
   // ---------------------------------------------------------------------------
 
@@ -1036,6 +1226,43 @@ export class IncidentsService {
       select: { id: true, displayName: true, username: true },
       orderBy: [{ displayName: 'asc' }],
       take: 20,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reference data for the Report Incident form's Location section
+  // (FMP-UI-22) — root cause of the empty Affected Plant/Department
+  // dropdowns: `new/page.tsx` called the ADMIN-gated `organizations-api.ts`
+  // (`GET /organizations/departments`/`/plants` — requiring
+  // `org.departments.read`/`org.plants.read`), a permission an
+  // `incidents.create`-only user does not hold. Fixed the same way as
+  // `factory-tasks`/`safety-compliance`/`contracts`/`production` already
+  // fixed the identical bug for their own create forms: a module-scoped
+  // reference list gated by `incidents.read` (already required for this
+  // whole module). No schema change.
+  // ---------------------------------------------------------------------------
+
+  async listDepartments(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().department.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
+    });
+  }
+
+  async listPlants(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().plant.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
+    });
+  }
+
+  async listLocations(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().location.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
     });
   }
 

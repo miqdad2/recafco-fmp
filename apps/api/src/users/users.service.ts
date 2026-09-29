@@ -446,10 +446,10 @@ export class UsersService {
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.ADMINISTRATION),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.ADMINISTRATION),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.ADMINISTRATION);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.ADMINISTRATION, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {

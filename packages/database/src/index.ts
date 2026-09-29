@@ -20,6 +20,7 @@ export type {
   IncidentAction,
   IncidentComment,
   IncidentActivity,
+  IncidentAttachment,
   TaskSequence,
   FactoryTask,
   FactoryTaskProgress,

@@ -5,8 +5,6 @@ import { Breadcrumbs } from '../../../_components/breadcrumbs';
 import { IncidentForm } from '../../_components/incident-form';
 import { updateDraftAction } from '../../actions';
 import { incidentsApi } from '../../../../../lib/incidents-api';
-import { plants, departments } from '../../../../../lib/organizations-api';
-import type { OrgRef } from '../../../../../lib/incidents-api';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -36,6 +34,17 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   }
 }
 
+/**
+ * FMP-UI-22 — this page shares `IncidentForm` with `new/page.tsx`, which
+ * this same unit fixed to source Plant/Department/Location options from
+ * `incidentsApi.departments()`/`.plants()`/`.locations()` (module-scoped,
+ * gated `incidents.read`) instead of the admin-gated `organizations-api.ts`
+ * (`org.departments.read`/`org.plants.read`, a permission an
+ * `incidents.create`-only user does not hold). Applied the identical fix
+ * here — this page had the exact same bug, just previously out of this
+ * unit's stated scope until `IncidentForm`'s own prop signature changed
+ * and required this call site to be updated anyway.
+ */
 export default async function EditIncidentPage({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
@@ -51,17 +60,18 @@ export default async function EditIncidentPage({ params }: PageProps): Promise<R
     redirect(`/incidents/${id}`);
   }
 
-  const [plantsRes, deptsRes] = await Promise.allSettled([
-    plants.list({ isActive: true, pageSize: 100 }),
-    departments.list({ isActive: true, pageSize: 100 }),
+  const [deptsRes, plantsRes, locationsRes] = await Promise.allSettled([
+    incidentsApi.departments(),
+    incidentsApi.plants(),
+    incidentsApi.locations(),
   ]);
 
-  const plantOptions: OrgRef[] = plantsRes.status === 'fulfilled'
-    ? plantsRes.value.items.map((p) => ({ id: p.id, code: p.code, name: p.name }))
-    : [];
-  const deptOptions: OrgRef[] = deptsRes.status === 'fulfilled'
-    ? deptsRes.value.items.map((d) => ({ id: d.id, code: d.code, name: d.name }))
-    : [];
+  const deptOptions = deptsRes.status === 'fulfilled' ? deptsRes.value : [];
+  const deptsFailed = deptsRes.status === 'rejected';
+  const plantOptions = plantsRes.status === 'fulfilled' ? plantsRes.value : [];
+  const plantsFailed = plantsRes.status === 'rejected';
+  const locationOptions = locationsRes.status === 'fulfilled' ? locationsRes.value : [];
+  const locationsFailed = locationsRes.status === 'rejected';
 
   const boundAction = updateDraftAction.bind(null, id);
 
@@ -69,7 +79,7 @@ export default async function EditIncidentPage({ params }: PageProps): Promise<R
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Incident Report', href: '/incidents' },
+          { label: 'Incident Management', href: '/incidents' },
           { label: incidentRes.referenceNumber, href: `/incidents/${id}` },
           { label: 'Edit draft' },
         ]} />
@@ -85,7 +95,11 @@ export default async function EditIncidentPage({ params }: PageProps): Promise<R
           action={boundAction}
           submitLabel="Save changes"
           plants={plantOptions}
+          plantsFailed={plantsFailed}
           departments={deptOptions}
+          deptsFailed={deptsFailed}
+          locations={locationOptions}
+          locationsFailed={locationsFailed}
           defaultValues={incidentRes}
         />
       </div>

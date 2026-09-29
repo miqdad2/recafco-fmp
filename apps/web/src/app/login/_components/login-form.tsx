@@ -41,6 +41,15 @@ interface Props {
 // guard entirely (the welcome screen now always shows after a real login),
 // so there is no flag left to clear — this form only handles the actual
 // sign-in submission again.
+//
+// FMP-UI-17I — label/placeholder text only (no `name`/`type`/validation/
+// submission changes, no auth logic touched): username label
+// "Username"→"Email / Username" (the field already accepts either — this
+// just makes that explicit for users who don't have a separate username),
+// plus new `placeholder` attributes on both fields ("Enter email ID or
+// username" / "Enter password") — purely visual hint text, native HTML
+// `placeholder`, never a `value`, so it can't interfere with the existing
+// uncontrolled-input/autofill/autocomplete behavior.
 export function LoginForm({ action }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
   const [showPassword, setShowPassword] = useState(false);
@@ -59,7 +68,7 @@ export function LoginForm({ action }: Props): React.JSX.Element {
 
       <div>
         <label htmlFor="username" className="mb-1.5 block text-sm font-semibold text-text-primary">
-          Username
+          Email / Username
         </label>
         <div className="relative">
           <User className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-text-muted" aria-hidden="true" />
@@ -70,7 +79,8 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             required
             autoComplete="username"
             autoFocus
-            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-3 text-base text-text-primary transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
+            placeholder="Enter email ID or username"
+            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-3 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
           />
         </div>
       </div>
@@ -87,7 +97,8 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             type={showPassword ? 'text' : 'password'}
             required
             autoComplete="current-password"
-            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-11 text-base text-text-primary transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
+            placeholder="Enter password"
+            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-11 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
           />
           <button
             type="button"

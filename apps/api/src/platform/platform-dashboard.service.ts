@@ -42,7 +42,7 @@ export interface PlatformMetric {
 
 export interface PlatformModuleCard {
   code:
-    | 'CONTRACTS_MANAGEMENT' | 'TECHNICAL' | 'ERECTION'
+    | 'CONTRACTS_MANAGEMENT' | 'ESTIMATION' | 'TECHNICAL' | 'ERECTION'
     | 'QA_QC' | 'STORAGE_DELIVERY'
     | 'SAFETY_COMPLIANCE' | 'INCIDENT_REPORT' | 'PRODUCTION_DASHBOARD' | 'MAINTENANCE_REQUESTS' | 'FACTORY_TASKS';
   title: string;
@@ -88,10 +88,12 @@ function isExecutiveManagerOrAdminAccess(permissions: string[]): boolean {
 function buildQaQcCard(): PlatformModuleCard {
   return {
     code: 'QA_QC',
-    // FMP-UI-10C — renamed from "QA/QC" everywhere user-facing; the internal
-    // code/route are unchanged (this unit's own instruction: routes stay as
-    // technical slugs, only labels change).
-    title: 'Quality Assurance & Control',
+    // FMP-UI-10C — renamed from "QA/QC" to "Quality Assurance & Control";
+    // FMP-UI-23 — renamed again to "Quality Control" everywhere user-facing
+    // (the exact wording that unit's own required-labels table specifies).
+    // The internal code/route are unchanged (this unit's own instruction:
+    // routes stay as technical slugs, only labels change).
+    title: 'Quality Control',
     description: 'Quality checks, inspections, and approvals.',
     route: '/executive/qaqc',
     // Module not built yet — every figure is honestly "Not available" (null), never a fabricated 0.
@@ -100,6 +102,27 @@ function buildQaQcCard(): PlatformModuleCard {
       metric('Pending Checks', null),
       metric('Approvals', null),
       metric('NCR / Issues', null),
+    ],
+  };
+}
+
+// FMP-UI-23 — Estimation is a new placeholder module, same shape as QA/QC
+// and Storage & Delivery above: no real backend module exists yet, so every
+// metric is honestly null rather than a fabricated number, and visibility
+// mirrors the same "Executive Manager or Admin/Super Admin" rule (no
+// dedicated `estimation.read` permission was created, per this unit's own
+// explicit "do not create a new permission" instruction).
+function buildEstimationCard(): PlatformModuleCard {
+  return {
+    code: 'ESTIMATION',
+    title: 'Estimation',
+    description: 'Cost estimation, quotations, and pre-contract costing.',
+    route: '/executive/estimation',
+    metrics: [
+      metric('Quotations', null),
+      metric('Pending Review', null),
+      metric('Approved', null),
+      metric('Estimated Value', null),
     ],
   };
 }
@@ -151,22 +174,49 @@ export class PlatformDashboardService {
   async getDashboard(actor: AuthUser): Promise<PlatformDashboardResult> {
     const cards: PlatformModuleCard[] = [];
 
-    // Fixed order per FMP-UI-01 (extended in FMP-UI-10): Contract Management,
-    // Technical, Erection, QA/QC, Storage & Delivery, Safety & Compliance,
-    // Incident Report, Production Planning, Maintenance Management, Task
-    // Management.
+    // FMP-UI-23 — fixed order per that unit's own required sequence: Contract
+    // Management, Estimation, Technical, Erection, Safety & Compliance,
+    // Incident Management, Production & Planning, Maintenance Management,
+    // Storage Yard & Delivery, Quality Control, Task Management. (Previous
+    // order, FMP-UI-01/FMP-UI-10: Contract Management, Technical, Erection,
+    // QA/QC, Storage & Delivery, Safety & Compliance, Incident Report,
+    // Production Planning, Maintenance Management, Task Management.)
+    //
+    // FMP-UI-23B — this push order is the backend's OWN copy of the exact
+    // same sequence apps/web/src/app/(protected)/_lib/executive-modules.ts's
+    // `EXECUTIVE_MODULES` array declares (the frontend's single source of
+    // truth for the sidebar, module switcher, and Previous/Next). The two
+    // cannot literally share one array — this file is `apps/api` (no JSX/
+    // lucide-react, builds its own card shape from live DB queries);
+    // `EXECUTIVE_MODULES` is `apps/web`-only (icons, `isVisible` closures
+    // keyed off frontend permission helpers) — so, exactly like
+    // `isExecutiveManagerOrAdminAccess` above already is, the ORDER is
+    // deliberately duplicated by hand in both places rather than merged
+    // into a genuinely shared package. If this sequence ever changes again,
+    // update BOTH this block and that array in the same change — do not
+    // let a future reorder happen in only one of the two.
+    //
+    // Estimation, Storage Yard & Delivery, and Quality Control are all
+    // placeholder modules sharing the same isExecutiveManagerOrAdminAccess
+    // gate (no dedicated permission exists for any of them — see that
+    // function's own doc comment). Estimation sits between Contract
+    // Management and Technical/Erection, which are only fetched inside the
+    // `contracts.read` branch — so it is pushed there too (and, separately,
+    // for the rare admin-without-contracts.read shape), to preserve its
+    // required position even when Contract Management itself is absent.
+    const showPlaceholders = isExecutiveManagerOrAdminAccess(actor.permissions);
+
     if (actor.permissions.includes('contracts.read')) {
       const [contractCard, technicalCard, erectionCard] = await Promise.all([
         this.buildContractManagementCard(actor),
         this.buildTechnicalCard(actor),
         this.buildErectionCard(actor),
       ]);
-      cards.push(contractCard, technicalCard, erectionCard);
-    }
-    // FMP-UI-10 — placeholder modules, gated on "Executive Manager or Admin"
-    // rather than a per-module read permission — see isExecutiveManagerOrAdminAccess's own doc comment for why.
-    if (isExecutiveManagerOrAdminAccess(actor.permissions)) {
-      cards.push(buildQaQcCard(), buildStorageDeliveryCard());
+      cards.push(contractCard);
+      if (showPlaceholders) cards.push(buildEstimationCard());
+      cards.push(technicalCard, erectionCard);
+    } else if (showPlaceholders) {
+      cards.push(buildEstimationCard());
     }
     if (actor.permissions.includes('safety.read')) {
       cards.push(await this.buildSafetyCard(actor));
@@ -179,6 +229,9 @@ export class PlatformDashboardService {
     }
     if (actor.permissions.includes('maintenance.read')) {
       cards.push(await this.buildMaintenanceCard(actor));
+    }
+    if (showPlaceholders) {
+      cards.push(buildStorageDeliveryCard(), buildQaQcCard());
     }
     if (actor.permissions.includes('tasks.read')) {
       cards.push(await this.buildTaskCard(actor));
@@ -300,7 +353,8 @@ export class PlatformDashboardService {
 
     return {
       code: 'INCIDENT_REPORT',
-      title: 'Incident Report',
+      // FMP-UI-23 — renamed from "Incident Report"; code/route unchanged.
+      title: 'Incident Management',
       description: 'Incidents and closure.',
       route: '/incidents/executive', // FMP-UI-07 — Executive Module Landing Page; full dashboard unchanged at /incidents/dashboard.
       metrics: [
@@ -317,7 +371,8 @@ export class PlatformDashboardService {
 
     return {
       code: 'PRODUCTION_DASHBOARD',
-      title: 'Production Planning',
+      // FMP-UI-23 — renamed from "Production Planning"; code/route unchanged.
+      title: 'Production & Planning',
       description: 'Production and readiness.',
       route: '/production/executive', // FMP-UI-07 — Executive Module Landing Page; full dashboard unchanged at /production/dashboard.
       metrics: [

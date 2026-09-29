@@ -1,5 +1,11 @@
 import type { FactoryTaskActivity, FactoryTaskComment } from '../../../../lib/factory-tasks-api';
 
+// FMP-UI-20E — activity phrasing changed from "{actor} {event label}" (e.g.
+// "manager Task created", read as run-on/awkward) to "{event label} by
+// {actor}" (e.g. "Task created by manager"), per direct feedback. Raw
+// event keys were already converted via EVENT_LABELS before this unit —
+// only the WORD ORDER changed, not the label text itself.
+
 type TimelineItem =
   | { kind: 'activity'; data: FactoryTaskActivity }
   | { kind: 'comment'; data: FactoryTaskComment };
@@ -75,8 +81,8 @@ export function TaskActivityTimeline({ activities, comments }: Props): React.JSX
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-text-secondary">
+                  {label}{' by '}
                   <span className="font-medium text-text-primary">{actorName}</span>
-                  {' '}{label}
                 </p>
                 {detail && (
                   <p className="text-xs text-text-muted font-mono mt-0.5">{detail}</p>

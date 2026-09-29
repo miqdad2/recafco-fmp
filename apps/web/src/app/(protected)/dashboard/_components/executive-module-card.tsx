@@ -133,6 +133,25 @@ interface ExecutiveModuleCardProps {
  *    (was hover-brightness only) for a slightly more premium lift,
  *    matching the shadow-on-hover language already used on the login
  *    page's own submit button.
+ *
+ * FMP-UI-23B — every size eased down one more notch so 11 cards (3 rows of
+ * 4/4/3) fit a normal 1920×1080 desktop viewport without the page scrolling
+ * vertically: card floor `min-h-56`→`min-h-48`, padding `p-3.5`→`p-3`, icon
+ * `size-9`→`size-8` (glyph `size-4.5`→`size-4`), title `18px`→`15px`,
+ * description `text-xs`→`11px`, metric-tile padding/gap tightened
+ * (`px-2.5 py-2`→`px-2 py-1.5`, `gap-2.5`→`gap-2`), metric number
+ * `22px`→`17px`, metric label `text-xs`→`11px`, placeholder block padding
+ * `px-3 py-2.5`→`px-2.5 py-2` with its own text sized down to match, button
+ * `min-h-10`→`min-h-9`/`py-2`→`py-1.5`/`text-sm`→`13px`. The placeholder
+ * block (Setup Pending) was deliberately kept noticeably SHORTER than the
+ * 2-row metrics grid, not just re-scaled proportionally — a placeholder
+ * card sharing a grid row with a live metrics card must never be the taller
+ * one, or the grid's row-stretch would force the live card up to match it,
+ * undoing the whole point of this pass. No mechanism changed (still literal
+ * hex via inline `style`, still `flex flex-col h-full` + `flex-1` + `mt-auto`
+ * button, still nothing that can clip the button) — purely a size pass, the
+ * same category of change as FMP-UI-10C's own "narrower grid, smaller card"
+ * easing.
  */
 export function ExecutiveModuleCard({
   title,
@@ -148,7 +167,7 @@ export function ExecutiveModuleCard({
   return (
     <Link
       href={href}
-      className="group flex h-full min-h-56 flex-col rounded-xl border border-border/60 bg-surface p-3.5 shadow-sm transition-[box-shadow,border-color] hover:border-border hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
+      className="group flex h-full min-h-48 flex-col rounded-xl border border-border/60 bg-surface p-3 shadow-sm transition-[box-shadow,border-color] hover:border-border hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
       style={{ borderLeftWidth: '3px', borderLeftColor: `${palette.base}cc` }}
     >
       {/* Content — header + metrics, flex-1 so the button wrapper below is always pushed to the bottom. */}
@@ -159,16 +178,16 @@ export function ExecutiveModuleCard({
             same row, so it reads at a glance without competing with the
             title for space. */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-start gap-2.5">
+          <div className="flex min-w-0 items-start gap-2">
             <span
-              className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg"
+              className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg"
               style={{ backgroundColor: palette.light, color: palette.base }}
             >
-              <Icon className="size-4.5" aria-hidden="true" />
+              <Icon className="size-4" aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h2 className="text-[18px] font-bold leading-tight text-text-primary">{title}</h2>
-              <p className="mt-1 text-xs leading-snug text-text-muted">{description}</p>
+              <h2 className="text-[15px] font-bold leading-tight text-text-primary">{title}</h2>
+              <p className="mt-0.5 text-[11px] leading-snug text-text-muted">{description}</p>
             </div>
           </div>
           {isPlaceholder ? (
@@ -182,21 +201,28 @@ export function ExecutiveModuleCard({
           )}
         </div>
 
+        {/* FMP-UI-23B — placeholder block deliberately kept SHORTER than the
+            2-row metrics grid below (one line + one line, tighter padding)
+            so a setup-pending card (Estimation, Storage Yard & Delivery,
+            Quality Control) never grows taller than a live card sitting
+            next to it in the same row — the grid's row-stretch would
+            otherwise force every card in that row up to match a taller
+            placeholder, defeating the point of compacting. */}
         {isPlaceholder ? (
-          <div className="mt-2.5 rounded-xl px-3 py-2.5" style={{ backgroundColor: `${palette.light}80` }}>
-            <p className="text-sm font-bold text-text-primary">Setup Pending</p>
-            <p className="mt-0.5 text-xs text-text-muted">Module will be configured in a future unit.</p>
+          <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: `${palette.light}80` }}>
+            <p className="text-[13px] font-bold text-text-primary">Setup Pending</p>
+            <p className="mt-0.5 text-[11px] text-text-muted">Module will be configured in a future unit.</p>
           </div>
         ) : (
-          <div className="mt-2.5 grid grid-cols-2 gap-2.5">
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {metrics.map((m) => (
-              <div key={m.label} className="rounded-xl px-2.5 py-2" style={{ backgroundColor: `${palette.light}70` }}>
+              <div key={m.label} className="rounded-lg px-2 py-1.5" style={{ backgroundColor: `${palette.light}70` }}>
                 {m.value !== null ? (
-                  <p className="text-[22px] font-extrabold leading-none text-text-primary">{m.value}</p>
+                  <p className="text-[17px] font-extrabold leading-none text-text-primary">{m.value}</p>
                 ) : (
-                  <p className="text-xs font-medium leading-none text-text-muted">Not available</p>
+                  <p className="text-[11px] font-medium leading-none text-text-muted">Not available</p>
                 )}
-                <p className="mt-1 flex items-start gap-1.5 text-xs font-semibold leading-snug text-text-secondary">
+                <p className="mt-0.5 flex items-start gap-1.5 text-[11px] font-semibold leading-snug text-text-secondary">
                   <span className="mt-1 inline-block size-1.5 shrink-0 rounded-full" style={{ backgroundColor: palette.base }} aria-hidden="true" />
                   <span>{m.label}</span>
                 </p>
@@ -212,17 +238,17 @@ export function ExecutiveModuleCard({
           `<Link>` — the whole card above is now the one real anchor (FMP-UI-07);
           `group-hover` reproduces the old hover feedback from anywhere on
           the card, not just this element. */}
-      <div className="mt-auto pt-2.5">
-        {/* min-h, not h — "Open Quality Assurance & Control"/"Open Storage
-            Yard & Delivery" are long enough to wrap to 2 lines on a narrow
-            5-column card; a fixed height would clip that text. A wrapped
+      <div className="mt-auto pt-2">
+        {/* min-h, not h — "Open Quality Control"/"Open Storage Yard &
+            Delivery" are long enough to wrap to 2 lines on a narrow
+            4-column card; a fixed height would clip that text. A wrapped
             button just makes its own row a little taller, and the grid's
             default row-stretch (see dashboard/page.tsx) keeps every other
             card in that same row matching it — still equal heights across
             the row, never a clipped label. */}
         <span
           style={{ backgroundColor: palette.base }}
-          className="flex min-h-10 w-full items-center justify-center rounded-lg px-3 py-2 text-center text-sm font-semibold leading-snug text-white shadow-sm transition group-hover:shadow-md group-hover:brightness-95"
+          className="flex min-h-9 w-full items-center justify-center rounded-lg px-3 py-1.5 text-center text-[13px] font-semibold leading-snug text-white shadow-sm transition group-hover:shadow-md group-hover:brightness-95"
         >
           Open {title}
         </span>

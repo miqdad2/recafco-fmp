@@ -1055,6 +1055,38 @@ export class FactoryTasksService {
     };
   }
 
+  /**
+   * FMP-UI-20 — "Assigned by Me" tab on the redesigned Task Control Center:
+   * tasks the current user created/assigned to others. Mirrors findMy()
+   * exactly (same shape, same lack of department scoping) — a task you
+   * personally created is yours to see regardless of department scope,
+   * same reasoning already applied to a task personally assigned to you.
+   */
+  async findAssignedByMe(query: TaskListQueryDto, actor: AuthUser): Promise<PaginatedResult<TaskRecord>> {
+    const myQuery = { ...query, createdByUserId: actor.id };
+    const page = myQuery.page ?? 1;
+    const pageSize = myQuery.pageSize ?? 20;
+    const skip = (page - 1) * pageSize;
+
+    const where = buildListWhere(myQuery, actor);
+
+    const [items, total] = await Promise.all([
+      this.db.getClient().factoryTask.findMany({
+        where,
+        select: TASK_SELECT,
+        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.db.getClient().factoryTask.count({ where }),
+    ]);
+
+    return {
+      items: (items as TaskRecord[]).map((t) => this.filterTaskIncident(t, actor)),
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+    };
+  }
+
   async getSummary(actor: AuthUser): Promise<{
     openTasks: number;
     assignedToMe: number;
@@ -1099,6 +1131,8 @@ export class FactoryTasksService {
     metrics: {
       openTasks: number;
       assignedToMe: number;
+      /** FMP-UI-20 — Task Control Center's "Assigned by Me" overview card: active tasks the current user created/assigned to others. Mirrors assignedToMe exactly (same ACTIVE_STATUSES population, not department-scoped — your own creations are yours to see), keyed on createdByUserId instead of assignedToUserId. */
+      assignedByMe: number;
       overdueTasks: number;
       blockedTasks: number;
       completedThisMonth: number;
@@ -1109,10 +1143,10 @@ export class FactoryTasksService {
     };
     recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
   }> {
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.FACTORY_TASKS),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.FACTORY_TASKS);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {
@@ -1136,11 +1170,14 @@ export class FactoryTasksService {
 
     const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
 
-    const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek, recentRaw] =
+    const [openTasks, assignedToMe, assignedByMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek, recentRaw] =
       await Promise.all([
         this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: { in: ACTIVE_STATUSES } } }),
         this.db.getClient().factoryTask.count({
           where: { assignedToUserId: actor.id, status: { in: ACTIVE_STATUSES } },
+        }),
+        this.db.getClient().factoryTask.count({
+          where: { createdByUserId: actor.id, status: { in: ACTIVE_STATUSES } },
         }),
         this.db.getClient().factoryTask.count({
           where: { ...deptWhere, status: { in: OVERDUE_STATUSES }, dueAt: { lt: now } },
@@ -1173,7 +1210,7 @@ export class FactoryTasksService {
 
     return {
       scope: { type: scopeType, departmentNames },
-      metrics: { openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek },
+      metrics: { openTasks, assignedToMe, assignedByMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek },
       recent: recentRaw.map((r) => ({
         id: r.id,
         referenceNumber: r.referenceNumber,
@@ -1201,6 +1238,42 @@ export class FactoryTasksService {
       select: { id: true, displayName: true, username: true },
       orderBy: [{ displayName: 'asc' }],
       take: 20,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Org selectors (active only — for the New Task form's Responsible/
+  // Requesting Department and Plant/Location dropdowns).
+  //
+  // FMP-UI-20D — root cause of the empty Responsible Department dropdown:
+  // `factory-tasks/new/page.tsx` was calling the ADMIN-gated
+  // `organizations-api.ts`'s `departments.list()`/`plants.list()`
+  // (`GET /organizations/departments`, requires `org.departments.read`) —
+  // a permission normal task-creating users (e.g. `tasks.create` only)
+  // don't hold. The 403 was silently swallowed by `Promise.allSettled`, so
+  // the dropdown rendered with zero options and no error. Mirrors the exact
+  // existing pattern `contracts.service.ts`'s own `listDepartments()`/
+  // `listPlants()` already established for the SAME problem in Contract
+  // Management (and `production`'s own `/production/departments`) — a
+  // module-scoped reference list gated by that module's own read
+  // permission (`tasks.read`, already required for this whole page),
+  // instead of the org-admin permission. No schema change — same
+  // `Department`/`Plant` tables, same `isActive` filter.
+  // ---------------------------------------------------------------------------
+
+  async listDepartments(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().department.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
+    });
+  }
+
+  async listPlants(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().plant.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
     });
   }
 
@@ -1363,6 +1436,11 @@ function buildListWhere(
   if (query.assignedToUserId) {
     const userId = query.assignedToUserId === 'me' ? actor.id : query.assignedToUserId;
     where['assignedToUserId'] = userId;
+  }
+
+  if (query.createdByUserId) {
+    const userId = query.createdByUserId === 'me' ? actor.id : query.createdByUserId;
+    where['createdByUserId'] = userId;
   }
 
   if (query.responsibleDepartmentId) where['responsibleDepartmentId'] = query.responsibleDepartmentId;

@@ -52,6 +52,7 @@ const mockActivityFindMany = vi.fn();
 const mockUserFindUnique = vi.fn();
 const mockLocationFindUnique = vi.fn();
 const mockDepartmentFindMany = vi.fn();
+const mockPlantFindMany = vi.fn();
 const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
@@ -72,6 +73,7 @@ const mockClient = {
   user: { findUnique: mockUserFindUnique, findMany: vi.fn() },
   location: { findUnique: mockLocationFindUnique },
   department: { findMany: mockDepartmentFindMany },
+  plant: { findMany: mockPlantFindMany },
   $transaction: mockTransaction,
 };
 
@@ -1081,7 +1083,26 @@ describe('SafetyService.getDashboard', () => {
       .mockResolvedValueOnce(3)  // criticalFindings
       .mockResolvedValueOnce(1); // overdueFindings
     mockInspectionFindMany.mockResolvedValueOnce([
-      { id: 'insp-r1', referenceNumber: 'SAFE-001', title: 'Fire Check', status: 'SCHEDULED', updatedAt: new Date('2026-07-01T09:00:00Z') },
+      {
+        id: 'insp-r1',
+        referenceNumber: 'SAFE-001',
+        title: 'Fire Check',
+        status: 'SCHEDULED',
+        updatedAt: new Date('2026-07-01T09:00:00Z'),
+        scheduledAt: new Date('2026-07-05T09:00:00Z'),
+        department: { name: 'Engineering' },
+      },
+    ]);
+    mockFindingFindMany.mockResolvedValueOnce([
+      {
+        id: 'finding-1',
+        title: 'Blocked fire exit',
+        severity: 'CRITICAL',
+        status: 'OPEN',
+        dueAt: new Date('2026-06-01T00:00:00Z'),
+        inspectionId: 'insp-r1',
+        inspection: { referenceNumber: 'SAFE-001' },
+      },
     ]);
 
     const result = await service.getDashboard(ACTOR_VIEWER);
@@ -1096,6 +1117,63 @@ describe('SafetyService.getDashboard', () => {
     expect(result.metrics.completedInspections).toBe(6);
     expect(result.recent).toHaveLength(1);
     expect(result.recent[0]?.referenceNumber).toBe('SAFE-001');
+    expect(result.recent[0]?.departmentName).toBe('Engineering');
+    expect(result.recent[0]?.scheduledAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(result.needsAttention).toHaveLength(1);
+    expect(result.needsAttention[0]?.inspectionReferenceNumber).toBe('SAFE-001');
+    expect(result.needsAttention[0]?.inspectionId).toBe('insp-r1');
+    expect(result.needsAttention[0]?.severity).toBe('CRITICAL');
+    expect(result.needsAttention[0]?.dueAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('returns an empty needsAttention list when nothing is critical or overdue', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+    mockInspectionCount.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    mockFindingCount.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    mockInspectionFindMany.mockResolvedValueOnce([]);
+    mockFindingFindMany.mockResolvedValueOnce([]);
+
+    const result = await service.getDashboard(ACTOR_VIEWER);
+
+    expect(result.needsAttention).toEqual([]);
+  });
+});
+
+// ── listDepartments / listPlants (FMP-UI-21C) ───────────────────────────────
+
+describe('SafetyService.listDepartments', () => {
+  it('returns only active departments, ordered by name', async () => {
+    mockDepartmentFindMany.mockResolvedValueOnce([
+      { id: 'dept-1', name: 'Engineering', code: 'ENG-01' },
+    ]);
+
+    const result = await service.listDepartments();
+
+    expect(result).toEqual([{ id: 'dept-1', name: 'Engineering', code: 'ENG-01' }]);
+    const call = mockDepartmentFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(call.where).toEqual({ isActive: true });
+  });
+
+  it('returns an empty array when there are no active departments — never fabricated rows', async () => {
+    mockDepartmentFindMany.mockResolvedValueOnce([]);
+    expect(await service.listDepartments()).toEqual([]);
+  });
+});
+
+describe('SafetyService.listPlants', () => {
+  it('returns only active plants, ordered by name', async () => {
+    mockPlantFindMany.mockResolvedValueOnce([{ id: 'plant-1', name: 'Main Plant', code: 'PLT1' }]);
+
+    const result = await service.listPlants();
+
+    expect(result).toEqual([{ id: 'plant-1', name: 'Main Plant', code: 'PLT1' }]);
+    const call = mockPlantFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(call.where).toEqual({ isActive: true });
+  });
+
+  it('returns an empty array when there are no plants — never fabricated rows', async () => {
+    mockPlantFindMany.mockResolvedValueOnce([]);
+    expect(await service.listPlants()).toEqual([]);
   });
 });

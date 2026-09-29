@@ -90,10 +90,29 @@ export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Eleme
           <p className="text-xs text-text-muted leading-tight">{user.roleName}</p>
         </div>
 
+        {/* FMP-UI-18 — was a neutral outline button (`border-border`/
+            `bg-surface`/`text-text-secondary`) that read as just another
+            quiet header control, easy to miss. Restyled with the same
+            RECAFCO-red badge tokens already used app-wide for red status
+            badges (`bg-accent-light`/`text-accent`, e.g.
+            `workflow-task-priority-badge.tsx`'s CRITICAL badge) rather than
+            a solid destructive-delete fill — a soft tinted button, not an
+            alarming one. Hover inverts to a solid `bg-accent` fill with
+            `text-accent-foreground` (white) for a clear, unambiguous
+            pressed-state cue. Font bumped to `font-semibold` (was no
+            weight class) for easier reading at a glance. Focus ring kept on
+            this app's one standard focus token (`ring-focus`/
+            `ring-offset-2`), unchanged from every other header/executive
+            button — not `ring-accent`, so a normal focus pass never reads
+            as an error state. `bg-accent-light`/`text-accent` are not
+            re-tinted between themes (see globals.css's own documented
+            light/dark-mode note), so this button renders identically
+            checked in both — same as every other red badge in the app
+            already does, with no washed-out/overly-bright regression. */}
         <form action={logoutAction}>
           <button
             type="submit"
-            className="h-9 px-3 rounded-md border border-border bg-surface text-text-secondary text-sm hover:bg-surface-secondary hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus transition-colors"
+            className="h-9 px-4 rounded-lg border border-accent/30 bg-accent-light text-sm font-semibold text-accent transition-colors hover:border-accent hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
           >
             Sign out
           </button>

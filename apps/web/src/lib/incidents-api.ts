@@ -98,6 +98,19 @@ export interface IncidentActivity {
   createdAt: string;
 }
 
+/** FMP-INC-01 — Incident Evidence Attachments. */
+export interface IncidentAttachment {
+  id: string;
+  incidentId: string;
+  originalFileName: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  uploadedByUserId: string;
+  createdAt: string;
+  uploadedByUser: UserRef;
+}
+
 export interface IncidentSummary {
   totalOpen: number;
   criticalOpen: number;
@@ -106,6 +119,15 @@ export interface IncidentSummary {
 }
 
 export type DashboardScopeType = 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS';
+
+export interface IncidentNeedsAttentionItem {
+  id: string;
+  referenceNumber: string;
+  title: string;
+  severity: IncidentSeverity;
+  status: string;
+  createdAt: string;
+}
 
 export interface IncidentDashboardData {
   scope: { type: DashboardScopeType; departmentNames: string[] };
@@ -116,7 +138,10 @@ export interface IncidentDashboardData {
     resolvedThisMonth: number;
     closedTotal: number;
   };
-  recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+  /** FMP-UI-22 — `severity`/`createdAt` added for the Incident Control Center's "Recent Incidents" section. */
+  recent: { id: string; referenceNumber: string; title: string; severity: IncidentSeverity; status: string; updatedAt: string; createdAt: string }[];
+  /** FMP-UI-22 — real critical/open incidents for the "Needs Attention" section (see incidents.service.ts's own getDashboard() doc comment). */
+  needsAttention: IncidentNeedsAttentionItem[];
 }
 
 export interface Pagination {
@@ -268,4 +293,25 @@ export const incidentsApi = {
 
   people: (search?: string) =>
     apiFetch<UserRef[]>(`/incidents/people${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+
+  // FMP-UI-22 — active departments/plants/locations for the Report Incident
+  // form's own dropdowns, gated by `incidents.read` (the same permission
+  // this whole module already requires) instead of the admin-only
+  // `org.departments.read` / `org.plants.read` / `org.locations.read` that
+  // `organizations-api.ts` requires — see incidents.service.ts's own doc
+  // comment for the root cause this fixes.
+  departments: () =>
+    apiFetch<OrgRef[]>('/incidents/departments'),
+
+  plants: () =>
+    apiFetch<OrgRef[]>('/incidents/plants'),
+
+  locations: () =>
+    apiFetch<OrgRef[]>('/incidents/locations'),
+
+  // FMP-INC-01 — real Incident Evidence Attachments. Upload/delete go
+  // through `actions.ts` (multipart/DELETE, need `revalidatePath`), not
+  // this JSON-only `apiFetch` namespace.
+  listAttachments: (id: string) =>
+    apiFetch<IncidentAttachment[]>(`/incidents/${id}/attachments`),
 };

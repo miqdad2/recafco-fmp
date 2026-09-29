@@ -1,5 +1,7 @@
 // Server-side only — never import from client components.
 
+import { cache } from 'react';
+
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
 export interface LoginResult {
@@ -68,6 +70,15 @@ async function apiGet<T>(
   return { ok: true, data: (json as ApiOk<T>).data };
 }
 
+// FMP-PERF-01 — every protected layout/page independently calls `authApi.me`
+// to resolve the current user's permissions (there is no shared request
+// context to pass it down through). `cache()` (React's per-request
+// memoization) makes repeated calls with the same access token within one
+// server render resolve to a single underlying `/auth/me` network+DB call
+// instead of one per caller, with no change to the returned data, staleness
+// window, or the backend's own live permission recomputation.
+const getCurrentUser = cache((accessToken: string) => apiGet<UserProfile>('/auth/me', accessToken));
+
 export const authApi = {
   login: (username: string, password: string) =>
     apiPost<LoginResult>('/auth/login', { username, password }),
@@ -78,8 +89,7 @@ export const authApi = {
   logout: (refreshToken: string) =>
     apiPost<null>('/auth/logout', { refreshToken }),
 
-  me: (accessToken: string) =>
-    apiGet<UserProfile>('/auth/me', accessToken),
+  me: getCurrentUser,
 
   changePassword: (accessToken: string, currentPassword: string, newPassword: string) =>
     apiPost<null>('/auth/change-password', { currentPassword, newPassword }, accessToken),

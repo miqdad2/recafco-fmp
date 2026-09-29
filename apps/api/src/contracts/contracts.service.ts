@@ -1333,10 +1333,10 @@ export class ContractsService {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {

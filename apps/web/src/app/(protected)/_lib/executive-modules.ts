@@ -1,5 +1,6 @@
 import {
   FileText,
+  Calculator,
   Ruler,
   HardHat,
   BadgeCheck,
@@ -38,26 +39,47 @@ function permissionGate(permission: string): (permissions: string[]) => boolean 
  * source of truth so all pages stay consistent.
  *
  * FMP-UI-10 — extended with QA/QC and Storage & Delivery (placeholder
- * modules, positioned right after Erection per this unit's own spec).
- * Neither has a dedicated permission yet, which is why `requiredPermission:
- * string` became `isVisible: (permissions) => boolean` — a single permission
- * string couldn't express "Executive Manager or Admin" the way the other 8
- * modules' single real read-permission check could.
+ * modules). Neither has a dedicated permission yet, which is why
+ * `requiredPermission: string` became `isVisible: (permissions) => boolean`
+ * — a single permission string couldn't express "Executive Manager or
+ * Admin" the way the other real modules' single read-permission check
+ * could.
+ *
+ * FMP-UI-23 — reordered to the exact required sequence (Contract
+ * Management, Estimation, Technical, Erection, Safety & Compliance,
+ * Incident Management, Production & Planning, Maintenance Management,
+ * Storage Yard & Delivery, Quality Control, Task Management) and extended
+ * with a new Estimation placeholder module (same `isVisible` shape as
+ * QA/QC and Storage & Delivery — no dedicated permission was created).
+ * Titles renamed: "Incident Report" → "Incident Management", "Production
+ * Planning" → "Production & Planning", "Quality Assurance & Control" →
+ * "Quality Control". `code`/`landingHref` values are UNCHANGED for every
+ * existing module (technical slugs, not user-facing) — only `title` and
+ * array position moved, per this unit's own "do not rename routes" rule.
+ *
+ * FMP-UI-23B — this array is the ONE frontend source of truth for order
+ * (sidebar's `EXECUTIVE_SIDEBAR_ITEMS`, the module switcher, Previous/Next
+ * all read from it), but `apps/api/src/platform/platform-dashboard.service.ts`
+ * cannot import it (different package, no JSX/lucide-react on the backend)
+ * — that file hand-duplicates this exact same order in its own
+ * `getDashboard()` push sequence. If this array's order/titles ever change
+ * again, update that file's push order in the same change, not later.
  */
 export const EXECUTIVE_MODULES: ExecutiveModuleMeta[] = [
   { code: 'CONTRACTS_MANAGEMENT', title: 'Contract Management', landingHref: '/contracts/executive', icon: FileText, accent: 'contracts', isVisible: permissionGate('contracts.read') },
+  { code: 'ESTIMATION', title: 'Estimation', landingHref: '/executive/estimation', icon: Calculator, accent: 'estimation', isVisible: isExecutiveManagerOrAdminAccess },
   { code: 'TECHNICAL', title: 'Technical', landingHref: '/contracts/technical', icon: Ruler, accent: 'technical', isVisible: permissionGate('contracts.read') },
   { code: 'ERECTION', title: 'Erection', landingHref: '/contracts/erection-executive', icon: HardHat, accent: 'erection', isVisible: permissionGate('contracts.read') },
-  { code: 'QA_QC', title: 'Quality Assurance & Control', landingHref: '/executive/qaqc', icon: BadgeCheck, accent: 'qaqc', isVisible: isExecutiveManagerOrAdminAccess },
-  { code: 'STORAGE_DELIVERY', title: 'Storage Yard & Delivery', landingHref: '/executive/storage-delivery', icon: Warehouse, accent: 'storage', isVisible: isExecutiveManagerOrAdminAccess },
   { code: 'SAFETY_COMPLIANCE', title: 'Safety & Compliance', landingHref: '/safety-compliance/executive', icon: ShieldCheck, accent: 'safety', isVisible: permissionGate('safety.read') },
-  { code: 'INCIDENT_REPORT', title: 'Incident Report', landingHref: '/incidents/executive', icon: AlertTriangle, accent: 'incident', isVisible: permissionGate('incidents.read') },
-  { code: 'PRODUCTION_DASHBOARD', title: 'Production Planning', landingHref: '/production/executive', icon: Factory, accent: 'production', isVisible: permissionGate('production.read') },
+  { code: 'INCIDENT_REPORT', title: 'Incident Management', landingHref: '/incidents/executive', icon: AlertTriangle, accent: 'incident', isVisible: permissionGate('incidents.read') },
+  { code: 'PRODUCTION_DASHBOARD', title: 'Production & Planning', landingHref: '/production/executive', icon: Factory, accent: 'production', isVisible: permissionGate('production.read') },
   { code: 'MAINTENANCE_REQUESTS', title: 'Maintenance Management', landingHref: '/maintenance/executive', icon: Wrench, accent: 'maintenance', isVisible: permissionGate('maintenance.read') },
+  { code: 'STORAGE_DELIVERY', title: 'Storage Yard & Delivery', landingHref: '/executive/storage-delivery', icon: Warehouse, accent: 'storage', isVisible: isExecutiveManagerOrAdminAccess },
+  { code: 'QA_QC', title: 'Quality Control', landingHref: '/executive/qaqc', icon: BadgeCheck, accent: 'qaqc', isVisible: isExecutiveManagerOrAdminAccess },
   { code: 'FACTORY_TASKS', title: 'Task Management', landingHref: '/factory-tasks/executive', icon: ClipboardList, accent: 'tasks', isVisible: permissionGate('tasks.read') },
 ];
 
-/** FMP-UI-07 (nav access pass) — the module-switcher chips and Previous/Next must only ever offer modules the viewer actually holds real access to, matching PlatformDashboardService's own per-card gating exactly. An Executive Manager holds all 6 underlying permissions (plus QA/QC and Storage & Delivery via isExecutiveManagerOrAdminAccess), so sees all 10; a single-module viewer sees only their own. */
+/** FMP-UI-07 (nav access pass) — the module-switcher chips and Previous/Next must only ever offer modules the viewer actually holds real access to, matching PlatformDashboardService's own per-card gating exactly. An Executive Manager holds all 6 underlying permissions (plus Estimation, QA/QC, and Storage & Delivery via isExecutiveManagerOrAdminAccess), so sees all 11; a single-module viewer sees only their own. */
 export function getVisibleModules(permissions: string[]): ExecutiveModuleMeta[] {
   return EXECUTIVE_MODULES.filter((m) => m.isVisible(permissions));
 }

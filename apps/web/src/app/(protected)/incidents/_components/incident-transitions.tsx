@@ -103,19 +103,26 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
         <Link key="edit" href={`/incidents/${id}/edit`}
           className="block w-full rounded-md border border-border bg-surface-secondary px-4 py-2 text-center text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
         >
-          Edit draft
+          Edit Draft
         </Link>,
       );
       buttons.push(
-        <Btn key="submit" variant="primary" disabled={isPending} onClick={() => run(() => submitIncidentAction(id))}>
-          Submit
-        </Btn>,
+        // FMP-INC-01E — "Submit" → "Submit Incident" (brief's own explicit
+        // rename), plus a real helper line explaining what it does — the
+        // brief's own named issue ("Actions panel does not explain what
+        // Submit does").
+        <div key="submit" className="space-y-1">
+          <Btn variant="primary" disabled={isPending} onClick={() => run(() => submitIncidentAction(id))}>
+            Submit Incident
+          </Btn>
+          <p className="text-[11px] text-text-muted">Submit this incident when the details and evidence are ready for review.</p>
+        </div>,
       );
     }
     if (isOwner || has('incidents.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel incident
+          Cancel Incident
         </Btn>,
       );
     }
@@ -126,14 +133,14 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.review')) {
       buttons.push(
         <Btn key="start-review" variant="primary" disabled={isPending} onClick={() => run(() => startReviewAction(id))}>
-          Start review
+          Start Review
         </Btn>,
       );
     }
     if (isOwner || has('incidents.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel incident
+          Cancel Incident
         </Btn>,
       );
     }
@@ -144,24 +151,24 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.review')) {
       buttons.push(
         <Btn key="assign" variant="secondary" onClick={() => openPanel(activePanel === 'assign' ? null : 'assign')}>
-          Assign investigator
+          Assign Investigator
         </Btn>,
       );
       buttons.push(
         <Btn key="severity" variant="secondary" onClick={() => openPanel(activePanel === 'severity' ? null : 'severity')}>
-          Change severity
+          Change Severity
         </Btn>,
       );
       buttons.push(
         <Btn key="begin" variant="primary" disabled={isPending} onClick={() => run(() => beginInvestigationAction(id))}>
-          Begin investigation
+          Begin Investigation
         </Btn>,
       );
     }
     if (has('incidents.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel incident
+          Cancel Incident
         </Btn>,
       );
     }
@@ -172,19 +179,19 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.investigate')) {
       buttons.push(
         <Btn key="request-actions" variant="primary" disabled={isPending} onClick={() => run(() => requestActionsAction(id))}>
-          Request corrective actions
+          Request Corrective Actions
         </Btn>,
       );
     }
     if (has('incidents.manage')) {
       buttons.push(
         <Btn key="severity" variant="secondary" onClick={() => openPanel(activePanel === 'severity' ? null : 'severity')}>
-          Change severity
+          Change Severity
         </Btn>,
       );
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel incident
+          Cancel Incident
         </Btn>,
       );
     }
@@ -195,19 +202,19 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.investigate')) {
       buttons.push(
         <Btn key="resolve" variant="primary" onClick={() => openPanel(activePanel === 'resolve' ? null : 'resolve')}>
-          Resolve incident
+          Resolve Incident
         </Btn>,
       );
     }
     if (has('incidents.manage')) {
       buttons.push(
         <Btn key="severity" variant="secondary" onClick={() => openPanel(activePanel === 'severity' ? null : 'severity')}>
-          Change severity
+          Change Severity
         </Btn>,
       );
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel incident
+          Cancel Incident
         </Btn>,
       );
     }
@@ -218,12 +225,12 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.manage')) {
       buttons.push(
         <Btn key="close" variant="primary" disabled={isPending} onClick={() => run(() => closeIncidentAction(id))}>
-          Close incident
+          Close Incident
         </Btn>,
       );
       buttons.push(
         <Btn key="reopen" variant="secondary" onClick={() => openPanel(activePanel === 'reopen' ? null : 'reopen')}>
-          Reopen
+          Reopen Incident
         </Btn>,
       );
     }
@@ -234,13 +241,23 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
     if (has('incidents.manage')) {
       buttons.push(
         <Btn key="reopen" variant="secondary" onClick={() => openPanel(activePanel === 'reopen' ? null : 'reopen')}>
-          Reopen incident
+          Reopen Incident
         </Btn>,
       );
     }
   }
 
-  if (buttons.length === 0) return <></>;
+  // FMP-INC-01E — an empty `buttons` array is a real, valid outcome (e.g.
+  // a plain viewer with no incidents.* action permission beyond
+  // incidents.read looking at someone else's incident) — previously
+  // rendered as literally nothing, matching the exact "Actions panel is
+  // unclear" complaint this unit's brief names. An honest one-line
+  // message replaces the silent empty state, matching the same fix
+  // already applied to Factory Tasks (FMP-UI-20E) and Safety & Compliance
+  // (FMP-UI-21D)'s own transitions panels.
+  if (buttons.length === 0) {
+    return <p className="text-xs text-text-muted">No actions available to you on this incident right now.</p>;
+  }
 
   return (
     <div className="space-y-3">
@@ -255,7 +272,7 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
       {/* Cancel panel */}
       {activePanel === 'cancel' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Cancel incident</p>
+          <p className="text-sm font-medium text-text-primary">Cancel Incident</p>
           <div>
             <label htmlFor="cancel-reason" className="block text-xs font-medium text-text-secondary">
               Reason <span aria-hidden="true" className="text-danger">*</span>
@@ -286,7 +303,7 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
       {/* Reopen panel */}
       {activePanel === 'reopen' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Reopen incident</p>
+          <p className="text-sm font-medium text-text-primary">Reopen Incident</p>
           <div>
             <label htmlFor="reopen-reason" className="block text-xs font-medium text-text-secondary">
               Reason <span aria-hidden="true" className="text-danger">*</span>
@@ -317,7 +334,7 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
       {/* Resolve panel */}
       {activePanel === 'resolve' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Resolve incident</p>
+          <p className="text-sm font-medium text-text-primary">Resolve Incident</p>
           <div>
             <label htmlFor="resolution-summary" className="block text-xs font-medium text-text-secondary">
               Resolution summary <span aria-hidden="true" className="text-danger">*</span>
@@ -365,7 +382,7 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
       {/* Assign panel */}
       {activePanel === 'assign' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Assign investigator</p>
+          <p className="text-sm font-medium text-text-primary">Assign Investigator</p>
           <div>
             <label htmlFor="assign-user" className="block text-xs font-medium text-text-secondary">
               Investigator
@@ -399,7 +416,7 @@ export function IncidentTransitionsPanel({ incident, currentUserId, permissions,
       {/* Severity panel */}
       {activePanel === 'severity' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Change severity</p>
+          <p className="text-sm font-medium text-text-primary">Change Severity</p>
           <div>
             <label htmlFor="new-severity" className="block text-xs font-medium text-text-secondary">
               Severity

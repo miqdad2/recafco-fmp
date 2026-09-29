@@ -803,7 +803,7 @@ export function NewUserWizard({
                 <p className="font-medium mb-1">Executive Manager gets access to all operational modules.</p>
                 <p>
                   Grants full view/create/update/approve/assign/manage access to Contract Management (incl.
-                  Technical and Erection), Safety &amp; Compliance, Incident Report, Production Planning,
+                  Technical and Erection), Safety &amp; Compliance, Incident Management, Production &amp; Planning,
                   Maintenance Management, and Task Management — not user, role, or organization administration
                   (that is Platform Admin, below).
                 </p>

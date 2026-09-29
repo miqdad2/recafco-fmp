@@ -6,7 +6,7 @@ import type { ModuleAccessActionState } from '../actions';
 
 const MODULE_LABELS: Record<ModuleIdentifier, string> = {
   FACTORY_TASKS: 'Factory Tasks Management',
-  INCIDENT_REPORT: 'Incident Report',
+  INCIDENT_REPORT: 'Incident Management',
   MAINTENANCE_REQUESTS: 'Maintenance Requests',
   SAFETY_COMPLIANCE: 'Safety & Compliance',
   CONTRACTS_MANAGEMENT: 'Contract Management',

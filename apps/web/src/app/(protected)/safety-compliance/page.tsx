@@ -4,11 +4,12 @@ import { cookies } from 'next/headers';
 import { Breadcrumbs } from '../_components/breadcrumbs';
 import { PageHeader } from '../administration/_components/page-header';
 import { InspectionStatusBadge } from './_components/inspection-status-badge';
+import { SafetyModuleNav } from './_components/safety-module-nav';
 import { safetyApi } from '../../../lib/safety-api';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Safety & Compliance — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Safety Records — RECAFCO FMP' };
 
 async function getUserPermissions(): Promise<string[]> {
   try {
@@ -33,6 +34,24 @@ interface PageProps {
   searchParams: Promise<PageSearchParams>;
 }
 
+/**
+ * FMP-UI-21 — this page (the Safety Records list) had no way back to the
+ * Safety Dashboard or the Platform Dashboard except the browser's own back
+ * button, and its breadcrumb/title just repeated "Safety & Compliance"
+ * with no context, per this unit's own brief. Added the same
+ * `SafetyModuleNav` row (Back to Safety Dashboard / Back to Platform
+ * Dashboard / Previous / Next / Switch module) the Task List page got in
+ * FMP-UI-20I, plus a 3-level breadcrumb ("Platform Dashboard > Safety &
+ * Compliance > Safety Records", was 1 level with no `href`). Title/
+ * subtitle changed to "Safety Records" / "View, search, and open safety
+ * inspections and findings." Create button relabeled "+ New Safety
+ * Inspection" (was "New Inspection" / "Create first inspection" — same
+ * route, `/safety-compliance/new`, unchanged). No "Record Finding" button
+ * here either — same audit result as the Safety Dashboard (see that
+ * page's own doc comment): findings can only be created from within a
+ * specific inspection, never from this list. No filter, search,
+ * pagination, or table behavior changed.
+ */
 export default async function SafetyCompliancePage({ searchParams }: PageProps): Promise<React.JSX.Element> {
   const params = await searchParams;
   const permissions = await getUserPermissions();
@@ -80,19 +99,26 @@ export default async function SafetyCompliancePage({ searchParams }: PageProps):
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Safety & Compliance' }]} />
+        <div className="space-y-3">
+          <Breadcrumbs items={[
+            { label: 'Platform Dashboard', href: '/dashboard' },
+            { label: 'Safety & Compliance', href: '/safety-compliance/executive' },
+            { label: 'Safety Records' },
+          ]} className="mb-0" />
+          <SafetyModuleNav permissions={permissions} />
+        </div>
 
-        <div className="mb-6">
+        <div className="mb-6 mt-8">
           <PageHeader
-            title="Safety & Compliance"
-            description="Safety inspections, findings, and compliance tracking. Ref format: SAFE-YYYY-NNNNNN"
+            title="Safety Records"
+            description="View, search, and open safety inspections and findings."
             action={
               canCreate ? (
                 <Link
                   href="/safety-compliance/new"
                   className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
                 >
-                  New Inspection
+                  + New Safety Inspection
                 </Link>
               ) : undefined
             }
@@ -142,16 +168,21 @@ export default async function SafetyCompliancePage({ searchParams }: PageProps):
         {/* Table */}
         {inspections.length === 0 && !error ? (
           <div className="rounded-lg border border-border bg-surface p-12 text-center">
-            <p className="text-sm text-text-secondary">
-              {search ?? statusFilter ? 'No inspections match the current filters.' : 'No safety inspections yet.'}
-            </p>
-            {canCreate && !(search ?? statusFilter) && (
-              <Link
-                href="/safety-compliance/new"
-                className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
-              >
-                Create first inspection
-              </Link>
+            {search ?? statusFilter ? (
+              <p className="text-sm text-text-secondary">No inspections match the current filters.</p>
+            ) : canCreate ? (
+              <>
+                <p className="text-sm text-text-secondary">No safety inspections yet.</p>
+                <p className="mt-1 text-sm text-text-secondary">Create the first safety inspection to start tracking compliance.</p>
+                <Link
+                  href="/safety-compliance/new"
+                  className="mt-4 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90"
+                >
+                  + New Safety Inspection
+                </Link>
+              </>
+            ) : (
+              <p className="text-sm text-text-secondary">No safety inspections in your current scope.</p>
             )}
           </div>
         ) : (

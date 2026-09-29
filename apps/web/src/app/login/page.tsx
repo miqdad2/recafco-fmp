@@ -6,7 +6,7 @@ import { ThemeToggle } from '../_components/theme-toggle';
 
 export const metadata: Metadata = { title: 'Sign in — RECAFCO FMP' };
 
-const MODULE_TAGS = ['Contracts', 'Technical', 'Erection', 'QA/QC', 'Storage Yard', 'Safety', 'Maintenance', 'Tasks'];
+const MODULE_TAGS = ['Contracts', 'Technical', 'Erection', 'Quality Control', 'Storage Yard', 'Safety', 'Maintenance', 'Tasks'];
 
 // FMP-UI-08B through FMP-UI-13 — this page was a single centered column
 // (logo/title/card/footer stacked, no side panel) for a long stretch of
@@ -364,20 +364,41 @@ export default function LoginPage(): React.JSX.Element {
               `px-3.5`→`px-4`, row gap `gap-2.5`→`gap-3`, row spacing
               `space-y-2.5`→`space-y-3`) to stay proportional now that the
               title/description above are noticeably larger — still 2
-              clean rows of 4, never crowded. */}
-          <div className="space-y-3">
-            {[MODULE_TAGS.slice(0, 4), MODULE_TAGS.slice(4)].map((row, i) => (
-              <div key={i} className="flex flex-wrap gap-3">
-                {row.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex h-10 items-center rounded-full border border-white/12 bg-white/6 px-4 text-sm font-medium text-white/80 transition-colors hover:border-white/25 hover:bg-white/12 hover:text-white"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ))}
+              clean rows of 4, never crowded.
+              FMP-UI-17J — added a small "System Modules" label above the
+              row (this unit's own suggested heading, kept subtle —
+              uppercase, muted, small) and stripped every affordance that
+              made these plain `<span>`s LOOK clickable even though they
+              never were one: `hover:border-white/25 hover:bg-white/12
+              hover:text-white` removed entirely (no hover state at all
+              now), `transition-colors` removed (nothing left to
+              transition), and `cursor-default` added explicitly. Contrast
+              eased one notch (`text-white/80`→`text-white/70`,
+              `border-white/12`→`border-white/10`) so they read as softer,
+              lower-contrast informational labels rather than buttons.
+              These were already plain `<span>`s with no `onClick`, no
+              `href`, and no `tabIndex` before this unit — i.e. already
+              structurally non-interactive and never keyboard-focusable;
+              this pass only removes the visual cues that suggested
+              otherwise. */}
+          <div className="space-y-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/45">
+              System Modules
+            </p>
+            <div className="space-y-3">
+              {[MODULE_TAGS.slice(0, 4), MODULE_TAGS.slice(4)].map((row, i) => (
+                <div key={i} className="flex flex-wrap gap-3">
+                  {row.map((tag) => (
+                    <span
+                      key={tag}
+                      className="inline-flex h-10 cursor-default items-center rounded-full border border-white/10 bg-white/6 px-4 text-sm font-medium text-white/70"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

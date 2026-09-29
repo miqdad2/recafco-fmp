@@ -31,8 +31,18 @@ export class DepartmentAccessService {
   // Returns {in:[]}→ empty set → caller gets zero results (fail-closed).
   // ---------------------------------------------------------------------------
 
-  async buildDeptFilter(actor: AuthUser, module: ModuleIdentifier): Promise<DeptWhereFragment> {
-    const scope = await this.getScope(actor, module);
+  // FMP-PERF-01 — callers that already resolved the scope (typically via
+  // `Promise.all([getScope(...), buildDeptFilter(...)])` for a dashboard's
+  // scope-label + filter) can pass it as `knownScope` so this method skips
+  // its own redundant `getScope` DB read instead of re-querying the same
+  // `userModuleAccess` row a second time. Behavior for every scope value is
+  // unchanged either way — this only removes a duplicate query.
+  async buildDeptFilter(
+    actor: AuthUser,
+    module: ModuleIdentifier,
+    knownScope?: DepartmentAccessScope,
+  ): Promise<DeptWhereFragment> {
+    const scope = knownScope ?? (await this.getScope(actor, module));
 
     if (scope === DepartmentAccessScope.ALL_DEPARTMENTS) {
       return null;

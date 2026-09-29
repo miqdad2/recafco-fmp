@@ -181,6 +181,7 @@ describe('PlatformDashboardService', () => {
     ]);
 
     const incidentCard = result.cards.find((c) => c.code === 'INCIDENT_REPORT')!;
+    expect(incidentCard.title).toBe('Incident Management');
     expect(incidentCard.metrics).toEqual([
       { label: 'Open', value: 7 },
       { label: 'Investigating', value: 3 },
@@ -189,8 +190,8 @@ describe('PlatformDashboardService', () => {
     ]);
   });
 
-  describe('QA/QC and Storage & Delivery placeholder modules (FMP-UI-10)', () => {
-    it('does not include QA/QC or Storage & Delivery for a single-module viewer', async () => {
+  describe('QA/QC, Storage & Delivery, and Estimation placeholder modules (FMP-UI-10, extended FMP-UI-23)', () => {
+    it('does not include QA/QC, Storage & Delivery, or Estimation for a single-module viewer', async () => {
       (mockSafetyService.getDashboard as ReturnType<typeof vi.fn>).mockResolvedValue({
         metrics: { scheduledInspections: 0, inProgressInspections: 0, openFindings: 0, criticalFindings: 0, overdueFindings: 0, completedInspections: 0 },
       });
@@ -200,7 +201,7 @@ describe('PlatformDashboardService', () => {
       expect(result.cards.map((c) => c.code)).toEqual(['SAFETY_COMPLIANCE']);
     });
 
-    it('includes honest not-available QA/QC and Storage & Delivery cards for an Executive-Manager-shaped actor (all 6 operational read permissions)', async () => {
+    it('includes honest not-available QA/QC, Storage & Delivery, and Estimation cards for an Executive-Manager-shaped actor (all 6 operational read permissions), in the FMP-UI-23 required order', async () => {
       (mockContractDashboardService.getDashboard as ReturnType<typeof vi.fn>).mockResolvedValue({
         metrics: { totalDraft: 0, totalActive: 0, totalExpiring: 0, totalExpired: 0, totalTerminated: 0, totalClosed: 0, totalCancelled: 0 },
         manager: { summary: { outstandingPayments: 0 } },
@@ -219,11 +220,24 @@ describe('PlatformDashboardService', () => {
       );
 
       expect(result.cards.map((c) => c.code)).toEqual([
-        'CONTRACTS_MANAGEMENT', 'TECHNICAL', 'ERECTION', 'QA_QC', 'STORAGE_DELIVERY',
-        'SAFETY_COMPLIANCE', 'INCIDENT_REPORT', 'PRODUCTION_DASHBOARD', 'MAINTENANCE_REQUESTS', 'FACTORY_TASKS',
+        'CONTRACTS_MANAGEMENT', 'ESTIMATION', 'TECHNICAL', 'ERECTION',
+        'SAFETY_COMPLIANCE', 'INCIDENT_REPORT', 'PRODUCTION_DASHBOARD', 'MAINTENANCE_REQUESTS',
+        'STORAGE_DELIVERY', 'QA_QC', 'FACTORY_TASKS',
       ]);
 
+      const contractCard = result.cards.find((c) => c.code === 'CONTRACTS_MANAGEMENT')!;
+      expect(contractCard.title).toBe('Contract Management');
+
+      const productionCard = result.cards.find((c) => c.code === 'PRODUCTION_DASHBOARD')!;
+      expect(productionCard.title).toBe('Production & Planning');
+
+      const estimationCard = result.cards.find((c) => c.code === 'ESTIMATION')!;
+      expect(estimationCard.title).toBe('Estimation');
+      expect(estimationCard.route).toBe('/executive/estimation');
+      expect(estimationCard.metrics.every((m) => m.value === null)).toBe(true);
+
       const qaQcCard = result.cards.find((c) => c.code === 'QA_QC')!;
+      expect(qaQcCard.title).toBe('Quality Control');
       expect(qaQcCard.route).toBe('/executive/qaqc');
       expect(qaQcCard.metrics).toEqual([
         { label: 'Inspections', value: null },
@@ -242,10 +256,10 @@ describe('PlatformDashboardService', () => {
       ]);
     });
 
-    it('includes QA/QC and Storage & Delivery for an Admin-shaped actor even without all 6 operational read permissions', async () => {
+    it('includes QA/QC, Storage & Delivery, and Estimation for an Admin-shaped actor even without all 6 operational read permissions, in the FMP-UI-23 required order', async () => {
       const result = await service.getDashboard(actor(['users.read']));
 
-      expect(result.cards.map((c) => c.code)).toEqual(['QA_QC', 'STORAGE_DELIVERY']);
+      expect(result.cards.map((c) => c.code)).toEqual(['ESTIMATION', 'STORAGE_DELIVERY', 'QA_QC']);
     });
   });
 });

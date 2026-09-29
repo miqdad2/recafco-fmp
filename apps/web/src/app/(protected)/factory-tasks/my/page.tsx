@@ -54,7 +54,7 @@ export default async function MyTasksPage(): Promise<React.JSX.Element> {
 
         {tasks && tasks.items.length === 0 && (
           <div className="rounded-lg border border-border bg-surface py-16 text-center">
-            <p className="text-sm text-text-muted">You have no active tasks assigned to you.</p>
+            <p className="text-sm text-text-muted">No tasks assigned to you.</p>
             <Link href="/factory-tasks" className="mt-2 inline-block text-sm text-accent hover:underline">
               View all tasks
             </Link>

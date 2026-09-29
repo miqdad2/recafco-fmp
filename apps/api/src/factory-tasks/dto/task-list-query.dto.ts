@@ -39,6 +39,13 @@ export class TaskListQueryDto {
   @IsString()
   assignedToUserId?: string;
 
+  // FMP-UI-20 — "Assigned by Me" tab on the redesigned Task Control Center.
+  // Mirrors assignedToUserId exactly: pass "me" to resolve to the current
+  // user's ID server-side (handled in buildListWhere, same as above).
+  @IsOptional()
+  @IsString()
+  createdByUserId?: string;
+
   @IsOptional()
   @IsUUID('4')
   responsibleDepartmentId?: string;

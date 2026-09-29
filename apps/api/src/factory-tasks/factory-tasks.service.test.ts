@@ -40,6 +40,7 @@ const mockUserFindUnique = vi.fn();
 const mockIncidentFindUnique = vi.fn();
 const mockLocationFindUnique = vi.fn();
 const mockDepartmentFindMany = vi.fn();
+const mockPlantFindMany = vi.fn();
 const mockGetScope = vi.fn();
 const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx));
 
@@ -53,6 +54,7 @@ const mockClient = {
   incident: { findUnique: mockIncidentFindUnique },
   location: { findUnique: mockLocationFindUnique },
   department: { findMany: mockDepartmentFindMany },
+  plant: { findMany: mockPlantFindMany },
   $transaction: mockTransaction,
 };
 
@@ -788,6 +790,7 @@ describe('FactoryTasksService', () => {
       mockFactoryTaskCount
         .mockResolvedValueOnce(12) // openTasks
         .mockResolvedValueOnce(4)  // assignedToMe
+        .mockResolvedValueOnce(6)  // assignedByMe
         .mockResolvedValueOnce(2)  // overdueTasks
         .mockResolvedValueOnce(1)  // blockedTasks
         .mockResolvedValueOnce(7)  // completedThisMonth
@@ -803,6 +806,7 @@ describe('FactoryTasksService', () => {
       expect(result.scope.departmentNames).toEqual([]);
       expect(result.metrics.openTasks).toBe(12);
       expect(result.metrics.assignedToMe).toBe(4);
+      expect(result.metrics.assignedByMe).toBe(6);
       expect(result.metrics.overdueTasks).toBe(2);
       expect(result.metrics.blockedTasks).toBe(1);
       expect(result.metrics.completedThisMonth).toBe(7);
@@ -811,6 +815,101 @@ describe('FactoryTasksService', () => {
       expect(result.recent).toHaveLength(1);
       expect(result.recent[0]?.referenceNumber).toBe('TASK-001');
       expect(result.recent[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+  });
+
+  // ── findAssignedByMe (FMP-UI-20) ────────────────────────────────────────────
+
+  describe('findAssignedByMe', () => {
+    it('filters by createdByUserId, not department scope', async () => {
+      const task = makeTask({ createdByUserId: ACTOR_NO_MANAGE.id });
+      mockFactoryTaskFindMany.mockResolvedValueOnce([task]);
+      mockFactoryTaskCount.mockResolvedValueOnce(1);
+
+      const result = await service.findAssignedByMe({}, ACTOR_NO_MANAGE);
+
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination.total).toBe(1);
+      const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where['createdByUserId']).toBe(ACTOR_NO_MANAGE.id);
+      // Never department-scoped — a task you created is yours to see regardless of scope.
+      expect(call.where['responsibleDepartmentId']).toBeUndefined();
+    });
+
+    it('ignores a createdByUserId passed by the caller and always uses the actor\'s own id', async () => {
+      mockFactoryTaskFindMany.mockResolvedValueOnce([]);
+      mockFactoryTaskCount.mockResolvedValueOnce(0);
+
+      await service.findAssignedByMe({ createdByUserId: 'someone-elses-id' }, ACTOR_NO_MANAGE);
+
+      const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where['createdByUserId']).toBe(ACTOR_NO_MANAGE.id);
+    });
+  });
+
+  // ── buildListWhere createdByUserId (FMP-UI-20, via findAll) ─────────────────
+
+  describe('findAll createdByUserId filter', () => {
+    it('resolves "me" to the actor\'s own id', async () => {
+      mockFactoryTaskFindMany.mockResolvedValueOnce([]);
+      mockFactoryTaskCount.mockResolvedValueOnce(0);
+
+      await service.findAll({ createdByUserId: 'me' }, ACTOR_NO_MANAGE);
+
+      const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where['createdByUserId']).toBe(ACTOR_NO_MANAGE.id);
+    });
+
+    it('passes through a literal user id unchanged', async () => {
+      mockFactoryTaskFindMany.mockResolvedValueOnce([]);
+      mockFactoryTaskCount.mockResolvedValueOnce(0);
+
+      await service.findAll({ createdByUserId: 'user-other-1' }, ACTOR_NO_MANAGE);
+
+      const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where['createdByUserId']).toBe('user-other-1');
+    });
+  });
+
+  // ── listDepartments / listPlants (FMP-UI-20D) ───────────────────────────────
+
+  describe('listDepartments', () => {
+    it('returns only active departments, ordered by name, no dept-scoping applied', async () => {
+      mockDepartmentFindMany.mockResolvedValueOnce([
+        { id: 'dept-1', name: 'Maintenance', code: 'MNT' },
+        { id: 'dept-2', name: 'Operations', code: 'OPS' },
+      ]);
+
+      const result = await service.listDepartments();
+
+      expect(result).toEqual([
+        { id: 'dept-1', name: 'Maintenance', code: 'MNT' },
+        { id: 'dept-2', name: 'Operations', code: 'OPS' },
+      ]);
+      const call = mockDepartmentFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where).toEqual({ isActive: true });
+    });
+
+    it('returns an empty array when there are no active departments — never fabricated rows', async () => {
+      mockDepartmentFindMany.mockResolvedValueOnce([]);
+      expect(await service.listDepartments()).toEqual([]);
+    });
+  });
+
+  describe('listPlants', () => {
+    it('returns only active plants, ordered by name', async () => {
+      mockPlantFindMany.mockResolvedValueOnce([{ id: 'plant-1', name: 'Main Plant', code: 'PLT1' }]);
+
+      const result = await service.listPlants();
+
+      expect(result).toEqual([{ id: 'plant-1', name: 'Main Plant', code: 'PLT1' }]);
+      const call = mockPlantFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where).toEqual({ isActive: true });
+    });
+
+    it('returns an empty array when there are no active plants', async () => {
+      mockPlantFindMany.mockResolvedValueOnce([]);
+      expect(await service.listPlants()).toEqual([]);
     });
   });
 });

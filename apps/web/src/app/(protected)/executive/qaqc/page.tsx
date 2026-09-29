@@ -9,7 +9,7 @@ import { ExecutiveModuleNav } from '../../_components/executive-module-nav';
 import { ExecutiveModuleTitle } from '../../_components/executive-module-title';
 import { ExecutiveComingSoon } from '../../_components/executive-coming-soon';
 
-export const metadata: Metadata = { title: 'Quality Assurance & Control — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Quality Control — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 /**
@@ -23,9 +23,11 @@ export const dynamic = 'force-dynamic';
  * dashboard card itself.
  *
  * FMP-UI-10C — renamed "QA/QC" → "Quality Assurance & Control" everywhere
- * user-facing on this page; the route (/executive/qaqc), file path, and
- * `code="QA_QC"` are unchanged (technical slugs, per this unit's own
- * instruction).
+ * user-facing on this page.
+ * FMP-UI-23 — renamed again, "Quality Assurance & Control" → "Quality
+ * Control" (that unit's own required exact wording). The route
+ * (/executive/qaqc), file path, and `code="QA_QC"` remain unchanged
+ * (technical slugs, per this unit's own "do not rename routes" instruction).
  */
 export default async function QaQcExecutivePage(): Promise<React.JSX.Element> {
   const store = await cookies();
@@ -40,13 +42,13 @@ export default async function QaQcExecutivePage(): Promise<React.JSX.Element> {
       <ExecutiveModuleNav code="QA_QC" permissions={permissions} />
 
       <ExecutiveModuleTitle
-        title="Quality Assurance & Control"
+        title="Quality Control"
         description="Quality checks, inspections, approvals, and non-conformance follow-up."
         icon={BadgeCheck}
         accent="qaqc"
       />
 
-      <ExecutiveComingSoon message="Quality Assurance & Control module will be configured in a future unit." />
+      <ExecutiveComingSoon message="Quality Control module will be configured in a future unit." />
 
       <div className="pt-2">
         <Link

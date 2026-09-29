@@ -63,6 +63,7 @@ export const ApiEnvSchema = z
     ERECTION_DELIVERY_START_ATTACHMENTS_DIR: z.string().optional(),
     ERECTION_START_ATTACHMENTS_DIR: z.string().optional(),
     ERECTION_CHECKLIST_ATTACHMENTS_DIR: z.string().optional(),
+    INCIDENT_ATTACHMENTS_DIR: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -106,6 +107,7 @@ export const ApiEnvSchema = z
       erectionDeliveryStartAttachmentsDir: raw.ERECTION_DELIVERY_START_ATTACHMENTS_DIR ?? './storage/erection-delivery-start-attachments',
       erectionStartAttachmentsDir: raw.ERECTION_START_ATTACHMENTS_DIR ?? './storage/erection-start-attachments',
       erectionChecklistAttachmentsDir: raw.ERECTION_CHECKLIST_ATTACHMENTS_DIR ?? './storage/erection-checklist-attachments',
+      incidentAttachmentsDir: raw.INCIDENT_ATTACHMENTS_DIR ?? './storage/incident-attachments',
     };
   });
 

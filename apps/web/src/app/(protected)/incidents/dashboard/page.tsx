@@ -15,7 +15,7 @@ import { Breadcrumbs } from '../../_components/breadcrumbs';
 import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { DashboardRecentTable } from '../../_components/dashboard-recent-table';
 
-export const metadata: Metadata = { title: 'Incident Report Dashboard — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Incident Management Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 export default async function IncidentsDashboardPage(): Promise<React.JSX.Element> {
@@ -41,14 +41,14 @@ export default async function IncidentsDashboardPage(): Promise<React.JSX.Elemen
     <div className="p-6 max-w-5xl mx-auto space-y-8">
       <Breadcrumbs
         items={[
-          { label: 'Incident Report', href: '/incidents/dashboard' },
+          { label: 'Incident Management', href: '/incidents/dashboard' },
           { label: 'Dashboard' },
         ]}
       />
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Incident Report</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">Incident Management</h1>
           <p className="mt-1 text-sm text-text-secondary">
             Report and manage incidents, near-misses, and corrective actions
           </p>

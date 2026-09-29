@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import {
   FileText,
+  Calculator,
   Ruler,
   HardHat,
   BadgeCheck,
@@ -25,6 +26,7 @@ export const dynamic = 'force-dynamic';
 
 const CARD_ICONS: Record<PlatformModuleCode, LucideIcon> = {
   CONTRACTS_MANAGEMENT: FileText,
+  ESTIMATION: Calculator,
   TECHNICAL: Ruler,
   ERECTION: HardHat,
   QA_QC: BadgeCheck,
@@ -39,6 +41,7 @@ const CARD_ICONS: Record<PlatformModuleCode, LucideIcon> = {
 // FMP-UI-03 — soft, module-specific accent per card (see executive-module-card.tsx's own ACCENT_CLASSES).
 const CARD_ACCENTS: Record<PlatformModuleCode, ModuleAccent> = {
   CONTRACTS_MANAGEMENT: 'contracts',
+  ESTIMATION: 'estimation',
   TECHNICAL: 'technical',
   ERECTION: 'erection',
   QA_QC: 'qaqc',
@@ -104,8 +107,25 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
     // underneath it. FMP-UI-14 trimmed the top padding by one more notch
     // (pt-2→pt-1, lg:pt-3→lg:pt-2) to reclaim a little of the room the new
     // heading needs.
-    <div className="mx-auto flex min-h-full max-w-7xl flex-col px-5 pt-1 pb-3 lg:px-6 lg:pt-2 lg:pb-4">
-      <div className="flex flex-1 flex-col justify-center space-y-2">
+    // FMP-UI-23B — trimmed once more (pt-1→pt-0.5/pb-3→pb-2 at base,
+    // lg:pt-2→lg:pt-1/lg:pb-4→lg:pb-3), and the hero→grid gap eased
+    // space-y-2→space-y-1.5, as part of fitting 11 cards (3 rows) into a
+    // normal 1920x1080 viewport with no page scroll — see the title
+    // block's own FMP-UI-23B note below for the matching size reduction.
+    // FMP-UI-23D — outer top/bottom padding left exactly as FMP-UI-23B set
+    // it (still compact, per this unit's own "keep top spacing compact"
+    // requirement); only the INNER hero→grid gap changed — see below.
+    <div className="mx-auto flex min-h-full max-w-7xl flex-col px-5 pt-0.5 pb-2 lg:px-6 lg:pt-1 lg:pb-3">
+      {/* FMP-UI-23D — `space-y-1.5` (a bare 6px, "cramped"/"cards feel
+          attached to the heading" per this unit's own brief) replaced with
+          a real flex `gap-6 lg:gap-8` (24px→32px, this unit's own
+          recommended range) applied via CSS `gap` rather than `space-y`'s
+          margin-top-on-siblings trick — `gap` applies uniformly between
+          EVERY pair of adjacent children (heading→error-banner,
+          heading→grid, or banner→grid on the rare error/empty path),
+          so the heading never touches whatever renders below it, in any
+          state. */}
+      <div className="flex flex-1 flex-col justify-center gap-6 lg:gap-8">
         {/* FMP-UI-14 — the main dashboard hero title, replacing the one that
             used to live in TopHeader. Always shown (even on an error/empty
             state, same as any page's own title would be).
@@ -124,15 +144,32 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
             `space-y-3`→`space-y-2` (hero → grid gap) also tightened now
             that the hero is shorter, so the cards sit closer to the title
             instead of the centered block just leaving more blank space
-            above/below evenly. */}
-        <div className="text-center">
-          <h1 className="text-3xl font-extrabold tracking-tight text-text-primary lg:text-4xl">
-            RECAFCO Factory Management Platform
-          </h1>
-          <p className="mt-1.5 text-xs font-semibold uppercase tracking-widest text-text-muted">
-            Factory Operations Control Center
-          </p>
-        </div>
+            above/below evenly.
+            FMP-UI-23B — title eased text-3xl/lg:text-4xl → text-2xl/lg:text-3xl
+            and the subtitle gap mt-1.5 → mt-1, freeing vertical room for
+            the now-3-row (11-card) grid below without page scroll.
+            FMP-UI-23C — the "RECAFCO Factory Management Platform" title AND
+            its small-caps tagline are both gone; the sidebar already carries
+            the RECAFCO FMP brand (logo + name), so repeating the full
+            product name here read as redundant. "Factory Operations Control
+            Center" is now the ONLY heading, promoted from a small uppercase
+            caption to the page's one large, bold, centered `<h1>`
+            (`text-2xl sm:text-3xl lg:text-5xl font-extrabold`) — bigger than
+            the OLD title ever was despite being the only line now, so this
+            is a net height REDUCTION versus the two-line title+tagline block
+            it replaces (a single bigger line is shorter than a big line plus
+            a subtitle line), which is why it doesn't push the card grid down
+            even at the largest `lg:text-5xl` size.
+            FMP-UI-23D — sized up one more step at the smaller breakpoints
+            (`text-2xl`→`text-3xl`, `sm:text-3xl`→`sm:text-4xl`) per this
+            unit's own recommended `text-3xl sm:text-4xl lg:text-5xl`;
+            `lg:text-5xl` itself is UNCHANGED (already at this unit's own
+            "if it still fits well" ceiling) — so the no-scroll-critical
+            desktop breakpoint gets zero extra height from the heading
+            itself, only from the larger hero→grid gap below. */}
+        <h1 className="text-center text-3xl font-extrabold tracking-tight text-text-primary sm:text-4xl lg:text-5xl">
+          Factory Operations Control Center
+        </h1>
 
         {loadError && (
           <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
@@ -148,17 +185,25 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
           </div>
         )}
 
-        {/* FMP-UI-04 — 2 rows regardless of column count; grid's default
-            `align-items: stretch` makes every card in a row match the row's
-            tallest card, so each ExecutiveModuleCard's own `mt-auto` button
-            lands at the same height across the row regardless of
-            description length.
-            FMP-UI-10 — widened to 5 columns on large desktop (was 4) now
-            that there are 10 cards (still exactly 2 rows), with an added
-            3-column step for medium desktop between the existing 2-column
-            tablet step and the 5-column large-desktop step: 1 (mobile) → 2
-            (md, tablet) → 3 (lg, medium desktop) → 5 (xl, large desktop). */}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {/* FMP-UI-04 — grid's default `align-items: stretch` makes every card
+            in a row match the row's tallest card, so each
+            ExecutiveModuleCard's own `mt-auto` button lands at the same
+            height across the row regardless of description length.
+            FMP-UI-10 — widened to 5 columns on large desktop (was 4) for 10
+            cards (exactly 2 rows), with an added 3-column step for medium
+            desktop between the existing 2-column tablet step and the
+            5-column large-desktop step.
+            FMP-UI-23 — eased large-desktop back to 4 columns (was 5) now
+            that Estimation makes 11 cards: 5 columns would leave an
+            orphaned single card on its own row (5+5+1); 4 columns gives a
+            cleaner 3-row spread (4+4+3) without narrowing any card enough
+            to risk "Storage Yard & Delivery"/"Production & Planning"
+            wrapping awkwardly. Still 1 (mobile) → 2 (md, tablet) → 3 (lg,
+            medium desktop) → 4 (xl, large desktop).
+            FMP-UI-23B — gap eased gap-3 → gap-2.5 (a small additional
+            contribution to fitting 3 rows of compacted cards without page
+            scroll, on top of this component's own per-card size pass). */}
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {cards.map((card) => (
             <ExecutiveModuleCard
               key={card.code}

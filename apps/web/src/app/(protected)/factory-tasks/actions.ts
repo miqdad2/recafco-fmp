@@ -78,14 +78,23 @@ export async function createTaskAction(
   const locationId = (formData.get('locationId') as string | null) || null;
   const incidentId = (formData.get('incidentId') as string | null) || null;
   const dueAt = (formData.get('dueAt') as string | null) || null;
+  // FMP-UI-20C — assignment is now optional, not a distinct button choice:
+  // "Assign To User" is only ever rendered for a viewer with `tasks.assign`
+  // (task-form.tsx), so its mere presence/absence in the submitted form is
+  // enough to decide whether the create→open→assign chain below runs — no
+  // separate "intent" field, no "Assign To User is required" error.
+  const assignedToUserId = (formData.get('assignedToUserId') as string | null) || null;
 
-  if (!title) return { error: null, fieldErrors: { title: ['Title is required'] } };
+  const fieldErrors: Record<string, string[]> = {};
+  if (!title) fieldErrors['title'] = ['Task title is required.'];
+  if (!responsibleDepartmentId) fieldErrors['responsibleDepartmentId'] = ['Responsible department is required.'];
+  if (dueAt && isNaN(new Date(dueAt).getTime())) fieldErrors['dueAt'] = ['Due date must be valid.'];
+  if (Object.keys(fieldErrors).length > 0) return { error: null, fieldErrors };
 
-  const body: Record<string, unknown> = { title };
+  const body: Record<string, unknown> = { title, responsibleDepartmentId };
   if (description) body['description'] = description;
   if (priority) body['priority'] = priority;
   if (requestingDepartmentId) body['requestingDepartmentId'] = requestingDepartmentId;
-  if (responsibleDepartmentId) body['responsibleDepartmentId'] = responsibleDepartmentId;
   if (plantId) body['plantId'] = plantId;
   if (locationId) body['locationId'] = locationId;
   if (incidentId) body['incidentId'] = incidentId;
@@ -107,18 +116,31 @@ export async function createTaskAction(
     cache: 'no-store',
   });
 
-  if (res.ok) {
-    const json = (await res.json()) as { data: { id: string } };
-    redirect(`/factory-tasks/${json.data.id}`);
+  if (!res.ok) {
+    let message = 'Failed to create task';
+    try {
+      const json = (await res.json()) as { error?: { message?: string } };
+      message = json.error?.message ?? message;
+    } catch { /* ignore */ }
+    return { error: message };
   }
 
-  let message = 'Failed to create task';
-  try {
-    const json = (await res.json()) as { error?: { message?: string } };
-    message = json.error?.message ?? message;
-  } catch { /* ignore */ }
+  const json = (await res.json()) as { data: { id: string } };
+  const taskId = json.data.id;
 
-  return { error: message };
+  // FMP-UI-20B — an assignee selected in "Assign To User" chains the SAME 3
+  // already-existing, already-permission-gated endpoints TaskTransitionsPanel
+  // itself calls (open, then assign) — never a new endpoint, never a
+  // fabricated assignment. If either later step fails, the task already
+  // exists for real, so we still land on its own detail page (where the
+  // real Open/Assign controls already live) rather than stranding the user
+  // on a stale create form referring to a task it can no longer reach.
+  if (assignedToUserId) {
+    await actionFetch(`/factory-tasks/${taskId}/open`, 'POST').catch(() => ({ ok: false }));
+    await actionFetch(`/factory-tasks/${taskId}/assign`, 'POST', { assignedToUserId }).catch(() => ({ ok: false }));
+  }
+
+  redirect(`/factory-tasks/${taskId}`);
 }
 
 // ---------------------------------------------------------------------------

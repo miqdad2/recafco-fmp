@@ -1,5 +1,6 @@
 export type ModuleAccent =
   | 'contracts'
+  | 'estimation'
   | 'technical'
   | 'erection'
   | 'qaqc'
@@ -29,6 +30,9 @@ export interface AccentPalette {
  */
 export const ACCENT_PALETTE: Record<ModuleAccent, AccentPalette> = {
   contracts: { base: '#1e3a8a', light: '#eff6ff' }, // navy / blue
+  // FMP-UI-23 — gold, distinct from erection's amber/orange (#b45309) and
+  // storage's slate (#475569) despite the ticket suggesting either.
+  estimation: { base: '#a16207', light: '#fefce8' }, // gold / mustard
   technical: { base: '#4338ca', light: '#eef2ff' }, // indigo / steel blue
   erection: { base: '#b45309', light: '#fffbeb' }, // amber / orange
   // FMP-UI-10 — deliberately NOT amber/purple: erection already owns amber

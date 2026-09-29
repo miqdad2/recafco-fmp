@@ -5,12 +5,13 @@ import { Breadcrumbs } from '../_components/breadcrumbs';
 import { PageHeader } from '../administration/_components/page-header';
 import { TaskStatusBadge } from './_components/task-status-badge';
 import { TaskPriorityBadge } from './_components/task-priority-badge';
+import { TaskModuleNav } from './_components/task-module-nav';
 import { tasksApi } from '../../../lib/factory-tasks-api';
 import type { TaskStatus, TaskPriority, TaskListQuery } from '../../../lib/factory-tasks-api';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Factory Tasks Management — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Task List — RECAFCO FMP' };
 
 const ACTIVE_STATUSES: TaskStatus[] = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'];
 
@@ -42,6 +43,22 @@ interface PageProps {
   searchParams: Promise<PageSearchParams>;
 }
 
+/**
+ * FMP-UI-20I — this page had no clear way back to Task Management or the
+ * Platform Dashboard, and repeated "Factory Tasks Management" as both the
+ * breadcrumb and the title, per direct feedback. Added the same
+ * `TaskModuleNav` row (Back to Task Management / Back to Platform
+ * Dashboard / Previous / Switch module) the Task Detail page already has
+ * (FMP-UI-20F–20H) — this page needed no task-specific data for it, so the
+ * component (renamed from `TaskDetailNav`, see its own file) is reused
+ * verbatim. Breadcrumb is now 3 levels ("Platform Dashboard > Task
+ * Management > Task List", was 1 level: "Factory Tasks Management").
+ * Title/subtitle changed to "Task List" / "View, filter, and open
+ * operational tasks." (was "Factory Tasks Management" repeated as both
+ * breadcrumb and title). "Assigned to" empty cell wording aligned with the
+ * rest of the module ("Not assigned", was a bare "—"). No filter, search,
+ * pagination, or table-action behavior changed.
+ */
 export default async function FactoryTasksPage({ searchParams }: PageProps): Promise<React.JSX.Element> {
   const params = await searchParams;
   const permissions = await getUserPermissions();
@@ -54,6 +71,10 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
   const dueTo = typeof params['dueTo'] === 'string' ? params['dueTo'] : undefined;
   const overdueRaw = typeof params['overdue'] === 'string' ? params['overdue'] : undefined;
   const overdueFilter = overdueRaw === 'true' ? true : overdueRaw === 'false' ? false : undefined;
+  // FMP-UI-20 — "createdByUserId" passthrough for the Task Control Center's
+  // "Assigned by Me" style links into this same full list (mirrors the
+  // existing assignedToUserId="me" support the API already had).
+  const createdByUserId = typeof params['createdByUserId'] === 'string' ? params['createdByUserId'] : undefined;
   const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
 
   let tasks: Awaited<ReturnType<typeof tasksApi.list>> | null = null;
@@ -71,22 +92,30 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
     if (dueFrom) query.dueFrom = dueFrom;
     if (dueTo) query.dueTo = dueTo;
     if (overdueFilter !== undefined) query.overdue = overdueFilter;
+    if (createdByUserId) query.createdByUserId = createdByUserId;
     tasks = await tasksApi.list(query);
   } catch (e) {
     error = e instanceof Error ? e.message : 'Failed to load tasks';
   }
 
-  const hasFilters = !!(statusFilter ?? priorityFilter ?? search ?? dueFrom ?? dueTo ?? overdueRaw);
+  const hasFilters = !!(statusFilter ?? priorityFilter ?? search ?? dueFrom ?? dueTo ?? overdueRaw ?? createdByUserId);
 
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Factory Tasks Management' }]} />
+        <div className="space-y-3">
+          <Breadcrumbs items={[
+            { label: 'Platform Dashboard', href: '/dashboard' },
+            { label: 'Task Management', href: '/factory-tasks/executive' },
+            { label: 'Task List' },
+          ]} className="mb-0" />
+          <TaskModuleNav permissions={permissions} />
+        </div>
 
-        <div className="mb-6">
+        <div className="mb-6 mt-8">
           <PageHeader
-            title="Factory Tasks Management"
-            description="Manage and track operational tasks across all factory facilities."
+            title="Task List"
+            description="View, filter, and open operational tasks."
             action={
               canCreate ? (
                 <Link
@@ -121,10 +150,22 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
             Blocked
           </Link>
           <Link
+            href="/factory-tasks?status=COMPLETED,CLOSED"
+            className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${statusFilter === 'COMPLETED,CLOSED' ? 'bg-success-light text-success border-success' : 'border-border bg-surface text-text-secondary hover:border-border-strong'}`}
+          >
+            Completed
+          </Link>
+          <Link
             href="/factory-tasks/my"
             className="rounded-full px-3 py-1 text-xs font-medium border border-border bg-surface text-text-secondary hover:border-border-strong transition-colors"
           >
             My tasks →
+          </Link>
+          <Link
+            href="/factory-tasks/assigned-by-me"
+            className="rounded-full px-3 py-1 text-xs font-medium border border-border bg-surface text-text-secondary hover:border-border-strong transition-colors"
+          >
+            Assigned by me →
           </Link>
         </div>
 
@@ -233,6 +274,7 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
                     <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wide">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wide">Due</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wide">Assigned to</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wide">Created by</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wide">Department</th>
                   </tr>
                 </thead>
@@ -274,7 +316,10 @@ export default async function FactoryTasksPage({ searchParams }: PageProps): Pro
                           )}
                         </td>
                         <td className="px-4 py-3 text-text-secondary">
-                          {task.assignedToUser?.displayName ?? <span className="text-text-muted">—</span>}
+                          {task.assignedToUser?.displayName ?? <span className="text-text-muted">Not assigned</span>}
+                        </td>
+                        <td className="px-4 py-3 text-text-secondary">
+                          {task.createdByUser.displayName}
                         </td>
                         <td className="px-4 py-3 text-text-secondary">
                           {task.responsibleDepartment?.name ?? <span className="text-text-muted">—</span>}

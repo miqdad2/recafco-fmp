@@ -65,6 +65,18 @@ export class FactoryTasksController {
     return { data: result, meta: meta(), error: null };
   }
 
+  // FMP-UI-20 — "Assigned by Me" tab on the redesigned Task Control Center.
+  // Declared before /:id, same reason as /my above.
+  @Get('assigned-by-me')
+  @Permissions('tasks.read')
+  async assignedByMe(
+    @Query() query: TaskListQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const result = await this.tasksService.findAssignedByMe(query, actor);
+    return { data: result, meta: meta(), error: null };
+  }
+
   @Get('people')
   @Permissions('tasks.read')
   async people(
@@ -72,6 +84,25 @@ export class FactoryTasksController {
   ): Promise<ApiSuccessResponse<{ id: string; displayName: string; username: string }[]>> {
     const people = await this.tasksService.listPeople(search);
     return { data: people, meta: meta(), error: null };
+  }
+
+  // FMP-UI-20D — active departments/plants for the New Task form's own
+  // dropdowns, gated by `tasks.read` (not the admin-only
+  // `org.departments.read`) — see factory-tasks.service.ts's own doc
+  // comment on `listDepartments`/`listPlants` for why. Declared before
+  // /:id, same reason as /my, /people above.
+  @Get('departments')
+  @Permissions('tasks.read')
+  async departments(): Promise<ApiSuccessResponse<{ id: string; name: string; code: string }[]>> {
+    const data = await this.tasksService.listDepartments();
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get('plants')
+  @Permissions('tasks.read')
+  async plants(): Promise<ApiSuccessResponse<{ id: string; name: string; code: string }[]>> {
+    const data = await this.tasksService.listPlants();
+    return { data, meta: meta(), error: null };
   }
 
   @Get()

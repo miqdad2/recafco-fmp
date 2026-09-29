@@ -676,10 +676,10 @@ export class ProductionOrdersService {
       throw new ForbiddenException({ code: 'PRODUCTION_PERMISSION_DENIED', message: 'Missing production.read' });
     }
 
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.PRODUCTION_DASHBOARD),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.PRODUCTION_DASHBOARD),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.PRODUCTION_DASHBOARD);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.PRODUCTION_DASHBOARD, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {

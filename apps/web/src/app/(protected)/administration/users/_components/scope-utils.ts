@@ -16,12 +16,15 @@ export const SCOPE_LABELS: Record<DepartmentAccessScope, string> = {
 // and sidebar (Task Management / Production Planning / Maintenance
 // Management). These are the only 3 that changed; the underlying
 // ModuleIdentifier/permission codes are unchanged.
+// FMP-UI-23 — INCIDENT_REPORT and PRODUCTION_DASHBOARD relabelled again
+// ("Incident Report" → "Incident Management", "Production Planning" →
+// "Production & Planning"), matching that unit's own required wording.
 export const MODULE_LABELS: Record<string, string> = {
   FACTORY_TASKS: 'Task Management',
-  INCIDENT_REPORT: 'Incident Report',
+  INCIDENT_REPORT: 'Incident Management',
   MAINTENANCE_REQUESTS: 'Maintenance Management',
   SAFETY_COMPLIANCE: 'Safety & Compliance',
   CONTRACTS_MANAGEMENT: 'Contract Management',
-  PRODUCTION_DASHBOARD: 'Production Planning',
+  PRODUCTION_DASHBOARD: 'Production & Planning',
   ADMINISTRATION: 'Administration',
 };

@@ -64,13 +64,15 @@ export const MODULE_CATALOG: ModuleCatalogEntry[] = [
   {
     code: 'INCIDENT_REPORT',
     slug: 'incident-report',
-    name: 'Incident Report',
+    // FMP-UI-23 — renamed from "Incident Report"; slug/code unchanged.
+    name: 'Incident Management',
     shortDescription: 'Create users who report, investigate, and close incidents.',
   },
   {
     code: 'PRODUCTION_DASHBOARD',
     slug: 'production',
-    name: 'Production Planning',
+    // FMP-UI-23 — renamed from "Production Planning"; slug/code unchanged.
+    name: 'Production & Planning',
     shortDescription: 'Create users who monitor production schedules, delayed jobs, and delivery readiness.',
   },
   {

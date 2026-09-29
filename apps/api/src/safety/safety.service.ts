@@ -1284,12 +1284,40 @@ export class SafetyService {
       /** FMP-UI-01 — Executive Dashboard's "Completed Inspections" card metric. COMPLETED and CLOSED are both "done" states — a CLOSED inspection went through COMPLETED first. */
       completedInspections: number;
     };
-    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string }[];
+    /**
+     * FMP-UI-21D — `departmentName`/`scheduledAt` added for the Safety
+     * Dashboard's "Latest Safety Records" section (top 3 of these 8,
+     * sliced client-side), which needs both fields alongside reference/
+     * title/status — the pre-existing shape only had the latter 3. No
+     * schema change — same `SafetyInspection` select, 2 more columns.
+     */
+    recent: { id: string; referenceNumber: string; title: string; status: string; updatedAt: string; departmentName: string | null; scheduledAt: string | null }[];
+    /**
+     * FMP-UI-21 — the Safety Control Center's "Needs Attention" section
+     * needs real, per-finding records (reference number, title, status, due
+     * date) to link a viewer straight to the record that needs action —
+     * the existing criticalFindings/overdueFindings COUNTS above can't back
+     * that UI on their own. Top 8 findings that are either CRITICAL (and
+     * not yet CLOSED) or overdue (past due, still OPEN/ACTION_REQUIRED),
+     * scoped by the same department filter as every other metric here.
+     * Findings have no reference number of their own — each item carries
+     * its PARENT inspection's referenceNumber/id, since that inspection's
+     * detail page is the only real place a finding can be opened/actioned.
+     */
+    needsAttention: {
+      id: string;
+      inspectionId: string;
+      inspectionReferenceNumber: string;
+      title: string;
+      severity: FindingSeverity;
+      status: FindingStatus;
+      dueAt: string | null;
+    }[];
   }> {
-    const [scopeType, deptFilter] = await Promise.all([
-      this.deptAccess.getScope(actor, ModuleIdentifier.SAFETY_COMPLIANCE),
-      this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.SAFETY_COMPLIANCE),
-    ]);
+    // FMP-PERF-01 — resolved once, then reused for buildDeptFilter's `knownScope`
+    // instead of each fetching the same userModuleAccess row separately.
+    const scopeType = await this.deptAccess.getScope(actor, ModuleIdentifier.SAFETY_COMPLIANCE);
+    const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.SAFETY_COMPLIANCE, scopeType);
 
     let departmentNames: string[] = [];
     if (deptFilter !== null && deptFilter.in.length > 0) {
@@ -1316,6 +1344,7 @@ export class SafetyService {
       overdueFindings,
       completedInspections,
       recentRaw,
+      needsAttentionRaw,
     ] = await Promise.all([
       this.db.getClient().safetyInspection.count({
         where: { ...inspectionDeptWhere, status: InspectionStatus.SCHEDULED },
@@ -1347,7 +1376,35 @@ export class SafetyService {
         where: { ...inspectionDeptWhere },
         take: 8,
         orderBy: { updatedAt: 'desc' },
-        select: { id: true, referenceNumber: true, title: true, status: true, updatedAt: true },
+        select: {
+          id: true,
+          referenceNumber: true,
+          title: true,
+          status: true,
+          updatedAt: true,
+          scheduledAt: true,
+          department: { select: { name: true } },
+        },
+      }),
+      this.db.getClient().safetyFinding.findMany({
+        where: {
+          ...findingDeptWhere,
+          OR: [
+            { severity: FindingSeverity.CRITICAL, status: { not: FindingStatus.CLOSED } },
+            { dueAt: { lt: now }, status: { in: openFindingStatuses } },
+          ],
+        },
+        take: 8,
+        orderBy: [{ severity: 'desc' }, { dueAt: 'asc' }],
+        select: {
+          id: true,
+          title: true,
+          severity: true,
+          status: true,
+          dueAt: true,
+          inspectionId: true,
+          inspection: { select: { referenceNumber: true } },
+        },
       }),
     ]);
 
@@ -1363,6 +1420,17 @@ export class SafetyService {
         title: r.title,
         status: r.status as string,
         updatedAt: r.updatedAt.toISOString(),
+        departmentName: r.department?.name ?? null,
+        scheduledAt: r.scheduledAt ? r.scheduledAt.toISOString() : null,
+      })),
+      needsAttention: needsAttentionRaw.map((f) => ({
+        id: f.id,
+        inspectionId: f.inspectionId,
+        inspectionReferenceNumber: f.inspection.referenceNumber,
+        title: f.title,
+        severity: f.severity,
+        status: f.status,
+        dueAt: f.dueAt ? f.dueAt.toISOString() : null,
       })),
     };
   }
@@ -1380,6 +1448,39 @@ export class SafetyService {
       select: { id: true, displayName: true, username: true },
       orderBy: [{ displayName: 'asc' }],
       take: 20,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reference data for the New/Edit Safety Inspection forms (FMP-UI-21C)
+  // ---------------------------------------------------------------------------
+  //
+  // FMP-UI-21C — root cause of the New Safety Inspection page's empty
+  // Department/Plant dropdowns: `new/page.tsx` was calling the ADMIN-gated
+  // `organizations-api.ts` (`GET /organizations/departments`/`/plants`,
+  // requiring `org.departments.read`/`org.plants.read`) — permissions a
+  // `safety.create`-only user does not hold. The 403 was silently swallowed
+  // by `Promise.allSettled`, leaving the dropdowns permanently empty with
+  // no visible error. Fixed the exact same way `factory-tasks`,
+  // `contracts`, and `production` already fixed the identical bug for
+  // their own create forms: a module-scoped reference list gated by this
+  // module's own read permission (`safety.read`, already required to reach
+  // this whole page), instead of the org-admin permission. No schema
+  // change — same `Department`/`Plant` tables, same `isActive` filter.
+
+  async listDepartments(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().department.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
+    });
+  }
+
+  async listPlants(): Promise<{ id: string; name: string; code: string }[]> {
+    return this.db.getClient().plant.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, code: true },
+      orderBy: [{ name: 'asc' }],
     });
   }
 

@@ -96,17 +96,24 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
         <Link key="edit" href={`/factory-tasks/${id}/edit`}
           className="block w-full rounded-md border border-border bg-surface-secondary px-4 py-2 text-center text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
         >
-          Edit draft
+          Edit Draft
         </Link>,
       );
       buttons.push(
-        <Btn key="open" variant="primary" disabled={isPending} onClick={() => run(() => openTaskAction(id))}>
-          Open task
-        </Btn>,
+        // FMP-UI-20G — "Open task" read as confusing (the user is already
+        // ON the task page) and didn't explain what actually changes.
+        // "Open for Work" names the real lifecycle move (DRAFT → OPEN) —
+        // same `openTaskAction`, same permission, only the label changed.
+        <div key="open" className="space-y-1">
+          <Btn variant="primary" disabled={isPending} onClick={() => run(() => openTaskAction(id))}>
+            Open for Work
+          </Btn>
+          <p className="text-[11px] text-text-muted">Moves this task from Draft to Open.</p>
+        </div>,
       );
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel task
+          Cancel Task
         </Btn>,
       );
     }
@@ -131,7 +138,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (isCreator || has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel task
+          Cancel Task
         </Btn>,
       );
     }
@@ -161,7 +168,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel task
+          Cancel Task
         </Btn>,
       );
     }
@@ -193,7 +200,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel task
+          Cancel Task
         </Btn>,
       );
     }
@@ -218,7 +225,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel task
+          Cancel Task
         </Btn>,
       );
     }
@@ -253,7 +260,19 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     }
   }
 
-  if (buttons.length === 0) return <></>;
+  // FMP-UI-20E — an empty `buttons` array is a real, valid outcome (e.g. a
+  // plain viewer with no tasks.* permission beyond tasks.read looking at
+  // someone else's OPEN task) — previously rendered as literally nothing,
+  // which read as "the page is broken" per direct feedback ("Task detail
+  // page only shows 'Cancel task' in Actions, which makes the task
+  // lifecycle unclear" — the more common version of that same complaint is
+  // an Actions panel with NO buttons at all and no explanation). An honest
+  // one-line message replaces the silent empty state; the panel's own
+  // "Available Actions" heading (factory-tasks/[id]/page.tsx) still renders
+  // around it either way, so this never looks like a missing section.
+  if (buttons.length === 0) {
+    return <p className="text-xs text-text-muted">No actions available to you on this task right now.</p>;
+  }
 
   return (
     <div className="space-y-3">
@@ -397,7 +416,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Cancel panel */}
       {activePanel === 'cancel' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Cancel task</p>
+          <p className="text-sm font-medium text-text-primary">Cancel Task</p>
           <div>
             <label htmlFor="cancel-reason" className="block text-xs font-medium text-text-secondary">
               Reason <span aria-hidden="true" className="text-danger">*</span>

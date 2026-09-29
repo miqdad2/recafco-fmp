@@ -9,6 +9,7 @@ import {
   Wrench,
   ShieldCheck,
   FileText,
+  Calculator,
   Factory,
   FileSearch,
   Settings,
@@ -84,8 +85,10 @@ const MAIN_GROUPS: NavGroup[] = [
       { label: 'Technical', href: '/contracts/technical', icon: Ruler, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
-      { label: 'Incident Report', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
-      { label: 'Production Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
+      // FMP-UI-23 — renamed from "Incident Report"; module code/href unchanged.
+      { label: 'Incident Management', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
+      // FMP-UI-23 — renamed from "Production Planning"; module code/href unchanged.
+      { label: 'Production & Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
     ],
@@ -183,23 +186,32 @@ const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideI
 // dashboard, so the Executive Manager persona always lands on the
 // simplified senior-friendly overview first — matching the Executive
 // Dashboard's own card buttons, which now route the same way.
-// FMP-UI-10 — QA/QC and Storage & Delivery added right after Erection, per
-// this unit's own spec. Both are placeholder modules with no dedicated
-// permission (see _lib/executive-modules.ts's isVisible for the real
-// gating logic on the dashboard cards themselves) — shown here purely
-// because this whole sidebar section already only renders under
-// isExecutiveManagerAccess (below), the exact "executive-only access rule"
-// this unit's own instruction allows using for now.
+// FMP-UI-10 — QA/QC and Storage & Delivery added, per that unit's own spec.
+// Both are placeholder modules with no dedicated permission (see
+// _lib/executive-modules.ts's isVisible for the real gating logic on the
+// dashboard cards themselves) — shown here purely because this whole
+// sidebar section already only renders under isExecutiveManagerAccess
+// (below), the exact "executive-only access rule" this unit's own
+// instruction allows using for now.
+//
+// FMP-UI-23 — reordered to the exact required sequence and extended with a
+// new Estimation placeholder module (same "no dedicated permission, shown
+// because this section is already executive-only" reasoning as QA/QC and
+// Storage & Delivery). Renamed: "Incident Report" → "Incident Management",
+// "Production Planning" → "Production & Planning", "Quality Assurance &
+// Control" → "Quality Control". Every href is unchanged — this unit's own
+// "do not rename routes" instruction.
 const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
+  { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
   { label: 'Technical', href: '/contracts/technical', icon: Ruler },
   { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
-  { label: 'Quality Assurance & Control', href: '/executive/qaqc', icon: BadgeCheck },
-  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
   { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
-  { label: 'Incident Report', href: '/incidents/executive', icon: AlertTriangle },
-  { label: 'Production Planning', href: '/production/executive', icon: Factory },
+  { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
+  { label: 'Production & Planning', href: '/production/executive', icon: Factory },
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
+  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
+  { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
 ];
 

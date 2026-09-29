@@ -115,6 +115,8 @@ export interface TaskDashboardData {
   metrics: {
     openTasks: number;
     assignedToMe: number;
+    /** FMP-UI-20 — Task Control Center's "Assigned by Me" overview card: active tasks the current user created/assigned to others. */
+    assignedByMe: number;
     overdueTasks: number;
     blockedTasks: number;
     completedThisMonth: number;
@@ -223,6 +225,8 @@ export interface TaskListQuery {
   status?: string;
   priority?: string;
   assignedToUserId?: string;
+  /** FMP-UI-20 — "Assigned by Me" tab; pass "me" to resolve to the current user server-side (mirrors assignedToUserId). */
+  createdByUserId?: string;
   responsibleDepartmentId?: string;
   requestingDepartmentId?: string;
   plantId?: string;
@@ -241,6 +245,7 @@ function buildQuery(q: TaskListQuery): string {
   if (q.status) params.set('status', q.status);
   if (q.priority) params.set('priority', q.priority);
   if (q.assignedToUserId) params.set('assignedToUserId', q.assignedToUserId);
+  if (q.createdByUserId) params.set('createdByUserId', q.createdByUserId);
   if (q.responsibleDepartmentId) params.set('responsibleDepartmentId', q.responsibleDepartmentId);
   if (q.requestingDepartmentId) params.set('requestingDepartmentId', q.requestingDepartmentId);
   if (q.plantId) params.set('plantId', q.plantId);
@@ -273,6 +278,9 @@ export const tasksApi = {
   my: (q: TaskListQuery = {}) =>
     apiFetch<ListResponse<FactoryTask>>(`/factory-tasks/my${buildQuery(q)}`),
 
+  assignedByMe: (q: TaskListQuery = {}) =>
+    apiFetch<ListResponse<FactoryTask>>(`/factory-tasks/assigned-by-me${buildQuery(q)}`),
+
   listProgress: (id: string) =>
     apiFetch<FactoryTaskProgress[]>(`/factory-tasks/${id}/progress`),
 
@@ -284,4 +292,16 @@ export const tasksApi = {
 
   people: (search?: string) =>
     apiFetch<UserRef[]>(`/factory-tasks/people${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+
+  // FMP-UI-20D — active departments/plants for the New Task form's own
+  // dropdowns, gated by `tasks.read` (the same permission this whole module
+  // already requires) instead of the admin-only `org.departments.read` /
+  // `org.plants.read` that `organizations-api.ts`'s `departments.list()`/
+  // `plants.list()` require — see factory-tasks.service.ts's own doc
+  // comment for the root cause this fixes.
+  departments: () =>
+    apiFetch<OrgRef[]>('/factory-tasks/departments'),
+
+  plants: () =>
+    apiFetch<OrgRef[]>('/factory-tasks/plants'),
 };

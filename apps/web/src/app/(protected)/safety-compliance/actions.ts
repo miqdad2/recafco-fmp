@@ -78,6 +78,16 @@ export async function createInspectionAction(
   _prev: ActionResult,
   formData: FormData,
 ): Promise<ActionResult> {
+  // FMP-UI-21B — defensive guard: this action is only ever called correctly
+  // via `useActionState`'s `dispatch` (see safety-inspection-form.tsx), but
+  // a form action can in principle be invoked in ways that don't supply a
+  // real FormData as the second argument (e.g. a caller still using the
+  // plain `<form action={fn}>` calling convention this unit fixed one
+  // instance of). Fail with a real, visible error instead of crashing.
+  if (!(formData instanceof FormData)) {
+    return { error: 'Unable to submit inspection form. Please try again.' };
+  }
+
   const title = (formData.get('title') as string)?.trim();
   const summary = (formData.get('summary') as string | null)?.trim() || null;
   const departmentId = (formData.get('departmentId') as string | null) || null;
@@ -100,7 +110,14 @@ export async function createInspectionAction(
 
   if (!result.ok) return { error: result.message ?? 'Failed to create inspection' };
 
+  // FMP-UI-21C — `/safety-compliance/executive` (the Safety Dashboard) is a
+  // separate route from `/safety-compliance`, not a child page Next.js's
+  // `revalidatePath` would already cover — its own metric counts (e.g.
+  // Scheduled Inspections) need their own explicit revalidation too, so a
+  // manager landing back on the dashboard right after creating an
+  // inspection sees the real, updated count immediately.
   revalidatePath('/safety-compliance');
+  revalidatePath('/safety-compliance/executive');
   if (result.id) {
     redirect(`/safety-compliance/${result.id}`);
   }
@@ -162,8 +179,17 @@ export async function scheduleInspectionAction(
 
   if (!result.ok) return { error: result.message ?? 'Failed to schedule inspection' };
 
+  // FMP-UI-21D — this action (and every other transition action below) is
+  // called directly from a client component (`safety-inspection-transitions.tsx`,
+  // via `useTransition`, not a `<form>` submission), so there is no
+  // automatic client-side re-render on success the way a form submit's
+  // navigation would give one. Redirecting back to the SAME detail page
+  // forces a fresh server render with the now-updated status — the same
+  // pattern `factory-tasks/actions.ts`'s own transition actions already
+  // use (e.g. `startTaskAction`'s `redirect('/factory-tasks/${taskId}')`).
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +201,8 @@ export async function startInspectionAction(id: string): Promise<ActionResult> {
   if (!result.ok) return { error: result.message ?? 'Failed to start inspection' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +223,8 @@ export async function completeInspectionAction(
   if (!result.ok) return { error: result.message ?? 'Failed to complete inspection' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +236,8 @@ export async function closeInspectionAction(id: string): Promise<ActionResult> {
   if (!result.ok) return { error: result.message ?? 'Failed to close inspection' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +256,8 @@ export async function reopenInspectionAction(
   if (!result.ok) return { error: result.message ?? 'Failed to reopen inspection' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +276,8 @@ export async function cancelInspectionAction(
   if (!result.ok) return { error: result.message ?? 'Failed to cancel inspection' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  revalidatePath('/safety-compliance/executive');
+  redirect(`/safety-compliance/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,18 +292,23 @@ export async function createFindingAction(
   const title = (formData.get('title') as string)?.trim();
   const description = (formData.get('description') as string)?.trim();
   const severity = (formData.get('severity') as string | null) || undefined;
-  const assignedToUserId = (formData.get('assignedToUserId') as string | null) || null;
   const dueAt = (formData.get('dueAt') as string | null) || null;
   const actionRequired = (formData.get('actionRequired') as string | null)?.trim() || null;
 
   if (!title) return { error: 'Title is required' };
   if (!description) return { error: 'Description is required' };
 
+  // FMP-UI-21D — `CreateFindingDto` has no `assignedToUserId` field (that
+  // only exists on the separate `assign` endpoint's own DTO); the API's
+  // global `ValidationPipe` runs with `forbidNonWhitelisted: true`, so
+  // sending it here would make every finding creation fail with a 400.
+  // This action was never actually called by any page before this unit
+  // wired a real "+ Record Finding" button to it, which is how this was
+  // caught before it could ever reach a real user.
   const result = await actionFetch(`/safety-compliance/${inspectionId}/findings`, 'POST', {
     title,
     description,
     ...(severity ? { severity } : {}),
-    ...(assignedToUserId ? { assignedToUserId } : {}),
     ...(dueAt ? { dueAt } : {}),
     ...(actionRequired ? { actionRequired } : {}),
   });
@@ -280,7 +316,7 @@ export async function createFindingAction(
   if (!result.ok) return { error: result.message ?? 'Failed to create finding' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  redirect(`/safety-compliance/${inspectionId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +473,6 @@ export async function addCommentAction(
   if (!result.ok) return { error: result.message ?? 'Failed to add comment' };
 
   revalidatePath('/safety-compliance');
-  return { error: null };
+  redirect(`/safety-compliance/${inspectionId}`);
 }
 
