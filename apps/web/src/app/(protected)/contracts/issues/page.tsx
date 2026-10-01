@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import type { Metadata } from 'next';
 import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { contractsApi } from '../../../../lib/contracts-api';
@@ -162,15 +163,19 @@ export default async function ContractIssuesPage({ searchParams }: PageProps): P
         <div className="flex items-center justify-between text-sm text-text-secondary print:hidden">
           <span>Showing {issues.length} of {total}</span>
           <div className="flex gap-2">
+            {/* FMP-PERF-02 — Link, not <a>: these are same-page query-string
+                pagination links, and a plain <a> was forcing a full browser
+                reload (re-downloading the whole JS bundle) on every
+                Previous/Next click instead of a fast client-side navigation. */}
             {page > 1 && (
-              <a href={buildHref({ page: String(page - 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
+              <Link href={buildHref({ page: String(page - 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
                 Previous
-              </a>
+              </Link>
             )}
             {page < totalPages && (
-              <a href={buildHref({ page: String(page + 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
+              <Link href={buildHref({ page: String(page + 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
                 Next
-              </a>
+              </Link>
             )}
           </div>
         </div>

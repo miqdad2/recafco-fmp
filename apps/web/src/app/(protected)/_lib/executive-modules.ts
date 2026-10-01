@@ -68,7 +68,8 @@ function permissionGate(permission: string): (permissions: string[]) => boolean 
 export const EXECUTIVE_MODULES: ExecutiveModuleMeta[] = [
   { code: 'CONTRACTS_MANAGEMENT', title: 'Contract Management', landingHref: '/contracts/executive', icon: FileText, accent: 'contracts', isVisible: permissionGate('contracts.read') },
   { code: 'ESTIMATION', title: 'Estimation', landingHref: '/executive/estimation', icon: Calculator, accent: 'estimation', isVisible: isExecutiveManagerOrAdminAccess },
-  { code: 'TECHNICAL', title: 'Technical', landingHref: '/contracts/technical', icon: Ruler, accent: 'technical', isVisible: permissionGate('contracts.read') },
+  // FMP-TECH-01 — repointed from /contracts/technical to the new Technical module (see that route's own history for why).
+  { code: 'TECHNICAL', title: 'Technical', landingHref: '/technical', icon: Ruler, accent: 'technical', isVisible: permissionGate('contracts.read') },
   { code: 'ERECTION', title: 'Erection', landingHref: '/contracts/erection-executive', icon: HardHat, accent: 'erection', isVisible: permissionGate('contracts.read') },
   { code: 'SAFETY_COMPLIANCE', title: 'Safety & Compliance', landingHref: '/safety-compliance/executive', icon: ShieldCheck, accent: 'safety', isVisible: permissionGate('safety.read') },
   { code: 'INCIDENT_REPORT', title: 'Incident Management', landingHref: '/incidents/executive', icon: AlertTriangle, accent: 'incident', isVisible: permissionGate('incidents.read') },

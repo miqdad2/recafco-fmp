@@ -30,6 +30,20 @@ export interface UserProfile {
 type ApiOk<T> = { data: T; meta: { requestId?: string }; error: null };
 type ApiErr = { data: null; meta: { requestId?: string }; error: { code: string; message: string } };
 
+// A network-level failure (API unreachable — e.g. mid-startup, briefly down)
+// throws from `fetch()` itself, before there's any response to parse. Every
+// caller already handles `{ ok: false }` (login shows `result.message`;
+// every protected page falls back to `permissions: []` → `notFound()`), so
+// catching here turns an unhandled exception (crashing the page/action)
+// into the same clean, already-handled failure path instead.
+function networkErrorResult(error: unknown): { ok: false; code: string; message: string } {
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message: error instanceof Error ? error.message : 'Unable to reach the server. Please try again.',
+  };
+}
+
 async function apiPost<T>(
   path: string,
   body: unknown,
@@ -38,12 +52,17 @@ async function apiPost<T>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+  } catch (error) {
+    return networkErrorResult(error);
+  }
 
   const json = (await res.json()) as ApiOk<T> | ApiErr;
   if (!res.ok || json.error !== null) {
@@ -57,10 +76,15 @@ async function apiGet<T>(
   path: string,
   accessToken: string,
 ): Promise<{ ok: true; data: T } | { ok: false; code: string; message: string }> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+  } catch (error) {
+    return networkErrorResult(error);
+  }
 
   const json = (await res.json()) as ApiOk<T> | ApiErr;
   if (!res.ok || json.error !== null) {

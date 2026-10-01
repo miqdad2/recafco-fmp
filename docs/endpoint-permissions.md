@@ -150,6 +150,7 @@ Auth endpoints are public or require only a valid JWT (no specific permission co
 | Endpoint | Permission |
 |----------|------------|
 | `GET /maintenance/summary` | `maintenance.read` |
+| `GET /maintenance/dashboard/live` | `maintenance.read` + ALL_DEPARTMENTS Maintenance scope for data (FMP-MAINT-02: proxies MMS's read-only live API server-to-server) |
 | `GET /maintenance/my` | `maintenance.read` |
 | `GET /maintenance/people` | `maintenance.read` |
 | `GET /maintenance` | `maintenance.read` |

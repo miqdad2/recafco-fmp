@@ -30,6 +30,20 @@ function isDatabaseUrl(url: string): boolean {
   return url.startsWith('postgresql://') || url.startsWith('postgres://');
 }
 
+// FMP-MAINT-01/02 — the live MMS (Maintenance Management System). FMP reads
+// MMS's read-only live dashboard API server-to-server; MMS_BASE_URL is also
+// used for "Open MMS" links shown to users (not a secret).
+const DEFAULT_MMS_BASE_URL = 'http://192.168.1.17:81';
+const DEFAULT_MMS_LIVE_DASHBOARD_ENDPOINT = '/api/integrations/fmp/maintenance-dashboard/live';
+const DEFAULT_MMS_QUERY_TIMEOUT_MS = 8_000;
+const DEFAULT_MMS_LIVE_REFRESH_SECONDS = 30;
+/** Never poll MMS faster than this, whatever the env says. */
+const MIN_MMS_LIVE_REFRESH_SECONDS = 15;
+
+function isHttpUrl(url: string): boolean {
+  return url.startsWith('http://') || url.startsWith('https://');
+}
+
 const DEFAULT_JWT_ACCESS_EXPIRES_SECONDS = 900; // 15 minutes
 const DEFAULT_REFRESH_TOKEN_EXPIRES_DAYS = 7;
 
@@ -64,6 +78,26 @@ export const ApiEnvSchema = z
     ERECTION_START_ATTACHMENTS_DIR: z.string().optional(),
     ERECTION_CHECKLIST_ATTACHMENTS_DIR: z.string().optional(),
     INCIDENT_ATTACHMENTS_DIR: z.string().optional(),
+    TECHNICAL_DRAWING_ATTACHMENTS_DIR: z.string().optional(),
+    // FMP-MAINT-02 — MMS live dashboard API. MMS_INTEGRATION_KEY is optional:
+    // when absent, the Maintenance dashboard shows "MMS integration not
+    // configured". It must equal MMS's own FMP_INTEGRATION_KEY and is only
+    // ever sent server-to-server in the x-fmp-integration-key header.
+    MMS_BASE_URL: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v === '' || isHttpUrl(v), {
+        message: 'MMS_BASE_URL must use http:// or https:// scheme',
+      }),
+    MMS_LIVE_DASHBOARD_ENDPOINT: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v === '' || v.startsWith('/'), {
+        message: 'MMS_LIVE_DASHBOARD_ENDPOINT must be a path starting with /',
+      }),
+    MMS_INTEGRATION_KEY: z.string().optional(),
+    MMS_QUERY_TIMEOUT_MS: z.string().optional(),
+    MMS_LIVE_REFRESH_SECONDS: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
@@ -108,6 +142,16 @@ export const ApiEnvSchema = z
       erectionStartAttachmentsDir: raw.ERECTION_START_ATTACHMENTS_DIR ?? './storage/erection-start-attachments',
       erectionChecklistAttachmentsDir: raw.ERECTION_CHECKLIST_ATTACHMENTS_DIR ?? './storage/erection-checklist-attachments',
       incidentAttachmentsDir: raw.INCIDENT_ATTACHMENTS_DIR ?? './storage/incident-attachments',
+      technicalDrawingAttachmentsDir:
+        raw.TECHNICAL_DRAWING_ATTACHMENTS_DIR ?? './storage/technical-drawing-attachments',
+      mmsBaseUrl: (raw.MMS_BASE_URL || DEFAULT_MMS_BASE_URL).replace(/\/+$/, ''),
+      mmsLiveDashboardEndpoint: raw.MMS_LIVE_DASHBOARD_ENDPOINT || DEFAULT_MMS_LIVE_DASHBOARD_ENDPOINT,
+      mmsIntegrationKey: raw.MMS_INTEGRATION_KEY?.trim() || null,
+      mmsQueryTimeoutMs: parseIntWithDefault(raw.MMS_QUERY_TIMEOUT_MS, DEFAULT_MMS_QUERY_TIMEOUT_MS),
+      mmsLiveRefreshSeconds: Math.max(
+        MIN_MMS_LIVE_REFRESH_SECONDS,
+        parseIntWithDefault(raw.MMS_LIVE_REFRESH_SECONDS, DEFAULT_MMS_LIVE_REFRESH_SECONDS),
+      ),
     };
   });
 

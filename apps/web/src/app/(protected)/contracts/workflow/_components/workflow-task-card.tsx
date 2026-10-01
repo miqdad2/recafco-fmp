@@ -137,7 +137,19 @@ export function WorkflowTaskCard({ task, onOpen }: Props): React.JSX.Element {
             <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
           </span>
         ) : (
-          <span className="text-[10px] text-text-muted">{formatRelativeActivity(task.lastActivityAt)}</span>
+          // FMP-PERF-02 — formatRelativeActivity() reads Date.now(), which can
+          // genuinely differ by a few seconds between this Client Component's
+          // server-render pass and its client hydration pass, occasionally
+          // flipping the rounded-minute label (e.g. "4m ago" -> "5m ago") and
+          // tripping a React hydration-mismatch warning even though nothing is
+          // actually wrong. `suppressHydrationWarning` is React's own documented
+          // escape hatch for exactly this class of intentionally-time-varying
+          // text — the label's value/logic/update cadence are unchanged, this
+          // only stops React from warning about (or reconciling away) a
+          // difference that is expected here.
+          <span className="text-[10px] text-text-muted" suppressHydrationWarning>
+            {formatRelativeActivity(task.lastActivityAt)}
+          </span>
         )}
       </div>
     </>

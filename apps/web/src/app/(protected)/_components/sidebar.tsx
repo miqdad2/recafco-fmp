@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -82,7 +83,8 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      { label: 'Technical', href: '/contracts/technical', icon: Ruler, module: 'CONTRACTS_MANAGEMENT' },
+      // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
+      { label: 'Technical', href: '/technical', icon: Ruler, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
       // FMP-UI-23 — renamed from "Incident Report"; module code/href unchanged.
@@ -165,7 +167,8 @@ const CONTRACT_STAFF_ITEMS: NavItem[] = [
  * contractManagementOnly is true (which itself requires contracts.read).
  */
 const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
-  { label: 'Technical', href: '/contracts/technical', icon: Ruler },
+  // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
+  { label: 'Technical', href: '/technical', icon: Ruler },
   { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat },
 ];
 
@@ -204,7 +207,8 @@ const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideI
 const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
   { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
-  { label: 'Technical', href: '/contracts/technical', icon: Ruler },
+  // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
+  { label: 'Technical', href: '/technical', icon: Ruler },
   { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
   { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
   { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
@@ -357,8 +361,14 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           className="flex items-center gap-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 rounded"
           onClick={onClose}
         >
+          {/* FMP-PERF-02 — next/image: always-visible brand mark on every
+              protected page, displayed at ~44px tall from a 150px-tall
+              source — next/image serves a correctly-downscaled, modern-format
+              (WebP/AVIF where the browser supports it) variant instead of the
+              full 157KB PNG. `priority` skips the default lazy-load since
+              this is always in the initial viewport. */}
           <span className="flex shrink-0 items-center justify-center rounded-md bg-white p-1">
-            <img src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} className="h-auto w-11" />
+            <Image src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} priority className="h-auto w-11" />
           </span>
           <span className="flex flex-col leading-tight">
             <span className="text-sm font-bold tracking-tight text-text-inverse">RECAFCO FMP</span>

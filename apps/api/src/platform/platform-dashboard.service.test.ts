@@ -99,7 +99,7 @@ describe('PlatformDashboardService', () => {
     ]);
 
     const technicalCard = result.cards[1]!;
-    expect(technicalCard.route).toBe('/contracts/technical');
+    expect(technicalCard.route).toBe('/technical');
     expect(technicalCard.metrics).toEqual([
       { label: 'Drawings', value: 4 },
       { label: 'SD / Calc.', value: 2 },

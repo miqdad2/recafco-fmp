@@ -34,7 +34,11 @@ export default function RootLayout({ children }: { children: ReactNode }): React
         {/* Anti-FOUC theme script — must run before hydration; a literal constant, no user input involved. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body>
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla's
+          cz-shortcut-listen) inject attributes onto <body> before React
+          hydrates; this only silences that attribute-mismatch class, not
+          other hydration bugs. */}
+      <body suppressHydrationWarning>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

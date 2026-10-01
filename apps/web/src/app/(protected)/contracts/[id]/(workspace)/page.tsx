@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { ContractTransitions } from '../../_components/contract-transitions';
 import { ContractClosureAction } from '../../_components/contract-closure-action';
 import { ContractOverviewSummaryCard } from '../../_components/contract-overview-summary-card';
@@ -116,23 +117,39 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
       <ContractOverviewSummaryCard
         contract={contract}
         actions={
-          hasActions ? (
-            <>
-              <ContractTransitions
-                contractId={contract.id}
-                status={contract.status}
-                version={contract.version}
-                permissions={permissions}
-              />
-              <ContractClosureAction
-                contractId={contract.id}
-                contractStatus={contract.status}
-                permissions={permissions}
-                latestRequestStatus={latestCloseoutRequest?.status ?? null}
-                latestRequestId={latestCloseoutRequest?.id ?? null}
-              />
-            </>
-          ) : undefined
+          <>
+            {/* FMP-TECH-01 — entry point into the real Technical module for
+                this contract's own job order, per that unit's own "From
+                Contract detail/workflow area, provide entry point: Open
+                Technical Workflow" requirement. Always shown (not gated by
+                hasActions, which only covers lifecycle/closeout buttons) —
+                every viewer who can reach this page already has
+                contracts.read, the same permission Technical itself is
+                gated on. */}
+            <Link
+              href={`/technical/jobs/${contract.id}`}
+              className="inline-flex items-center rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text-secondary hover:bg-surface-secondary"
+            >
+              Open Technical Workflow
+            </Link>
+            {hasActions && (
+              <>
+                <ContractTransitions
+                  contractId={contract.id}
+                  status={contract.status}
+                  version={contract.version}
+                  permissions={permissions}
+                />
+                <ContractClosureAction
+                  contractId={contract.id}
+                  contractStatus={contract.status}
+                  permissions={permissions}
+                  latestRequestStatus={latestCloseoutRequest?.status ?? null}
+                  latestRequestId={latestCloseoutRequest?.id ?? null}
+                />
+              </>
+            )}
+          </>
         }
       />
 

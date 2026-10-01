@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import { ShieldUser } from 'lucide-react';
 import { loginAction } from './actions';
 import { LoginForm } from './_components/login-form';
@@ -244,14 +245,27 @@ export default function LoginPage(): React.JSX.Element {
           whole viewport regardless of page height. Two swapped `<img>`s
           (desktop vs. mobile-sized asset) plus the shared navy overlay. */}
       <div aria-hidden="true" className="fixed inset-0 z-0 overflow-hidden">
+        {/* FMP-PERF-02 — re-encoded as WebP from the exact same source crop
+            (same visual style/layout, no re-crop): desktop 983KB JPEG -> 396KB
+            WebP. The old "mobile" JPEG was, by mistake, byte-for-byte
+            identical to the desktop one (both 2048x1152) — phones were
+            downloading the full desktop-resolution image. This is now a
+            genuinely smaller 1024x576 asset (95KB). `width`/`height` set to
+            each file's real pixel dimensions as a sizing hint; actual layout
+            is unaffected either way since this fixed/inset-0 + h-full/w-full
+            box is already fully determined by CSS regardless of image load. */}
         <img
-          src="/login-hero.jpg"
+          src="/login-hero.webp"
           alt=""
+          width={2048}
+          height={1152}
           className="hidden h-full w-full object-cover object-[60%_40%] lg:block"
         />
         <img
-          src="/login-hero-mobile.jpg"
+          src="/login-hero-mobile.webp"
           alt=""
+          width={1024}
+          height={576}
           className="h-full w-full object-cover object-[60%_40%] lg:hidden"
         />
         <div
@@ -316,8 +330,12 @@ export default function LoginPage(): React.JSX.Element {
             {/* FMP-UI-18C — logo enlarged again (h-16→h-20, chip p-3.5→p-4)
                 per direct user feedback on a screenshot ("place the logo a
                 little bit top and increase the size"). */}
+            {/* FMP-PERF-02 — next/image: this is the login page's own LCP-
+                adjacent brand mark, so `priority` opts it out of the default
+                lazy-load; next/image also serves a downscaled/modern-format
+                variant instead of the full 157KB PNG at this ~80px display size. */}
             <div className="inline-flex rounded-2xl bg-white p-4 shadow-xl">
-              <img src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} className="h-20 w-auto" />
+              <Image src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} priority className="h-20 w-auto" />
             </div>
             {/* FMP-UI-17H — sized back up: `text-3xl xl:text-4xl`→
                 `text-4xl xl:text-5xl 2xl:text-6xl`, per direct feedback
@@ -440,8 +458,9 @@ export default function LoginPage(): React.JSX.Element {
               photo+overlay, the same way the desktop left panel's content
               always has. */}
           <div className="mb-8 text-center lg:hidden">
+            {/* FMP-PERF-02 — next/image, same reasoning as the desktop logo above. */}
             <div className="inline-flex rounded-2xl bg-white p-3 shadow-md">
-              <img src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} className="h-14 w-auto" />
+              <Image src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} priority className="h-14 w-auto" />
             </div>
             <h1 className="mt-4 text-xl font-extrabold tracking-tight text-white sm:text-2xl">
               RECAFCO Factory Management Platform

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { DashboardScopeBadge } from '../../../_components/dashboard-scope-badge';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { WorkflowModeTabs } from './workflow-mode-tabs';
@@ -151,18 +152,22 @@ export async function AssignmentQueueView({ searchParams }: Props): Promise<Reac
           <div className="rounded-lg border border-border bg-surface p-8 text-center">
             <p className="text-sm text-text-secondary">All workflow tasks for this contract are assigned.</p>
             <div className="mt-3 flex items-center justify-center gap-2">
-              <a
+              {/* FMP-PERF-02 — Link, not <a>: contractListHref is an internal
+                  same-page query-string link (see this file's own
+                  buildAssignmentHref) — a plain <a> was forcing a full
+                  browser reload instead of a fast client-side navigation. */}
+              <Link
                 href={contractListHref}
                 className="inline-flex items-center justify-center rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
               >
                 Close
-              </a>
-              <a
+              </Link>
+              <Link
                 href={contractListHref}
                 className="inline-flex items-center justify-center rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
               >
                 Back to Contracts
-              </a>
+              </Link>
             </div>
           </div>
         );
@@ -215,7 +220,7 @@ export async function AssignmentQueueView({ searchParams }: Props): Promise<Reac
       {scopeError && (
         <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
           This contract is not available in your scope.{' '}
-          <a href={contractListHref} className="font-medium underline">Back to Contracts</a>
+          <Link href={contractListHref} className="font-medium underline">Back to Contracts</Link>
         </div>
       )}
 

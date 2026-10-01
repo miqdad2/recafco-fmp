@@ -17,6 +17,9 @@ const CHANGE_PASSWORD_PATH = '/change-password';
 // page's new background photo, desktop + mobile sizes) added proactively
 // for the exact same reason: both are <img> sources on /login itself,
 // requested before any auth cookie exists.
+// FMP-PERF-02 — both re-encoded as `.webp` (see login/page.tsx's own doc
+// comment); updated here to match or the login page's background would
+// 404/redirect-loop for a signed-out visitor.
 const PUBLIC_PREFIXES = [
   LOGIN_PATH,
   '/_next',
@@ -24,8 +27,8 @@ const PUBLIC_PREFIXES = [
   '/api/health',
   '/recafco-logo.png',
   '/icon.png',
-  '/login-hero.jpg',
-  '/login-hero-mobile.jpg',
+  '/login-hero.webp',
+  '/login-hero-mobile.webp',
 ];
 
 // Parse JWT payload without signature verification (navigation use only).
@@ -129,7 +132,18 @@ export const proxy = async (request: NextRequest): Promise<NextResponse> => {
     const newPayload = parseJwtPayload(refreshed.accessToken);
     if (!newPayload) return redirectToLogin(request);
 
-    const res = nextWithPathname(request);
+    // Rewrite the request's own cookies (not just the response's) so the
+    // Server Component render for THIS SAME request sees the freshly
+    // refreshed access token too. `setTokenCookies` below only sets
+    // Set-Cookie on the outgoing response, which the browser only applies
+    // to its NEXT request — without also updating `request.cookies` here,
+    // this exact page load still reads the old, expired access token via
+    // `cookies()` downstream, fails its own permission check, and 404s,
+    // even though the refresh itself succeeded.
+    request.cookies.set('recafco_access', refreshed.accessToken);
+    request.cookies.set('recafco_refresh', refreshed.refreshToken);
+    request.headers.set('x-pathname', pathname);
+    const res = NextResponse.next({ request: { headers: request.headers } });
     setTokenCookies(res, refreshed.accessToken, refreshed.refreshToken);
 
     // Check mustChangePassword after refresh.

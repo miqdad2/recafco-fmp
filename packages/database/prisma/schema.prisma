@@ -278,6 +278,28 @@ model User {
   contractErectionWorkflowAssignmentsAssignedTo              ContractErectionWorkflowAssignment[]                @relation("ContractErectionWorkflowAssignmentAssignedTo")
   contractErectionWorkflowAssignmentsAssignedBy              ContractErectionWorkflowAssignment[]                @relation("ContractErectionWorkflowAssignmentAssignedBy")
 
+  // FMP-TECH-01
+  technicalWorkflowsAssigned          TechnicalWorkflow[]          @relation("TechnicalWorkflowAssignedTo")
+  technicalWorkflowsCreated           TechnicalWorkflow[]          @relation("TechnicalWorkflowCreatedBy")
+  technicalDrawingsAssigned           TechnicalDrawing[]           @relation("TechnicalDrawingAssignedTo")
+  technicalDrawingsCreated            TechnicalDrawing[]           @relation("TechnicalDrawingCreatedBy")
+  technicalDrawingAttachmentsUploaded TechnicalDrawingAttachment[] @relation("TechnicalDrawingAttachmentUploadedBy")
+
+  // FMP-TECH-02
+  technicalSdSubmissionsSubmitted          TechnicalSdCalculationSubmission[] @relation("TechnicalSdSubmissionSubmittedBy")
+  technicalSdSubmissionsCreated            TechnicalSdCalculationSubmission[] @relation("TechnicalSdSubmissionCreatedBy")
+  technicalSdSubmissionAttachmentsUploaded TechnicalSdSubmissionAttachment[]  @relation("TechnicalSdSubmissionAttachmentUploadedBy")
+
+  // FMP-TECH-03
+  technicalApprovalsSubmitted          TechnicalApproval[]           @relation("TechnicalApprovalSubmittedBy")
+  technicalApprovalsCreated            TechnicalApproval[]           @relation("TechnicalApprovalCreatedBy")
+  technicalApprovalAttachmentsUploaded TechnicalApprovalAttachment[] @relation("TechnicalApprovalAttachmentUploadedBy")
+
+  // FMP-TECH-04
+  technicalFdIssuancesIssuedBy           TechnicalFdIssuance[]           @relation("TechnicalFdIssuanceIssuedBy")
+  technicalFdIssuancesCreated            TechnicalFdIssuance[]           @relation("TechnicalFdIssuanceCreatedBy")
+  technicalFdIssuanceAttachmentsUploaded TechnicalFdIssuanceAttachment[] @relation("TechnicalFdIssuanceAttachmentUploadedBy")
+
   productionOrdersCreated    ProductionOrder[]   @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[]   @relation("ProdOrderSupervisor")
   productionOrdersStarted    ProductionOrder[]   @relation("ProdOrderStartedBy")
@@ -1167,29 +1189,37 @@ model Contract {
   plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
   location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  comments                         ContractComment[]
-  activities                       ContractActivity[]
-  boqItems                         ContractBoqItem[]
-  payments                         ContractPayment[]
-  workflowTasks                    ContractWorkflowTask[]
-  issues                           ContractIssue[]
-  claims                           ContractClaim[]
-  variations                       ContractVariation[]
-  risks                            ContractRisk[]
-  documentObligations              ContractDocumentObligation[]
-  closeoutRequests                 ContractCloseoutRequest[]
-  scheduleItems                    ContractScheduleItem[]
-  erectionMethodStatement          ContractErectionMethodStatement?
+  comments                          ContractComment[]
+  activities                        ContractActivity[]
+  boqItems                          ContractBoqItem[]
+  payments                          ContractPayment[]
+  workflowTasks                     ContractWorkflowTask[]
+  issues                            ContractIssue[]
+  claims                            ContractClaim[]
+  variations                        ContractVariation[]
+  risks                             ContractRisk[]
+  documentObligations               ContractDocumentObligation[]
+  closeoutRequests                  ContractCloseoutRequest[]
+  scheduleItems                     ContractScheduleItem[]
+  erectionMethodStatement           ContractErectionMethodStatement?
   // Not a real one-to-one from Contract's own side (contractId here isn't
   // unique — only methodStatementId is, on the model itself) — practically
   // at most one row, but declared as a list since Prisma requires either a
   // unique FK or list cardinality for a back-relation.
-  erectionMethodStatementApprovals ContractErectionMethodStatementApproval[]
-  erectionSchedule                 ContractErectionSchedule?
-  erectionDeliveryStart            ContractErectionDeliveryStart?
-  erectionStart                    ContractErectionStart?
-  erectionChecklist                ContractErectionChecklist?
-  erectionWorkflowAssignment       ContractErectionWorkflowAssignment?
+  erectionMethodStatementApprovals  ContractErectionMethodStatementApproval[]
+  erectionSchedule                  ContractErectionSchedule?
+  erectionDeliveryStart             ContractErectionDeliveryStart?
+  erectionStart                     ContractErectionStart?
+  erectionChecklist                 ContractErectionChecklist?
+  erectionWorkflowAssignment        ContractErectionWorkflowAssignment?
+  // FMP-TECH-01 — a Contract may have at most one TechnicalWorkflow (see that
+  // model's own unique contractId), but a real one-to-one still declares as
+  // an optional scalar back-relation on this side per Prisma convention.
+  technicalWorkflow                 TechnicalWorkflow?
+  technicalDrawings                 TechnicalDrawing[]
+  technicalSdCalculationSubmissions TechnicalSdCalculationSubmission[]
+  technicalApprovals                TechnicalApproval[]
+  technicalFdIssuances              TechnicalFdIssuance[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -2070,6 +2100,571 @@ enum ProductionEntryType {
   ADJUSTMENT
 
   @@map("production_entry_type")
+}
+
+// ---------------------------------------------------------------------------
+// FMP-TECH-01 — Technical Workflow Foundation.
+//
+// Additive-only: a new, separate table family linked to Contract by
+// `contractId`, alongside (not replacing) the existing generic
+// ContractWorkflowTask TECHNICAL-team rows (technical_drawing_received,
+// technical_sd_calculation_submission, technical_getting_approval,
+// technical_fd_issuance — see contract-workflow-templates.ts) that already
+// back the Workflow & Team Tasks board and the Executive Dashboard's
+// Technical card. Those generic task rows have no domain fields (drawing
+// reference, revision, sheets, sender, etc.) — this family exists to
+// capture that real intake data for the Drawing Received screen and the
+// stages after it. The two systems are intentionally NOT merged/synced in
+// this unit: ContractWorkflowTask's own board/detection logic is unchanged,
+// and this family owns its own independent `currentStage`/`status`.
+//
+// One TechnicalWorkflow per Contract (contractId is unique) — "Job Order No"
+// is never duplicated here; it's read live from `contract.jobOrder` at query
+// time (never copied/denormalized into this table), so it can never drift
+// from Contract Management's own value.
+// ---------------------------------------------------------------------------
+
+enum TechnicalStage {
+  DRAWING_RECEIVED
+  SD_CALCULATION_SUBMISSION
+  GETTING_APPROVAL
+  FD_ISSUANCE
+
+  @@map("technical_stage")
+}
+
+enum TechnicalWorkflowStatus {
+  IN_PROGRESS
+  COMPLETED
+
+  @@map("technical_workflow_status")
+}
+
+enum TechnicalPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+
+  @@map("technical_priority")
+}
+
+enum TechnicalReceivedFrom {
+  CLIENT
+  CONSULTANT
+  EMPLOYER
+  MAIN_CONTRACTOR
+  INTERNAL
+
+  @@map("technical_received_from")
+}
+
+enum TechnicalDrawingType {
+  SHOP_DRAWING
+  ARCHITECTURAL
+  STRUCTURAL
+  MEP
+  PRECAST
+  COORDINATION
+  AS_BUILT
+  OTHER
+
+  @@map("technical_drawing_type")
+}
+
+enum TechnicalDrawingStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+
+  @@map("technical_drawing_status")
+}
+
+// The Drawing Received form's "Linked Workflow Stage" field — which of the 4
+// Technical stages this intake record is being logged against. Defaults to
+// TECHNICAL_REVIEW (a pre-stage-1 review label from the reference design),
+// distinct from the 4 real TechnicalStage values above.
+enum TechnicalLinkedStage {
+  TECHNICAL_REVIEW
+  SD_CALCULATION
+  GETTING_APPROVAL
+  FD_ISSUANCE
+
+  @@map("technical_linked_stage")
+}
+
+model TechnicalWorkflow {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  contractId         String                  @unique @map("contract_id") @db.Uuid
+  currentStage       TechnicalStage          @default(DRAWING_RECEIVED) @map("current_stage")
+  status             TechnicalWorkflowStatus @default(IN_PROGRESS)
+  priority           TechnicalPriority       @default(NORMAL)
+  // Fixed "TECHNICAL" today (this workflow family only exists for the
+  // Technical module) — a real column rather than a hardcoded frontend
+  // label so a future multi-team extension has somewhere to write a
+  // different value without a schema change.
+  assignedDepartment String                  @default("TECHNICAL") @map("assigned_department") @db.VarChar(50)
+  assignedToUserId   String?                 @map("assigned_to_user_id") @db.Uuid
+  createdByUserId    String                  @map("created_by_user_id") @db.Uuid
+  startedAt          DateTime                @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt        DateTime?               @map("completed_at") @db.Timestamptz(3)
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract       Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  assignedToUser User?    @relation("TechnicalWorkflowAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdByUser  User     @relation("TechnicalWorkflowCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  drawings                 TechnicalDrawing[]
+  activities               TechnicalWorkflowActivity[]
+  sdCalculationSubmissions TechnicalSdCalculationSubmission[]
+  approvals                TechnicalApproval[]
+  fdIssuances              TechnicalFdIssuance[]
+
+  @@index([status, currentStage])
+  @@map("technical_workflows")
+}
+
+// The Drawing Received screen's saved record. One per TechnicalWorkflow in
+// this unit (the screen's own single form) — modeled as a list (not a 1:1)
+// because a future unit may need to log more than one drawing package
+// received over a workflow's lifetime without another migration.
+model TechnicalDrawing {
+  id                          String                 @id @default(uuid()) @db.Uuid
+  technicalWorkflowId         String                 @map("technical_workflow_id") @db.Uuid
+  contractId                  String                 @map("contract_id") @db.Uuid
+  drawingReferenceNo          String?                @map("drawing_reference_no") @db.VarChar(100)
+  revisionNo                  String?                @map("revision_no") @db.VarChar(50)
+  drawingType                 TechnicalDrawingType?  @map("drawing_type")
+  drawingDescription          String?                @map("drawing_description") @db.VarChar(2000)
+  relatedAreaPackage          String?                @map("related_area_package") @db.VarChar(300)
+  receivedDate                DateTime?              @map("received_date") @db.Date
+  receivedFrom                TechnicalReceivedFrom? @map("received_from")
+  senderName                  String?                @map("sender_name") @db.VarChar(200)
+  numberOfSheets              Int?                   @map("number_of_sheets")
+  priority                    TechnicalPriority      @default(NORMAL)
+  status                      TechnicalDrawingStatus @default(DRAFT)
+  internalReferenceNo         String?                @map("internal_reference_no") @db.VarChar(100)
+  requiresImmediateReview     Boolean                @default(false) @map("requires_immediate_review")
+  additionalDocumentsReceived Boolean                @default(false) @map("additional_documents_received")
+  linkedWorkflowStage         TechnicalLinkedStage   @default(TECHNICAL_REVIEW) @map("linked_workflow_stage")
+  remarks                     String?                @db.VarChar(4000)
+  internalNotes               String?                @map("internal_notes") @db.VarChar(4000)
+  assignedToUserId            String?                @map("assigned_to_user_id") @db.Uuid
+  plannedReviewStart          DateTime?              @map("planned_review_start") @db.Date
+  createdByUserId             String                 @map("created_by_user_id") @db.Uuid
+  completedAt                 DateTime?              @map("completed_at") @db.Timestamptz(3)
+  createdAt                   DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  technicalWorkflow TechnicalWorkflow @relation(fields: [technicalWorkflowId], references: [id], onDelete: Restrict)
+  contract          Contract          @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  assignedToUser    User?             @relation("TechnicalDrawingAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdByUser     User              @relation("TechnicalDrawingCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  attachments                  TechnicalDrawingAttachment[]
+  // FMP-TECH-02 — the reverse side of TechnicalSdCalculationSubmission.relatedDrawing.
+  sdSubmissionsReferencingThis TechnicalSdCalculationSubmission[] @relation("TechnicalSdSubmissionRelatedDrawing")
+
+  @@index([technicalWorkflowId])
+  @@index([contractId])
+  @@map("technical_drawings")
+}
+
+// actorUserId has no FK — mirrors IncidentActivity/FactoryTaskActivity;
+// deactivating a user does not corrupt the workflow timeline.
+model TechnicalWorkflowActivity {
+  id                  String          @id @default(uuid()) @db.Uuid
+  technicalWorkflowId String          @map("technical_workflow_id") @db.Uuid
+  actorUserId         String?         @map("actor_user_id") @db.Uuid
+  actorName           String?         @map("actor_name") @db.VarChar(200)
+  event               String          @db.VarChar(100)
+  previousStage       TechnicalStage? @map("previous_stage")
+  newStage            TechnicalStage? @map("new_stage")
+  metadata            Json?           @db.JsonB
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  technicalWorkflow TechnicalWorkflow @relation(fields: [technicalWorkflowId], references: [id], onDelete: Restrict)
+
+  @@index([technicalWorkflowId, createdAt(sort: Asc)])
+  @@map("technical_workflow_activities")
+}
+
+// Structure mirrors IncidentAttachment exactly (same field set/types/naming,
+// local-disk storage via TechnicalDrawingAttachmentStorageService — this
+// codebase has no MinIO/S3 configured anywhere, confirmed by FMP-UI-22's own
+// audit and reconfirmed here).
+model TechnicalDrawingAttachment {
+  id                 String   @id @default(uuid()) @db.Uuid
+  technicalDrawingId String   @map("technical_drawing_id") @db.Uuid
+  fileName           String   @map("file_name") @db.VarChar(255)
+  originalFileName   String   @map("original_file_name") @db.VarChar(255)
+  mimeType           String   @map("mime_type") @db.VarChar(150)
+  fileSize           Int      @map("file_size")
+  storagePath        String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId   String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  technicalDrawing TechnicalDrawing @relation(fields: [technicalDrawingId], references: [id], onDelete: Cascade)
+  uploadedByUser   User             @relation("TechnicalDrawingAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([technicalDrawingId, createdAt(sort: Desc)])
+  @@map("technical_drawing_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// FMP-TECH-02 — Technical Stage 2: SD & Calculation Submission.
+//
+// Additive-only, same family as FMP-TECH-01's TechnicalWorkflow/
+// TechnicalDrawing/TechnicalWorkflowActivity/TechnicalDrawingAttachment.
+// One submission record per TechnicalWorkflow (in practice — modeled as a
+// list, same reasoning as TechnicalDrawing: a future unit may need more
+// than one submission logged without another migration). `relatedDrawingId`
+// links back to the specific completed TechnicalDrawing this submission is
+// built on — enforced at the SERVICE layer (must belong to the same
+// TechnicalWorkflow and be COMPLETED), not at the DB constraint level,
+// matching how every other cross-record business rule in this schema is
+// enforced in application code, not SQL CHECK constraints.
+// ---------------------------------------------------------------------------
+
+enum TechnicalSubmissionType {
+  SHOP_DRAWING
+  CALCULATION
+  SHOP_DRAWING_AND_CALCULATION
+  REVISION_SUBMISSION
+  OTHER
+
+  @@map("technical_submission_type")
+}
+
+enum TechnicalCalculationType {
+  STRUCTURAL_CALCULATION
+  PRECAST_CALCULATION
+  CONNECTION_DESIGN
+  LOAD_CALCULATION
+  GENERAL_TECHNICAL_CALCULATION
+  OTHER
+
+  @@map("technical_calculation_type")
+}
+
+enum TechnicalSubmissionMethod {
+  EMAIL
+  PORTAL
+  HAND_SUBMISSION
+  COURIER
+  INTERNAL_HANDOVER
+  OTHER
+
+  @@map("technical_submission_method")
+}
+
+enum TechnicalSdSubmissionStatus {
+  DRAFT
+  IN_PROGRESS
+  SUBMITTED
+  CLARIFICATION_REQUESTED
+  COMPLETED
+
+  @@map("technical_sd_submission_status")
+}
+
+model TechnicalSdCalculationSubmission {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  technicalWorkflowId   String                      @map("technical_workflow_id") @db.Uuid
+  contractId            String                      @map("contract_id") @db.Uuid
+  relatedDrawingId      String?                     @map("related_drawing_id") @db.Uuid
+  submissionDate        DateTime?                   @map("submission_date") @db.Date
+  submissionType        TechnicalSubmissionType?    @map("submission_type")
+  submittedTo           String?                     @map("submitted_to") @db.VarChar(200)
+  targetApprovalDate    DateTime?                   @map("target_approval_date") @db.Date
+  drawingReferenceNo    String?                     @map("drawing_reference_no") @db.VarChar(100)
+  revisionNo            String?                     @map("revision_no") @db.VarChar(50)
+  calculationType       TechnicalCalculationType?   @map("calculation_type")
+  numberOfSheetsOrFiles Int?                        @map("number_of_sheets_or_files")
+  scopeDescription      String?                     @map("scope_description") @db.VarChar(2000)
+  submittedById         String?                     @map("submitted_by_id") @db.Uuid
+  submittedByName       String?                     @map("submitted_by_name") @db.VarChar(200)
+  designation           String?                     @db.VarChar(150)
+  submissionMethod      TechnicalSubmissionMethod?  @map("submission_method")
+  referenceSubmissionNo String?                     @map("reference_submission_no") @db.VarChar(100)
+  contactNo             String?                     @map("contact_no") @db.VarChar(50)
+  email                 String?                     @db.VarChar(254)
+  remarks               String?                     @db.VarChar(4000)
+  status                TechnicalSdSubmissionStatus @default(DRAFT)
+  priority              TechnicalPriority           @default(NORMAL)
+  createdByUserId       String                      @map("created_by_user_id") @db.Uuid
+  completedAt           DateTime?                   @map("completed_at") @db.Timestamptz(3)
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  technicalWorkflow TechnicalWorkflow @relation(fields: [technicalWorkflowId], references: [id], onDelete: Restrict)
+  contract          Contract          @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  relatedDrawing    TechnicalDrawing? @relation("TechnicalSdSubmissionRelatedDrawing", fields: [relatedDrawingId], references: [id], onDelete: SetNull)
+  submittedByUser   User?             @relation("TechnicalSdSubmissionSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  createdByUser     User              @relation("TechnicalSdSubmissionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  attachments              TechnicalSdSubmissionAttachment[]
+  // FMP-TECH-03 — the reverse side of TechnicalApproval.relatedSdSubmission.
+  approvalsReferencingThis TechnicalApproval[]               @relation("TechnicalApprovalRelatedSdSubmission")
+
+  @@index([technicalWorkflowId])
+  @@index([contractId])
+  @@index([relatedDrawingId])
+  @@map("technical_sd_calculation_submissions")
+}
+
+// Structure mirrors TechnicalDrawingAttachment exactly — same storage
+// service (TechnicalAttachmentStorageService), a different DB table/folder
+// namespace keyed by this submission's own id, no new storage code needed.
+model TechnicalSdSubmissionAttachment {
+  id                      String   @id @default(uuid()) @db.Uuid
+  technicalSdSubmissionId String   @map("technical_sd_submission_id") @db.Uuid
+  fileName                String   @map("file_name") @db.VarChar(255)
+  originalFileName        String   @map("original_file_name") @db.VarChar(255)
+  mimeType                String   @map("mime_type") @db.VarChar(150)
+  fileSize                Int      @map("file_size")
+  storagePath             String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId        String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  technicalSdSubmission TechnicalSdCalculationSubmission @relation(fields: [technicalSdSubmissionId], references: [id], onDelete: Cascade)
+  uploadedByUser        User                             @relation("TechnicalSdSubmissionAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([technicalSdSubmissionId, createdAt(sort: Desc)])
+  @@map("technical_sd_submission_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// FMP-TECH-03 — Technical Stage 3: Getting Approval.
+//
+// Additive-only, same family as FMP-TECH-01/02. `relatedSdSubmissionId`
+// links back to the specific SUBMITTED/COMPLETED TechnicalSdCalculationSubmission
+// this approval is built on — enforced at the SERVICE layer (must belong to
+// the same TechnicalWorkflow and be SUBMITTED or COMPLETED), same pattern as
+// TechnicalSdCalculationSubmission.relatedDrawingId in FMP-TECH-02.
+// `reviewedBy` is a plain name field (not a User FK) — the ticket's own
+// field list gives Submitted By both an optional `submittedById` AND a
+// `submittedByName`, but only a bare `reviewedBy` with no separate id
+// field, so this schema follows that literally: an external reviewer
+// (client/consultant) is not necessarily a system user.
+// ---------------------------------------------------------------------------
+
+enum TechnicalApprovalStatus {
+  UNDER_REVIEW
+  APPROVED
+  APPROVED_WITH_COMMENTS
+  CHANGES_REQUIRED
+  REJECTED
+
+  @@map("technical_approval_status")
+}
+
+enum TechnicalApprovalRecordStatus {
+  DRAFT
+  IN_PROGRESS
+  UNDER_REVIEW
+  CHANGES_REQUIRED
+  APPROVED
+  REJECTED
+  COMPLETED
+
+  @@map("technical_approval_record_status")
+}
+
+model TechnicalApproval {
+  id                    String                        @id @default(uuid()) @db.Uuid
+  technicalWorkflowId   String                        @map("technical_workflow_id") @db.Uuid
+  contractId            String                        @map("contract_id") @db.Uuid
+  relatedSdSubmissionId String?                       @map("related_sd_submission_id") @db.Uuid
+  submittedOn           DateTime?                     @map("submitted_on") @db.Date
+  submittedById         String?                       @map("submitted_by_id") @db.Uuid
+  submittedByName       String?                       @map("submitted_by_name") @db.VarChar(200)
+  submittedTo           String?                       @map("submitted_to") @db.VarChar(200)
+  approvalStatus        TechnicalApprovalStatus?      @map("approval_status")
+  expectedApprovalDate  DateTime?                     @map("expected_approval_date") @db.Date
+  reviewedOn            DateTime?                     @map("reviewed_on") @db.Date
+  reviewedBy            String?                       @map("reviewed_by") @db.VarChar(200)
+  revisionNo            String?                       @map("revision_no") @db.VarChar(50)
+  reviewerComments      String?                       @map("reviewer_comments") @db.VarChar(4000)
+  resubmissionRequired  Boolean                       @default(false) @map("resubmission_required")
+  resubmissionDate      DateTime?                     @map("resubmission_date") @db.Date
+  resubmissionReason    String?                       @map("resubmission_reason") @db.VarChar(4000)
+  priority              TechnicalPriority             @default(NORMAL)
+  status                TechnicalApprovalRecordStatus @default(DRAFT)
+  createdByUserId       String                        @map("created_by_user_id") @db.Uuid
+  completedAt           DateTime?                     @map("completed_at") @db.Timestamptz(3)
+  createdAt             DateTime                      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  technicalWorkflow   TechnicalWorkflow                 @relation(fields: [technicalWorkflowId], references: [id], onDelete: Restrict)
+  contract            Contract                          @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  relatedSdSubmission TechnicalSdCalculationSubmission? @relation("TechnicalApprovalRelatedSdSubmission", fields: [relatedSdSubmissionId], references: [id], onDelete: SetNull)
+  submittedByUser     User?                             @relation("TechnicalApprovalSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  createdByUser       User                              @relation("TechnicalApprovalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  attachments                TechnicalApprovalAttachment[]
+  // FMP-TECH-04 — the reverse side of TechnicalFdIssuance.relatedApproval.
+  fdIssuancesReferencingThis TechnicalFdIssuance[]
+
+  @@index([technicalWorkflowId])
+  @@index([contractId])
+  @@index([relatedSdSubmissionId])
+  @@map("technical_approvals")
+}
+
+// Structure mirrors TechnicalSdSubmissionAttachment exactly — same storage
+// service, a different DB table/folder namespace keyed by this approval's
+// own id.
+model TechnicalApprovalAttachment {
+  id                  String   @id @default(uuid()) @db.Uuid
+  technicalApprovalId String   @map("technical_approval_id") @db.Uuid
+  fileName            String   @map("file_name") @db.VarChar(255)
+  originalFileName    String   @map("original_file_name") @db.VarChar(255)
+  mimeType            String   @map("mime_type") @db.VarChar(150)
+  fileSize            Int      @map("file_size")
+  storagePath         String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId    String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  technicalApproval TechnicalApproval @relation(fields: [technicalApprovalId], references: [id], onDelete: Cascade)
+  uploadedByUser    User              @relation("TechnicalApprovalAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([technicalApprovalId, createdAt(sort: Desc)])
+  @@map("technical_approval_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// FMP-TECH-04 — Technical Stage 4: FD Issuance (final stage).
+//
+// Additive-only, same family as FMP-TECH-01/02/03. `relatedApprovalId` links
+// back to the specific APPROVED/APPROVED_WITH_COMMENTS TechnicalApproval this
+// issuance is built on — enforced at the SERVICE layer, same pattern as
+// TechnicalApproval.relatedSdSubmissionId in FMP-TECH-03. Completing this
+// stage's "Issue FD & Complete Technical Workflow" action sets
+// TechnicalWorkflow.status = COMPLETED (currentStage stays FD_ISSUANCE —
+// nextStageOf(FD_ISSUANCE) already returns null, there is no later stage to
+// advance to), which is the one field TechnicalDashboard's own
+// readyForProductionRelease metric has counted against since FMP-TECH-01 —
+// no dashboard-side schema change needed for that count to become real.
+// ---------------------------------------------------------------------------
+
+enum TechnicalFdPurpose {
+  PRODUCTION
+  ERECTION
+  STORAGE_YARD_DELIVERY
+  QUALITY_CONTROL
+  CLIENT_CONSULTANT
+  INTERNAL_RECORD
+  OTHER
+
+  @@map("technical_fd_purpose")
+}
+
+enum TechnicalFdIssueType {
+  FINAL_DRAWING
+  FINAL_DOCUMENT
+  REVISED_FINAL_DRAWING
+  APPROVED_PACKAGE
+  OTHER
+
+  @@map("technical_fd_issue_type")
+}
+
+enum TechnicalFdDistribution {
+  ELECTRONIC
+  PRINTED_COPY
+  BOTH
+  PORTAL
+  OTHER
+
+  @@map("technical_fd_distribution")
+}
+
+enum TechnicalFdIssueMethod {
+  EMAIL
+  PORTAL
+  HANDOVER
+  INTERNAL_SYSTEM
+  COURIER
+  OTHER
+
+  @@map("technical_fd_issue_method")
+}
+
+enum TechnicalFdStatus {
+  DRAFT
+  IN_PROGRESS
+  SUBMITTED
+  ISSUED
+  RETURNED_REOPENED
+  COMPLETED
+
+  @@map("technical_fd_status")
+}
+
+model TechnicalFdIssuance {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  technicalWorkflowId   String                   @map("technical_workflow_id") @db.Uuid
+  contractId            String                   @map("contract_id") @db.Uuid
+  relatedApprovalId     String?                  @map("related_approval_id") @db.Uuid
+  fdIssueDate           DateTime?                @map("fd_issue_date") @db.Date
+  issuedTo              String?                  @map("issued_to") @db.VarChar(200)
+  purposeFor            TechnicalFdPurpose?      @map("purpose_for")
+  issueType             TechnicalFdIssueType?    @map("issue_type")
+  drawingReferenceNo    String?                  @map("drawing_reference_no") @db.VarChar(100)
+  revisionNo            String?                  @map("revision_no") @db.VarChar(50)
+  approvedReferenceNo   String?                  @map("approved_reference_no") @db.VarChar(100)
+  approvedDate          DateTime?                @map("approved_date") @db.Date
+  numberOfSheetsOrFiles Int?                     @map("number_of_sheets_or_files")
+  distribution          TechnicalFdDistribution? @map("distribution")
+  issueMethod           TechnicalFdIssueMethod?  @map("issue_method")
+  issuedById            String?                  @map("issued_by_id") @db.Uuid
+  issuedByName          String?                  @map("issued_by_name") @db.VarChar(200)
+  designation           String?                  @db.VarChar(150)
+  contactNo             String?                  @map("contact_no") @db.VarChar(50)
+  email                 String?                  @db.VarChar(254)
+  remarks               String?                  @db.VarChar(4000)
+  priority              TechnicalPriority        @default(NORMAL)
+  status                TechnicalFdStatus        @default(DRAFT)
+  createdByUserId       String                   @map("created_by_user_id") @db.Uuid
+  completedAt           DateTime?                @map("completed_at") @db.Timestamptz(3)
+  createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  technicalWorkflow TechnicalWorkflow  @relation(fields: [technicalWorkflowId], references: [id], onDelete: Restrict)
+  contract          Contract           @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  relatedApproval   TechnicalApproval? @relation(fields: [relatedApprovalId], references: [id], onDelete: SetNull)
+  issuedByUser      User?              @relation("TechnicalFdIssuanceIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  createdByUser     User               @relation("TechnicalFdIssuanceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  attachments TechnicalFdIssuanceAttachment[]
+
+  @@index([technicalWorkflowId])
+  @@index([contractId])
+  @@index([relatedApprovalId])
+  @@map("technical_fd_issuances")
+}
+
+// Structure mirrors TechnicalApprovalAttachment exactly — same storage
+// service, a different DB table/folder namespace keyed by this issuance's
+// own id.
+model TechnicalFdIssuanceAttachment {
+  id                    String   @id @default(uuid()) @db.Uuid
+  technicalFdIssuanceId String   @map("technical_fd_issuance_id") @db.Uuid
+  fileName              String   @map("file_name") @db.VarChar(255)
+  originalFileName      String   @map("original_file_name") @db.VarChar(255)
+  mimeType              String   @map("mime_type") @db.VarChar(150)
+  fileSize              Int      @map("file_size")
+  storagePath           String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId      String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  technicalFdIssuance TechnicalFdIssuance @relation(fields: [technicalFdIssuanceId], references: [id], onDelete: Cascade)
+  uploadedByUser      User                @relation("TechnicalFdIssuanceAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([technicalFdIssuanceId, createdAt(sort: Desc)])
+  @@map("technical_fd_issuance_attachments")
 }
 
 model ProductionSequence {

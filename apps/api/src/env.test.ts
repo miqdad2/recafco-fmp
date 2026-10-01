@@ -98,4 +98,50 @@ describe('ApiEnvSchema', () => {
     expect(thrownMessage).not.toContain('secret');
     expect(thrownMessage).not.toContain('password');
   });
+
+  // FMP-MAINT-02 — MMS live dashboard API config
+  it('defaults MMS config: base URL + endpoint set, key not configured', () => {
+    const result = ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb });
+    expect(result.mmsBaseUrl).toBe('http://192.168.1.17:81');
+    expect(result.mmsLiveDashboardEndpoint).toBe('/api/integrations/fmp/maintenance-dashboard/live');
+    expect(result.mmsIntegrationKey).toBeNull();
+    expect(result.mmsQueryTimeoutMs).toBe(8_000);
+    expect(result.mmsLiveRefreshSeconds).toBe(30);
+  });
+
+  it('parses MMS config, strips trailing slash, trims key', () => {
+    const result = ApiEnvSchema.parse({
+      NODE_ENV: 'development',
+      ...validDb,
+      MMS_BASE_URL: 'http://mms.local:81/',
+      MMS_LIVE_DASHBOARD_ENDPOINT: '/api/custom/live',
+      MMS_INTEGRATION_KEY: '  k'.padEnd(40, 'x') + '  ',
+      MMS_QUERY_TIMEOUT_MS: '5000',
+      MMS_LIVE_REFRESH_SECONDS: '45',
+    });
+    expect(result.mmsBaseUrl).toBe('http://mms.local:81');
+    expect(result.mmsLiveDashboardEndpoint).toBe('/api/custom/live');
+    expect(result.mmsIntegrationKey).toBe('k'.padEnd(38, 'x'));
+    expect(result.mmsQueryTimeoutMs).toBe(5000);
+    expect(result.mmsLiveRefreshSeconds).toBe(45);
+  });
+
+  it('never polls MMS faster than 15 seconds', () => {
+    const result = ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_LIVE_REFRESH_SECONDS: '5' });
+    expect(result.mmsLiveRefreshSeconds).toBe(15);
+  });
+
+  it('treats an empty MMS_INTEGRATION_KEY as not configured', () => {
+    const result = ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_INTEGRATION_KEY: '   ' });
+    expect(result.mmsIntegrationKey).toBeNull();
+  });
+
+  it('rejects a non-http MMS_BASE_URL and a relative-less endpoint', () => {
+    expect(() =>
+      ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_BASE_URL: 'ftp://mms' }),
+    ).toThrow();
+    expect(() =>
+      ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_LIVE_DASHBOARD_ENDPOINT: 'http://evil/x' }),
+    ).toThrow();
+  });
 });

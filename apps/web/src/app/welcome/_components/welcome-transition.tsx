@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 const REDIRECT_DELAY_MS = 1800;
 
@@ -64,8 +65,9 @@ export function WelcomeTransition(): React.JSX.Element {
       <div
         className={`flex flex-col items-center transition-all duration-700 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
       >
+        {/* FMP-PERF-02 — next/image, same reasoning as the login/sidebar logo. */}
         <div className="inline-flex rounded-3xl border border-border bg-white p-6 shadow-lg">
-          <img src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} className="h-20 w-auto sm:h-24" />
+          <Image src="/recafco-logo.png" alt="RECAFCO" width={193} height={150} priority className="h-20 w-auto sm:h-24" />
         </div>
       </div>
 

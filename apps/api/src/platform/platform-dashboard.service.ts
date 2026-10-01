@@ -301,7 +301,12 @@ export class PlatformDashboardService {
       code: 'TECHNICAL',
       title: 'Technical',
       description: 'Drawings and approvals.',
-      route: '/contracts/technical',
+      // FMP-TECH-01 — repointed from the old /contracts/technical Executive
+      // Module Landing Page to the new, real Technical module (its own
+      // dashboard + per-job-order workflow + Drawing Received screen).
+      // /contracts/technical itself is unchanged and still reachable
+      // directly — just no longer the primary nav target.
+      route: '/technical',
       metrics: [
         metric('Drawings', pendingDrawings),
         metric('SD / Calc.', sdCalculationPending),

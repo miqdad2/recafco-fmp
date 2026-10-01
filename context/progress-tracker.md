@@ -11788,6 +11788,1657 @@ Directly inspected `packages/database/prisma/schema.prisma` for `Incident`, `Fac
 - Did not attempt to eliminate the `authApi.me` call in `(protected)/layout.tsx` itself (e.g. by threading the resolved profile down via a shared context to every page) — that would require a larger routing/context restructure across all 26 pages, which this ticket's own "no risky refactors" constraint rules out. The `cache()` fix gets the same practical benefit (one real call per request) with a one-file change.
 - Did not run the app in a browser or capture real network-tab timings: the dev servers were already running under the user's own supervision (ports 3000/4000 listening) and this project's own prior units (see the FMP-UI-23B incident note above) document a concrete prior incident from a Claude-launched detached process colliding with the user's own `npm run dev` — so no new process was started against those ports. Audit evidence instead came from direct source/schema inspection, a full production build (confirms bundle compiles and every route's data-fetching code path is type-correct), and the full test suite.
 
+## FMP-PERF-02 — Asset and Loading Optimization (Completed 2026-09-29)
+
+### Summary
+
+Follow-up to FMP-PERF-01, now that its backend fixes are deployed. This unit is UI/asset-only: optimized the login hero images (and, along the way, found and fixed a real bug — the "mobile" hero was a byte-for-byte duplicate of the desktop file, not an actual smaller asset), swapped the app's one repeated logo image to `next/image` everywhere it appears, added route-specific loading skeletons for the pages that were falling back to a generic/mismatched ancestor one, suppressed a narrow, expected hydration-mismatch warning in a workflow board card's relative-timestamp display, and converted 6 internal navigation links from plain `<a>` (full page reload) to `next/link`'s `Link` (fast client-side navigation). No backend, schema, permission, or route changed.
+
+### Files changed
+
+**Images/assets:**
+- `apps/web/public/login-hero.webp` (new, 396KB) / `login-hero-mobile.webp` (new, 95KB) — re-encoded from the live `login-hero.jpg` (same crop/photo, quality 75/72 WebP). The old `login-hero-mobile.jpg` was discovered to be byte-identical to `login-hero.jpg` (both 2048×1152, 983076 bytes) — a real regression where mobile visitors were downloading the full desktop-resolution image; the new mobile asset is a genuine 1024×576 derivative.
+- `apps/web/src/app/login/page.tsx` — hero `<img>` sources updated to the new `.webp` files, both gained explicit `width`/`height` matching their real pixel dimensions; 2 `<img>` logo usages converted to `next/image` (`priority`, same `width`/`height`/`className`).
+- `apps/web/src/app/(protected)/_components/sidebar.tsx` — logo `<img>` converted to `next/image` (`priority`).
+- `apps/web/src/app/welcome/_components/welcome-transition.tsx` — logo `<img>` converted to `next/image` (`priority`).
+- `apps/web/src/proxy.ts` — `PUBLIC_PREFIXES` updated from `/login-hero.jpg`/`/login-hero-mobile.jpg` to the new `.webp` paths (this exact class of bug — a public asset path missing from this allowlist 404s/redirect-loops for a signed-out visitor — has bitten this project twice before: FMP-UI-11-fix, FMP-UI-18).
+- **Not deleted:** the now-unreferenced `login-hero.jpg`, `login-hero-mobile.jpg`, plus 2 already-untracked, never-wired-in orphan files (`login-hero1.jpg` 360KB, `login-hero-mobile1.jpg` 73KB — an abandoned earlier optimization attempt with a different crop/aspect ratio, discovered sitting in `public/` unreferenced by any code). File deletion is an irreversible action this environment requires explicit user confirmation for; left in place pending that decision rather than force-deleted. They no longer affect load performance (nothing references them), just disk space.
+
+**Loading states (5 new route-specific `loading.tsx`, 3 new shared skeleton components):**
+- `apps/web/src/app/(protected)/_components/card-grid-loading-skeleton.tsx`, `executive-summary-loading-skeleton.tsx`, `form-loading-skeleton.tsx` (new, reusable — registered in `ui-registry.md`).
+- `apps/web/src/app/(protected)/dashboard/loading.tsx` (new) — previously fell back to the generic top-level spinner (`(protected)/loading.tsx`, the only one above it); now a real 11-card grid skeleton matching `dashboard/page.tsx`'s own grid.
+- `apps/web/src/app/(protected)/contracts/executive/loading.tsx` (new) — previously inherited `contracts/loading.tsx`'s generic title+block skeleton; now a KPI-row + 2-panel skeleton matching the real page's `ExecutiveKpiGrid` + `lg:grid-cols-[13fr_7fr]` layout.
+- `apps/web/src/app/(protected)/incidents/executive/loading.tsx` (new) — previously inherited `incidents/loading.tsx`'s LIST-row skeleton (a real shape mismatch for this KPI landing page); now a KPI-row + 2-panel skeleton.
+- `apps/web/src/app/(protected)/incidents/new/loading.tsx` (new) — previously inherited the same list-row skeleton (an even bigger mismatch for a create form); now a field-bar form skeleton.
+- `apps/web/src/app/(protected)/contracts/erection-dashboard/loading.tsx` (new) — previously inherited `contracts/loading.tsx`'s generic skeleton; now a KPI-row + single-panel skeleton.
+- **Not touched:** `/incidents`, `/factory-tasks`, `/safety-compliance` already had well-built, page-shaped list-row skeletons (`incidents/loading.tsx`, `factory-tasks/loading.tsx`, `safety-compliance/loading.tsx`) — good as-is, no change needed. The new route-specific files above only override the mismatched cases; the shared ancestor `loading.tsx` files themselves were left untouched (editing them would have risked changing the fallback for every OTHER sibling page under the same shared parent, e.g. `/contracts/dashboard`, `/contracts` list, `/contracts/[id]` — out of scope for this ticket and unnecessary given Next's per-segment `loading.tsx` override behavior).
+
+**Hydration fix:**
+- `apps/web/src/app/(protected)/contracts/workflow/_components/workflow-task-card.tsx` — the "Xm/Xh/Xd ago" relative-activity label (`formatRelativeActivity()`, reads `Date.now()`) now has `suppressHydrationWarning` on its `<span>`. This is React's own documented pattern for intentionally-time-varying text: the label's value, computation logic, and update cadence are all byte-for-byte unchanged — this only stops React from warning about (or attempting to reconcile) a value that is expected to occasionally differ by a few seconds between this Client Component's server-render pass and its client hydration pass.
+
+**Navigation (plain `<a>` → `next/link` `Link`, internal links only):**
+- `apps/web/src/app/(protected)/contracts/issues/page.tsx`, `claims/page.tsx`, `closeouts/page.tsx`, `payments/page.tsx`, `workflow/page.tsx` — each page's Previous/Next pagination links (`buildHref(...)`, a same-page query-string link) were plain `<a>`, forcing a full browser reload (re-downloading the whole JS bundle) on every click instead of a fast client-side navigation. All 5 converted to `Link`.
+- `apps/web/src/app/(protected)/contracts/workflow/_components/assignment-queue-view.tsx` — 3 more internal `<a href={contractListHref}>` occurrences (a "Close"/"Back to Contracts" button pair plus an error-state "Back to Contracts" link, all pointing at an internal same-page query-string href) converted to `Link`.
+- **Not touched:** `contract-variation-panel.tsx`'s `<a href={v.supportingDocumentUrl} target="_blank">` — a genuinely external stored-document URL; `<a target="_blank">` is the correct element there, not a bug. `edit-line-form.tsx`'s `window.location.reload()` "Refresh" button — an intentional full-reload recovery action for a stale-data error state, also correct as-is.
+
+### Audit findings not acted on
+
+- **Icon-import bundle concern (item 6):** checked whether `lucide-react` (155 files import from it) needs `experimental.optimizePackageImports` in `next.config.ts`. It does not — Next.js has shipped `lucide-react` in its own DEFAULT `optimizePackageImports` list since 13.5, and this project is on `next: "latest"` (confirmed Next.js 16.2.9 via the build output), so this optimization is already active with zero config. Adding the config explicitly would have been a redundant no-op — not done, per this ticket's own "do not fake performance improvements."
+- **`'use client'` density:** re-confirmed (following on from FMP-PERF-01's audit) that all 100+ Client Components in this app are forms, modals, or genuinely interactive widgets — no unnecessary `'use client'` found to remove.
+- The hero background images themselves (as opposed to the 4 logo occurrences) were deliberately NOT converted to `next/image`: they're swapped via CSS `hidden lg:block`/`lg:hidden` art-direction (2 different assets per breakpoint), which `next/image` doesn't handle as a single element — doing it with 2 `next/image fill` elements was judged more integration risk (on a page with an extensive, carefully-tuned visual history — see the login layout's own `ui-registry.md` entry) than the item 1 manual-WebP fix already delivers, and item 2's own scope explicitly names "sidebar logo, login logo, dashboard/header branding" — not the hero.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors (unaffected — no API files changed) |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/api test` | ✓ 1684/1684 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all 94 routes compiled (Next.js 16.2.9 / Turbopack) |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 47 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- Both new WebP hero images were generated from the CURRENTLY LIVE `login-hero.jpg`/`login-hero-mobile.jpg` (via Pillow, quality 75/72, `method=6`), not from the untracked `login-hero1.jpg`/`login-hero-mobile1.jpg` orphan pair sitting alongside them — those orphans have a different aspect ratio (2400×1148 vs the live 2048×1152), meaning a different visible crop of the source photo, and their provenance/approval status is unknown (never wired into any code, never mentioned in this file's own history before now). Generating fresh assets from the exact currently-live crop guarantees zero visual/style change, matching this ticket's own "keep the same visual style and layout" constraint exactly; using the mystery orphan pair could not have made that same guarantee.
+- `next/image` requires no `next.config.ts` changes for local `/public` assets (no `remotePatterns`/`domains` needed) and works correctly under this project's `output: 'standalone'` self-hosted PM2 deployment (the built-in optimizer runs locally, no CDN/internet dependency) — confirmed via a full production build rather than assumed.
+- `suppressHydrationWarning` (not a `useEffect`-deferred client-only render) was chosen for the `workflow-task-card.tsx` fix specifically to avoid adding new component state/lifecycle to a card rendered in bulk on a Kanban-style board — the officially-documented React escape hatch for exactly this "intentionally time-varying text" class of mismatch, zero added render passes, zero new bugs surface area.
+
+## FMP-TECH-01 — Technical Workflow Foundation + Drawing Received Screen (Completed 2026-09-29)
+
+### Summary
+
+Built the Technical module's own real data foundation and its first connected screen, Drawing Received (stage 1 of 4: Drawing Received → SD & Calculation Submission → Getting Approval → FD Issuance). Technical is a genuinely separate route/module (`/technical`) with its own dashboard, per-job-order workflow overview, and the Drawing Received form — but is NOT isolated: every workflow is created against a real `Contract` row (`contractId`, unique per contract), reuses the exact same `contracts.*` permission codes and `DepartmentAccessService`/`ModuleIdentifier.CONTRACTS_MANAGEMENT` scoping every other Contract Management sub-feature (Erection, Workflow board) already uses, and links back to the owning contract from every Technical page.
+
+This is a new, additive-only table family (`TechnicalWorkflow`/`TechnicalDrawing`/`TechnicalWorkflowActivity`/`TechnicalDrawingAttachment`), deliberately kept separate from the pre-existing generic `ContractWorkflowTask` TECHNICAL-team rows (`technical_drawing_received`/`technical_sd_calculation_submission`/`technical_getting_approval`/`technical_fd_issuance` — see `contract-workflow-templates.ts`) that already back the Workflow & Team Tasks board and the Executive Dashboard's Technical card: those generic task rows have no domain fields (drawing reference, revision, sheets, sender, etc.), so this unit's new tables exist to capture that real intake data. The two systems are NOT merged/synced in this unit — the old board/card are completely unchanged and still work exactly as before.
+
+### Schema / migration
+
+Migration `20260929000000_add_technical_workflow` — 7 new enums (`TechnicalStage`, `TechnicalWorkflowStatus`, `TechnicalPriority`, `TechnicalReceivedFrom`, `TechnicalDrawingType`, `TechnicalDrawingStatus`, `TechnicalLinkedStage`) + 4 new tables (`technical_workflows`, `technical_drawings`, `technical_workflow_activities`, `technical_drawing_attachments`) + their indexes/FKs. Purely additive — no existing table, column, or constraint touched; `Contract` gained 2 new back-relation fields only (`technicalWorkflow`, `technicalDrawings`), no new scalar column. Hand-extracted via the established shadow-DB workaround (`prisma migrate diff --from-config-datasource --to-schema`, trimmed to only the new-table/enum/FK statements — the raw diff also contained unrelated `contract_*` FK-naming drift from an earlier Prisma version upgrade), applied via `prisma migrate deploy`. `pnpm db:migrate:status` confirms 48 migrations, up to date.
+
+### Files changed / added
+
+**Backend (`apps/api/src/technical/`, new module):**
+- `technical.service.ts` — dashboard metrics/jobs list, workflow start (idempotent), Drawing Received get/save-draft/request-clarification/complete, attachment CRUD. `nextStageOf()`/`TECHNICAL_STAGE_LABELS` exported as pure functions.
+- `technical.controller.ts` — `GET /technical/dashboard`, `GET/POST /technical/jobs/:contractId[/start]`, `GET/PATCH /technical/jobs/:contractId/drawing-received`, `POST .../clarification`, `POST .../complete`, attachment list/upload/download/delete.
+- `technical-attachment-storage.service.ts` — local-disk storage, mirrors `IncidentAttachmentStorageService` exactly (this codebase has no MinIO/S3 anywhere).
+- `dto/save-drawing-received.dto.ts`, `dto/request-clarification.dto.ts`.
+- `technical.module.ts`, registered in `app.module.ts`.
+- `technical.service.test.ts` — 26 tests (permissions, dashboard metrics/jobs, start idempotency, draft save partial-update behavior, complete's required-field/date-rule validation and stage transition, clarification, attachment MIME/size/ownership checks).
+- `packages/config/src/env/api.ts` — `TECHNICAL_DRAWING_ATTACHMENTS_DIR` env var (default `./storage/technical-drawing-attachments`).
+- `packages/database/src/index.ts` — new model/enum exports.
+- `platform-dashboard.service.ts` (+ its own test) — Technical card's `route` repointed from `/contracts/technical` to `/technical`.
+
+**Frontend (`apps/web/src/app/(protected)/technical/`, new):**
+- `page.tsx` — Technical Dashboard: 6 KPI tiles (Pending Technical Review / Drawing Received / SD & Calculation Pending / Waiting Approval / FD Issued / Ready for Production Release, all real counts) + a Technical Jobs table (Job Order No / Project / Client / Current Stage / Next Action / Priority / Last Updated / Open Technical Workflow).
+- `jobs/[contractId]/page.tsx` — per-job-order workflow overview: current/next stage if a workflow exists, or a real "Technical workflow not started" state + Start Technical Workflow button if not. This is also where `completeDrawingReceivedAction` redirects once Drawing Received finishes (SD & Calculation Submission has no screen yet in this unit — its own stage label renders here clearly, per the ticket's own explicit fallback instruction).
+- `jobs/[contractId]/workflow/drawing-received/page.tsx` + `_components/` (`drawing-received-form.tsx`, `drawing-attachments-panel.tsx`, `technical-checklist.tsx`, `technical-activity-timeline.tsx`) — the full screen: breadcrumb, status chips, summary card, 4-step stepper, guidance panel, the 4 form sections, real attachment upload/list/delete, a real (not hardcoded) task checklist, a real activity timeline, task details, and the 4 footer actions.
+- `jobs/[contractId]/workflow/drawing-received/attachments/[attachmentId]/download/route.ts` — same-origin download proxy, mirrors the Incident Evidence pattern.
+- `actions.ts` — `startTechnicalWorkflowAction`, `saveDrawingReceivedDraftAction`, `requestClarificationAction`, `completeDrawingReceivedAction`, `uploadDrawingAttachmentAction`, `deleteDrawingAttachmentAction`.
+- `_lib/technical-format.ts` — local date/enum-label formatters (matches this app's existing per-module convention of small local formatters, not a shared package).
+- `apps/web/src/lib/technical-api.ts` — typed client, mirrors `incidents-api.ts`'s exact `apiFetch`/`apiFetchResult` shape.
+- `sidebar.tsx` (3 occurrences) + `executive-modules.ts` — Technical links repointed from `/contracts/technical` to `/technical`.
+- `contracts/[id]/(workspace)/page.tsx` — added an always-visible "Open Technical Workflow" link in the Contract Overview's own action-buttons row (next to Activate/Terminate/Closeout), linking to `/technical/jobs/[id]` — the ticket's own required "entry point from Contract Management" requirement.
+
+### Job Order No display
+
+`contract.jobOrder` (an existing, already-populated `Contract` column) is read live at query time and shown as the PRIMARY identifier everywhere on every new Technical page/table — "Job Order No" in the dashboard table and both workflow pages' summary cards. The internal contract UUID is shown only as "System Ref", in small muted text, never as the main label. `contract.referenceNumber` (the CT-xxxx system reference) is shown as a clearly-secondary "Contract No / Quotation No" line. "Department: Contracts Management" never appears on any Technical page — every one shows "Department: Technical" (a fixed string — see `TechnicalWorkflow.assignedDepartment`'s own doc comment for why it's a real column, not just a hardcoded label). "Linked Contract Stage" never appears — the field is "Linked Workflow Stage" throughout, matching the ticket's exact wording correction.
+
+### Save Draft / Complete Drawing Receipt behavior
+
+- **Save Draft** (`PATCH .../drawing-received`) — creates the `TechnicalDrawing` row on first save (logs `DRAWING_PACKAGE_RECEIVED`) or updates it on later saves (logs `DETAILS_SAVED`); only ever writes fields the caller actually provided (`toUpdateData()` in `technical.service.ts`) — a partially-filled draft never nulls out fields the user hasn't touched yet. Never moves `currentStage`. Rejected with 409 if the stage has already advanced past Drawing Received.
+- **Request Clarification** — logs a `CLARIFICATION_REQUESTED` activity (reuses the form's own Remarks field as the note, since the reference design has no separate clarification-note input); never touches `currentStage` or `status`.
+- **Complete Drawing Receipt & Continue** — validates all 12 of the ticket's own required fields server-side (never trusts the frontend alone — `REQUIRED_COMPLETE_FIELDS` in `technical.service.ts`), validates Received Date is not in the future and Planned Review Start is today-or-future, marks the `TechnicalDrawing` `COMPLETED`, advances `TechnicalWorkflow.currentStage` to `SD_CALCULATION_SUBMISSION`, logs a `DRAWING_RECEIVED_COMPLETED` activity, and redirects to the job's own Technical Workflow overview page (SD & Calculation Submission has no screen yet — the overview page shows the new current/next stage clearly, exactly matching the ticket's own explicit fallback instruction).
+
+### Permission handling
+
+No new `technical.*` permission was introduced. Every Technical read is gated on `contracts.read`; every write (start workflow, save draft, complete, clarification, attachment upload/delete) is gated on `contracts.update` OR `contracts.workflow_update` — the exact same Manager-or-Staff pair `contract-workflow.service.ts` already uses for team-task writes, via the `@AnyPermission` decorator at the controller level and matching `actor.permissions.includes(...)` checks in the service. Department scoping reuses `DepartmentAccessService` + `ModuleIdentifier.CONTRACTS_MANAGEMENT` — no new `ModuleIdentifier` was added. This directly follows the ticket's own "follow existing FMP permission architecture, do not introduce permission changes blindly" instruction, and matches how Erection/Technical's own pre-existing Executive Dashboard card are already gated.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1710/1710 tests (1684 + 26 new) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged — no new pure-function logic added on the web side) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including the 4 new `/technical/*` routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 48 migrations, up to date |
+
+### Key Implementation Notes
+
+- The pre-existing `ContractWorkflowTask` TECHNICAL-team rows/board/card (`/contracts/technical`, `/contracts/workflow?team=TECHNICAL`) were read but never modified — confirmed via the full test suite's unchanged pass count for everything outside this unit's own new files, plus a direct diff review before finishing.
+- `contractsApi.people()` (`/contracts/people`, already existing) was reused for the Drawing Received form's "Assigned To" dropdown rather than adding a new Technical-specific people-picker endpoint — one real active-users list, not a duplicate.
+- The Contract Overview tab's own `ContractOverviewProgressCard` (which already shows a `TECHNICAL`-team progress percentage computed from the OLD `ContractWorkflowTask` rows) was deliberately left untouched — the new "Open Technical Workflow" link was added as a new sibling action button instead of trying to merge it into or reinterpret that existing card's own logic.
+- `/contracts/technical` (the FMP-UI-07 Executive Module Landing Page) is unchanged and still fully reachable — only the Platform Dashboard card, sidebar links, and `executive-modules.ts` were repointed to the new `/technical` module; nothing was deleted.
+
+## FMP-TECH-01C — Redesign Technical Dashboard as Workflow Control Center (Completed 2026-09-29)
+
+### Summary
+
+Replaced the Technical Dashboard's simple KPI-cards-plus-table page with a real workflow control center, and resolved the `/technical` vs `/contracts/technical` route confusion by redirecting the old route. No schema change, no permission change, no change to the Drawing Received screen or attachments.
+
+### Root cause of the old/simple dashboard
+
+`/contracts/technical` — the FMP-UI-07 Executive Module Landing Page for Technical, built before FMP-TECH-01 gave Technical any real backend of its own — had no dedicated data source. It computed its 4 tiles by reading the Platform Dashboard's generic per-module card endpoint (`GET /platform/dashboard`, filtered to the `TECHNICAL` card) and hardcoded "Not available yet — coming next for the Technical module" for both its Needs Attention and Recent Activity sections, because no real Technical-specific data existed to show there at the time it was written. FMP-TECH-01 later built the real `/technical` dashboard (backed by `GET /technical/dashboard`) and repointed every nav link (sidebar, Platform Dashboard card, `executive-modules.ts`) to it — but never touched the OLD `/contracts/technical` page itself, which kept rendering its original placeholder-shaped content for anyone reaching it directly (a bookmark, a typed URL, or — per this ticket's own screenshot — a stale browser tab). Two different "Technical dashboards" existed simultaneously; this unit's own root-cause read of the screenshot URL (`/contracts/technical`) confirms that's exactly which one was seen.
+
+### Route decision for /contracts/technical
+
+Option A (preferred, per this ticket): `apps/web/src/app/(protected)/contracts/technical/page.tsx` now does a single `redirect('/technical')` — the entire old placeholder page (KPI grid off the platform endpoint, both hardcoded "not available yet" panels, the single generic "View Technical Workflow" button into the old `ContractWorkflowTask` board) was removed. Only one Technical dashboard exists now. Nothing else under `/contracts/*` was touched — the Workflow & Team Tasks board (`/contracts/workflow?team=TECHNICAL`) that old page's button pointed at is still there, still working, just no longer has a dedicated Technical-branded landing page of its own (it didn't need one — `/technical` is that landing page now).
+
+### API/dashboard data changes
+
+`GET /technical/dashboard` (`TechnicalService.getDashboard()`) extended in ONE call — per this ticket's own "do not fetch each section with many separate calls unless necessary" — to additionally return:
+- `metrics.needsAttention` (a count, for the new 7th KPI card).
+- `needsAttention: TechnicalAttentionItem[]` — 5 real conditions, each its own targeted query, batched into the same `Promise.all` as everything else: overdue planned review start (`TechnicalDrawing.plannedReviewStart` in the past, not completed), urgent priority (`TechnicalWorkflow.priority === URGENT`, in progress), Drawing Received not completed (a drawing record exists, still at that stage, still not `COMPLETED`), waiting approval too long (`GETTING_APPROVAL` stage, unchanged for 7+ days), and clarification requested (a workflow whose MOST RECENT activity — derived from the same 100-row recent-activity fetch below, not a 6th query — is a `CLARIFICATION_REQUESTED` event still unresolved).
+- `recentActivities: TechnicalActivityFeedItem[]` — top 10 of a single 100-row `TechnicalWorkflowActivity` fetch (ordered newest-first, scoped to the actor's department access), each joined to its contract's `jobOrder`/`referenceNumber`/`title`. The same 100-row fetch is reused (not re-queried) for the clarification-detection logic above.
+- `stageBreakdown: Record<TechnicalStage, number>` — the exact same 4 per-stage counts the KPI cards already compute (`drawingReceived`/`sdCalculationPending`/`waitingApproval`/`fdIssued`), restructured for the new compact stage-progress bar — zero additional queries.
+- `TechnicalJobRow` gained `dueDate` (the latest `TechnicalDrawing.plannedReviewStart` for that job's workflow) and `assignedTo` (that same drawing's assignee display name) — both pulled via a `drawings: { take: 1, orderBy: { createdAt: 'desc' } }` nested select added to the existing jobs-list query, not a new query.
+
+No new endpoint, no schema change — every addition reads existing `TechnicalWorkflow`/`TechnicalDrawing`/`TechnicalWorkflowActivity` columns.
+
+### Dashboard sections implemented
+
+1. **Header** — title/subtitle exactly as specified; actions: Refresh (`router.refresh()`, no new endpoint), Back to Platform Dashboard, Contract List.
+2. **7 KPI cards** — the original 6 plus Needs Attention/Overdue (icon turns `text-warning` when count > 0). Every card shows a real count or 0 — `status="unavailable"` is now only ever passed when the API call itself failed (`hasData === false`), never merely because a count is 0.
+3. **Technical Workflow Jobs table** — 10 columns (added Due/Planned Date, Assigned To, Status; kept Job Order No/Project/Client/Current Stage/Next Action/Priority) and 3 per-row actions: **Open Current Stage** (routes straight to `/technical/jobs/[contractId]/workflow/drawing-received` when the job is at that stage; otherwise to the workflow overview, which shows the real next stage clearly — never a 404 into an unbuilt route), **Open Workflow** (always the overview), **View Contract** (`/contracts/[contractId]`).
+4. **Empty state** — "No Technical workflow jobs yet." / "Start a Technical workflow from an active contract/job order." + a "Go to Contract List" action, replacing what would otherwise be a bare empty table.
+5. **Needs Attention panel** (`needs-attention-panel.tsx`) — renders the 5 real conditions above, or "All Technical workflow items are currently on track." when empty.
+6. **Recent Technical Activity panel** (`recent-activity-panel.tsx`) — real `technical_workflow_activities` rows across every in-scope job, or "No Technical activity recorded yet." when empty — never "coming soon" (the table has existed since FMP-TECH-01).
+7. **Stage Progress Overview** (`stage-progress-overview.tsx`) — a compact 4-bar row (Drawing Received / SD & Calculation / Getting Approval / FD Issuance) built from `stageBreakdown`.
+
+### Empty/error state behavior
+
+Switched the page from the throwing `technicalApi.dashboard()` client to `technicalApiFetchResult()` (already existed, just not previously used by this page) so a failed call never throws past the page boundary — `TechnicalApiError` gained a `status: number` field (0 for a network-level failure with no response) so the page can render the ticket's exact 3 messages: 401 → "Session expired. Please sign in again.", 403 → "You do not have permission to view Technical Dashboard.", anything else → "Technical dashboard data could not be loaded. Please try again." On a genuine failure, ALL 7 KPI cards correctly show `status="unavailable"` (that's the one case they're allowed to); on success with zero rows, every card shows a real `0` and the table/panels render their real empty-state copy instead. Loading state: a new `technical/loading.tsx` (7-card + table-row skeleton, same visual language as this app's other `loading.tsx` skeletons) replaces the previous generic fallback.
+
+### Confirmation: Drawing Received still works
+
+Not touched in this unit: `TechnicalController`, `TechnicalService.getDrawingReceived/saveDrawingReceivedDraft/completeDrawingReceived/requestClarification/listAttachments/createAttachment/getAttachmentForDownload/deleteAttachment`, the Drawing Received page/form/attachments/checklist/activity-timeline components, or the attachment download route — only `getDashboard()` and its 2 new type interfaces changed in `technical.service.ts`. All 29 `technical.service.test.ts` tests (the pre-existing 26 from FMP-TECH-01 covering exactly those untouched methods, plus 3 new ones for this unit's own additions) pass unchanged.
+
+### Files changed
+
+- `apps/api/src/technical/technical.service.ts` — `TechnicalDashboardResult`/`TechnicalJobRow` extended, 3 new exported interfaces (`TechnicalAttentionItem`, `TechnicalAttentionReason`, `TechnicalActivityFeedItem`), `getDashboard()` rewritten.
+- `apps/api/src/technical/technical.service.test.ts` — updated the 2 existing dashboard tests for the new fields, added 3 new tests (stage breakdown, Needs Attention, Recent Activity).
+- `apps/web/src/lib/technical-api.ts` — matching type extensions; `TechnicalApiError` gained `status`.
+- `apps/web/src/app/(protected)/technical/page.tsx` — full redesign.
+- `apps/web/src/app/(protected)/technical/loading.tsx` (new), `_components/refresh-button.tsx` (new), `_components/needs-attention-panel.tsx` (new), `_components/recent-activity-panel.tsx` (new), `_components/stage-progress-overview.tsx` (new) — registered in `ui-registry.md`.
+- `apps/web/src/app/(protected)/contracts/technical/page.tsx` — replaced with a `redirect('/technical')`.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1713/1713 tests (1710 + 3 new) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/contracts/technical` (now a redirect) and every `/technical/*` route |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 48 migrations, up to date — unchanged, confirming no schema change this unit |
+
+### Key Implementation Notes
+
+- The clarification-requested Needs Attention reason deliberately reuses the SAME 100-row `recentActivitiesRaw` fetch the Recent Activity panel needs, rather than a 6th targeted query — "most recent activity per workflow" is derived in-memory (first occurrence per `technicalWorkflowId` in a newest-first list) rather than via a SQL `DISTINCT ON`/window function, which Prisma's query builder doesn't expose directly; correct as long as every in-scope workflow's true latest activity falls within the top 100 fetched, a safe bound at this app's current scale and noted here in case a future unit needs to revisit it for a much larger dataset.
+- `MetricCard`'s existing `status: 'ok' | 'restricted' | 'unavailable'` prop already drew the exact "Unavailable" badge the ticket says must disappear when data is simply zero — no change to that component was needed, only to how this page decides which status to pass (`hasData` now gates it, not "is this specific count falsy").
+
+## FMP-TECH-02 — SD & Calculation Submission Workflow Screen (Completed 2026-09-29)
+
+### Summary
+
+Built Technical Stage 2 — SD & Calculation Submission — mirroring FMP-TECH-01's Drawing Received screen pattern exactly: a new additive table family, service/controller methods, and a full workflow screen, connected to the completed Drawing Received record and advancing `TechnicalWorkflow.currentStage` to `GETTING_APPROVAL` on completion. No permission change, no change to Drawing Received or the Technical Dashboard's own existing behavior beyond the additive stage-routing/label updates this stage requires.
+
+### Schema / migration
+
+Migration `20260929010000_add_technical_sd_calculation_submission` — purely additive: 4 new enums (`TechnicalSubmissionType`, `TechnicalCalculationType`, `TechnicalSubmissionMethod`, `TechnicalSdSubmissionStatus`), 2 new tables (`technical_sd_calculation_submissions`, `technical_sd_submission_attachments`), their indexes/FKs. `relatedDrawingId` FKs to `TechnicalDrawing` (`onDelete: SetNull`) but the real "must belong to this same workflow and be completed" business rule is enforced in `TechnicalService.assertRelatedDrawingValid()`, not a DB constraint — matching how every other cross-record rule in this schema is enforced in application code. Reused `TechnicalPriority` (already existed) rather than a new priority enum. No existing table/column/constraint touched. Hand-extracted via the established shadow-DB workaround, applied via `prisma migrate deploy`. `pnpm db:migrate:status` confirms 49 migrations, up to date.
+
+### Files changed / added
+
+**Backend:**
+- `apps/api/src/technical/technical.service.ts` — added `TechnicalSdCalculationSubmission`-family methods (`getSdCalculationSubmission`, `saveSdSubmissionDraft`, `submitSdCalculation`, `completeSdCalculationSubmission`, `requestSdClarification`, SD attachment CRUD), `CORE_SD_SUBMIT_FIELDS`/`COMPLETE_SD_REQUIRED_FIELDS` constants, `assertRelatedDrawingValid()`/`assertSdDateRules()`/`assertSdStageIsCurrent()` helpers, `toSdUpdateData()`. Extended `getDashboard()`'s Needs Attention with a 6th real condition (overdue target approval date).
+- `apps/api/src/technical/technical.controller.ts` — 8 new endpoints mirroring the Drawing Received ones (see "New API endpoints" below).
+- `apps/api/src/technical/dto/save-sd-calculation-submission.dto.ts` (new).
+- `apps/api/src/technical/technical.service.test.ts` — 22 new tests (51 total in this file).
+- `packages/database/src/index.ts` — new model/enum exports.
+
+**Frontend:**
+- `apps/web/src/lib/technical-api.ts` — new SD types + `technicalApi.sdCalculationSubmission()`.
+- `apps/web/src/app/(protected)/technical/actions.ts` — 6 new server actions mirroring the Drawing Received ones.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/workflow/sd-calculation-submission/` (new route) — `page.tsx`, `_components/sd-calculation-submission-form.tsx`, `_components/sd-attachments-panel.tsx`, `attachments/[attachmentId]/download/route.ts`.
+- `apps/web/src/app/(protected)/technical/page.tsx` — `openCurrentStageHref()` extended to route `SD_CALCULATION_SUBMISSION` jobs to the new screen.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/page.tsx` — added an "Open SD & Calculation Submission" action for that stage, plus a per-stage completion summary strip (Drawing Received shows "— Completed" once past it, per the ticket's own "show Drawing Received completed if already done").
+- `apps/web/src/app/(protected)/technical/_components/needs-attention-panel.tsx` — added the `OVERDUE_TARGET_APPROVAL` reason label.
+- `apps/web/src/app/(protected)/technical/_components/recent-activity-panel.tsx` and `.../drawing-received/_components/technical-activity-timeline.tsx` — both gained the 5 new SD event labels (both panels render workflow-wide activity, which now includes SD-stage events regardless of which screen is open).
+
+### New routes
+
+`/technical/jobs/[contractId]/workflow/sd-calculation-submission` (+ its attachment download route).
+
+### New API endpoints
+
+`GET`/`PATCH` `/technical/jobs/:contractId/sd-calculation-submission`, `POST .../submit`, `POST .../clarification`, `POST .../complete`, `GET`/`POST` `.../attachments`, `GET .../attachments/:id/download`, `DELETE .../attachments/:id`.
+
+### How SD & Calculation connects to Drawing Received
+
+`saveSdSubmissionDraft`/`submitSdCalculation`/`completeSdCalculationSubmission` all gate on `workflow.currentStage === SD_CALCULATION_SUBMISSION` — a workflow only ever reaches that stage via `completeDrawingReceived()` (FMP-TECH-01) advancing it there, so this single check correctly rejects both "too early" (Drawing Received not done yet) and "too late" writes without a separate query. The frontend's own "too early" case shows the ticket's exact required message ("Complete Drawing Received before creating SD & Calculation Submission.") whenever `completedDrawings.length === 0`, with a link back to the Drawing Received screen — checked via `getSdCalculationSubmission()`'s own `completedDrawings` list (every `TechnicalDrawing` with `status: COMPLETED` for this workflow). The "Related Drawing Received" field on the form is a real dropdown populated from that same list — never free text — and `relatedDrawingId` is re-validated server-side on every write (`assertRelatedDrawingValid`) to confirm it belongs to this exact workflow and is completed, so a request can never reference another contract's drawing.
+
+### How Job Order No is displayed
+
+Identical treatment to Drawing Received: `contract.jobOrder` is the primary label everywhere on this screen (breadcrumb, summary card, dashboard table); the contract UUID only ever appears as "System Ref"; "Project / Contract Name" and "Client / Employer" use the ticket's exact corrected wording. "Main Contractor / Consultant" (listed as "if available" in the ticket) was omitted — `Contract` has no such field, and inventing one wasn't in scope.
+
+### Save Draft / Submit / Complete / Clarification behavior
+
+- **Save Draft** — creates the submission record on first save, updates on later saves; only writes fields provided; never advances the stage; blocked (409) once the workflow is no longer at this stage in either direction.
+- **Submit SD & Calculation** — validates 10 "core" fields (this codebase's own documented reading of the ticket's ambiguous "core" vs. "all required" split — see the service's own `CORE_SD_SUBMIT_FIELDS` doc comment: Target Approval Date and Related Drawing Received are treated as complete-only, not core-submit); sets `status: SUBMITTED`; logs `SD_CALCULATION_SUBMITTED`; does **not** advance `currentStage`, per the ticket's own explicit instruction.
+- **Complete & Move to Getting Approval** — validates all 12 fields (core + Target Approval Date + Related Drawing Received), re-validates the related drawing is real/completed/same-workflow, requires at least one attachment (see below), sets `status: COMPLETED`, advances `TechnicalWorkflow.currentStage` to `GETTING_APPROVAL`, logs `SD_CALCULATION_STAGE_COMPLETED`, and redirects to the workflow overview (Getting Approval has no screen yet in this unit — the overview clearly shows it as the new current stage).
+- **Request Clarification** — logs `SD_CLARIFICATION_REQUESTED` and, unlike Drawing Received's clarification, also sets the submission's own `status: CLARIFICATION_REQUESTED` (the ticket's enum explicitly defines this value, so "records clarification activity/status" is honored literally here). Does not advance the workflow stage.
+
+### Attachment behavior
+
+Reuses the exact same `TechnicalAttachmentStorageService` and `TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES`/`_MAX_BYTES` (25MB) Drawing Received already uses — the ticket's own "Allowed file types: PDF, DWG, XLSX, DOCX, JPG, PNG" were already fully covered by that existing allow-list, so no storage code changed, only a new `technical_sd_submission_attachments` metadata table/folder namespace (keyed by the submission's own id, so no collision with Drawing Received's attachments even sharing the same base storage directory). Upload/list/download/delete all mirror the Drawing Received endpoints' shape and permission rules (uploader-or-`contracts.manage` for delete).
+
+**Completion attachment rule — simplified, as the ticket's own fallback allows:** `completeSdCalculationSubmission` requires at least ONE attachment, not the ticket's stricter ideal ("one drawing/submission file AND one calculation file"). No file-category taxonomy exists in the schema to distinguish those two kinds of files, and adding one wasn't asked for elsewhere in this ticket — flagged here as a **future enhancement**: a `TechnicalSdSubmissionAttachment.category` enum (e.g. `SUBMISSION_FILE` / `CALCULATION_FILE`) would let a future unit implement the stricter rule without another schema surprise.
+
+### Dashboard / workflow overview integration
+
+- Technical Dashboard's "Open Current Stage" now routes SD-stage jobs to `/technical/jobs/[contractId]/workflow/sd-calculation-submission` (previously fell back to the workflow overview for every stage but Drawing Received).
+- Stage counts (`stageBreakdown`, the 6 KPI cards) already worked generically — no change needed, they already counted `TechnicalWorkflow.currentStage`, which this unit's `completeSdCalculationSubmission` updates using the exact same mechanism FMP-TECH-01 established.
+- Needs Attention gained a 6th real condition: an SD submission whose `targetApprovalDate` has passed and isn't `COMPLETED`.
+- Recent Activity already worked generically (reads `TechnicalWorkflowActivity` across all workflows) — only needed its event-label map extended with the 5 new SD event codes to display them with real text instead of the raw code.
+- Workflow overview page gained an "Open SD & Calculation Submission" action for that stage and a per-stage completion strip.
+
+### Permission handling
+
+No new `technical.*` or other permission codes. Every SD read uses `contracts.read`; every write uses `contracts.update` OR `contracts.workflow_update` — identical to Drawing Received and every other Technical endpoint, via the same `@AnyPermission` decorator pattern.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1735/1735 tests (1713 + 22 new) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including the 2 new `/technical/.../sd-calculation-submission` routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 49 migrations, up to date |
+
+### Key Implementation Notes
+
+- Confirmed Drawing Received and its attachments remain fully intact: `TechnicalController`'s and `TechnicalService`'s Drawing-Received-specific methods were not modified at all in this unit (only new SD-specific methods were added alongside them), and all 26 of FMP-TECH-01's own original tests still pass unchanged within the 51-test file.
+- `assertSdStageIsCurrent()`'s single-check design (documented in its own doc comment) is the same pattern Drawing Received's `completeDrawingReceived`/`saveDrawingReceivedDraft` already used for stage-1 — reused deliberately rather than inventing a different gating mechanism for stage 2.
+
+## FMP-TECH-03 — Getting Approval Workflow Screen (Completed 2026-09-29)
+
+### Summary
+
+Built Technical Stage 3 — Getting Approval — mirroring FMP-TECH-01/02's pattern exactly: a new additive table family, service/controller methods, and a full workflow screen, connected to a real submitted/completed SD & Calculation record. The one genuinely new mechanic in this unit is **Send Back for Changes**, which implements the ticket's own PREFERRED "revision flow" (not its fallback) by reverting `TechnicalWorkflow.currentStage` back to `SD_CALCULATION_SUBMISSION` — see that method's own reasoning below. No permission change; Drawing Received, SD & Calculation Submission, and the Technical Dashboard are all unmodified beyond the additive stage-routing/label updates this stage requires.
+
+### Schema / migration
+
+Migration `20260929020000_add_technical_approval` — purely additive: 2 new enums (`TechnicalApprovalStatus`, `TechnicalApprovalRecordStatus`), 2 new tables (`technical_approvals`, `technical_approval_attachments`), their indexes/FKs. `relatedSdSubmissionId` FKs to `TechnicalSdCalculationSubmission` (`onDelete: SetNull`); the real "must belong to this workflow and be submitted/completed" rule is enforced in `TechnicalService.assertRelatedSdSubmissionValid()`, not a DB constraint. `reviewedBy` is a plain name field, not a `User` FK (the ticket's own field list gives it no separate id field, unlike `submittedById`/`submittedByName`). Reused `TechnicalPriority`. No existing table/column/constraint touched. Applied via the established shadow-DB workaround + `prisma migrate deploy`. `pnpm db:migrate:status` confirms 50 migrations, up to date.
+
+### Files changed / added
+
+**Backend:**
+- `apps/api/src/technical/technical.service.ts` — added `TechnicalApproval`-family methods (`getGettingApproval`, `saveApprovalDraft`, `requestApprovalClarification`, `sendApprovalBackForChanges`, `rejectApproval`, `approveAndMoveToFdIssuance`, approval attachment CRUD), `CORE_APPROVAL_REQUIRED_FIELDS`, `assertRelatedSdSubmissionValid()`/`assertApprovalDateRules()`/`assertApprovalStageIsCurrent()` helpers, `toApprovalUpdateData()`. Extended `getDashboard()`'s Needs Attention with a 7th real condition (overdue expected approval date).
+- `apps/api/src/technical/technical.controller.ts` — 10 new endpoints (see below).
+- `apps/api/src/technical/dto/save-getting-approval.dto.ts` (new).
+- `apps/api/src/technical/technical.service.test.ts` — 26 new tests (77 total in this file).
+- `packages/database/src/index.ts` — new model/enum exports.
+
+**Frontend:**
+- `apps/web/src/lib/technical-api.ts` — new Getting Approval types + `technicalApi.gettingApproval()`.
+- `apps/web/src/app/(protected)/technical/actions.ts` — 7 new server actions.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/workflow/getting-approval/` (new route) — `page.tsx`, `_components/getting-approval-form.tsx`, `_components/approval-attachments-panel.tsx`, `attachments/[attachmentId]/download/route.ts`.
+- `apps/web/src/app/(protected)/technical/page.tsx` — `openCurrentStageHref()` extended for `GETTING_APPROVAL`.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/page.tsx` — added an "Open Getting Approval" action; the existing per-stage completion strip (generic over `TECHNICAL_STAGE_ORDER`, built in FMP-TECH-02) automatically shows Drawing Received AND SD & Calculation Submission as completed once this stage is current — no change needed there.
+- `_components/needs-attention-panel.tsx`, `_components/recent-activity-panel.tsx`, and `.../drawing-received/_components/technical-activity-timeline.tsx` — gained the new `OVERDUE_EXPECTED_APPROVAL` reason label and 7 new Getting Approval event labels.
+
+### New routes
+
+`/technical/jobs/[contractId]/workflow/getting-approval` (+ its attachment download route).
+
+### New API endpoints
+
+`GET`/`PATCH` `/technical/jobs/:contractId/getting-approval`, `POST .../clarification`, `POST .../send-back`, `POST .../reject`, `POST .../approve`, `GET`/`POST` `.../attachments`, `GET .../attachments/:id/download`, `DELETE .../attachments/:id`.
+
+### How Getting Approval connects to SD & Calculation
+
+Same single-stage-gate pattern as the previous 2 stages (`assertApprovalStageIsCurrent`: `currentStage !== GETTING_APPROVAL` → conflict, correctly rejecting both too-early and too-late writes). The "Related SD & Calculation Submission" field is a real dropdown of `TechnicalSdCalculationSubmission` rows with `status IN (SUBMITTED, COMPLETED)` for this exact workflow (`eligibleSdSubmissions`), re-validated server-side on every write. When none exist, the screen shows the ticket's exact required message ("Complete SD & Calculation Submission before starting Getting Approval.") with a link back to that screen.
+
+### How Job Order No is displayed
+
+Identical treatment to the previous 2 stages: `contract.jobOrder` primary everywhere; contract UUID only as "System Ref"; "Project / Contract Name" and "Client / Employer" use the corrected wording. "Main Contractor / Consultant" (ticket: "if available") omitted — no such `Contract` field exists.
+
+### Save Draft / Request Clarification / Send Back for Changes / Approve / Reject behavior
+
+- **Save Draft** — creates/updates the approval record; only writes provided fields; never advances the stage.
+- **Request Clarification** — activity-only (no status change — `TechnicalApprovalRecordStatus` has no `CLARIFICATION_REQUESTED` value, unlike the SD stage's own enum), mirroring Drawing Received's simpler clarification rather than SD's status-changing one.
+- **Send Back for Changes** — requires `resubmissionReason`; sets `approvalStatus`/`status` to `CHANGES_REQUIRED` and `resubmissionRequired: true`; **implements the ticket's own preferred real revision flow**: it reverts `TechnicalWorkflow.currentStage` back to `SD_CALCULATION_SUBMISSION`. This works with zero new SD-side code because every SD write method (`saveSdSubmissionDraft`/`submitSdCalculation`/`completeSdCalculationSubmission`, from FMP-TECH-02) is already gated purely on `currentStage === SD_CALCULATION_SUBMISSION` — reverting the stage makes that screen fully writable again for revision, reusing existing machinery unchanged. Nothing is deleted: the existing `TechnicalSdCalculationSubmission` and this `TechnicalApproval` row both survive as history.
+- **Reject** — requires `reviewerComments`; the frontend requires an explicit `window.confirm()` before calling the action (the ticket's own "requires confirmation"); sets `approvalStatus`/`status` to `REJECTED`; logs `REJECTED`; never advances the stage, never deletes the workflow/approval/SD-submission rows.
+- **Approve & Move to FD Issuance** — validates all 6 required fields, requires `approvalStatus` to be `APPROVED` or `APPROVED_WITH_COMMENTS` (with `reviewerComments` additionally required for the latter), re-validates the related SD submission, checks the 3 cross-field date rules, sets `status: COMPLETED`, advances `currentStage` to `FD_ISSUANCE`, and logs **2** activity rows for this one action (`APPROVAL_RECEIVED` then `GETTING_APPROVAL_STAGE_COMPLETED`) — the ticket's own Recent Activity list names these as 2 distinct entries, unlike the single terminal event each of the prior 2 stages used.
+
+### Attachment behavior
+
+Reuses the exact same `TechnicalAttachmentStorageService` and allow-list/size-limit Drawing Received/SD Submission already use — only a new `technical_approval_attachments` metadata table/folder namespace. Upload/list/download/delete mirror the established shape and permission rules.
+
+### Dashboard / workflow overview integration
+
+- "Open Current Stage" now routes `GETTING_APPROVAL` jobs to the new screen.
+- Needs Attention gained a 7th condition: an approval whose `expectedApprovalDate` has passed and isn't `COMPLETED`.
+- Recent Activity/timeline event-label maps extended with this stage's 7 event codes.
+- Workflow overview gained an "Open Getting Approval" action; its existing generic per-stage completion strip (built in FMP-TECH-02) needed no change to also cover this stage.
+
+### Permission handling
+
+No new permission codes. Every read uses `contracts.read`; every write uses `contracts.update` OR `contracts.workflow_update` — identical to the previous 2 stages.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1761/1761 tests (1735 + 26 new) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including the 2 new `/technical/.../getting-approval` routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 50 migrations, up to date |
+
+### Key Implementation Notes
+
+- Confirmed Drawing Received and SD & Calculation Submission remain fully intact: neither's own service/controller methods were modified in this unit (only new Getting-Approval-specific methods were added alongside them), and every pre-existing test in the 77-test file still passes.
+- The Send Back for Changes revision-flow decision was validated against the exact same stage-gate mechanism the SD stage's own methods already use — no new "is this a valid revision" concept was introduced; reverting `currentStage` is sufficient on its own because every SD write method already treats "is `currentStage` exactly `SD_CALCULATION_SUBMISSION`" as the only precondition it checks.
+
+## FMP-TECH-04 — FD Issuance Workflow Screen (Completed 2026-09-29)
+
+### Summary
+
+Built Technical Stage 4 — FD Issuance — the FINAL Technical stage, mirroring FMP-TECH-01/02/03's pattern exactly: a new additive table family, service/controller methods, and a full workflow screen, connected to a real approved/approved-with-comments Getting Approval record. Two genuinely new mechanics in this unit: (1) **Return/Reopen**, which — like FMP-TECH-03's Send Back for Changes — implements the real revision flow by reverting `TechnicalWorkflow.currentStage` back to `GETTING_APPROVAL`; and (2) **Issue FD & Complete Technical Workflow**, which is the only completion action across all 4 stages that does NOT advance `currentStage` (there is no stage after FD Issuance — `nextStageOf(FD_ISSUANCE)` already returns `null`) — instead it sets `TechnicalWorkflow.status = COMPLETED`, the exact field the Dashboard's `readyForProductionRelease` metric has counted against since FMP-TECH-01. Also fixed a latent display bug on the workflow overview page (see Key Implementation Notes). No permission change; Drawing Received, SD & Calculation Submission, Getting Approval, and the Technical Dashboard are all unmodified beyond the additive stage-routing/label updates this stage requires.
+
+### Schema / migration
+
+Migration `20260929030000_add_technical_fd_issuance` — purely additive: 5 new enums (`TechnicalFdPurpose`, `TechnicalFdIssueType`, `TechnicalFdDistribution`, `TechnicalFdIssueMethod`, `TechnicalFdStatus`), 2 new tables (`technical_fd_issuances`, `technical_fd_issuance_attachments`), their indexes/FKs. `relatedApprovalId` FKs to `TechnicalApproval` (`onDelete: SetNull`); the real "must belong to this workflow and be Approved/Approved with Comments" rule is enforced in `TechnicalService.assertRelatedApprovalValid()`, not a DB constraint. Reused `TechnicalPriority`. No existing table/column/constraint touched. Applied via the established shadow-DB workaround + `prisma migrate deploy`. `pnpm db:migrate:status` confirms 51 migrations, up to date.
+
+### Files changed / added
+
+**Backend:**
+- `apps/api/src/technical/technical.service.ts` — added `TechnicalFdIssuance`-family methods (`getFdIssuance`, `saveFdIssuanceDraft`, `submitFdIssue`, `returnOrReopenFd`, `issueFdAndCompleteWorkflow`, FD attachment CRUD), `CORE_FD_SUBMIT_FIELDS`/`COMPLETE_FD_REQUIRED_FIELDS`, `assertRelatedApprovalValid()`/`assertFdDateRules()`/`assertFdStageIsCurrent()` helpers, `toFdUpdateData()`. Extended `getDashboard()`'s Needs Attention with an 8th real condition (overdue FD Issue Date).
+- `apps/api/src/technical/technical.controller.ts` — 10 new endpoints (see below).
+- `apps/api/src/technical/dto/save-fd-issuance.dto.ts` (new).
+- `apps/api/src/technical/technical.service.test.ts` — 23 new tests (100 total in this file).
+- `packages/database/src/index.ts` — new model/enum exports.
+
+**Frontend:**
+- `apps/web/src/lib/technical-api.ts` — new FD Issuance types + `technicalApi.fdIssuance()`.
+- `apps/web/src/app/(protected)/technical/actions.ts` — 7 new server actions.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/workflow/fd-issuance/` (new route) — `page.tsx`, `_components/fd-issuance-form.tsx`, `_components/fd-attachments-panel.tsx`, `attachments/[attachmentId]/download/route.ts`.
+- `apps/web/src/app/(protected)/technical/page.tsx` — `openCurrentStageHref()` extended for `FD_ISSUANCE` (only routes to the screen while `status !== COMPLETED`).
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/page.tsx` — added an "Open FD Issuance" action plus a new "Technical Workflow Completed — Ready for downstream execution" banner shown once `workflow.status === COMPLETED`; also fixed a pre-existing display bug (see Key Implementation Notes).
+- `_components/needs-attention-panel.tsx`, `_components/recent-activity-panel.tsx`, and `.../drawing-received/_components/technical-activity-timeline.tsx` — gained the new `OVERDUE_FD_ISSUE_DATE` reason label and 5 new FD Issuance event labels (including the workflow-level `TECHNICAL_WORKFLOW_COMPLETED`).
+
+### New routes
+
+`/technical/jobs/[contractId]/workflow/fd-issuance` (+ its attachment download route).
+
+### New API endpoints
+
+`GET`/`PATCH` `/technical/jobs/:contractId/fd-issuance`, `POST .../submit`, `POST .../return`, `POST .../complete`, `GET`/`POST` `.../attachments`, `GET .../attachments/:id/download`, `DELETE .../attachments/:id`.
+
+### How FD Issuance connects to Getting Approval
+
+Same single-stage-gate pattern as the previous 3 stages (`assertFdStageIsCurrent`: rejects when `currentStage !== FD_ISSUANCE` OR when `workflow.status === COMPLETED` — the second check is new to this stage, since FD Issuance has no later stage to have "advanced past", so completion itself is what must block further writes). The "Related Approval" field is a real dropdown of `TechnicalApproval` rows with `approvalStatus IN (APPROVED, APPROVED_WITH_COMMENTS)` for this exact workflow (`eligibleApprovals`), re-validated server-side on every write. When none exist, the screen shows "Approve the Getting Approval stage before issuing FD." with a link back to that screen.
+
+### How Job Order No is displayed
+
+Identical treatment to the previous 3 stages: `contract.jobOrder` primary everywhere; contract UUID only as "System Ref".
+
+### Save Draft / Submit FD Issue / Issue FD & Complete Technical Workflow / Return-Reopen behavior
+
+- **Save Draft** — creates/updates the FD issuance record; only writes provided fields; never advances or completes anything.
+- **Submit FD Issue** — validates the 9 "core" fields (FD Issue Date, Issued To, Purpose/For, Issue Type, Drawing Reference No, Revision No, No. of Sheets/Files, Distribution, Issue Method); sets `status: SUBMITTED`; deliberately does NOT complete the Technical workflow (mirrors the SD stage's own Submit/Complete split).
+- **Return/Reopen** — requires a non-empty reason (enforced both client-side and via the reused `RequestClarificationDto`'s `@IsNotEmpty`); sets FD `status: RETURNED_REOPENED`; **implements the real revision flow**, same reasoning as FMP-TECH-03's Send Back for Changes: reverts `TechnicalWorkflow.currentStage` back to `GETTING_APPROVAL`, which works with zero new Approval-side code because every Getting Approval write method is already gated purely on `currentStage === GETTING_APPROVAL`. Nothing is deleted: the existing `TechnicalApproval` and this `TechnicalFdIssuance` row both survive as history. The reason is recorded only in the activity's `metadata` (no dedicated DB column, matching every other note/reason field in this schema family).
+- **Issue FD & Complete Technical Workflow** — validates all 12 required fields (core 9 + Related Approval, Approved Reference No, Approved Date), requires the related approval to be Approved/Approved with Comments, checks FD Issue Date isn't before Approved Date or in the future, requires ≥1 FD attachment, sets FD `status: COMPLETED`, and — because this is the final stage — sets `TechnicalWorkflow.status: COMPLETED` + `completedAt` **without changing `currentStage`** (it stays `FD_ISSUANCE`, since `nextStageOf(FD_ISSUANCE)` is already `null`). Logs a single `TECHNICAL_WORKFLOW_COMPLETED` activity — the terminal event for the whole workflow, distinct from the prior 3 stages' own `_STAGE_COMPLETED` events since there is no next stage to name.
+
+### Attachment behavior
+
+Reuses the exact same `TechnicalAttachmentStorageService` and allow-list/size-limit the other 3 stages already use — only a new `technical_fd_issuance_attachments` metadata table/folder namespace. Upload/list/download/delete mirror the established shape and permission rules. Completion requires ≥1 attachment (same "at least one, no file-category taxonomy yet" fallback as the SD stage's own completion rule).
+
+### Dashboard / workflow overview integration
+
+- "Open Current Stage" now routes `FD_ISSUANCE` jobs to the new screen — but only while `status !== COMPLETED` (once completed, it routes to the workflow overview instead, which now shows the completed banner).
+- Needs Attention gained an 8th condition: an FD issuance whose `fdIssueDate` has passed and isn't `ISSUED`/`COMPLETED`.
+- Recent Activity/timeline event-label maps extended with this stage's 5 event codes.
+- `readyForProductionRelease` (defined in FMP-TECH-01, never previously reachable in practice) now becomes real: it already counted `TechnicalWorkflow.status === COMPLETED`, and this unit is the first one that ever sets that field — **zero dashboard-side code changed** for this metric to start reporting real numbers.
+- Workflow overview gained an "Open FD Issuance" action and a new "Technical Workflow Completed — Ready for downstream execution" banner, shown only when `workflow.status === COMPLETED` (see Key Implementation Notes for why this couldn't reuse the pre-existing `!nextStage` check).
+
+### Permission handling
+
+No new permission codes. Every read uses `contracts.read`; every write uses `contracts.update` OR `contracts.workflow_update` — identical to the previous 3 stages.
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (1761 + 23 new) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including the 2 new `/technical/.../fd-issuance` routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- Confirmed Drawing Received, SD & Calculation Submission, and Getting Approval remain fully intact: none of their own service/controller methods were modified in this unit (only new FD-Issuance-specific methods were added alongside them), and every pre-existing test in the 100-test file still passes.
+- **Fixed a latent workflow-overview display bug**: since FMP-TECH-03, `nextStageOf(FD_ISSUANCE)` has always returned `null` as soon as a workflow's `currentStage` reaches `FD_ISSUANCE` — but the overview page's "Workflow Complete" badge was keyed on `!nextStage`, so it would show as soon as a job order reached FD Issuance, even before FD Issuance itself had been done. This was invisible before this unit (nothing ever advanced `currentStage` to `FD_ISSUANCE` from a real screen until FMP-TECH-03 shipped its Approve action, and no one had reached that state in testing yet), but would have shown a false "complete" badge on any job order sitting at FD Issuance. Fixed by keying the badge (and the new completed banner) on `workflow.status === 'COMPLETED'` instead — the field this unit is the first to ever actually set.
+- The Return/Reopen revision-flow decision was validated against the exact same stage-gate mechanism the Approval stage's own methods already use — reverting `currentStage` to `GETTING_APPROVAL` is sufficient on its own because every Approval write method already treats "is `currentStage` exactly `GETTING_APPROVAL`" as its only precondition.
+- Per the ticket's own explicit scope boundary, no Production/Erection/Delivery integration was built in this unit — `TechnicalFdIssuance`'s fields (drawing/document reference, revision, distribution, issue method, sheets/files count) are stored as clean, well-typed columns so a later unit can read them without needing this unit's own schema reshaped.
+
+## FMP-TECH-05A — Fix Technical Workflow Overview Server Action Crash (Completed 2026-09-29)
+
+### Summary
+
+Fixed a real runtime crash on `/technical/jobs/[contractId]`: opening the workflow overview for a job order with no Technical workflow yet threw "Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with 'use server'". Root cause: a local wrapper function (`startWorkflowFormAction`), declared directly inside the page's Server Component module with no `'use server'` marking of its own, was bound and passed into `<form action={...}>`. A bare function in an ordinary page module carries no server-action reference, so Next.js couldn't serialize it for the client-interactive form. Fix: moved the wrapper into `technical/actions.ts` (the file every other Technical server action already lives in, with a top-level `'use server'` directive) as `startTechnicalWorkflowFormAction`, and imported that into the page instead of declaring a local function. Zero business-logic, schema, or permission changes.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/technical/actions.ts` — added `startTechnicalWorkflowFormAction(contractId): Promise<void>`.
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/page.tsx` — removed the local unmarked wrapper; imports/binds the new server action instead.
+
+### Verification Results (2026-09-29)
+
+All 8 required checks passed (typecheck ×2, lint, test ×2 — 1784 API / 981 web, unchanged — build ×2, `db:migrate:status` clean at 51 migrations). Full report delivered inline in that turn's response (not duplicated here since this unit had no acceptance criterion requiring a progress-tracker entry — added now for continuity ahead of FMP-TECH-05's dashboard work).
+
+## FMP-TECH-05 — Technical Dashboard UI Polish and Manager-Friendly Control Center (Completed 2026-09-29)
+
+### Summary
+
+Polished the Technical Dashboard (`/technical`) into a more premium, manager-friendly control center — UI/UX only, reading the exact same `GET /technical/dashboard` endpoint as before. One small, low-risk response-shape addition was made (a `stage` field on each Needs Attention item, populated from data every source query already had in scope) to let the polished panel show a stage badge without a second lookup — no schema change, no new query, no business-logic change. No permission change. All 4 stage screens (Drawing Received, SD & Calculation Submission, Getting Approval, FD Issuance) and the `/contracts/technical` → `/technical` redirect are untouched and confirmed still working.
+
+### Dashboard layout changes
+
+- **Header** — larger icon block (`size-12`, using the existing `--color-module-technical` indigo token — the Technical module's own per-module accent from `ui-tokens.md`, distinct from RECAFCO's red brand accent used for primary buttons), larger title (`text-2xl`/`text-3xl`), a "Live workflow data" status chip, a tightened operational subtitle, all inside a bordered header card. Refresh / Back to Platform Dashboard / Contract List kept on the right, unchanged behavior.
+- **Stage Progress + Next Action** — now a single section with a 2-column layout (`lg:grid-cols-[2fr_1fr]`): the redesigned Stage Progress Overview on the left, a new Next Action Focus panel on the right.
+- Overall vertical rhythm tightened (consistent `space-y-6`/`gap-3`–`gap-5` spacing), no structural change to section order otherwise.
+
+### KPI card changes
+
+- New `TechnicalKpiCard` component (`_components/technical-kpi-card.tsx`) — a Technical-specific tile, deliberately NOT a change to the shared `MetricCard` (reused by 23+ other dashboards app-wide) to keep this polish pass from touching unrelated modules, same reasoning every per-stage attachment panel in this app already follows.
+- Each of the 7 cards now shows: icon in a tinted chip, a colored top accent bar, the count, the label, and the ticket's own exact helper text (e.g. "Jobs not yet started", "Active intake stage", "Under client/consultant review"). Needs Attention/Overdue switches its accent from neutral to error-red once its count is above zero.
+- Accent colors use only existing, already-dark-mode-safe tokens (`info`, `secondary-accent`, `warning`, `module-technical`, `success`, `error`, `surface-secondary`) — no new tokens added, none invented.
+- Deliberately NOT wrapped in a `<Link>`: no real per-metric filtered view exists on this page, and the ticket explicitly said not to fake a filtering affordance that doesn't do anything.
+- Grid breakpoints widened (`sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7`) so tablet widths get a readable 3–4-up layout instead of a 7-way squish.
+
+### Stage progress / job table changes
+
+- `StageProgressOverview` rewritten as a compact numbered 4-step list (1–4 badges), each with the stage label, count, share-of-total percentage, and a thicker (`h-2`), stage-colored progress bar — colors shared with the jobs table's stage badges via a new `stageBarClasses()`/`stageBadgeClasses()` pair in `_lib/technical-format.ts` (one source of truth, no drift between panels). Shows a calm empty state when total is 0.
+- New `NextActionPanel` (`_components/next-action-panel.tsx`) — a single manager-friendly sentence derived from data the dashboard already fetched: Needs Attention first (most urgent item + a link), otherwise the busiest active stage + its plain-English next action ("complete drawing receipt", "submit the SD & Calculation package", "record the approval decision", "issue FD & complete the workflow"), otherwise "No urgent Technical action currently." No new query, no invented recommendation.
+- Jobs table: merged "Project / Contract Name" + "Client / Employer" into one "Project / Client" column (main text + secondary muted line) to trim width and improve scannability; Job Order No now renders as a bold indigo pill instead of plain text; Current Stage is a proper colored badge (including new "Not Started"/"Completed" variants, reusing the same stage-color mapping); Next Action shows a real plain-English action per row instead of just the next stage's name; row padding increased (`py-3`/`py-3.5`) for breathing room; Actions column regrouped into a primary filled-accent button ("Open Current Stage" / "Start Technical Workflow" for not-started jobs) plus two small bordered secondary buttons ("Workflow", "Contract") — replacing the old plain underlined red/gray text links per the ticket's own "do not use too many red text links" instruction. Empty state kept (title/body/action unchanged in meaning, minor copy tightening).
+
+### Needs Attention / Recent Activity changes
+
+- `NeedsAttentionPanel` — each row now shows a stage badge (new `item.stage` field) next to the job order number, plus a small bordered "Open" button instead of a bare underlined link; the empty state gained a `CheckCircle2` icon and a success-tinted "on track" card instead of a plain gray box.
+- `RecentActivityPanel` — rewritten as a connected timeline (dot + line, matching the same visual language `TechnicalActivityTimeline` already uses on each stage's own screen) with a stage badge per entry, a positive/warning-tinted dot for completion/rejection/clarification-type events, and a small "Open" link per row. Empty-state text unchanged.
+- Backend: `TechnicalAttentionItem` gained a `stage: TechnicalStage` field in both `technical.service.ts` and `technical-api.ts` — populated from the literal stage each source query already targets (or, for the one query that didn't already select it — urgent workflows — a single added `currentStage: true` in its `select`). No new query, no schema change; all 100 existing/new Technical service tests pass unchanged.
+
+### Confirmation — no schema/permission/workflow-logic changes
+
+- `packages/database/prisma/schema.prisma` untouched this unit; `db:migrate:status` still reports 51 migrations, up to date.
+- No permission codes added, removed, or reassigned; every read/write still gates on the exact same `contracts.read` / `contracts.update` / `contracts.workflow_update` checks as before.
+- No stage-gate, validation rule, or action behavior changed in `technical.service.ts` — the only backend edit was the additive `stage` field on Needs Attention items.
+
+### Confirmation — all 4 Technical stages still work
+
+Drawing Received, SD & Calculation Submission, Getting Approval, and FD Issuance routes all compiled successfully in the same production build as the dashboard changes, and none of their own controller/service/component files were touched in this unit. `/contracts/technical` still redirects to `/technical` (confirmed by reading that route's unchanged source).
+
+### Verification Results (2026-09-29)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical` and all 4 stage routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- The shared `MetricCard` component (used by 23+ other module dashboards) was deliberately left untouched — a new Technical-only `TechnicalKpiCard` was built instead, so this dashboard's own visual polish carries zero risk of regressing any other module's KPI tiles.
+- `--color-module-technical` / `--color-module-technical-light` already existed in `ui-tokens.md`/`globals.css` (added earlier for the Executive Dashboard's per-module accents) but had never been used inside the Technical module's own pages until this unit — using it here gives the dashboard a distinct "Technical" visual identity separate from RECAFCO's red brand accent, with zero new CSS tokens.
+- Verified no "danger" color token exists in `globals.css`'s `@theme` block (only `error`/`error-light`) — confirmed this dashboard's new code never references it, sticking to the confirmed-existing token set throughout.
+
+## FMP-TECH-05B — Redesign Drawing Received Page into Compact Professional Workflow Screen (Completed 2026-09-30)
+
+### Summary
+
+Redesigned `/technical/jobs/[contractId]/workflow/drawing-received` into a compact, enterprise-feeling workflow screen — pure UI/UX polish, same `GET /technical/jobs/:contractId/drawing-received` endpoint, same 3 server actions (Save Draft / Request Clarification / Complete Drawing Receipt & Continue), same attachment endpoints, no schema/permission/business-logic change. The raw Contract UUID ("System Ref") is no longer shown anywhere on this page — the ticket's own preferred option over a muted/collapsible treatment.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/technical/jobs/[contractId]/workflow/drawing-received/page.tsx` — page width, summary card, stepper, guidance strip, right column.
+- `.../drawing-received/_components/drawing-received-form.tsx` — Card 1 renamed/widened to 3 columns, tighter spacing throughout, action bar rebuilt as a sticky bar with the ticket's exact Left/Right button grouping.
+- `.../drawing-received/_components/drawing-attachments-panel.tsx` — compact single-strip empty state (was two stacked blocks: a "no files" line above a separate large dashed box).
+
+### Layout before/after
+
+- **Width**: `max-w-6xl` (1152px) → `max-w-[1320px]`, per the ticket's own suggested range.
+- **Summary card**: `p-5`/`gap-4` → `p-4`/`gap-3`; System Ref (raw UUID) row removed entirely; "Project Name" relabeled "Project / Contract Name" to match the ticket's field list.
+- **Stepper**: `p-4` circles `size-6` text-sm → `p-3` circles `size-5` text-[10px] — noticeably shorter without losing any of the 4 steps or their done/current/upcoming states.
+- **Guidance panel**: a 4-line bulleted box → a single-line compact strip with the ticket's exact 3 bullets ("Upload received drawing files." / "Enter drawing reference, revision, and received date." / "Complete this step to move to SD & Calculation Submission."), separated by `·` rather than stacked `<li>`s.
+- **Form cards**: `p-5`/`space-y-4` → `p-4`/`space-y-3` on every `SectionCard`; Card 1 grid widened `sm:2` → `sm:2 lg:3` columns so its 9 fields sit in 3 rows instead of 5; Card 2's description textarea shrunk `rows=3` → `rows=2` and its 3 fields also moved to a 3-column row.
+- **Page-level vertical rhythm**: outer `space-y-5` → `space-y-4`; 2-column grid gap `gap-5` → `gap-4`; grid now `lg:items-start` so the shorter right column doesn't stretch to match the taller left column's height.
+
+### Items removed/hidden from main UI
+
+- Raw Contract UUID ("System Ref") — removed entirely from this page (not shown collapsed/muted either, per the ticket's own preferred fallback). Every other Technical stage page is untouched and still shows it as before — this ticket's scope was this one page only.
+- "Created By" in the right panel's status card — dropped as a genuine duplicate of the summary card's own "Contract Manager" field (same `contract.ownerUser.displayName` value), per the ticket's "remove redundant fields that already appear in summary and right panel" instruction. The card itself was renamed "Task Details" → "Workflow Status" to match the ticket's own section-B naming and field list (Department / Current Stage / Status / Last Updated).
+- Activity Timeline capped to the latest 3 entries on this page only (`activities.slice(0, 3)`, a page-local display slice — `TechnicalActivityTimeline` itself, shared by all 4 stage screens, was NOT modified, so the other 3 stage pages still show their full activity list unchanged). No "View all activity" link was added — no such page/action exists, per the ticket's own explicit conditional instruction.
+- The old two-block attachments empty state (a "No files uploaded yet." line stacked above a separate full-width dashed upload box) collapsed into one compact dashed strip holding both the text and the upload control.
+
+### Confirmation — raw UUID removed/hidden
+
+Confirmed by reading the rewritten summary-card JSX: the `dt`/`dd` pair for `contract.id` ("System Ref") no longer exists anywhere in `page.tsx`. `contract.id` is still used internally for links/hrefs (e.g. attachment download URLs, "Back to Workflow") as it always was — only its *visible display* as a labeled UUID field was removed.
+
+### Form sections changed
+
+Kept the same 4-card structure the ticket itself recommended (it already matched what FMP-TECH-01 had built): **Drawing Receipt Details** (renamed from "Receipt Details"; widened to 3 columns), **Drawing Information** (3-column row for its 3 fields, shorter description textarea), **Attachments** (compact empty state), **Remarks & Follow-up** (unchanged field set, tightened spacing). No form fields were removed — every field from the original screen is still present and functional.
+
+### Right-side panel changes
+
+- **A. Step Checklist** (`TechnicalChecklist`) — unchanged, already matched the ticket's 4-item list exactly.
+- **B. Workflow Status** (was "Task Details") — trimmed to the ticket's exact 4 fields (Department / Current Stage / Status / Last Updated), dropping the duplicate "Created By" field.
+- **C. Activity** — same shared `TechnicalActivityTimeline` component, fed only the latest 3 activities on this page.
+- Grid changed to `lg:items-start` so the now-shorter right column no longer stretches to the left column's full height, keeping the ticket's "do not allow the right column to become taller than the main form unnecessarily" satisfied structurally.
+
+### Action bar changes
+
+Rebuilt as a `sticky bottom-0` bar (was a plain `border-t` strip at the form's natural end) so it stays reachable near the viewport bottom while scrolling the form, with a `shadow-md` for visual separation from content behind it. Button grouping changed to match the ticket's exact spec: **Left** — Back to Workflow only (previously grouped with Save Draft). **Right** — Save Draft, Request Clarification, Complete Drawing Receipt & Continue (primary, filled accent). No button behavior changed — only position/grouping.
+
+### Confirmation — existing Drawing Received actions still work
+
+Save Draft, Request Clarification, and Complete Drawing Receipt & Continue all call the exact same unmodified server actions (`saveDrawingReceivedDraftAction`/`requestClarificationAction`/`completeDrawingReceivedAction`) with the exact same `FormData` field names as before — only their button markup/position changed. Attachment upload/download/delete call the exact same unmodified actions (`uploadDrawingAttachmentAction`/`deleteDrawingAttachmentAction`) and download route.
+
+### Confirmation — other Technical stages still work
+
+SD & Calculation Submission, Getting Approval, and FD Issuance pages/components were not touched in this unit (only Drawing Received's own page/form/attachments-panel files were edited) and all compiled successfully in the same production build. The Technical Dashboard (`/technical`) was also untouched and unaffected.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical/.../drawing-received` and the other 3 stage routes |
+| `pnpm --filter @recafco/api build` | ✓ `tsc` clean |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- `TechnicalActivityTimeline` is shared by all 4 stage screens — capping to 3 items was done as a page-local `.slice(0, 3)` at the call site, never inside the shared component itself, so this unit's polish carries zero risk of shortening the activity list on the other 3 stage pages.
+- The sticky action bar relies on ordinary CSS `position: sticky` within normal page flow (no fixed-height scroll container needed) — safe because this page has no `overflow-hidden` ancestor between the form and the viewport's own scroll.
+- No new frontend types or API calls were introduced; the only "data mapping" change was a pure client-side array slice, not a request/response shape change.
+
+## FMP-TECH-05C — Final Polish for Drawing Received Compact Layout (Completed 2026-09-30)
+
+### Summary
+
+A second, final polish pass on `/technical/jobs/[contractId]/workflow/drawing-received` on top of FMP-TECH-05B: refined the main/right column ratio to ~70/30, strengthened the workflow stepper's current-step styling, tightened vertical spacing further, put Drawing Information and Attachments side by side on desktop, and merged the right column's 3 separate cards (Task Checklist / Task Details / Activity Timeline) into one connected "Workflow Panel" card with 3 divided sub-sections. Pure UI/UX — same endpoint, same 3 server actions, same attachment actions, no schema/permission/business-logic change. Raw Contract UUID remains hidden (untouched from FMP-TECH-05B).
+
+### Files changed
+
+- `.../drawing-received/page.tsx` — grid ratio, stepper styling, guidance strip, spacing, combined Workflow Panel.
+- `.../drawing-received/_components/drawing-received-form.tsx` — Drawing Information + Attachments side-by-side row, card padding, action bar visual strengthening.
+- `.../drawing-received/_components/technical-checklist.tsx` — simplified to a bare list (no longer renders its own outer card — this component has exactly one consumer, this page).
+- `.../drawing-received/_components/technical-activity-timeline.tsx` — added an optional `bare?: boolean` prop (default `false`) so it can nest without its own outer card/heading; every other call site (SD & Calculation, Getting Approval, FD Issuance) doesn't pass it, so those 3 pages render byte-for-byte unchanged.
+
+### Width/layout changes
+
+Main/right column ratio changed from `lg:grid-cols-[2fr_1fr]` (~67/33) to `lg:grid-cols-[7fr_3fr]` (~70/30), per the ticket's explicit ask — `max-w-[1320px]` itself was unchanged (already within the ticket's requested 1280–1320px range from FMP-TECH-05B). Outer page spacing tightened `space-y-4` → `space-y-3`; summary card `p-4`/`gap-3` → `p-3.5`/`gap-2.5`; stepper `p-3` → `p-2.5`; guidance strip `py-2` → `py-1.5`.
+
+### Stepper changes
+
+The current step now renders as a filled pill (`bg-accent-light` background, bold `text-accent` label, a slightly larger `size-6` circle) instead of just a bold circle on a plain background — reads as clearly "active" at a glance. Completed steps now show a checkmark icon instead of a plain number. Upcoming steps unchanged (muted number + muted label). Still compact (a single-row `<ol>`, no added height beyond the pill's own small padding).
+
+### Form compacting changes
+
+Drawing Information and Attachments now sit side by side in a `lg:grid-cols-2` row (each keeping its own card/border/heading — not merged into one card), stacking back to 1 column on tablet/mobile. Drawing Information's own inner 3-field grid narrowed from `lg:grid-cols-3` to `sm:grid-cols-2` to fit its now-halved column width. `SectionCard` padding tightened `p-4` → `p-3.5` across all 4 cards. Remarks & Follow-up unchanged in structure (already matched the ticket's "Remarks/Internal Notes 2-col, Assigned To/Planned Review Start same row" layout from FMP-TECH-05B).
+
+### Right workflow panel changes
+
+Replaced 3 separately-bordered cards with one `Workflow Panel` card containing 3 `divide-y`-separated sub-sections (Checklist / Status / Latest Activity), each with its own small uppercase sub-heading. `TechnicalChecklist` was simplified to a bare `<ul>` (it has exactly one consumer, so no compatibility concern). `TechnicalActivityTimeline` gained an additive, default-`false` `bare` prop so it could nest inside the panel's "Latest Activity" section without its own outer card/heading — the component's own rendering logic and event-label map are otherwise completely unchanged, and the 3 other stage pages that import it don't pass the new prop, so they're provably unaffected. The panel's overall height stays well under the main form's height at typical viewport widths, satisfying "do not allow the right column to become taller than the main form unnecessarily."
+
+### Action bar changes
+
+Kept the FMP-TECH-05B sticky mechanism (`position: sticky; bottom: 0`, safe because it's the form's own last element and no `overflow-hidden` ancestor exists — it can only ever dock after everything above it has already scrolled past, so it never overlays unseen fields). Visually strengthened with a `border-t-2 border-t-accent` top accent line and a stronger drop shadow (`shadow-[0_-4px_12px_rgba(0,0,0,0.08)]`) for clearer separation from scrolled content. Button grouping/behavior unchanged from FMP-TECH-05B (Left: Back to Workflow; Right: Save Draft, Request Clarification, Complete Drawing Receipt & Continue as the primary filled-accent button).
+
+### Confirmation — raw UUID hidden
+
+Unchanged from FMP-TECH-05B: no `System Ref`/`contract.id` display anywhere on this page. Verified by reading the rewritten summary card and the rest of `page.tsx` — the raw UUID never appears as visible text.
+
+### Confirmation — actions still work
+
+Save Draft, Request Clarification, and Complete Drawing Receipt & Continue still call the exact same unmodified server actions (`saveDrawingReceivedDraftAction`/`requestClarificationAction`/`completeDrawingReceivedAction`) with the exact same `FormData` field names — only the action bar's markup/visual weight changed, not its handlers. Attachment upload/download/delete are backed by the unmodified `DrawingAttachmentsPanel` logic (only its FMP-TECH-05B empty-state markup remains; nothing in this unit touched it further).
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical/.../drawing-received` and the other 3 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- The `bare` prop pattern on `TechnicalActivityTimeline` mirrors `MetricCard`'s own `dense` prop precedent elsewhere in this app — an additive, default-preserving optional prop is the safe way to give one consumer a different rendering shape without touching the other 3 stage pages that depend on the same shared component.
+- `TechnicalChecklist` was edited directly (not given an opt-in prop) because it genuinely has only one consumer — confirmed via a repo-wide search before editing.
+- Deliberately did NOT increase `max-w-[1320px]` further or go edge-to-edge — the ticket's own "do not make it full-width edge-to-edge" instruction was already satisfied by FMP-TECH-05B's width, so this unit's width-related work focused on the column *ratio* (66/33 → 70/30) rather than the page's absolute width.
+
+## FMP-TECH-05D — Simplify Drawing Received Page and Remove Confusing Workflow Panel (Completed 2026-09-30)
+
+### Summary
+
+A third, final simplification pass on `/technical/jobs/[contractId]/workflow/drawing-received`: removed the Request Clarification button from this screen's action bar (the flow doesn't yet show who receives it, who owns it, or where it's tracked — Remarks/Internal Notes are the interim substitute), and replaced FMP-TECH-05C's "Workflow Panel" with a leaner "Task Status" panel (same 3 sub-sections, but Latest Activity trimmed from 3 items to 2). Pure UI/UX — same endpoint, same server actions for the 2 remaining buttons, same attachment actions, no schema/permission/business-logic change. The backend clarification action/endpoint is untouched and still fully functional — only this one screen's UI button was removed.
+
+### Files changed
+
+- `.../drawing-received/_components/drawing-received-form.tsx` — removed the Request Clarification button, its `requestClarificationAction` import, its `pendingIntent` state value, and its success-message branch.
+- `.../drawing-received/page.tsx` — renamed "Workflow Panel" → "Task Status", renamed its 2 sub-headings ("Checklist" → "Completion Checklist", "Status" → "Current Status"), trimmed Latest Activity to `activities.slice(0, 2)` (was 3), adjusted the main/right column ratio.
+
+### What was removed
+
+- **Request Clarification button** — removed from Drawing Received's action bar only. `requestClarificationAction` (the frontend server action) and the backend `POST /technical/jobs/:contractId/drawing-received/clarification` endpoint / `TechnicalService.requestClarification()` method are all untouched and still exist — confirmed via a repo-wide search showing `requestClarificationAction` is still defined and exported in `technical/actions.ts`, simply no longer imported/called from this one form component.
+- **The "Workflow Panel" name/shape from FMP-TECH-05C** — replaced (not literally deleted structurally; the same 3 sub-sections exist under a new name and reduced content) by "Task Status" — the third sub-section (Latest Activity) now shows only 2 items instead of 3.
+
+### New page layout
+
+Same top structure as FMP-TECH-05C (breadcrumb, Technical Team badge, status badge, title, summary card, stepper, guidance strip) — nothing added or removed there per the ticket's own "keep... do not add more panels" instruction. Main/right column ratio adjusted from FMP-TECH-05C's `lg:grid-cols-[7fr_3fr]` (~70/30) to `lg:grid-cols-[18fr_7fr]` (exactly 72/28, per this ticket's explicit ask). On tablet/mobile the grid collapses to 1 column and the Task Status panel renders after the form (its existing DOM position) — one of the ticket's own 2 explicitly accepted placements ("after summary/stepper or after form, whichever is cleaner").
+
+### Action bar changes
+
+Reduced from 3 buttons to 2: **Left** — Back to Workflow (unchanged). **Right** — Save Draft, Complete Drawing Receipt & Continue (primary, filled accent) — Request Clarification removed entirely. Sticky mechanism, top accent border, and shadow from FMP-TECH-05C are unchanged.
+
+### Right-side panel changes
+
+Renamed "Workflow Panel" → "Task Status" (per the ticket's exact naming). Sub-sections renamed to match the ticket's exact labels: "Checklist" → "Completion Checklist", "Status" → "Current Status", "Latest Activity" unchanged in name but now shows only the latest 2 activities (`activities.slice(0, 2)`, was 3 in FMP-TECH-05C) via the same `TechnicalActivityTimeline` `bare` variant introduced in FMP-TECH-05C — no new duplicate event-label mapping was introduced. Panel padding tightened (`p-4` → `p-3.5` per sub-section) for a visually lighter card.
+
+### Confirmation — Request Clarification hidden only from UI
+
+Verified via `grep` across the whole Technical web module: `requestClarificationAction` still exists as a full, working export in `apps/web/src/app/(protected)/technical/actions.ts` (line unchanged, function body unchanged), and its own doc comment in `drawing-received-form.tsx` now explicitly notes "The backend action/endpoint ... is untouched and still exists." No backend file (`technical.service.ts`, `technical.controller.ts`) was touched in this unit — the `POST .../drawing-received/clarification` endpoint remains fully live for any future UI (or a different client) to call.
+
+### Confirmation — Save Draft and Complete still work
+
+Both remaining buttons call the exact same unmodified server actions (`saveDrawingReceivedDraftAction` / `completeDrawingReceivedAction`) with the exact same `FormData` field names as every prior unit — only the removed third button and its now-unused `'clarification'` intent branch were deleted from the client component; the `runAction()` mechanism itself (shared by the 2 remaining buttons) is otherwise unchanged.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical/.../drawing-received` and the other 3 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- Reused FMP-TECH-05C's `TechnicalActivityTimeline` `bare` prop as-is (just changed the slice count at the call site) rather than building a third, even-more-minimal activity renderer — avoids adding a third duplicate `EVENT_LABELS`-style map to a codebase that already has 2.
+- Removing the button required removing 3 things in the client component to keep lint clean: the now-unused `requestClarificationAction` import, the `'clarification'` member of the `pendingIntent` union type, and the dead `else if (intent === 'clarification')` success-message branch — all 3 were removed together in one edit.
+- Confirmed SD & Calculation, Getting Approval, and FD Issuance each have their OWN separate clarification actions/buttons (`requestSdClarificationAction`, `requestApprovalClarificationAction`) — this unit's removal is scoped to Drawing Received's own button only, per the ticket's explicit page scope; those 3 other screens' own clarification flows are completely untouched and out of scope for this ticket.
+
+## FMP-TECH-05E — Technical Workflow Page UX Polish + Locked Stage Preview Mode (Completed 2026-09-30)
+
+### Summary
+
+The biggest Technical UX unit since the 4 stages were first built: every one of the 4 stage pages (Drawing Received, SD & Calculation Submission, Getting Approval, FD Issuance) plus the workflow overview page now share one consistent, clickable stepper and one shared `mode` rule (`active` / `completed` / `locked`) governing what's editable. Future stages that haven't been reached yet can now be opened and previewed — read-only, with a clear "why it's locked" banner — instead of being hidden behind a blocking "come back later" screen. No backend change was required for this: `GET` endpoints never stage-gated in the first place (confirmed by reading all 5 GET methods in `technical.service.ts`), only the write methods' existing `assertXxxStageIsCurrent()` checks do, and those are completely untouched. Drawing Received also got 3 smaller polish items: the action bar's red top border (read as an error strip) was softened, the right-side Task Status panel is now sticky on desktop, and the attachments card shows the accepted file types.
+
+### Files changed
+
+**New:**
+- `_lib/technical-format.ts` — added `TechnicalStageMode` type, `computeStageMode()`, `lockedStageMessage()`.
+- `_components/technical-stepper.tsx` (new) — the one shared, clickable 4-step stepper.
+
+**Updated — all 4 stage pages + their form components:**
+- `drawing-received/page.tsx` / `drawing-received-form.tsx` / `drawing-attachments-panel.tsx`
+- `sd-calculation-submission/page.tsx` / `sd-calculation-submission-form.tsx`
+- `getting-approval/page.tsx` / `getting-approval-form.tsx`
+- `fd-issuance/page.tsx` / `fd-issuance-form.tsx`
+- `jobs/[contractId]/page.tsx` (the workflow overview)
+
+### Page mode rules implemented
+
+`computeStageMode(stage, workflow.currentStage, workflow.status)` in `_lib/technical-format.ts` — the ONE rule every page now calls, derived purely from the 2 fields every stage page already fetches (no new query, no new field):
+- **`active`** — this stage IS `currentStage` and the workflow isn't completed: real, editable. Inputs enabled, uploads enabled, all action buttons visible.
+- **`completed`** — this stage's index is before `currentStage`'s (already done — including after a return/reopen reverts `currentStage`, at which point the SAME rule makes the reverted stage `active` again with zero special-casing), OR this stage IS `currentStage` but `workflow.status === COMPLETED` (only possible for FD Issuance, the final stage, which never advances `currentStage` past itself). Inputs disabled, a "This stage is completed." banner shows, action buttons are hidden entirely (not just disabled) — only "Back to Workflow" remains.
+- **`locked`** — this stage's index is after `currentStage`'s: not reached yet. The form still renders in full (every required field visible, disabled) — the old per-page "come back later" blocking screens (`drawingReceivedNotDone`/`sdSubmissionNotReady`/`approvalNotReady`) were removed entirely and replaced by this. Uploads/deletes disabled, action buttons hidden, and the ticket's own exact banner text shows via `lockedStageMessage(stage)`.
+
+Each of the 4 form components was changed from an `isCurrentStage: boolean` prop to a `mode: TechnicalStageMode` prop (`+ lockedMessage: string` for the 3 stages that can actually be locked — Drawing Received, the first stage, can never be locked). `disabled` is now `!canWrite || mode !== 'active' || isPending` — the same effective gating as before for the 2 pre-existing states, now correctly extended to the new locked state too.
+
+### Stepper — clickable / preview behavior
+
+`TechnicalStepper` (new, shared by all 4 stage pages + the overview) renders each of the 4 steps as a real `<Link>` to that stage's own URL — completed and locked/future steps are exactly as clickable as the current one, since every stage page now supports the read-only preview mode above. Visual states: completed = green circle with a checkmark; current = filled accent pill with bold accent text; locked/future = muted circle with a small lock icon instead of a step number, still a real link. "Returned/Reopened" gets no special 4th visual state in this unit (a reverted stage just reads as "current" again, which is accurate) — the ticket's own "if applicable" softened that requirement, and building a distinct visual would need each stage's own record status threaded into the stepper's props, a bigger plumbing change not attempted here.
+
+### Backend GET vs write-gate behavior
+
+No backend files were changed. Confirmed by reading all 5 GET methods (`getWorkflowOverview`, `getDrawingReceived`, `getSdCalculationSubmission`, `getGettingApproval`, `getFdIssuance`) in `technical.service.ts`: none of them call any `assertXxxStageIsCurrent()` gate — they only call `requireRead`/`loadContractOrThrow`/`requireWorkflow` and then fetch whatever data exists, regardless of the workflow's current stage. Every WRITE method (`saveXxxDraft`, `submitXxx`, `completeXxx`, `approveAndMoveToFdIssuance`, `sendApprovalBackForChanges`, `rejectApproval`, `returnOrReopenFd`, etc.) still calls its own stage-gate exactly as before — none of those methods were touched. This means: a UI bypass attempt (e.g. crafting a raw `PATCH`/`POST` request against a locked stage) still gets rejected server-side with the same `TECHNICAL_STAGE_NOT_CURRENT` conflict it always has — the frontend's new preview mode only changes what's *shown*, never what the backend *accepts*.
+
+### Drawing Received layout/action-bar polish
+
+- Action bar: the `border-t-2 border-t-accent` top border (which read as an error/danger strip) was removed, back to a plain neutral `border border-border` matching every other card. The primary "Complete Drawing Receipt & Continue" button is still filled accent (brand color, not an error signal).
+- Right-side "Task Status" panel: now `lg:sticky lg:top-4` (disabled below `lg`) — confirmed safe by reading `app-shell.tsx`: the actual scroll container is `<main className="overflow-auto">`, not the window, and it has no fixed header inside it, so the sticky panel can never cover anything.
+- Attachments card: added a small muted "Accepted: PDF, DOC/DOCX, XLS/XLSX, DWG/DXF, JPG/PNG/WEBP" line near the upload control (both the empty-state strip and the non-empty upload strip), using the exact same allow-list wording the backend's own upload-rejection error message already uses.
+
+### Confirmation — locked stages are read-only
+
+For a workflow currently at, say, `SD_CALCULATION_SUBMISSION`, opening `/technical/jobs/[contractId]/workflow/getting-approval` and `/workflow/fd-issuance` now renders each screen's full form (all required fields visible) with every input `disabled`, a "This stage is locked. ..." banner with the ticket's exact wording, upload/delete disabled on the attachments panel (`canUpload`/`canManage` both gated on `mode !== 'locked'`), and the entire action-button row hidden (only "Back to Workflow" remains). No client-side code path can re-enable these — even if a user forced the DOM, the backend's own `assertXxxStageIsCurrent()` would reject the write.
+
+### Confirmation — active stages still work
+
+Drawing Received's Save Draft/Complete, SD & Calculation's Save Draft/Submit/Request Clarification/Complete, Getting Approval's Save Draft/Request Clarification/Send Back/Reject/Approve, and FD Issuance's Save Draft/Submit/Return-Reopen/Complete all call the exact same unmodified server actions with the exact same `FormData` field names as before — only the surrounding `mode`-based visibility/disabled logic changed, never the action wiring itself.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical`, the workflow overview, and all 4 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- The old per-page "come back later" blocking screens each had slightly different framing (Drawing Received had none — it's always reachable; SD checked `completedDrawings.length === 0`; Approval checked `eligibleSdSubmissions.length === 0`; FD checked `eligibleApprovals.length === 0`). The new `mode`-based rule is strictly more correct: those old checks could theoretically diverge from the real `currentStage` signal (e.g. an edge case where the current stage's own eligible-options list is empty for an unrelated reason), whereas `mode` reads `currentStage` directly — the single source of truth every write method already trusts.
+- FD Issuance's form still shows the generic "This stage is completed." banner (from the shared `mode === 'completed'` branch) alongside its own pre-existing, more specific "Technical Workflow Completed — Ready for downstream execution" banner on the page itself — a minor, deliberate redundancy rather than special-casing one of the 4 forms differently from the other 3.
+- `canManageAttachments && mode !== 'locked'` is a NEW restriction introduced in this unit (delete was previously ungated by stage in the UI); `mode === 'completed'` still allows delete, unchanged from every prior unit's behavior — only the new `locked` state gets the stricter treatment, per the ticket's own "cannot ... delete" wording for locked preview specifically.
+
+## FMP-TECH-05F — Simplify Technical Workflow Visibility and Remove Floating Action Bar (Completed 2026-09-30)
+
+### Summary
+
+A direct correction to 2 specific complaints about FMP-TECH-05E: (1) Drawing Received's action bar had become a `sticky`/floating strip with a red top border that covered part of the form and read as an error; (2) the stepper's lock icon and per-stage "This stage is locked. ..." banners made an *internal* company system feel unnecessarily restricted. This unit removes both — the action bar is back to a normal in-flow footer (matching the other 3 stage pages' own shape), the stepper shows plain muted circles for future steps (no lock icon), and every future-stage banner is now one simple, identical, non-alarming sentence instead of 3 different "locked" messages. The underlying `active`/`completed`/`locked` MODE logic from FMP-TECH-05E is completely unchanged — this unit only changed what users are shown and told, never what's enabled/disabled or what the backend accepts.
+
+### Files changed
+
+- `_lib/technical-format.ts` — removed `LOCKED_STAGE_MESSAGES`/`lockedStageMessage()`, replaced with one exported `FUTURE_STAGE_NOTE` constant.
+- `_components/technical-stepper.tsx` — removed the `Lock` icon; future steps now render the same plain numbered-circle treatment as every other step (just muted); added an accessible `title` attribute per step (Completed/Current/Pending) instead of visible extra text.
+- `drawing-received/_components/drawing-received-form.tsx` — action footer reverted from `sticky` floating to normal in-flow (matching SD/Approval/FD's own shape).
+- `sd-calculation-submission/_components/sd-calculation-submission-form.tsx`, `getting-approval/_components/getting-approval-form.tsx`, `fd-issuance/_components/fd-issuance-form.tsx` — locked-mode banner simplified from a bordered box to one plain muted text line; removed the now-unnecessary `lockedMessage` prop (the note is a fixed constant now, imported directly).
+- `sd-calculation-submission/page.tsx`, `getting-approval/page.tsx`, `fd-issuance/page.tsx` — stopped calling the removed `lockedStageMessage()`/passing `lockedMessage`.
+- `jobs/[contractId]/page.tsx` (workflow overview) — action row now offers all 4 stages (not just the current one), each labeled by mode (Continue / View Completed / Preview + the real stage name).
+
+### Action footer changes
+
+Drawing Received's footer is no longer `position: sticky` with a `border-t-2 border-t-accent` top line and a drop shadow — it's now a plain `border-t border-border pt-4` block in normal document flow, appearing right after the Remarks & Follow-up card, identical in shape to the other 3 stage pages' own footers (which were never floating — only Drawing Received had been made sticky, back in FMP-TECH-05B/05C). Buttons unchanged: Left — Back to Workflow; Right (only when `mode === 'active'`) — Save Draft, Complete Drawing Receipt & Continue (primary, still brand-red).
+
+### Stepper changes
+
+`TechnicalStepper`'s future/"pending" steps now render with the exact same numbered-circle look as a normal step (muted color), no `Lock` icon. `computeStageMode()`'s 3rd state is still internally called `'locked'` in code (pure implementation detail, never shown to a user) but every USER-FACING signal now says "Pending" (via the new `title` attribute) rather than anything suggesting the step is forbidden.
+
+### How all workflow pages are now visible
+
+Nothing structural changed here — FMP-TECH-05E already made every stage page permanently openable (the old blocking "come back later" screens were removed in that unit, and GET endpoints never stage-gated). This unit only changes the COPY shown on a not-yet-reached stage: one plain sentence ("Complete the previous stage before submitting this stage.") with no box/border, instead of 3 different "This stage is locked. ..." banners. The workflow overview page now also offers a real link to ALL 4 stages (previously only the current stage had its own button — the other 3 were reachable only via the stepper above).
+
+### Backend validation confirmation
+
+No backend files were touched in this unit (same as FMP-TECH-05E) — confirmed by `git status` showing zero changes under `apps/api/`. Every write method's `assertXxxStageIsCurrent()` gate is exactly as it was: Drawing Received completion still required before SD completion, SD completion still required before Getting Approval's approve action, Getting Approval's approval still required before FD completion, and FD completion still requires an approved related approval plus at least one attachment. A locked/future stage's action buttons are still hidden client-side and, even if bypassed, the backend still rejects the write with the same `TECHNICAL_STAGE_NOT_CURRENT` conflict it always has.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical`, the workflow overview, and all 4 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- Removed the `lockedMessage: string` prop from all 3 forms that had it (SD/Approval/FD) rather than keeping it and just changing what the pages passed — since the note is now one fixed, non-per-stage constant, threading it through as a prop added indirection with no benefit; each form imports `FUTURE_STAGE_NOTE` directly instead.
+- Deliberately did NOT rename the internal `TechnicalStageMode` type value `'locked'` to something like `'future'` — it's a pure implementation-level identifier never rendered to a user, and renaming it across 9 files would have been pure churn for zero behavioral or user-facing benefit; the copy/iconography changes above are what actually address this ticket's "avoid Locked/Disabled/Forbidden-looking icons" concern.
+- The workflow overview's new 4-link action row reuses `computeStageMode()` (the same function every stage page already calls) rather than re-deriving stage state a different way — one source of truth for "what state is this stage in" across the whole Technical module.
+
+## FMP-TECH-05G — Improve Technical Workflow Overview Navigation and Open All Stage Pages (Completed 2026-09-30)
+
+### Summary
+
+A full redesign of `/technical/jobs/[contractId]` (the workflow overview) into the module's real navigation hub: a wider page, clear top navigation beside the header, a proper 4-card stage grid (number, name, status badge, "Open" button) replacing the old flat pill-link row, and uniform "Open <Stage>" button wording on every card regardless of stage status — the ticket's own preferred consistent wording, replacing FMP-TECH-05F's mode-varying "Continue/View Completed/Preview" labels. Before touching any code, I did a full root-cause investigation into the reported "Getting Approval and FD Issuance do not open" symptom (see below) — no functional defect was found in either the frontend link generation or the 2 backend GET methods; the fix is the wording/visual redesign itself.
+
+### Files changed
+
+- `jobs/[contractId]/page.tsx` — full rewrite: wider container, top nav row, widened summary grid (+ the previously-missing "Project / Contract Name" field), 4-card stage navigation grid, helper text, removed the now-redundant bottom nav row.
+- `context/progress-tracker.md`, `context/ui-registry.md` — updated.
+
+No other Technical files were touched — `TechnicalStepper`, `computeStageMode()`, and all 4 stage pages/forms are unchanged from FMP-TECH-05F.
+
+### Overview layout changes
+
+Container widened `max-w-4xl` (896px) → `max-w-[1320px]`, matching the width already established on the 4 stage pages. Job/order summary grid widened `sm:grid-cols-2` → `lg:grid-cols-3` (now 7 fields across 3 columns instead of a narrow 2-column strip) and gained the "Project / Contract Name" field it had been missing. The current-stage summary card was kept deliberately small (its own card, `p-4`, 2 lines of text) per the ticket's own "avoid making this section too large" instruction.
+
+### Top navigation changes
+
+Moved "Back to Technical Dashboard" / "Back to Contract" / "Back to Platform Dashboard" from a small row at the very bottom of the page to a proper action row beside the header (same position/shape the Technical Dashboard's own header already uses for its own nav row) — visible without scrolling. The breadcrumb also gained an explicit "Technical Dashboard" link (the ticket's own "optional" suggestion), between "Contract Management" and the job order. The old bottom nav row was removed entirely rather than duplicated.
+
+### Stage button wording changes
+
+Every stage card's button now reads exactly "Open Drawing Received" / "Open SD & Calculation" / "Open Getting Approval" / "Open FD Issuance" — the ticket's own explicitly preferred consistent wording — regardless of whether that stage is current, completed, or not yet reached. "Preview" was removed entirely. Status is now shown as a separate small badge on each card instead (Current / Completed / Pending — the ticket's own approved vocabulary; "Returned"/"In Progress" were not implemented as card-level badges, since deriving them would require each stage's own detailed record status, which `GET /technical/jobs/:contractId` doesn't fetch — the same judgment call FMP-TECH-05E made for the stepper's own "Returned" state).
+
+### Root cause — why Getting Approval/FD Issuance were reported as not opening
+
+Investigated thoroughly before writing any code:
+- **Frontend link generation**: the overview's stage-action links build `href` from a `STAGE_SLUGS` map — verified `GETTING_APPROVAL → 'getting-approval'` and `FD_ISSUANCE → 'fd-issuance'` exactly match those 2 folders' real route segments. No mismatch found.
+- **Backend GET methods**: re-read `getGettingApproval()` and `getFdIssuance()` in full — both call only `requireRead`/`loadContractOrThrow`/`requireWorkflow` (no `assertXxxStageIsCurrent()` gate), return `null` (not an error) for a not-yet-created approval/FD record, and their `Promise.all` destructuring order exactly matches the array order (ruled out a silent-mismatch class of bug).
+- **Frontend page try/catch**: both `getting-approval/page.tsx` and `fd-issuance/page.tsx` redirect back to the overview only if the API call throws — and nothing in the traced code path throws for a workflow that simply hasn't reached that stage yet.
+
+No functional defect was found. The most likely real explanation, consistent with the ticket's own item 3/5/6 (all about wording and "forbidden-looking" visual language), is that FMP-TECH-05F's mode-varying button labels — especially "Preview SD & Calculation Submission" — read as decorative/non-functional to users, even though the underlying `<Link>` always worked. This unit's redesign (uniform "Open" wording, a real button-shaped card action, status shown separately) directly removes that ambiguity. If a genuine reproducible crash is found later, it would need separate investigation — nothing in the current code causes one.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical`, the workflow overview, and all 4 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- Confirmed via `grep` across the whole Technical web module that no user-facing "Preview"/"locked"/"forbidden" text remains anywhere (only 2 historical doc-comment mentions, never rendered to a user).
+- The Technical Dashboard's own per-row "Open Workflow" link already routes to this overview page unchanged — since the overview is now the full navigation hub, no change was needed there (the ticket's own "if applicable" for the dashboard's Open Workflow area).
+- Kept `TechnicalStepper` alongside the new stage-cards grid rather than removing it — the stepper is still useful as an ultra-compact glance-and-go indicator shared identically across all 5 Technical pages, while the new cards are the primary, more informative navigation action; having both isn't redundant since they serve different information densities.
+
+## FMP-TECH-05H — Redesign SD & Calculation Submission Page into Compact Workflow Screen (Completed 2026-09-30)
+
+### Summary
+
+Applied Drawing Received's now-established compact page language (FMP-TECH-05B through 05F) to `/technical/jobs/[contractId]/workflow/sd-calculation-submission`: same page width, summary card shape, stepper, compact guide strip, and non-floating action footer; reorganized the single 15-field form into 3 focused cards; collapsed 4 secondary contact fields behind a `<details>` disclosure; combined the 3 separate right-column boxes into one "Stage Status" panel; and removed Request Clarification from this page's UI (same reasoning Drawing Received used in FMP-TECH-05D — the flow doesn't yet show who receives it/owns it/tracks it). Pure UI/UX — same endpoint, same 3 remaining server actions with unchanged field names, no schema/permission/business-logic change.
+
+### Files changed
+
+- `sd-calculation-submission/page.tsx` — full rewrite: width, summary card (now matches Drawing Received's exact 7 fields), guide strip, grid ratio, combined "Stage Status" panel.
+- `sd-calculation-submission/_components/sd-calculation-submission-form.tsx` — 3-card reorg, collapsed contact details, Request Clarification removed, footer de-floated (it was never floating here, already matched the target shape).
+- `sd-calculation-submission/_components/sd-attachments-panel.tsx` — compact single-strip empty state + accepted file types text, matching `DrawingAttachmentsPanel`.
+
+### Fields removed/collapsed from main UI
+
+Submitted By, Designation, Contact No, and Email moved from the main visible form into a collapsed `<details>` "Contact details (optional)" disclosure inside Card 3 — a plain HTML disclosure widget (no extra client state), so the fields remain in the DOM and still submit normally via `FormData` when the form is active, regardless of whether the user expanded the section. No fields were deleted — every one of the original 15 fields is still present and still uses its exact original `name` attribute.
+
+### Layout before/after summary
+
+- **Width**: `max-w-6xl` (1152px) → `max-w-[1320px]`, matching Drawing Received.
+- **Summary card**: was 6 fields including a "System Ref" row → now the exact same 7 fields Drawing Received's summary card uses (added "Contract No / Quotation No" and "Contract Manager"; dropped the "System Ref" row entirely, matching Drawing Received's own decision to never show it).
+- **Guide**: a 4-line bulleted card → a single-line compact strip with the ticket's exact 3 bullets, matching Drawing Received's `Info`-icon strip style exactly.
+- **Main grid ratio**: `lg:grid-cols-[2fr_1fr]` (~67/33) → `lg:grid-cols-[18fr_7fr]` (72/28), matching Drawing Received.
+- **Form**: 1 large "Submission Information" card (11 fields + a textarea + 4 more fields) + separate Attachments card + separate Remarks card → 3 focused cards: **Submission Core Details** (6 fields, 3-column), **Linked Drawing & Technical Scope** (5 fields + Scope/Description textarea), **Attachments & Remarks** (2-column: attachments left, Remarks + collapsed contact details right).
+
+### Status panel changes
+
+Replaced the 3 separate boxes (Workflow Steps / Task Details / Activity) with one "Stage Status" panel (the ticket's own explicit title) containing 3 divided sub-sections: **A. Workflow Steps** (the same 4-stage done/current/pending list, now nested), **B. Current Status** (Department / Current Stage / Status / Last Updated — replacing Task Owner/Team/Created On/Priority, which were dropped per the ticket's own "do not over-show" instruction as duplicates of information already visible in the summary card/badges), **C. Latest Activity** (latest 2 only, via `TechnicalActivityTimeline`'s existing `bare` prop). The panel is `lg:sticky lg:top-4` on desktop, same as Drawing Received's Task Status panel.
+
+### Action footer changes
+
+Already non-floating in this file (only Drawing Received had been made `sticky` back in FMP-TECH-05B/05C) — no positioning change needed. Removed the 4th button, Request Clarification, from the active-mode footer: **Left** — Back to Workflow; **Right** (active only) — Save Draft, Submit SD & Calculation, Complete & Move to Getting Approval (primary). When not active, the right side shows no buttons at all — the top-of-form banner (locked note or "This stage is completed.") already conveys why, so no duplicate footer text was added.
+
+### Confirmation — all workflow pages remain visible
+
+No page-visibility logic was touched — `computeStageMode()` and the "always render the form, gate only writes" pattern (established FMP-TECH-05E, simplified FMP-TECH-05F) are unchanged. Drawing Received, Getting Approval, and FD Issuance pages/forms were not modified in this unit.
+
+### Confirmation — backend validation remains strict
+
+Zero backend files touched — confirmed via `git status`. `assertSdStageIsCurrent()` and every other write-gate in `technical.service.ts` are untouched; Save Draft/Submit/Complete still only work when `mode === 'active'` client-side, and the backend still independently rejects any bypassed write for a workflow not currently at `SD_CALCULATION_SUBMISSION`.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` (Technical scope, both apps) | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including `/technical/.../sd-calculation-submission` and the other 3 stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+
+### Key Implementation Notes
+
+- The SD-specific locked-mode note ("Complete Drawing Received before submitting this stage.") is a local constant in the form component, not the shared `FUTURE_STAGE_NOTE` from FMP-TECH-05F — SD can only ever be locked for exactly one reason (Drawing Received not done), so a specific sentence reads more naturally here without reintroducing the per-stage-message sprawl FMP-TECH-05F deliberately removed elsewhere.
+- Verified via `grep` that `requestSdClarificationAction` still exists fully intact and exported in `technical/actions.ts` — only this page's UI wiring to it was removed, matching the exact pattern used for Drawing Received in FMP-TECH-05D.
+- `SdAttachmentsPanel`'s non-empty row no longer shows the file's raw MIME type (dropped `{a.mimeType} ·` from the display line), matching `DrawingAttachmentsPanel`'s own already-established row format.
+
+## FMP-TECH-05I — Fix Getting Approval and FD Issuance Stage Buttons Not Opening (Completed 2026-09-30)
+
+### Root cause
+
+Not a code defect. Three static-review rounds (this unit and FMP-TECH-05G before it) found the frontend `technical-api.ts` paths, the `technical.controller.ts` route decorators, and the `technical.service.ts` GET methods for all 4 stages fully symmetric and correct. Live testing against the running dev API (a real login, a real started workflow, direct `curl` requests) proved the actual defect: `GET /technical/jobs/:id/getting-approval` and `GET /technical/jobs/:id/fd-issuance` returned genuine Express/Nest `404 Cannot GET ...` responses — meaning the route table in the *running* process didn't contain them — while the identically-shaped `drawing-received` and `sd-calculation-submission` GET routes returned `200`. `apps/api`'s `dev` script (`node -r ts-node/register src/main.ts`) has no watch/reload; it JIT-compiles each file once at boot. The API process on port 4000 had been running continuously since 2026-09-29 1:34 PM, well before these 2 routes were current on disk, and was never restarted. The frontend's `try { await technicalApi.gettingApproval(...) } catch { redirect(...) }` pattern (in both stage `page.tsx` files) faithfully turned that 404 into a silent bounce back to the workflow overview — exactly the reported symptom, and why the same report recurred a 3rd time despite FMP-TECH-05G's "just wording" fix.
+
+### Files changed
+
+None. The fix was restarting the stale API dev server process so it loads the current, already-correct `technical.controller.ts`/`technical.service.ts`.
+
+### Confirmation
+
+After the restart, live `curl` requests confirmed `200 OK` from both `GET .../getting-approval` and `GET .../fd-issuance` (alongside the already-working `drawing-received`/`sd-calculation-submission`/workflow-overview routes), with no source changes. Backend write validation was never touched and remains exactly as strict as before.
+
+### Key Implementation Notes
+
+- This class of bug (stale long-running dev process silently serving an outdated route table) is invisible to any amount of static code review — only a live request against the actual running process exposes it. Worth remembering for any future "the button doesn't work but the code looks right" report in this project.
+
+## FMP-TECH-05J — Fix Missing Actions on SD & Calculation Page and Clarify Stage Mode (Completed 2026-09-30)
+
+### Summary
+
+The SD & Calculation Submission page (and, on inspection, Getting Approval and FD Issuance too) already correctly hid Save/Submit/Complete buttons and disabled form fields when `mode !== 'active'` — but the "why" was a barely-visible one-line muted note, disabled fields rendered visually identical to editable ones (native browser dimming only), and there was no way to navigate to the actual blocking stage. Result: a future-stage page looked like a broken/empty editable form. Fixed by making the locked-state notice a proper bordered banner at the top of each form, giving disabled fields real visual distinction, and adding "Open `<Previous Stage>`" / "Open `<Current Stage>`" navigation links to each form's footer for the locked/completed cases respectively. Applied identically to all 4 stage forms (Drawing Received included, for consistency, even though it can never be `locked`). No backend changes.
+
+### Files changed
+
+- `_lib/technical-format.ts` — added `STAGE_SLUGS`, `STAGE_OPEN_LABELS` ("Open Drawing Received" / "Open SD & Calculation" / "Open Getting Approval" / "Open FD Issuance"), and `stageHref(contractId, stage)`, centralizing what was previously duplicated separately in `technical-stepper.tsx` and `jobs/[contractId]/page.tsx`. Removed the now-unused shared `FUTURE_STAGE_NOTE` (each stage form now carries its own specific, single-reason sentence, same reasoning FMP-TECH-05H already used for SD).
+- `_components/technical-stepper.tsx`, `jobs/[contractId]/page.tsx` — swapped their local `STAGE_SLUGS`/label maps for the new shared exports (mechanical de-duplication, identical output).
+- `workflow/sd-calculation-submission/_components/sd-calculation-submission-form.tsx` — new `currentStage` prop; locked banner promoted to a bordered box with a 2nd explanatory line; `INPUT_CLS` gained `disabled:*` classes; footer gained "Open Drawing Received" (locked) / "Open `<currentStage>`" (completed, workflow moved on).
+- `workflow/getting-approval/_components/getting-approval-form.tsx` — same treatment; own `GETTING_APPROVAL_FUTURE_STAGE_NOTE` replacing the shared `FUTURE_STAGE_NOTE`; footer gained "Open SD & Calculation" (locked) / "Open `<currentStage>`" (completed).
+- `workflow/fd-issuance/_components/fd-issuance-form.tsx` — same treatment; own `FD_ISSUANCE_FUTURE_STAGE_NOTE`; footer gained "Open Getting Approval" (locked).
+- `workflow/drawing-received/_components/drawing-received-form.tsx` — same `disabled:*` styling and "Open `<currentStage>`" completed-mode link, for consistency (this stage can never be `locked`, so no locked-banner/previous-stage-link case applies to it).
+- The corresponding 4 `page.tsx` files — each now passes `currentStage={workflow.currentStage}` down to its form.
+
+### Stage mode rules implemented
+
+- **Active** (`mode === 'active'`): normal editable form; footer shows Back to Workflow (left) + the stage's own write actions (right) — unchanged from before this unit.
+- **Locked** (`mode === 'locked'`, future stage): top banner states the single specific prerequisite (e.g. "Complete Drawing Received before submitting SD & Calculation.") plus a 2nd line noting fields are reference-only; every field/select/textarea gets `disabled` with visible dimmed styling (`disabled:bg-surface-secondary disabled:text-text-muted disabled:cursor-not-allowed`); write-action buttons stay hidden entirely (unchanged); footer right side shows "Open `<Previous Stage>`" instead of nothing.
+- **Completed** (`mode === 'completed'`, workflow moved past this stage — or, for FD Issuance only, this stage itself with `status === COMPLETED`): top banner confirms completion and that data is read-only; footer right side shows "Open `<Current Stage>`" when the workflow's actual current stage differs from this one (never rendered for FD Issuance's own completed case, since current stage there always equals FD Issuance itself).
+
+### SD active-stage action buttons confirmed
+
+Live-tested: started a real UAT workflow, completed Drawing Received via the API (backend correctly rejected an initial incomplete payload with `TECHNICAL_DRAWING_RECEIVED_INCOMPLETE` before accepting a full one), then loaded the SD page — confirmed `Save Draft`, `Submit SD & Calculation`, and `Complete & Move to Getting Approval` all render, with the locked banner gone.
+
+### SD future-stage message/navigation confirmed
+
+Live-tested with the workflow still at Drawing Received: SD page rendered "Complete Drawing Received before submitting SD & Calculation.", 17 form fields with `disabled` + the new dimmed styling, no Save/Submit/Complete buttons, and an "Open Drawing Received" link in the footer.
+
+### Confirmation — same issue checked for Getting Approval and FD Issuance
+
+Both live-tested in their locked state (workflow at SD & Calculation Submission): Getting Approval rendered "Complete SD & Calculation Submission before starting Getting Approval." with an "Open SD & Calculation" link and no write buttons; FD Issuance rendered "Complete Getting Approval before starting FD Issuance." with an "Open Getting Approval" link and no write buttons.
+
+### Backend validation confirmation
+
+Zero backend files touched (confirmed via `git status` — only `apps/web` files changed). The Drawing Received completion rejection observed during live testing (`TECHNICAL_DRAWING_RECEIVED_INCOMPLETE` for a partial payload) is itself live proof that `assertXxxStageIsCurrent()`/field-validation in `technical.service.ts` remain fully strict and are wholly unaffected by this UI-only unit.
+
+### Verification Results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including all 4 Technical stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: Technical Dashboard, workflow overview, Drawing Received, SD, Getting Approval, FD Issuance | ✓ all return `200` |
+
+### Key Implementation Notes
+
+- `STAGE_OPEN_LABELS`/`STAGE_SLUGS`/`stageHref()` centralization in `technical-format.ts` removes a 2x-duplicated map (stepper + overview page) and gives every stage form's new "Open `<Stage>`" footer link the exact same wording the overview page already used, at zero extra behavior risk (mechanical swap, both typecheck and build confirm identical output).
+- Each stage form's "why locked" sentence stays intentionally single-reason and stage-specific (no shared generic copy) — every stage can only ever be locked by exactly one prior stage not being complete, so a generic multi-case message would be strictly less clear than naming the actual blocker.
+
+## FMP-TECH-05K — Make Technical Workflow Pages Fully Editable Internally, Keep Completion Validation Only (Completed 2026-09-30)
+
+### Root cause
+
+FMP-TECH-05J (previous unit) made future-stage pages viewable but kept them disabled/read-only and gated even Save Draft behind `assertXxxStageIsCurrent()` server-side — appropriate for an external/strict workflow, but wrong for RECAFCO's actual internal use: staff need to open ANY of the 4 stage pages and start entering/preparing data ahead of time, with only the final Complete/Approve/Issue actions actually enforcing sequence. This required both a frontend change (stop disabling fields/hiding Save Draft for `mode === 'locked'`) and, discovered while implementing it, a backend change (`saveSdSubmissionDraft`/`saveApprovalDraft`/`saveFdIssuanceDraft` were themselves gated by the strict "must be current stage" assertion, which would have rejected Save Draft the same way Complete already correctly does).
+
+### Files changed
+
+- `apps/api/src/technical/technical.service.ts` — added 3 new narrower gates: `assertSdStageNotAlreadyPassed()`, `assertApprovalStageNotAlreadyPassed()` (both: reject only once `STAGE_ORDER` shows this stage is BEHIND `workflow.currentStage`, not merely not-yet-reached), and `assertFdStageNotAlreadyCompleted()` (FD Issuance is the final stage, so its only "already done" signal is `workflow.status === COMPLETED`). Each replaces the old strict `assertXxxStageIsCurrent()` call inside its respective `saveXxxDraft()` method only — `submitSdCalculation`, `completeSdCalculationSubmission`, `saveApprovalDraft`'s sibling actions (`sendApprovalBackForChanges`, `rejectApproval`, `approveAndMoveToFdIssuance`), and `submitFdIssue`/`returnOrReopenFd`/`issueFdAndCompleteWorkflow` all keep calling the original strict `assertXxxStageIsCurrent()`, completely untouched.
+- `apps/api/src/technical/technical.service.test.ts` — the 3 old "rejects when the workflow has not yet reached `<stage>`" tests were replaced with "allows draft save before this stage is reached" tests (asserting the call now resolves, not rejects); the 3 "rejects once the workflow has already advanced past this stage" tests were left unchanged (they already tested the behavior that's preserved).
+- `apps/web/.../sd-calculation-submission/_components/sd-calculation-submission-form.tsx`, `.../getting-approval/_components/getting-approval-form.tsx`, `.../fd-issuance/_components/fd-issuance-form.tsx` — `disabled` changed from `!canWrite || mode !== 'active' || isPending` to `!canWrite || mode === 'completed' || isPending` (fields now editable in both `active` and `locked`, only truly-passed `completed` stays read-only); removed the FMP-TECH-05J top-of-page locked banner entirely; removed the "Open `<Previous Stage>`" footer link FMP-TECH-05J had added for the locked case; added a small right-aligned muted note directly above the footer, shown only when `mode === 'locked'`, naming the one real prerequisite for the stage's completion action; attachments panels' `canUpload`/`canManage` relaxed from `isActive`/`mode !== 'locked'` to `mode !== 'completed'` (upload/manage was never actually stage-gated server-side — confirmed via `createSdAttachment`/`createApprovalAttachment`/`createFdAttachment` — so the old frontend-only restriction was pure over-caution); footer button visibility changed to: Save Draft + the stage's one completion action (Complete/Approve/Issue) always shown together whenever `mode !== 'completed'`; the remaining "in-between" actions (Submit SD & Calculation / Request Clarification / Send Back for Changes / Reject / Submit FD Issue / Return-Reopen) shown only when `mode === 'active'`, since they only have business meaning once this genuinely is the current stage under active review.
+
+### How future-stage fields are now editable
+
+`disabled` no longer keys off `mode !== 'active'` — it keys off `mode === 'completed'` only. `'locked'` (future, not yet reached) and `'active'` (current) now render identically editable; the only visual difference is the small note above the footer and which of the 5 buttons show. A genuinely `'completed'` (already-passed) stage is unaffected by this unit and stays fully read-only, matching FMP-TECH-05J and the backend's own unchanged "already advanced" protection.
+
+### Save Draft behavior on all stages
+
+Drawing Received's own Save Draft was never gated by "is this the current stage" in the future-stage sense (it's stage 1 — nothing precedes it), so it needed no change. SD & Calculation/Getting Approval/FD Issuance's Save Draft now succeeds regardless of whether the workflow has reached that stage yet, and continues to reject once the workflow has moved PAST that stage (`TECHNICAL_STAGE_ALREADY_ADVANCED` / `TECHNICAL_WORKFLOW_ALREADY_COMPLETED`, live-tested below) — internal staff can prepare any stage's data ahead of time, but can't rewrite a stage's data once the workflow has genuinely moved on from it.
+
+### Removed restriction banner/button details
+
+Removed (all 3 forms): the bordered top-of-page banner shown for `mode === 'locked'` (SD's exact old text: "Complete Drawing Received before submitting SD & Calculation." + a 2nd "fields are reference only" line). Removed (all 3 forms): the "Open `<Previous Stage>`" footer link FMP-TECH-05J had added for the locked case (SD's was "Open Drawing Received", the ticket's own named example). Added in its place: one small `text-right text-xs text-text-muted` line directly above the footer, shown only when locked — SD: "Completion will require Drawing Received to be completed."; Getting Approval: "Completion will require a submitted SD & Calculation record."; FD Issuance: "Completion will require Getting Approval to be approved."
+
+### Confirmation — completion validation remains strict
+
+Zero changes to `assertSdStageIsCurrent`, `assertApprovalStageIsCurrent`, or `assertFdStageIsCurrent`, and zero changes to `submitSdCalculation`/`completeSdCalculationSubmission`/`sendApprovalBackForChanges`/`rejectApproval`/`approveAndMoveToFdIssuance`/`submitFdIssue`/`returnOrReopenFd`/`issueFdAndCompleteWorkflow`. Live-tested: `POST .../sd-calculation-submission/complete` while the workflow was still at Drawing Received returned `409 TECHNICAL_STAGE_NOT_CURRENT` with the message "SD & Calculation Submission is not the current stage for this workflow" — unchanged from before this unit. A draft-save attempt against Drawing Received on a workflow that had already moved to SD & Calculation Submission was live-tested and still correctly rejected with `409 TECHNICAL_STAGE_ALREADY_ADVANCED`.
+
+### Confirmation — all 4 pages open and save draft
+
+Live-tested end to end against a real UAT workflow left at Drawing Received: `PATCH .../sd-calculation-submission`, `PATCH .../getting-approval`, and `PATCH .../fd-issuance` each returned `200` with the saved record. The corresponding 3 pages rendered with 0 disabled fields, the correct soft note, and the correct button set (Save Draft + the one completion action; Submit/Clarification/Send Back/Reject/Return correctly absent). Drawing Received, the workflow overview, and the Technical Dashboard were all re-confirmed at `200` (unaffected by this unit). The workflow overview's 4 "Open `<Stage>`" buttons remain real, always-clickable `<Link>`s with no "Preview"/"Locked" wording anywhere on the page (grep-verified against the live-rendered HTML).
+
+### Test/build results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (3 tests rewritten to test the new allowed-before-reached behavior; net count unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled, including all 4 Technical stage routes |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: draft-save on SD/Getting Approval/FD Issuance before the stage is reached | ✓ all `200`, verified via a fresh UAT workflow |
+| Live: Complete/Approve/Issue attempted before eligible | ✓ still `409` with a clear message |
+| Live: draft-save on an already-passed stage | ✓ still `409 TECHNICAL_STAGE_ALREADY_ADVANCED` |
+
+### Key Implementation Notes
+
+- Same class of issue as FMP-TECH-05I: this repo's `apps/api` `dev` script has no watch/reload (plain `ts-node/register`, JIT-compiled once at boot), so every backend edit in this session required manually restarting the API dev process before live-testing could reflect it — 2 stale-process cycles were hit and resolved during this unit's own verification. Worth automating (e.g. `ts-node-dev`/`nodemon`) in a future infra-focused unit, but out of scope here.
+- Attachment upload/delete were never actually stage-gated server-side for any of the 3 stages (confirmed by reading `createSdAttachment`/`createApprovalAttachment`/`createFdAttachment`/their delete counterparts) — the old `isActive`/`mode !== 'locked'` frontend restriction was pure UI over-caution with no backend counterpart, so relaxing it to `mode !== 'completed'` introduces no new backend exposure.
+- The "in-between" actions (Submit/Request Clarification/Send Back for Changes/Reject/Return-Reopen) were deliberately kept active-only rather than also being unlocked for the future-stage case: unlike Save Draft (pure data entry) and the one completion action (meaningfully attempt-able early since the backend gate gives a clear rejection), these actions each represent a reviewer decision on an actual active submission/approval — offering them before this is even the current stage would be confusing regardless of backend gating, and the ticket's own requirement #4 explicitly allowed "keep Submit hidden until active" as a valid choice.
+
+## FMP-TECH-05L — Remove Confusing Non-Current Stage Warning and Normalize Future Stage Actions (Completed 2026-09-30)
+
+### Summary
+
+FMP-TECH-05K's own "in-between actions stay active-only" decision (see its own Key Implementation Notes above) turned out to be the wrong call in practice: hiding Submit/Send Back/Reject/Return-Reopen until active gave no real protection (every one of them is independently backend-gated already) while still leaving Save Draft + the one completion action visible on a future-stage page — so a user who clicked the visible completion button saw the backend's raw `assertXxxStageIsCurrent()` message ("Getting Approval is not the current stage for this workflow") sitting next to buttons that otherwise looked perfectly normal, reading as a confusing, unexplained restriction. This unit completes FMP-TECH-05K's own "let the backend be the only gatekeeper" philosophy: every write action button is now shown whenever the stage hasn't already been passed, the backend's rejection messages were reworded to read as ordinary guidance instead of raw restriction text, and Getting Approval + FD Issuance's pages (never redesigned since FMP-TECH-05E) were brought in line with Drawing Received/SD's own established compact layout, which also resolved the reported "large empty lower space."
+
+### Files changed
+
+- `apps/api/src/technical/technical.service.ts` — reworded the 3 still-strict `assertSdStageIsCurrent()`/`assertApprovalStageIsCurrent()`/`assertFdStageIsCurrent()` messages from "`<Stage>` is not the current stage for this workflow" to "This workflow isn't at the `<Stage>` stage right now, so this action isn't available yet." — wording only, the underlying rejection logic (`ConflictException`, same code `TECHNICAL_STAGE_NOT_CURRENT`) is completely unchanged.
+- `sd-calculation-submission-form.tsx` — Submit SD & Calculation is no longer wrapped in `isActive &&`; now shown alongside Save Draft and Complete whenever `mode !== 'completed'`.
+- `getting-approval-form.tsx` — Request Clarification button (and its now-unused `requestApprovalClarificationAction` import/handler) removed entirely from this page's footer, matching the same reasoning Drawing Received (FMP-TECH-05D) and SD (FMP-TECH-05H) already used to remove it from theirs; Send Back for Changes/Approve & Move to FD Issuance/Reject are no longer wrapped in `isActive &&` — all 4 write actions (plus Save Draft) now show together whenever `mode !== 'completed'`; soft note reworded to the ticket's exact text.
+- `fd-issuance-form.tsx` — Submit FD Issue/Return-Reopen no longer wrapped in `isActive &&`; all 4 write actions (plus Save Draft) now show together whenever `mode !== 'completed'`; soft note reworded to the ticket's exact text.
+- `getting-approval/page.tsx`, `fd-issuance/page.tsx` — full layout rewrite: `max-w-6xl` → `max-w-[1320px]`, old 6-field summary card (with a "System Ref" row) → the same 7-field summary card Drawing Received/SD/Getting Approval now all share (added Contract Manager, dropped System Ref), old 4-5 line bulleted guidance card → a single-line compact 3-bullet strip, old `grid-cols-[2fr_1fr]` (~67/33) → `grid-cols-[18fr_7fr]` (72/28, `items-start`), old 3 separate right-column boxes (Workflow Steps / Task Details / full Activity list) → one combined sticky "Stage Status" panel (Workflow Steps / Current Status / Latest Activity via `.slice(0, 2)` + `TechnicalActivityTimeline`'s existing `bare` prop) — this is the exact template SD already established in FMP-TECH-05H, applied here for the first time. FD Issuance's `workflowCompleted` banner is unchanged in content, just repositioned to sit after the stepper (matching where it already sat) with the tightened `p-4` spacing the rest of the page now uses.
+
+### Hard warning messages removed
+
+"`<Stage>` is not the current stage for this workflow" no longer appears anywhere in the UI as a standing/blocking message — it only ever appeared inside the transient error box after a premature action click, and even that has been reworded (see Files changed above) to "This workflow isn't at the `<Stage>` stage right now, so this action isn't available yet." The proactive, always-visible soft notes (shown only when `mode === 'locked'`, positioned directly above the footer, never as a top-of-page banner) now read exactly as the ticket specified: SD — "Completion will require Drawing Received to be completed." (unchanged from FMP-TECH-05K); Getting Approval — "Approval completion will require SD & Calculation submission to be completed."; FD Issuance — "FD completion will require Getting Approval to be approved."
+
+### Save Draft behavior confirmed
+
+Unchanged from FMP-TECH-05K — Save Draft remains available on all 4 stage pages regardless of `currentStage`, gated only by `canWrite` and the "not already passed" checks added in that unit. Not touched further in this unit.
+
+### Final action validation behavior confirmed
+
+Live-tested: `POST .../getting-approval/approve` while the workflow was still at Drawing Received returned `409 TECHNICAL_STAGE_NOT_CURRENT` — the rejection fires exactly as before, only the message text differs (confirmed in source; the running dev API process needs a restart to actually serve the new wording live — see Key Implementation Notes).
+
+### Backend validation confirmation
+
+Zero changes to any assertion's *logic* — only the 3 strict gates' message strings changed. `assertSdStageIsCurrent`/`assertApprovalStageIsCurrent`/`assertFdStageIsCurrent` (still used by Submit/Complete, Send Back/Reject/Approve, and Submit/Return/Issue respectively) are otherwise byte-for-byte unchanged from FMP-TECH-05K. `pnpm --filter @recafco/api test` confirms 1784/1784 (no count change — no tests asserted the old message text, only `ConflictException`/error-code shape, both unaffected).
+
+### Test/build results (2026-09-30)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: Getting Approval page (future stage) | ✓ no raw warning text, correct soft note, all 4 write buttons + Save Draft shown, Request Clarification absent |
+| Live: FD Issuance page (future stage) | ✓ correct soft note, all 4 write buttons + Save Draft shown |
+| Live: SD page (active) | ✓ Save Draft/Submit/Complete all shown |
+| Live: premature Approve attempt | ✓ still `409` (message wording pending an API dev-server restart the user owns — see below) |
+
+### Key Implementation Notes
+
+- The API dev server this session's `npm run dev` (turbo) started is a child process of the user's own foreground command, unlike the standalone `pnpm dev` instances used for live testing in FMP-TECH-05I/05J/05K — restarting it without being asked would risk crashing their active multi-service session (turbo can propagate a child's exit as a task failure). The backend message wording change is therefore verified via source + the unchanged unit test suite, and flagged to the user as needing their own restart to appear live, rather than restarted directly.
+- Getting Approval and FD Issuance were the last 2 of the 4 stage pages still on the original FMP-TECH-05E layout — this unit closes that gap, so all 4 stage pages now share one identical page-level template (summary card, stepper, guide strip, `18fr/7fr` grid, Stage Status panel).
+
+## FMP-TECH-05M — Fix Technical Workflow Page Footer Spacing and Empty Bottom Area (Investigated 2026-09-30, no code change)
+
+### Root cause
+
+Not a defect in any Technical page's own markup. Re-audited all 4 stage pages and forms (`grep` for `min-h-screen`/`h-screen`/`flex-1`/oversized padding/spacer divs) — none exist; the FMP-TECH-05L rewrite of Getting Approval/FD Issuance's `page.tsx` was re-read in full and is structurally clean (no stray wrapper divs, no forced height, matches Drawing Received/SD's own already-clean template exactly). The actual source of the blank area below a short page's footer is `apps/web/src/app/(protected)/_components/app-shell.tsx`'s `<main id="main-content" className="flex-1 overflow-auto bg-background">`: `flex-1` inside the shell's `flex h-screen` layout forces `<main>` to always fill the full viewport height below the header, on **every page in the app**, regardless of how much actual content that page has. This is intentional, load-bearing behavior — `<main>` is the app's real scroll container, and every `lg:sticky lg:top-4` panel across Technical (and other modules) depends on it being a fixed-height, independently-scrolling container. When a page's content is shorter than the viewport — which Getting Approval/FD Issuance now are, after FMP-TECH-05L's compaction — `<main>`'s own background simply continues below the content; that continuation is the reported "huge blank area." It is not unique to these 4 pages and would appear identically on any other short page in the platform.
+
+### Why no fix was made
+
+Eliminating this gap would require changing `<main>` from "always fills the viewport, scrolls internally" to "grows/shrinks with content, the page itself scrolls" — a platform-wide layout change touching every page and every sticky-positioned element in the app, not something safely scoped to "Technical workflow pages only." Presented this finding to the user with 3 options (leave as-is and document; scope a separate platform-wide shell ticket; attempt the shell change now accepting the risk) via `AskUserQuestion`. The user chose to leave the shell unchanged and have this documented instead.
+
+### Confirmation — the other, actually-actionable parts of this ticket are already satisfied
+
+Re-verified live and via source, no changes needed:
+- **Footer placement** (item 2): all 4 forms' action footers are a plain `border-t border-border pt-4` block sitting directly after the last form section — confirmed no `sticky`/`fixed` classes remain in any of the 4 form components (the only matches for those terms are historical doc comments describing states already reverted in FMP-TECH-05F).
+- **No red border strip** (item 4): confirmed absent from all 4 — Drawing Received's own `border-t-2 border-t-accent` sticky bar was already removed in FMP-TECH-05F.
+- **Soft helper text placement** (item 5): all 3 notes (SD/Getting Approval/FD Issuance) are a single `<p className="text-right text-xs text-text-muted">`, positioned immediately above the footer, already established in FMP-TECH-05K/05L — not centered, no extra vertical spacing.
+- **All 4 stage pages, Technical Dashboard, and the workflow overview** — live-tested at `200` (`/technical`, `/technical/jobs/[contractId]`, and all 4 `/workflow/*` routes).
+
+### Confirmation actions still work
+
+Save Draft, Approve & Move to FD Issuance, Send Back for Changes, and Reject all still render per FMP-TECH-05L (unchanged, no code touched this unit).
+
+### Test/build results
+
+No source files changed in this unit (confirmed via `git status`) — the full verification suite from FMP-TECH-05L (run minutes earlier against this exact same code) stands: API/Web typecheck 0 errors, lint 0 errors, API tests 1784/1784, web tests 981/981, web build all routes compiled, `db:migrate:status` 51 migrations up to date. Not re-run in this unit since nothing changed.
+
+## FMP-TECH-05N — Fix Technical Workflow App Shell Scrolling: Main Page No Scroll, Inner Content Scroll Only (Completed 2026-10-01)
+
+### Root cause of full-page scroll
+
+Not a defect — the 4 Technical stage pages previously had no height constraint of their own, so their content simply flowed to whatever height it needed, and the app's own shared shell (`apps/web/src/app/(protected)/_components/app-shell.tsx`'s `<main className="flex-1 overflow-auto bg-background">`, confirmed unchanged and NOT touched in this unit) scrolled that content as a whole — header, summary, stepper, form, and action footer all moved together. This is exactly the behavior FMP-TECH-05M diagnosed as the source of "empty space on short pages"; this unit addresses the opposite symptom (long pages scrolling as one unit, footer ending up far down) using the same, previously-identified safe boundary: fix it entirely within the 4 Technical pages' own markup, never touching `app-shell.tsx` itself (per the ticket's own "if global layout change is risky, scope this to Technical workflow pages only" fallback, and consistent with the user's FMP-TECH-05M decision to leave the shared shell alone).
+
+### Files changed
+
+- `drawing-received/page.tsx`, `sd-calculation-submission/page.tsx`, `getting-approval/page.tsx`, `fd-issuance/page.tsx` — each restructured into 2 `lg:`-scoped regions inside one `flex flex-col` root: a `shrink-0` header region (breadcrumb, title/badges, summary card, stepper, guide strip — plus FD's `workflowCompleted` banner) that never scrolls, and a `lg:flex-1 lg:overflow-hidden` body region containing the `[18fr_7fr]` form+panel grid (now `lg:h-full lg:items-stretch`, was `lg:items-start`). Every new constraint is `lg:`-prefixed — below the `lg` breakpoint, each page is an unconstrained `flex flex-col` with no height/overflow rules, i.e. its original simple stacked/page-scroll behavior, unchanged (ticket item 9).
+- `drawing-received-form.tsx`, `sd-calculation-submission-form.tsx`, `getting-approval-form.tsx`, `fd-issuance-form.tsx` — each split into a scrollable region (`lg:flex-1 lg:overflow-y-auto`, holding the mode banners + the `<form>` wrapping all section cards) and a `shrink-0` pinned footer region (error/success messages, the locked-mode soft note, and the actual action-button footer) — the `</form>` tag now closes right after the last section card instead of wrapping the footer too. Footer buttons were already `type="button"` with `onClick` handlers referencing `formRef.current` directly (a DOM node ref, not a React-tree relationship), so moving them to a DOM sibling of `<form>` changes nothing functionally, including FD Issuance's `handleReturnOrReopen()` reading the `returnReason` textarea via `formRef.current.elements` (that field itself stays inside `<form>`).
+- Each page's right-side "Task Status"/"Stage Status" panel — `lg:sticky lg:top-4` (no longer meaningful once `<main>` never scrolls past it) replaced with the same "bounded height, scroll its own content" treatment as the form: `lg:flex lg:h-full lg:flex-col lg:overflow-hidden` on the panel, `lg:min-h-0 lg:flex-1 lg:overflow-y-auto` on its 3-sub-section body.
+- The workflow overview page (`jobs/[contractId]/page.tsx`) — checked, not changed: it has no persistent action footer to pin (just a static stage-card grid), so it doesn't share this issue, matching the ticket's own conditional "if it shares the same issue" wording.
+
+### Shell/layout changes
+
+None to `app-shell.tsx` — confirmed via `git status` that only the 4 stage pages + their forms changed. `<main>`'s own `flex-1 overflow-auto` is completely unchanged; it simply never needs to activate its scrollbar for these 4 pages anymore because each page's own root is now bounded to `<main>`'s exact available height (`lg:h-full`) with `lg:overflow-hidden`, so content taller than that is contained and scrolled internally instead of overflowing up to `<main>`.
+
+### Scroll container changes
+
+Per stage page (desktop only): 2 independent scroll regions replace the single implicit page/`<main>` scroll — (1) the form's own cards region, (2) the right panel's own body region (defensive; in practice always shorter than its allotted height, so this rarely/never actually scrolls). The header region (title/summary/stepper/guide) and the footer region never scroll — both are `shrink-0` flex children that always render at their natural size.
+
+### Action footer behavior
+
+Stays pinned at the bottom of each page's own workspace (not the browser viewport, not floating/fixed/sticky — just the last `shrink-0` child in a bounded flex column, so it's always exactly below the scrollable form region with no gap and no overlap). Save Draft and every stage's own completion/transition button set are unchanged from FMP-TECH-05K/05L — no action, label, or visibility rule was touched in this unit, only where in the DOM/layout they render.
+
+### Confirmation all 4 Technical workflow pages checked
+
+Live-tested (fresh UAT workflow, test.manager account) against all 4 `/workflow/*` routes: each returns `200` and renders an identical structural class signature (7× `lg:h-full`, 7× `lg:overflow-hidden`, 3× `lg:overflow-y-auto`, 0× `lg:sticky` remaining). Footer buttons confirmed present and correct per stage (Drawing Received showed its `completed`-mode "Open SD & Calculation" link, since this test workflow has already moved past it — consistent with FMP-TECH-05J/05K behavior, not a regression). Technical Dashboard and the workflow overview both re-confirmed at `200`.
+
+### Confirmation no backend/schema/permission changes
+
+Zero backend files touched this unit (`git status` shows only the 4 pages + 4 forms under `apps/web`). No schema, migration, permission, or validation logic changed.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: all 4 stage pages + Technical Dashboard + workflow overview | ✓ all `200`, correct structural classes and footer content |
+
+### Key Implementation Notes
+
+- This directly resolves the architectural tension left open at the end of FMP-TECH-05M (where the global shell's `h-screen`/`flex-1` `<main>` was identified as the true root cause of that unit's "blank space" symptom, but changing it was deemed too risky/out of scope): this unit achieves the enterprise-dashboard "shell doesn't scroll, inner content does" feel entirely within the 4 Technical pages' own markup, by making each page's own root exactly as tall as `<main>`'s available space (`lg:h-full`) and containing all overflow internally (`lg:overflow-hidden` + 2 internal `lg:overflow-y-auto` regions) — `<main>` itself needed zero changes.
+- `items-start` → `items-stretch` (via `lg:items-stretch`, replacing the grid's previous `lg:items-start`) on all 4 pages' form+panel grid was necessary for the panel to correctly receive `lg:h-full` from its grid cell — CSS Grid's default `align-items` is already `stretch`, so this specific override simply had to be removed rather than added.
+- Mobile/tablet (`<lg`) behavior is untouched by design: every single new constraint added in this unit is `lg:`-prefixed, so at those widths each page is exactly the plain stacked, page-scrolling layout it already was before this unit (ticket's own item 9 requirement).
+
+## FMP-TECH-05O — Remove Inner Scrollbars from Technical Workflow Pages (Completed 2026-10-01)
+
+### Root cause of nested scrollbars
+
+FMP-TECH-05N (the immediately prior unit). That unit deliberately introduced 3 independent `lg:`-scoped scroll regions per stage page — the form's own cards area, the right-side Task Status/Stage Status panel's own body, and (implicitly) the page itself never needing to scroll because both of those contained their own overflow — specifically to stop the whole page (including the action footer) from scrolling as one unit. In practice, stacking 2–3 independently-scrolling regions inside one visual page reads as broken rather than "enterprise dashboard," exactly as this ticket describes. This unit fully reverts that architecture back to the single-page-scroll shape every stage page had from FMP-TECH-05E through FMP-TECH-05M.
+
+### Files changed
+
+The same 8 files FMP-TECH-05N touched, and only those: `drawing-received/page.tsx`, `sd-calculation-submission/page.tsx`, `getting-approval/page.tsx`, `fd-issuance/page.tsx`, and their 4 corresponding form components. No other file (including `app-shell.tsx`, still untouched by any unit in this whole campaign) was changed.
+
+### Scroll classes/layout wrappers removed
+
+Per page: the `shrink-0` header-region wrapper and the `lg:flex-1 lg:overflow-hidden` body-region wrapper are gone — the page is back to one flat sequence of elements (breadcrumb, title block, summary card, stepper, guide strip, then the form+panel grid) under a single `mx-auto max-w-[1320px] space-y-3 px-5 py-6 lg:px-6` root, exactly as before FMP-TECH-05N. The grid's `lg:h-full lg:items-stretch` reverted to `lg:items-start` (no explicit height). The right-side panel's `lg:flex lg:h-full lg:flex-col lg:overflow-hidden` (header) + `lg:min-h-0 lg:flex-1 lg:overflow-y-auto` (body) reverted to a single `lg:sticky lg:top-4` on the panel's own outer div — no internal split, no scroll of its own. Per form: the `lg:h-full lg:min-h-0 lg:overflow-hidden` outer wrapper, the `lg:flex-1 lg:overflow-y-auto` scrollable-cards region, and the `shrink-0` pinned-footer region all collapsed back into one `space-y-5` (or `space-y-4`/`space-y-3` to match each form's own original spacing) wrapper with a single `<form>` that once again contains its own action-button footer as its last child, directly after the last section card — not a DOM sibling of `<form>` anymore.
+
+### Confirmation all 4 Technical pages checked
+
+Live-tested against the running dev server (hot-reloaded, no restart needed): all 4 `/workflow/*` routes return `200`, and grepping the rendered HTML confirms `0` occurrences of `lg:overflow-y-auto`, `lg:overflow-hidden`, and `lg:h-full` on every page, while `lg:sticky` is present again on every page's right panel. `0` occurrences of `sticky bottom`/`fixed bottom` on every page's footer.
+
+### Confirmation Task Status no longer has internal scrollbar
+
+Confirmed via the same grep pass — the panel's body `div` (`divide-y divide-border border-t border-border`) no longer carries any `overflow`/height class at any breakpoint; it expands to its natural content height exactly like the rest of the page, and (unchanged from every prior unit) only shows the latest 2 activities via `activities.slice(0, 2)`, keeping it compact without needing its own scroll.
+
+### Confirmation action footer is normal
+
+Each footer is the last child inside its form's own `<form>` tag again — a plain `border-t border-border pt-4` block in normal document flow, not a sibling region, not `position: sticky`/`fixed`, confirmed absent from the live HTML. Save Draft and every stage's action-button set, soft locked-mode notes, and backend-gating behavior are all byte-for-byte unchanged from FMP-TECH-05L/05K — only where in the DOM the footer sits (back inside `<form>`, following its cards) was touched.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: all 4 stage pages, Technical Dashboard, workflow overview | ✓ all `200`, zero internal-scroll classes remaining, `lg:sticky` panel restored, all footer buttons present |
+
+### Key Implementation Notes
+
+- This is a straight architectural reversal of FMP-TECH-05N, not a new design — every file was restored to its exact FMP-TECH-05L/05M-era structure (same comments, same spacing, same class names) with only the 05K/05L functional behavior (always-shown action buttons, soft locked-mode notes, editable-anytime `disabled` logic, Getting Approval's removed Request Clarification button) carried forward unchanged, since none of that was ever about scrolling.
+- `app-shell.tsx`'s own `<main className="flex-1 overflow-auto">` remains exactly as it's been since before this whole campaign — the single page-level scrollbar users now see on these 4 pages again is that same `<main>` scrollbar every other page in the platform already uses, restoring full consistency with the rest of the app.
+
+## FMP-TECH-05P — Technical Dashboard Final UI Polish and Data Fallback Cleanup (Completed 2026-10-01)
+
+### Summary
+
+A UI/UX-only polish pass on `/technical` (the Technical Dashboard) ahead of management review: fixed the jobs table's raw "—" Job Order No fallback, reduced the KPI row from 6 competing accent colors to 3, added a total-active-workflows count to Stage Progress, reworded Next Action Focus into clearer, priority-ordered sentences, lightened the jobs table's badges/primary action button, capped Recent Technical Activity at 5 items, and linked Needs Attention's "Open Stage" action directly to the item's own stage page. No backend query, schema, permission, or workflow-validation logic was touched — every number shown was already being fetched by the existing single `GET /technical/dashboard` call.
+
+### Files changed
+
+- `technical/page.tsx` — added `jobOrderDisplay()` (Job Order No → Contract reference → "Contract Ref Available" fallback chain); KPI accent mapping collapsed from 6 distinct colors to 3 (`neutral` for not-started/on-track, one shared `info` tint for all 4 in-progress stage cards, `success`/`error` reserved for the 2 cards that should stand out); jobs table's Job Order cell changed from a colored chip to plain bold text; Current Stage/Priority/Status badges shrunk (`px-2.5 py-1 text-xs` → `px-2 py-0.5 text-[11px]`); primary row action button changed from a solid `bg-accent` fill to a lighter `border-accent/40 bg-accent-light` treatment and relabeled "Open Current Stage" → "Open Stage"; `dashboard.recentActivities` sliced to 5 before reaching `RecentActivityPanel`, with a "Showing latest 5 activities" note when more exist; root vertical spacing tightened `space-y-6` → `space-y-5`.
+- `_components/technical-kpi-card.tsx` — tightened padding (`p-4` → `p-3.5`), icon chip (`size-9` → `size-8`), and value text (`text-2xl` → `text-xl`); added `min-h-[6.5rem]` so all 7 cards hold a consistent height even if one helper line wraps.
+- `_components/stage-progress-overview.tsx` — added a "Total active workflows" count line above the 4 stage rows (same `total` the component already computes, no new query); tightened row spacing (`space-y-3.5` → `space-y-3`) and bar height (`h-2` → `h-1.5`).
+- `_components/next-action-panel.tsx` — replaced the single "busiest stage in `TECHNICAL_STAGE_ORDER`" fallback with 3 explicit, priority-ordered checks (Getting Approval → SD & Calculation → Drawing Received, skipping FD Issuance), each with the ticket's own clearer wording style ("N job orders are waiting for `<X>`."); removed the now-unused `TECHNICAL_STAGE_ORDER`/`TECHNICAL_STAGE_LABELS`/`STAGE_ACTION_LABELS` imports/constant.
+- `_components/needs-attention-panel.tsx` — "Open" relabeled "Open Stage" and its link changed from the workflow overview (`/technical/jobs/:id`) to the item's own stage page via the shared `stageHref(contractId, item.stage)` helper (every attention item already carries a real `stage`).
+
+### Job Order fallback logic
+
+```
+jobOrderDisplay(job):
+  1. job.jobOrderNo         — if set, use it
+  2. job.referenceNumber    — if set (always true for a real Contract row), use it
+  3. 'Contract Ref Available' — only reachable if somehow both are empty
+```
+`referenceNumber` is a required field on every `Contract`, so in practice step 2 always resolves — the previous code simply never looked past `jobOrderNo ?? '—'`, which is what produced the reported dashes. `NeedsAttentionPanel`/`RecentActivityPanel` already had their own `jobOrderNo ?? referenceNumber` fallback (unaffected, already correct) — only the dashboard's own jobs table was missing it.
+
+### KPI card polish summary
+
+6 accent colors (`info`/`secondary`/`warning`/`module` on the 4 in-progress cards, plus `neutral`/`success`/`error`) collapsed to 3: `neutral` (Pending Technical Review; Needs Attention when empty), one shared `info` tint for all 4 active-stage cards (Drawing Received/SD & Calculation/Waiting Approval/FD Issued — previously 4 different colors with no real meaning difference between them), and `success`/`error` kept exclusively for the 2 cards meant to stand out (Ready for Production Release; Needs Attention when active). Helper text shortened/tightened across all 7 cards. Card padding/icon/value size reduced and a `min-h` added for row-height consistency.
+
+### Table polish summary
+
+Job Order No: colored chip → plain bold text (reduces one more competing color block per row). Current Stage/Priority/Status badges shrunk to `text-[11px]` to match the smaller badge sizing already used in Needs Attention/Recent Activity. Primary action button: solid accent fill → lighter bordered/tinted treatment, relabeled "Open Current Stage"/"Start Technical Workflow" → "Open Stage"/"Start Technical Workflow" (unchanged for the not-started case, since that's a genuinely different action). Secondary "Workflow"/"Contract" buttons unchanged (already compact/bordered).
+
+### Recent Activity limit/polish
+
+`RecentActivityPanel` itself is unchanged (it already showed exactly what the ticket asked for per item — title, job reference, stage badge, user/date, compact "Open" link). The limiting happens at the page level: `dashboard.recentActivities.slice(0, 5)` is passed in instead of the full list (the backend's `getDashboard()` already caps this at 10 server-side, unchanged — this unit only trims the last mile client-side), with a plain "Showing latest 5 activities" note when more exist, since no dedicated "view all activity" page/modal exists to link to (confirmed, matching the ticket's own fallback instruction).
+
+### Needs Attention layout changes
+
+Layout unchanged (Left: Needs Attention / Right: Recent Activity, `lg:grid-cols-2`, already matched the ticket's own recommendation) — only its "Open" action was relabeled "Open Stage" and repointed to the item's own stage page instead of the workflow overview, for consistency with the jobs table's own "Open Stage" action and to make the link genuinely open the stage that needs attention, not just the overview.
+
+### Confirmation no schema/permission/workflow logic changes
+
+Zero backend files touched (confirmed via `git status`) — `GET /technical/dashboard`'s query, response shape, and every number it returns are byte-for-byte unchanged; this unit only changed how the already-fetched data is displayed and labeled.
+
+### Confirmation all Technical pages still open
+
+Live-tested (test.manager account, real UAT data): Technical Dashboard, workflow overview, and all 4 stage pages (Drawing Received/SD & Calculation/Getting Approval/FD Issuance) all return `200`. Live HTML confirmed: `0` rows fell back to "Contract Ref Available" (real `referenceNumber` data covered every row), "Open Stage" present (jobs table + Needs Attention), "Total active workflows" present, Next Action Focus showing the new wording ("waiting for SD & Calculation submission", matching this environment's real current data), and the "Showing latest 5 activities" note correctly appearing (this environment has more than 5 real activity rows).
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: Technical Dashboard, workflow overview, all 4 stage pages | ✓ all `200` |
+
+## FMP-TECH-05Q — Polish Technical Workflow Jobs Table (Completed 2026-10-01)
+
+### Summary
+
+A focused UI/UX pass on the Technical Dashboard's own jobs table (the only part of `/technical` in scope this unit): compacted from 9 columns to the ticket's own recommended 7, merged Job Order No + Project/Client into one 3-line "Job / Project" column, shortened the stage badge/next-action wording to table-appropriate lengths (full labels stay available via `title`), shortened long `assignedTo` display names to just the name portion, added a real `dueDate`-derived "Overdue" status, and replaced the primary row action's bordered/tinted button with a plain text-button so it reads as less repetitive down a long column of rows. No backend query, schema, permission, or workflow-validation logic was touched.
+
+### Files changed
+
+- `technical/page.tsx` only — `jobStageLabel()`/`jobStageBadgeClasses()` now use a new local `TABLE_STAGE_LABELS` short-label map (table-only; the shared `TECHNICAL_STAGE_LABELS` used by the stepper/stage pages/badges elsewhere is untouched) plus a new `jobStageTitle()` helper supplying the full label via the badge's `title` attribute; `STAGE_ACTION_LABELS` shortened to the ticket's own suggested wording; added `jobStatusDisplay()` (real `dueDate`-vs-now comparison → "Overdue", alongside the existing Completed/In Progress/Not Started states) and `shortOwnerName()` (splits a display name at its first `(`); the table markup itself rewritten — header row and all `<td>`s — to the new 7-column layout.
+
+### Table column/layout changes
+
+Old 9 columns: Job Order No, Project / Client, Current Stage, Next Action, Priority, Due / Planned, Assigned To, Status, Actions.
+New 7 columns (exactly the ticket's own recommended list): Job / Project, Current Stage, Next Action, Due / Planned, Owner, Status, Actions. Priority is no longer a separate column — URGENT/HIGH jobs still surface via the Needs Attention panel and the "Needs Attention / Overdue" KPI card above the table, so the signal isn't lost, just no longer a dedicated 7th badge competing for space on every row. Row vertical padding tightened `py-3.5` → `py-3`, header padding `py-3` → `py-2.5`, table `min-w` reduced `1050px` → `900px` to match the narrower column set. `overflow-x-auto` wrapper (horizontal-scroll-on-small-screens behavior) is unchanged.
+
+### Job/project fallback logic
+
+Unchanged from FMP-TECH-05P's `jobOrderDisplay()` (`jobOrderNo → referenceNumber → 'Contract Ref Available'`) — this unit only changes where/how it's displayed: now the first of 3 stacked lines in the merged "Job / Project" cell (Job Order/reference, then `projectName`, then `clientEmployer` in muted `text-[11px]`), matching the ticket's own worked example exactly.
+
+### Stage badge label changes
+
+New table-only short labels (`TABLE_STAGE_LABELS`): `DRAWING_RECEIVED` → "Drawing Received" (unchanged, already short), `SD_CALCULATION_SUBMISSION` → "SD & Calc." (was the full "SD & Calculation Submission", which wrapped), `GETTING_APPROVAL` → "Getting Approval" (unchanged), `FD_ISSUANCE` → "FD Issuance" (unchanged). The badge's `title` attribute carries the full `TECHNICAL_STAGE_LABELS` value for any row where a real stage applies, so the full name is still one hover away. Next Action text shortened to match: "Submit SD & Calculation" → "Submit SD & Calc.", "Record approval decision" → "Track approval", "Issue FD & complete workflow" → "Issue FD", "Ready for production release" → "Technical complete".
+
+### Assigned owner display changes
+
+`shortOwnerName()` splits a display name at its first `(` and trims — e.g. `"[UAT] Manager (CM-01 / ALL_DEPARTMENTS for Incidents+Contracts)"` → `"[UAT] Manager"` — a pure substring operation on the real, already-fetched `assignedTo` string, not a new field or invented data. When the short form differs from the original, the full string is kept available via the cell's own `title` attribute (live-verified: the visible span shows "[UAT] Manager", its `title` carries the full department/scope string). Production display names without a parenthetical (the common case outside UAT seed data) pass through unchanged.
+
+### Action button polish
+
+Primary action ("Open Stage" / "Start Technical Workflow"): FMP-TECH-05P's bordered `border-accent/40 bg-accent-light` button replaced with a plain `text-accent` text-button (no fill, no border) — the same "Open" link treatment Needs Attention/Recent Activity already use — so it doesn't read as a solid colored block repeated down every row. Secondary "Workflow"/"Contract" buttons unchanged (already small bordered/outline buttons). Status badge gained a new real "Overdue" state (`bg-error-light text-error`, shown when `dueDate` has passed and the row isn't completed) alongside the existing Completed/In Progress/Not Started states — "Returned" (the ticket's other suggested status) was deliberately NOT implemented: `TechnicalJobRow` doesn't carry FD Issuance's own `RETURNED_REOPENED` sub-status, and adding it would require a backend response-shape change, out of scope for a UI-only ticket; faking it was not an option either.
+
+### Confirmation all actions still work
+
+Live-tested (test.manager account, 3 real UAT job rows): "Open Stage"/"Start Technical Workflow", "Workflow", and "Contract" links all present and correctly formed per row (same `href` logic as before — `openCurrentStageHref()` itself untouched). All 6 Technical routes (Dashboard, workflow overview, all 4 stage pages) return `200`.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1784/1784 tests (unchanged) |
+| `pnpm --filter @recafco/web test` | ✓ 981/981 tests (unchanged) |
+| `pnpm --filter @recafco/web build` | ✓ all routes compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date |
+| Live: Technical Dashboard, workflow overview, all 4 stage pages | ✓ all `200`; new column headers, short stage/owner labels, and text-button action all confirmed in the rendered HTML |
+
+## FMP-MAINT-01 — Live MMS Integration for Maintenance Management Dashboard (Completed 2026-10-01)
+
+### Summary
+
+`/maintenance/dashboard` now shows live, read-only data from the existing RECAFCO Maintenance Management System (MMS, `http://192.168.1.17:81`, a separate Next.js 16 + Prisma app on host 192.168.1.17, source at `Desktop/recafco-maintenance-management-system`). MMS remains the system of record; FMP only reads and links back. No MMS code, schema, or data was changed. No FMP schema change.
+
+### Integration method: MMS DB read-only (Option B)
+
+- **Audit result:** MMS exposes no JSON data API, only `app/api/{exports/[kind],files,health,notifications/stream,store/opening-stock-template}`. `exports/[kind]` needs an MMS session cookie and calls `writeAuditLog` + `notifyByEvent` on every request, so it is not safe for polling. Scraping is out of scope by rule.
+- MMS PostgreSQL on `192.168.1.17:5432` is reachable from the FMP server, so FMP reads it via a new SELECT-only pool. Read-only is enforced three ways: (1) a SELECT-only role (DBA setup, `docs/runbooks/mms-integration.md`); (2) `default_transaction_read_only=on` on every session; (3) `assertReadOnlySql()` rejects any non-`SELECT`/`WITH`, multi-statement, or write/DDL/`SET` statement before sending.
+- **Current state: not configured.** No MMS credentials were read. The MMS `.env` was deliberately not opened, and no `MMS_DATABASE_URL` is set in FMP. Until a DBA creates the read-only role and `MMS_DATABASE_URL` is set, the page shows "MMS integration not configured".
+
+### Fields verified in MMS source (no guessed names)
+
+`work_orders` (`work_order_number`, `status`, `priority`, `operator_complaint`, `description_of_work`, `maintenance_type`, `job_location`, `asset_id`, `requested_by_department_id`, `assigned_supervisor_id`, `created_at`, `updated_at`, `deleted_at`), `work_order_assignments` (`technician_id`, `external_name`, `external_company`), `parts_requests` (`work_order_id`, `status`), `assets` (`asset_code`, `asset_name`, `location`), `departments.name`, `profiles` (`full_name`, `is_active`, `deleted_at`), `auth_users` (`profile_id`, `email`, `is_active`, `deleted_at`).
+
+Sources:
+- Status values: `chk_work_orders_status` (migration `20260805000000`).
+- Open parts-request statuses: `lib/display/parts-request-labels.ts OPEN_PR_STATUSES`.
+- Priorities (Low/Normal/High/Urgent): `components/work-orders/work-order-form.tsx`.
+- Overdue rule (`OVERDUE_DAYS = 7`, based on `created_at` since there is no due-date column): the MMS job-card list page.
+- Display labels (Approved → "Active"): `lib/work-orders/simplified-status-display.ts`.
+- Detail route `/maintenance/work-orders/[id]` (UUID): `app/(dashboard)/maintenance/work-orders/[id]/page.tsx`.
+
+### Files changed
+
+- `packages/config/src/env/api.ts`: optional `MMS_BASE_URL` (default `http://192.168.1.17:81`), `MMS_DATABASE_URL` (postgres-scheme validated, empty = null), `MMS_QUERY_TIMEOUT_MS` (default 8000).
+- `packages/database/src/read-only-pool.ts` (+ test) and `index.ts` export: `createReadOnlyPool`, `assertReadOnlySql`, `ReadOnlySqlViolationError`. Placed in `@recafco/database` because that package already depends on `pg`. Adding `pg` to `apps/api` would have needed a lockfile re-resolve, which fails offline on an unrelated `next@16.2.11` resolution, so no `package.json`/lockfile changes were made.
+- `apps/api/src/mms-integration/`: `mms-read-only-client.service.ts` (lazy pool, max 3 connections, 5 s connect timeout, idle-error handler so an MMS restart cannot crash FMP, credential-free `categorize()`), `mms-dashboard.service.ts` (+ test), `mms-integration.controller.ts`, `mms-integration.module.ts`. `app.module.ts` imports `MmsIntegrationModule`.
+- `apps/api/src/env.test.ts`: 4 MMS config tests.
+- `apps/web/src/lib/mms-api.ts`: typed server-side client.
+- `apps/web/src/app/(protected)/maintenance/dashboard/page.tsx`: rewritten. New `_components/` (`mms-live-controls`, `mms-kpi-card`, `mms-needs-attention`, `mms-recent-table`, `mms-sync-status`) and `_lib/mms-format.ts` (+ test).
+- Docs: `docs/runbooks/mms-integration.md` (new: DBA role SQL with column-level grants, RLS check, pg_hba note, metric definitions, troubleshooting), `docs/environment-variables.md`, `docs/endpoint-permissions.md`, `.env.example`.
+
+### Endpoint
+
+`GET /maintenance/dashboard/live`, permission `maintenance.read`, GET only. Response: `status` (`ONLINE | OFFLINE | NOT_CONFIGURED | SCOPE_RESTRICTED`), `syncedAt`, `mmsBaseUrl`, `message`, `metrics` (`openRequests`, `inProgress`, `waitingForParts`, `overdue`, `completedThisMonth`, `assignedToMe: number|null`), `assignedToMeNote`, `needsAttention[]` (max 8, each with `reasons[]`, `ageDays`), `needsAttentionTotal`, `recent[]` (10), `overdueDays`.
+
+### Metric mapping
+
+| Card | MMS rule |
+|---|---|
+| Open Requests | `status` in Under Review, Approved, Waiting Materials, Partially Issued, Materials Issued, Assigned, In Progress, Closure Requested (drafts `Created` and `Closed` excluded) |
+| In Progress | `status = 'In Progress'` |
+| Waiting For Parts | open AND (`status` in Waiting Materials/Partially Issued OR has a `parts_requests` row in `OPEN_PR_STATUSES`) |
+| Overdue | open AND `created_at` older than 7 days |
+| Assigned To Me | open AND (matched profile = `assigned_supervisor_id` OR a `work_order_assignments.technician_id`) |
+| Completed This Month | `status = 'Closed'` AND `updated_at` ≥ start of the current month (same as the MMS manager dashboard) |
+
+Needs Attention covers open job cards with any of these reasons, in rank order:
+1. OVERDUE
+2. HIGH_PRIORITY (High/Urgent)
+3. WAITING_FOR_PARTS
+4. UNASSIGNED (no supervisor and no assignment)
+5. CLOSURE_REQUESTED
+
+Rows are sorted by their most urgent reason, then by number of reasons, then oldest first. The top 8 are shown, with the total count.
+
+### Security and scope
+
+- MMS departments have no mapping to FMP departments, so live data is returned only when the user's Maintenance module scope is **ALL_DEPARTMENTS**. Otherwise the response is `SCOPE_RESTRICTED` and MMS is not queried. Today only `manager` and `superadmin` have that scope (read-only query of `user_module_access`).
+- Assigned To Me uses an exact, case-insensitive match of the FMP `users.email` to an active MMS `auth_users.email`. A missing FMP email or no match returns `null` plus a note, never a fake 0. Neither `manager` nor `superadmin` has an FMP email today.
+- Errors are reported by category only (`connection refused`, `authentication failed`, …). Messages that could echo connection strings are never logged or returned.
+
+### Caching and refresh
+
+The factory-wide snapshot is cached for 10 s, and concurrent requests share one in-flight read. Assigned To Me is per-user and uncached. The page has a manual Refresh button and a 60 s auto-refresh (`router.refresh()`), which pauses while the tab is hidden and refreshes immediately when it becomes visible again. No websocket.
+
+### UI
+
+The page follows the Technical dashboard layout:
+- **Header:** teal Maintenance accent, "Live from MMS · Last synced HH:MM:SS" pill, and Refresh / Open MMS / Back to Platform Dashboard actions.
+- **Banners:** one per state (API error, MMS offline with an Open MMS link, not configured, restricted).
+- **KPI cards:** 6 cards — Open, In Progress, Waiting For Parts, Overdue, Assigned To Me, Completed This Month. A card shows "—" when there's no data, and the per-metric reason when only that metric is unavailable.
+- **Needs Attention** (2/3 width) beside **MMS Sync Status** (1/3 width).
+- **Recent Maintenance Requests:** 7-column table with an "Open in MMS" action per row.
+- **Footer:** a small link keeps FMP's own pre-existing `/maintenance` request log reachable. It replaces the old Quick Actions, which were the sidebar's only path to those pages.
+
+Not changed: `/maintenance/executive`, the Platform Dashboard maintenance card, and the FMP-native maintenance request pages. They still use FMP's own `MaintenanceRequest` data.
+
+### Live verification
+
+- A temporary API instance on port 4011 was booted from source, and only that process was stopped afterwards. The existing API (4000) and web (3000) processes were not touched.
+- `test.manager` and `test.operator` both received `200 SCOPE_RESTRICTED`, with no MMS query made. No token returned `401`.
+- All 5 SQL statements were checked with `PREPARE` on the FMP dev DB in a read-only session. Each parsed and failed only with `42P01 relation does not exist`, meaning no syntax errors.
+- Not live-tested: ONLINE and OFFLINE through HTTP. No ALL-scope test account has a known password, and MMS credentials aren't configured. Both paths are covered by unit tests.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1801/1801 (+17) |
+| `pnpm --filter @recafco/web test` | ✓ 985/985 (+4) |
+| `pnpm --filter @recafco/database test` | ✓ 25/25 (+12) |
+| `pnpm --filter @recafco/web build` | ✓ `/maintenance/dashboard` compiled |
+| `pnpm db:migrate:status` | ✓ 51 migrations, up to date (no schema change) |
+
+### To go live (pending approval)
+
+1. MMS DBA creates `fmp_mms_readonly` (runbook SQL), checks RLS, and allows the FMP server in `pg_hba.conf`.
+2. Set `MMS_DATABASE_URL` in the FMP server `.env`.
+3. Restart only the FMP API process.
+4. Optionally set emails on FMP accounts so Assigned To Me can match MMS logins.
+
+## FMP-MAINT-02 — Connect FMP Maintenance Dashboard to MMS Live API (Completed 2026-10-01)
+
+### Summary
+
+The Maintenance Management dashboard now gets its live data from MMS's own key-authenticated, read-only endpoint `GET /api/integrations/fmp/maintenance-dashboard/live` (MMS-FMP-INTEGRATION-01). The FMP API calls it server-to-server; the browser only calls FMP. **FMP-MAINT-01's direct read-only MMS DB mode is removed entirely**: the `MMS_DATABASE_URL` env var, `MmsReadOnlyClient`, the SQL service, and `@recafco/database`'s `createReadOnlyPool`/`assertReadOnlySql` (+ tests and stale `dist/` outputs). No FMP schema change and no MMS change.
+
+**Deployment state found on 2026-10-01.** The MMS endpoint exists in the MMS source on this machine, but uncommitted (`app/api/integrations/`, `lib/integrations/`, modified `proxy.ts`). The deployed MMS at 192.168.1.17:81 answers `307 → /login`, so that build doesn't include it yet. FMP's real client run against it reports "MMS live integration not enabled — MMS redirected the request (live endpoint not deployed on MMS yet)". No `MMS_*` keys are set in the FMP `.env` yet.
+
+### MMS contract (read from MMS source, not guessed)
+
+- `lib/integrations/fmp/{auth,live-dashboard-handler,maintenance-dashboard,live-cache}.ts`.
+- Header `x-fmp-integration-key`, compared with `timingSafeEqual` on SHA-256 digests. MMS requires a key of at least 32 characters, otherwise it returns 503.
+- Status codes: 401 missing key, 403 invalid key, 503 not configured, 400 invalid `userEmail`, 500 `{source, online:false, error}`.
+- 200 payload: `{source:'MMS_LIVE', online:true, generatedAt, cacheTtlSeconds, summary{openRequests,inProgress,waitingForParts,overdue,assignedToMe|null,completedThisMonth}, needsAttention[{id,ref,title,status,statusLabel,priority,reasons[],updatedAt,openUrl}], recentRequests[{id,ref,title,assetOrLocation,status,statusLabel,priority,assignedTo,updatedAt,openUrl}]}`.
+- Overdue = `starting_datetime < now` AND status in the active/waiting set (MMS has no due-date field).
+- An unknown `userEmail` returns `assignedToMe: 0`, not null, so the endpoint can't be used to probe which emails exist.
+
+### Files changed
+
+- `packages/config/src/env/api.ts`: replaced `MMS_DATABASE_URL` with `MMS_LIVE_DASHBOARD_ENDPOINT` (default path, must start with `/`), `MMS_INTEGRATION_KEY` (trimmed, empty = null), and `MMS_LIVE_REFRESH_SECONDS` (default 30, clamped to ≥ 15). `MMS_BASE_URL` and `MMS_QUERY_TIMEOUT_MS` are kept.
+- `packages/database/src/index.ts`: read-only pool export removed. `read-only-pool.ts`/`.test.ts` deleted.
+- `apps/api/src/mms-integration/`:
+  - new `mms-live-api.client.ts` (+ test, 10 tests)
+  - rewritten `mms-dashboard.service.ts` (+ test, 17 tests)
+  - module now provides `MmsLiveApiClient`
+  - controller unchanged (`GET /maintenance/dashboard/live`, `maintenance.read`)
+  - `mms-read-only-client.service.ts` deleted
+- `apps/api/src/env.test.ts`: 5 MMS config tests (replacing MAINT-01's 4).
+- `apps/web/src/lib/mms-api.ts`: types now match the MMS payload (`summary`, `recentRequests`, `assetOrLocation`, `openUrl`, `reasons: string[]`, nullable `updatedAt`), plus `refreshSeconds`, `generatedAt`, `fetchedAt`, `cacheTtlSeconds`, and statuses `AUTH_ERROR`/`NOT_ENABLED`.
+- `apps/web/.../maintenance/dashboard/`: `page.tsx`, `_components/{mms-live-controls,mms-needs-attention,mms-recent-table,mms-sync-status}.tsx`, `_lib/mms-format.ts` (+ test). `mms-kpi-card.tsx` unchanged.
+- Docs: `docs/runbooks/mms-integration.md` (rewritten for API mode), `docs/environment-variables.md`, `docs/endpoint-permissions.md`, `.env.example`.
+
+### FMP API behavior (`MmsDashboardService` + `MmsLiveApiClient`)
+
+1. **Scope check.** Same as MAINT-01: only ALL_DEPARTMENTS Maintenance scope gets data; otherwise `SCOPE_RESTRICTED` and MMS is not called.
+2. **Email lookup.** FMP looks up `users.email` (trimmed, lower-cased).
+3. **Request.** `GET {MMS_BASE_URL}{MMS_LIVE_DASHBOARD_ENDPOINT}[?userEmail=…]` with headers `x-fmp-integration-key` and `Accept: application/json`. Settings: `redirect: 'manual'` (a redirect means MMS's session middleware intercepted the call, and the key must never follow it elsewhere) and `AbortSignal.timeout(MMS_QUERY_TIMEOUT_MS)`.
+4. **Response mapping:**
+
+| MMS response | FMP status |
+|---|---|
+| no key configured in FMP | `NOT_CONFIGURED` (no call) |
+| 401 / 403 | `AUTH_ERROR` |
+| 503, 404, 3xx | `NOT_ENABLED` (with reason) |
+| 400 with email | retried once without `userEmail` → Assigned To Me null + "not accepted" note |
+| 5xx, timeout, network error, non-JSON | `OFFLINE` |
+| 200 but invalid shape | `OFFLINE` ("unexpected response") |
+
+5. **Payload validation.** `source==='MMS_LIVE' && online===true`, and every summary count must be a non-negative integer (`assignedToMe` may be null). Malformed items are dropped.
+6. **`openUrl` sanitizing (`safeOpenUrl`).** Kept only as an http(s) URL on the `MMS_BASE_URL` origin. Any other host (e.g. MMS misconfigured to localhost) is moved onto that origin with the same path. Anything that isn't http(s) becomes `{base}/maintenance/work-orders/{id}`.
+7. **Cache.** A 10 s per-email FMP cache, with concurrent requests merged into one in-flight call. Only successes are cached.
+8. **Logging.** Only the outcome kind, reason, and HTTP status are logged. Never the key, headers, or stack traces.
+
+### Frontend behavior
+
+- **Header:** "Live from MMS · Last synced {MMS generatedAt}" pill, or "MMS offline". Actions: Refresh, Open MMS, Back to Platform Dashboard.
+- **Banners:** exactly one per state. OFFLINE uses the required wording "Maintenance MMS is currently unavailable. Live data could not be loaded." plus the specific reason and an Open MMS link. There are separate banners for auth failed, not enabled, not configured, and restricted.
+- **Cards:**
+  - Overdue is labelled **"Overdue / Past Start Time"** with helper text "Based on MMS start time rule".
+  - Assigned To Me: null shows "—" with "Unavailable — FMP user email not set" (or the server's more specific note). 0 shows 0.
+  - Everything shows "—" when there's no data.
+- **Needs Attention:** exactly MMS's returned items (ref, status label with the raw status as a tooltip, priority, reason chips, updated time, Open in MMS via `openUrl`). The MMS reason "Overdue" is displayed as "Past start time".
+- **Recent table:** Ref, Title (with a High/Urgent marker), Asset / Location, Status, Assigned To, Updated, Open in MMS (`openUrl`).
+- **Sync Status panel:** online pill, last synced, auto-refresh interval, MMS cache TTL, read-only badge, rule definitions.
+- **Refresh:** `MmsLiveControls` takes `refreshSeconds` from the API (default 30), clamped to ≥ 15 on the client too. It polls only while the tab is visible, stopping the interval on hide and refreshing immediately plus restarting on show. It polls only in ONLINE/OFFLINE or transient FMP-API failure, not in config/auth/scope states that need an admin.
+
+### Key stays server-side (verified)
+
+- 0 matches for `MMS_INTEGRATION_KEY|x-fmp-integration-key|mmsIntegrationKey` in `apps/web/src` and in the built `apps/web/.next/static`.
+- The FMP endpoint response contains no key field.
+- A client test asserts no failure result contains the key.
+
+### Live verification
+
+- FMP's real `MmsLiveApiClient` was run with a dummy key against the deployed MMS: `not_enabled (redirected)`. A GET with an invalid key cannot read data or write anything in MMS.
+- Against an unreachable host it reports `unavailable` (a real refused connection on a normal port reports `ECONNREFUSED` → "connection refused"). Port 1 is on fetch's blocked-port list, so it's useless for this kind of test.
+- **Not live-verified:** a 200 end-to-end, because MMS hasn't deployed the endpoint and no key is configured. It's covered by unit tests against the exact MMS payload shape.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1816/1816 |
+| `pnpm --filter @recafco/web test` | ✓ 985/985 |
+| `pnpm --filter @recafco/database test` | ✓ 13/13 (MAINT-01 pool tests removed with the pool) |
+| `pnpm --filter @recafco/web build` | ✓ `/maintenance/dashboard` compiled |
+| `pnpm db:migrate:status` | ✓ up to date (no schema change) |
+
+### To go live
+
+1. MMS team deploys the MMS build with `/api/integrations/fmp/*` and sets `FMP_INTEGRATION_KEY` (≥ 32 chars) and `MMS_PUBLIC_BASE_URL=http://192.168.1.17:81`.
+2. Set the same value as `MMS_INTEGRATION_KEY` in the FMP server `.env`.
+3. Restart only the FMP API process.
+4. Optionally set emails on FMP accounts (`manager`/`superadmin` have none) for Assigned To Me.
+
+## FMP-MAINT-03 — Redesign Maintenance Management Dashboard for Live MMS Data (Completed 2026-10-01)
+
+### Summary
+
+The Maintenance Management landing page is now a live-ready "Maintenance Control Center". UI only: no schema, permission, or integration-logic change, and nothing is written to MMS.
+
+**Root cause of the "basic / placeholder-like" page.** The ticket described a page with FMP-local cards, a "Recent Activity" table, "Quick Links", and a large red "View Maintenance Requests" button. That is `/maintenance/executive`, the route the Platform Dashboard card, the executive sidebar, and the module switcher all open. FMP-MAINT-01/02 had only changed `/maintenance/dashboard` (department sidebar), so the page most users land on still showed FMP-local `MaintenanceRequest` data. Both routes now render one shared component.
+
+### Files changed
+
+- New `maintenance/_components/mms/maintenance-control-center.tsx`: async Server Component that fetches `GET /maintenance/dashboard/live` and renders the whole control center.
+- New `maintenance/_components/mms/mms-sync-strip.tsx`, `mms-quick-actions.tsx`, `mms-unavailable-state.tsx`.
+- Moved from `maintenance/dashboard/_components/` to `maintenance/_components/mms/`: `mms-kpi-card.tsx`, `mms-live-controls.tsx`, `mms-needs-attention.tsx` (now with a reason summary row), `mms-recent-table.tsx` (column "Title" renamed to "Request / Work Order").
+- Moved `dashboard/_lib/mms-format.ts` (+ test) to `maintenance/_lib/`. Added `MMS_SYNC_STATUS_WORD`, `mmsJobCardsUrl()`, `summarizeReasons()`, and new header labels. 3 new tests.
+- Deleted `mms-sync-status.tsx` (side panel, replaced by the strip).
+- `maintenance/dashboard/page.tsx`: now a thin wrapper around `<MaintenanceControlCenter />`.
+- `maintenance/executive/page.tsx`: same `maintenance.read` gate and `ExecutiveModuleNav`, then `<MaintenanceControlCenter showBackLink={false} />`. FMP-local KPI grid, attention panel, Recent Activity table, Quick Links, and the `h-12` red button are removed.
+- API (message wording only, no behavior change): the 3xx reason now reads "live endpoint not deployed on MMS yet (MMS redirected to login)" and the NOT_ENABLED message reads "MMS live integration not enabled — {reason}." One test assertion updated.
+- `docs/runbooks/mms-integration.md`: entry points and restart note.
+
+### Layout (top to bottom)
+
+1. **Executive module nav** (executive route only, unchanged).
+2. **Header card:** teal icon, title, status pill, "Last synced HH:MM:SS" when data is loaded, the ticket's subtitle. Actions: Refresh, Open MMS, Back to Platform Dashboard (the last one is omitted on the executive route because the nav row directly above already has it).
+3. **One state banner** (none when online).
+4. **Sync status strip:** Source: MMS Live API · Status · Last synced · Refresh interval · MMS cache TTL (when known) · Read-only · Open MMS. A second line carries the server's specific reason in any non-online state.
+5. **Summary:** 6 KPI cards, `grid-cols-2 md:grid-cols-3 xl:grid-cols-6`.
+6. **Needs Attention (2/3) + Quick Actions (1/3).**
+7. **Recent Maintenance Requests** (full width).
+
+### Header status pill
+
+| State | Pill |
+|---|---|
+| ONLINE | "Live from MMS" (green) + last synced |
+| NOT_CONFIGURED, NOT_ENABLED | "MMS not configured" (amber) |
+| OFFLINE, FMP API unreachable | "MMS offline" (red) |
+| AUTH_ERROR | "MMS auth error" (red) |
+| SCOPE_RESTRICTED | "Restricted" (neutral) |
+
+### KPI cards
+
+Helper texts per ticket: Open Requests "Active maintenance workload"; In Progress "Work currently being handled"; Waiting For Parts "Jobs delayed by material/parts"; Overdue / Past Start Time "Based on MMS start time rule"; Assigned To Me "Matched by FMP user email"; Completed This Month "Closed this month". With no live data every card shows "—" and an "Unavailable" chip, never 0. Assigned To Me with a null value shows "—" and the server's reason.
+
+### Banner and placeholder text by state
+
+| State | Banner | Section placeholders |
+|---|---|---|
+| NOT_CONFIGURED / NOT_ENABLED | "MMS live integration not enabled. Deploy the MMS live endpoint and set MMS_INTEGRATION_KEY to show live data." (amber) | "Live MMS attention items will appear here after the MMS endpoint is deployed." / "Live MMS recent requests are not available yet." |
+| OFFLINE / API unreachable | "Maintenance MMS is currently unavailable. Live data could not be loaded." (red, with Open MMS) | "Live MMS data could not be loaded. It will appear here automatically once MMS is reachable." |
+| AUTH_ERROR | server message (red) | "…unavailable until the MMS integration credentials are corrected." |
+| SCOPE_RESTRICTED | server message (neutral) | "…shown only to users with all-department Maintenance access." |
+
+Placeholders are a dashed card with a muted icon, so the page reads as waiting for MMS rather than broken. When the 3xx redirect is the cause, the sync strip's detail line reads "MMS live integration not enabled — live endpoint not deployed on MMS yet (MMS redirected to login)."
+
+### Needs Attention
+
+Shows exactly the items MMS returns. New: a summary row of reason chips with counts (Past start time, Urgent priority, High priority, Closure request pending, Waiting for parts, Unassigned), counted over the returned items only and labelled "in the N most urgent job cards from MMS". Each row: ref, status badge (raw status in tooltip), priority, title, reason chips, updated time, Open in MMS.
+
+### Quick Actions (real links only)
+
+- Open MMS → `{MMS_BASE_URL}`
+- Active Job Cards → `{MMS_BASE_URL}/maintenance/work-orders?status=Active`
+- Closure Requests → `{MMS_BASE_URL}/maintenance/work-orders?status=ClosureRequested`
+- FMP Maintenance Requests → `/maintenance`, described as "FMP local maintenance records (not MMS)"
+
+The two MMS list filters are real tab keys in the committed MMS job-card list page. **"Waiting for Parts" and "Overdue / Past Start Time" links were deliberately not added.** MMS has no list view matching either rule: its report modes are manager-only and filter on legacy statuses no live record holds, and its "Materials" tab also includes fully issued job cards. FMP's own `/maintenance?status=WAITING_FOR_PARTS` and `?overdue=true` are FMP-local data and would be misread as MMS numbers.
+
+### Access and security (unchanged)
+
+Same `maintenance.read` permission and ALL_DEPARTMENTS scope rule as FMP-MAINT-01/02. The integration key stays on the FMP API. The banner names the `MMS_INTEGRATION_KEY` variable, as the ticket specifies, but never its value. No MMS database connection and no write to MMS.
+
+### Live verification
+
+- A temporary API (4011) and a temporary production web server (3011) were started from the fresh build, then only those two processes were stopped. The existing API (4000) and web (3000) were not touched.
+- As `test.manager`: `/maintenance/executive` and `/maintenance/dashboard` both return 200 and render the header, "Restricted" pill, sync strip, 6 cards all showing "—", both section placeholders, and Quick Actions with the correct MMS URLs. "View Maintenance Requests", "Quick Links", and "Recent Activity" occur 0 times.
+- `/maintenance`, `/maintenance/my`, `/dashboard`, `/technical` all return 200.
+- **The API process running on port 4000 predates FMP-MAINT-01** and returns 404 for `GET /maintenance/dashboard/live`. Until it is restarted the page shows the red "unavailable" banner, not the real state.
+- Not verified live: the ONLINE, NOT_CONFIGURED, and NOT_ENABLED layouts, because both UAT accounts are department-scoped and the MMS endpoint isn't deployed. Light/dark was not checked in a browser; the page uses only existing semantic color tokens.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1816/1816 |
+| `pnpm --filter @recafco/web test` | ✓ 988/988 (+3) |
+| `pnpm --filter @recafco/web build` | ✓ both maintenance routes compiled |
+| `pnpm db:migrate:status` | ✓ up to date (no schema change) |
+
 ## Risks
 
 - Incomplete module requirements

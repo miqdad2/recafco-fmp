@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import Link from 'next/link';
 import type { Metadata } from 'next';
 import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { contractsApi } from '../../../../lib/contracts-api';
@@ -204,15 +205,16 @@ export default async function ContractWorkflowPage({ searchParams }: PageProps):
         <div className="flex items-center justify-between text-sm text-text-secondary">
           <span>Showing {items.length} of {total}</span>
           <div className="flex gap-2">
+            {/* FMP-PERF-02 — Link, not <a>: see contracts/issues/page.tsx's own comment. */}
             {page > 1 && (
-              <a href={buildHref({ page: String(page - 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
+              <Link href={buildHref({ page: String(page - 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
                 Previous
-              </a>
+              </Link>
             )}
             {page < totalPages && (
-              <a href={buildHref({ page: String(page + 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
+              <Link href={buildHref({ page: String(page + 1) })} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:border-border-strong">
                 Next
-              </a>
+              </Link>
             )}
           </div>
         </div>
