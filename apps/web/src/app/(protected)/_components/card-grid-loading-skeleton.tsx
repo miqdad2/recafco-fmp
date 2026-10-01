@@ -10,11 +10,14 @@ interface Props {
   cardCount: number;
   /** Tailwind grid-column classes — pass the real page's own responsive grid so the skeleton reflows at the same breakpoints. */
   gridClassName?: string;
+  /** Height + radius of each placeholder — pass the real card's own so the skeleton matches it. */
+  cardClassName?: string;
 }
 
 export function CardGridLoadingSkeleton({
   cardCount,
   gridClassName = 'grid-cols-1 gap-2.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
+  cardClassName = 'h-40 rounded-lg',
 }: Props): React.JSX.Element {
   return (
     <div className="min-h-full p-8" aria-live="polite" aria-label="Loading">
@@ -22,7 +25,7 @@ export function CardGridLoadingSkeleton({
         <div className="mx-auto mb-8 h-8 w-80 rounded bg-surface-secondary" />
         <div className={`grid ${gridClassName}`}>
           {Array.from({ length: cardCount }).map((_, i) => (
-            <div key={i} className="h-40 rounded-lg border border-border bg-surface-secondary" />
+            <div key={i} className={`${cardClassName} border border-border bg-surface-secondary`} />
           ))}
         </div>
       </div>

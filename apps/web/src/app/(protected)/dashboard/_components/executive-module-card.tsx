@@ -152,6 +152,36 @@ interface ExecutiveModuleCardProps {
  * button, still nothing that can clip the button) — purely a size pass, the
  * same category of change as FMP-UI-10C's own "narrower grid, smaller card"
  * easing.
+ *
+ * FMP-UI-24 — standardized card: every card is now the SAME structure and
+ * the SAME height, live or setup-pending. This supersedes two earlier
+ * decisions in this history:
+ * - FMP-UI-23B kept the placeholder block deliberately SHORTER than the
+ *   metric grid. It now fills exactly the same content zone instead, so a
+ *   setup-pending card no longer looks smaller/emptier than a live one.
+ * - The card relied on per-row stretch only. The grid (dashboard/page.tsx)
+ *   now uses `auto-rows-fr`, so all rows — not just cards within a row —
+ *   share one height.
+ * Three fixed zones, top to bottom:
+ * 1. Header — icon + title (max 2 lines) left, status badge right (a
+ *    container query re-flows this for narrow 2-per-row tablet cards — see
+ *    the inline note), then the
+ *    subtitle on its own full-width line with 2 lines of height RESERVED
+ *    (`min-h` + `line-clamp-2`), so the content zone starts at the same
+ *    offset on every card whether the subtitle is 1 line or 2.
+ * 2. Content — `flex-1`, so it absorbs any extra row height itself (the
+ *    metric tiles / pending block grow; no gap opens above the button, the
+ *    failure mode FMP-UI-09B warned about). Live: 2x2 grid with
+ *    `auto-rows-fr` (4 equal tiles). Pending: one block with the same
+ *    minimum height as that grid.
+ * 3. Button — fixed `h-9`, single line (`truncate` as a safety net), so
+ *    every button is the same height at the same vertical position.
+ * Style: full module-colored border (was a 3px left accent on a grey
+ * border), `rounded-2xl`, `p-3.5`. Tints are now derived from the module's
+ * BASE color at low alpha (`${base}12`) rather than the palette's fixed
+ * `light` pastel, so tiles read correctly on both the light and the dark
+ * card surface. Still literal hex via inline `style` only (see the top of
+ * this comment for why).
  */
 export function ExecutiveModuleCard({
   title,
@@ -163,67 +193,66 @@ export function ExecutiveModuleCard({
 }: ExecutiveModuleCardProps): React.JSX.Element {
   const palette = ACCENT_PALETTE[accent];
   const isPlaceholder = metrics.every((m) => m.value === null);
+  // Module tint that works on both the light and the dark card surface.
+  const tint = `${palette.base}12`;
 
   return (
     <Link
       href={href}
-      className="group flex h-full min-h-48 flex-col rounded-xl border border-border/60 bg-surface p-3 shadow-sm transition-[box-shadow,border-color] hover:border-border hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
-      style={{ borderLeftWidth: '3px', borderLeftColor: `${palette.base}cc` }}
+      className="group @container flex h-full min-h-64 flex-col rounded-2xl border-[1.5px] bg-surface p-3.5 shadow-sm transition-[box-shadow,transform] hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
+      style={{ borderColor: `${palette.base}8c` }}
     >
-      {/* Content — header + metrics, flex-1 so the button wrapper below is always pushed to the bottom. */}
-      <div className="flex-1">
-        {/* Header — items-start (not items-center) so the icon aligns with
-            the title's top line rather than its vertical midpoint once the
-            title wraps to 2 lines. A status badge sits top-right, on the
-            same row, so it reads at a glance without competing with the
-            title for space. */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-start gap-2">
-            <span
-              className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg"
-              style={{ backgroundColor: palette.light, color: palette.base }}
-            >
-              <Icon className="size-4" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-bold leading-tight text-text-primary">{title}</h2>
-              <p className="mt-0.5 text-[11px] leading-snug text-text-muted">{description}</p>
-            </div>
-          </div>
-          {isPlaceholder ? (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
-              Setup Pending
-            </span>
-          ) : (
-            <span className="inline-flex shrink-0 items-center rounded-full bg-success-light px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
-              Live
-            </span>
-          )}
-        </div>
+      {/* 1. Header zone — identical height on every card. Normally one row:
+          icon, title (flex-1, max 2 lines), badge. In a NARROW card (content
+          box under 15.5rem — the 2-per-row tablet layout) a long title can't
+          fit between the icon and the "Setup Pending" badge, so via a
+          container query the title drops to its own full-width row and the
+          badge moves up beside the icon. Every card in the grid shares one
+          column width, so they all switch together and stay identical. */}
+      <div className="flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        <span
+          className="order-1 flex size-9 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: palette.light, color: palette.base }}
+        >
+          <Icon className="size-[1.125rem]" aria-hidden="true" />
+        </span>
+        <h2 className="order-2 line-clamp-2 min-w-0 flex-1 text-[15px] font-bold leading-tight text-text-primary @max-[15.5rem]:order-3 @max-[15.5rem]:basis-full">
+          {title}
+        </h2>
+        <span
+          className={`order-3 inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase leading-4 tracking-wide @max-[15.5rem]:order-2 @max-[15.5rem]:ml-auto ${
+            isPlaceholder ? 'border-border bg-surface-secondary text-text-secondary' : 'border-transparent bg-success-light text-success'
+          }`}
+        >
+          {isPlaceholder ? 'Setup Pending' : 'Live'}
+        </span>
+      </div>
+      {/* Two lines always reserved, so the content zone starts at the same offset on every card. */}
+      <p className="mt-1.5 line-clamp-2 min-h-[1.875rem] text-[11px] leading-[0.9375rem] text-text-muted" title={description}>
+        {description}
+      </p>
 
-        {/* FMP-UI-23B — placeholder block deliberately kept SHORTER than the
-            2-row metrics grid below (one line + one line, tighter padding)
-            so a setup-pending card (Estimation, Storage Yard & Delivery,
-            Quality Control) never grows taller than a live card sitting
-            next to it in the same row — the grid's row-stretch would
-            otherwise force every card in that row up to match a taller
-            placeholder, defeating the point of compacting. */}
+      {/* 2. Content zone — flex-1: it (not a gap above the button) absorbs any extra height. */}
+      <div className="mt-2.5 flex flex-1 flex-col">
         {isPlaceholder ? (
-          <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: `${palette.light}80` }}>
-            <p className="text-[13px] font-bold text-text-primary">Setup Pending</p>
-            <p className="mt-0.5 text-[11px] text-text-muted">Module will be configured in a future unit.</p>
+          <div
+            className="flex min-h-26 flex-1 flex-col items-center justify-center rounded-xl border border-dashed px-3 py-2 text-center"
+            style={{ backgroundColor: tint, borderColor: `${palette.base}40` }}
+          >
+            <p className="text-sm font-bold text-text-primary">Setup Pending</p>
+            <p className="mt-1 text-[11px] leading-snug text-text-muted">Module will be configured in a future unit.</p>
           </div>
         ) : (
-          <div className="mt-2 grid grid-cols-2 gap-2">
+          <div className="grid flex-1 auto-rows-fr grid-cols-2 gap-2">
             {metrics.map((m) => (
-              <div key={m.label} className="rounded-lg px-2 py-1.5" style={{ backgroundColor: `${palette.light}70` }}>
+              <div key={m.label} className="flex min-h-12 flex-col justify-center rounded-xl px-2.5 py-1.5" style={{ backgroundColor: tint }}>
                 {m.value !== null ? (
-                  <p className="text-[17px] font-extrabold leading-none text-text-primary">{m.value}</p>
+                  <p className="text-lg font-extrabold leading-none text-text-primary">{m.value}</p>
                 ) : (
-                  <p className="text-[11px] font-medium leading-none text-text-muted">Not available</p>
+                  <p className="text-[11px] font-medium leading-[1.125rem] text-text-muted">Not available</p>
                 )}
-                <p className="mt-0.5 flex items-start gap-1.5 text-[11px] font-semibold leading-snug text-text-secondary">
-                  <span className="mt-1 inline-block size-1.5 shrink-0 rounded-full" style={{ backgroundColor: palette.base }} aria-hidden="true" />
+                <p className="mt-1 flex items-start gap-1.5 text-[11px] font-semibold leading-tight text-text-secondary">
+                  <span className="mt-[0.1875rem] inline-block size-1.5 shrink-0 rounded-full" style={{ backgroundColor: palette.base }} aria-hidden="true" />
                   <span>{m.label}</span>
                 </p>
               </div>
@@ -232,27 +261,15 @@ export function ExecutiveModuleCard({
         )}
       </div>
 
-      {/* Button-look wrapper — mt-auto anchors it to the card's bottom. Module-
-          colored via literal hex in style (never a CSS variable/Tailwind
-          color class — see this file's own doc comment). A `<span>`, not a
-          `<Link>` — the whole card above is now the one real anchor (FMP-UI-07);
-          `group-hover` reproduces the old hover feedback from anywhere on
-          the card, not just this element. */}
-      <div className="mt-auto pt-2">
-        {/* min-h, not h — "Open Quality Control"/"Open Storage Yard &
-            Delivery" are long enough to wrap to 2 lines on a narrow
-            4-column card; a fixed height would clip that text. A wrapped
-            button just makes its own row a little taller, and the grid's
-            default row-stretch (see dashboard/page.tsx) keeps every other
-            card in that same row matching it — still equal heights across
-            the row, never a clipped label. */}
-        <span
-          style={{ backgroundColor: palette.base }}
-          className="flex min-h-9 w-full items-center justify-center rounded-lg px-3 py-1.5 text-center text-[13px] font-semibold leading-snug text-white shadow-sm transition group-hover:shadow-md group-hover:brightness-95"
-        >
-          Open {title}
-        </span>
-      </div>
+      {/* 3. Button zone — fixed height, always at the card's bottom edge. A
+          `<span>`, not a `<Link>`: the whole card is the one real anchor
+          (FMP-UI-07); `group-hover` gives hover feedback from anywhere on it. */}
+      <span
+        style={{ backgroundColor: palette.base }}
+        className="mt-2.5 flex h-9 w-full shrink-0 items-center justify-center rounded-xl px-3 text-[13px] font-semibold text-white shadow-sm transition group-hover:shadow-md group-hover:brightness-95 @max-[15.5rem]:px-2 @max-[15.5rem]:text-xs"
+      >
+        <span className="truncate">Open {title}</span>
+      </span>
     </Link>
   );
 }

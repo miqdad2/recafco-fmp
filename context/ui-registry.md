@@ -2865,3 +2865,14 @@ Do not register one-off page markup. Do not create duplicate components with sli
 - **Avoid duplicate nav.** A shared component with header actions should take a prop to drop an action the host page already provides (`showBackLink`).
 - Header pill labels: "Live from MMS", "MMS not configured" (both not-configured and not-deployed), "MMS offline", "MMS auth error", "Restricted".
 
+## Standardized Platform Dashboard Module Card (FMP-UI-24)
+
+- **`ExecutiveModuleCard` is three fixed zones:** header (icon, title max 2 lines, badge; subtitle below with 2 lines reserved), content (`flex-1`), button (`h-9`). Any new card variant must fill the same content zone, never add a zone.
+- **Equal height across the whole grid** needs `auto-rows-fr` on the grid. Row stretch alone only equalizes cards within a row. It is safe only when a zone inside the card is `flex-1` and its children stretch (`auto-rows-fr` tiles, or a `flex-1` block), otherwise the extra height becomes a gap above the button.
+- **Reserve space instead of letting text push content.** A fixed row min-height for a 1-or-2-line title and a `min-h` + `line-clamp-2` subtitle keep the content zone at the same offset on every card.
+- **Setup-pending block:** dashed border and tint in the module color, centered text, same minimum height as the 2x2 metric grid. This supersedes FMP-UI-23B's "keep the placeholder shorter" rule.
+- **Grid columns by minimum card width, not viewport breakpoints:** `grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] lg:grid-cols-[repeat(auto-fill,minmax(17.5rem,1fr))]`. With a persistent sidebar, viewport breakpoints overestimate the content width. Inside `max-w-7xl` this yields at most 4 columns.
+- **Container query for narrow cards:** the card is `@container`; under a 15.5rem content box the title moves to its own row (`@max-[15.5rem]:order-3 @max-[15.5rem]:basis-full`) and the badge sits beside the icon. Prefer this to truncating a long module title.
+- **Theme-safe tints:** use the module base color with an alpha suffix (`${base}12`) for tile backgrounds. A fixed light pastel hex only works on a light surface.
+- **Verify layout numerically.** A Playwright script that reports the set of distinct card heights, button offsets, and content offsets across all cards catches 2px drift that a screenshot review misses.
+

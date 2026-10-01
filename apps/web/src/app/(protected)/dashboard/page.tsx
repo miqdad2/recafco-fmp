@@ -202,8 +202,23 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
             medium desktop) → 4 (xl, large desktop).
             FMP-UI-23B — gap eased gap-3 → gap-2.5 (a small additional
             contribution to fitting 3 rows of compacted cards without page
-            scroll, on top of this component's own per-card size pass). */}
-        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            scroll, on top of this component's own per-card size pass).
+            FMP-UI-24 — standardized grid:
+            - `auto-rows-fr`: every ROW is the same height, so all 11 cards
+              are equal height (row-stretch alone only equalized cards
+              within one row). Each card's own content zone is `flex-1`, so
+              the extra height goes into its tiles, not a gap above the button.
+            - Columns are `auto-fill` with a minimum card width (17.5rem
+              from `lg` up; 14rem below it, so a tablet with the sidebar
+              open still gets 2 per row) instead of fixed column counts: the sidebar makes the real content width
+              much narrower than the viewport, so `xl:grid-cols-4` could
+              squeeze 4 cards into ~230px each. Now it is 4 per row when
+              there is room for four 280px cards (the max-w-7xl container
+              fits exactly 4, never 5), 3 or 2 on narrower widths, 1 on
+              mobile — and a card is never narrower than its own content
+              needs. The last row's 3 cards keep the same column width.
+            - One uniform `gap-3.5` (was 2.5) in both directions. */}
+        <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] gap-3.5 lg:grid-cols-[repeat(auto-fill,minmax(17.5rem,1fr))]">
           {cards.map((card) => (
             <ExecutiveModuleCard
               key={card.code}

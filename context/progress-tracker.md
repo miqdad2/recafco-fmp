@@ -13439,6 +13439,83 @@ Same `maintenance.read` permission and ALL_DEPARTMENTS scope rule as FMP-MAINT-0
 | `pnpm --filter @recafco/web build` | ✓ both maintenance routes compiled |
 | `pnpm db:migrate:status` | ✓ up to date (no schema change) |
 
+## FMP-UI-24 — Standardize Platform Dashboard Module Cards (Completed 2026-10-01)
+
+### Summary
+
+All 11 Platform Dashboard module cards now share one structure and one height, live or setup-pending. UI only: no backend, route, permission, label, order, or data-fetching change.
+
+**The "approved second screenshot" was not available.** No image reached this session, so the design was built from the ticket's written spec, not matched against the screenshot. If the approved card differs (for example header arrangement, border weight, or padding), that needs a follow-up with the image.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx`: card layout rewritten (props unchanged).
+- `apps/web/src/app/(protected)/dashboard/page.tsx`: grid classes only.
+- `apps/web/src/app/(protected)/dashboard/loading.tsx` and `_components/card-grid-loading-skeleton.tsx`: skeleton matches the new grid, card height, and radius (new optional `cardClassName` prop; default unchanged).
+
+### Card layout
+
+Three fixed zones, top to bottom:
+
+1. **Header.** Icon chip (`size-9`, `rounded-xl`, soft module tint), title (15px bold, max 2 lines), status badge top-right (LIVE or SETUP PENDING, same size and radius). The row reserves 40px so a 2-line title doesn't move anything below it. The subtitle sits on its own full-width line with 2 lines of height always reserved.
+2. **Content** (`flex-1`). Live cards: 2x2 grid with `auto-rows-fr`, so four equal tiles (tinted background, large bold count, dot + label). Setup-pending cards: one dashed, tinted block with "Setup Pending" and "Module will be configured in a future unit.", with the same minimum height as the metric grid (104px).
+3. **Button.** Fixed `h-9`, full width, `rounded-xl`, module color, white text, single line.
+
+Card style: `rounded-2xl`, 1.5px full border in the module color at 55% alpha (was a 3px left accent on a grey border), `p-3.5`, `shadow-sm` with a lift on hover.
+
+### Equal-height implementation
+
+- The grid uses `auto-rows-fr`, so every row is the same height. Previously only cards within one row matched.
+- Each card is `h-full` with a `min-h-64` floor.
+- The content zone is `flex-1`, so any extra height goes into the tiles or the pending block, not into a gap above the button.
+- This reverses FMP-UI-23B's rule that the pending block must stay shorter than the metric grid.
+
+### Button alignment
+
+The card is `flex flex-col`; the header and button are fixed-height and the content zone grows. Measured in a headless browser: every button is 36px high and ends 15px above the card's bottom edge, on all 11 cards at every viewport tested.
+
+### Colors
+
+Module identity is unchanged (`ACCENT_PALETTE`). Tile and pending-block tints now use the module's base color at 7% alpha instead of the fixed light pastel, so they read correctly on both the light and the dark card surface.
+
+### Responsive grid
+
+Columns use `auto-fill` with a minimum card width instead of fixed viewport breakpoints, because the open sidebar makes the content area much narrower than the viewport. Minimum is 17.5rem from `lg` up and 14rem below. One uniform `gap-3.5`.
+
+| Viewport | Columns | Card width | Card height | Page scroll |
+|---|---|---|---|---|
+| 1920x1080 | 4 (4+4+3) | 298px | 266px | none |
+| 1366x768 | 3 | 345px | 266px | yes |
+| 820 wide (tablet, sidebar open) | 2 | 255px | 287px | yes |
+| 768 wide (tablet portrait) | 2 | 229px | 287px | yes |
+| 390 wide (mobile) | 1 | 350px | 266px | yes |
+
+In narrow cards (content box under 15.5rem, the 2-per-row tablet layout) a container query moves the title to its own row under the icon and badge, because "Storage Yard & Delivery" cannot fit between the icon and the SETUP PENDING badge at that width. All cards share one column width, so they all switch together. The button label drops to 12px in that mode so "Open Maintenance Management" is not truncated.
+
+### Heading
+
+"Factory Operations Control Center" is unchanged (large, bold, centered, no subtitle), with the existing 24–32px gap above the grid.
+
+### Verification
+
+- Headless Chromium (Playwright, already installed for the MMS project) against temporary servers on ports 4011/3011, as `test.manager`, at the five viewports above plus 1920x1080 dark. At every viewport all 11 cards reported a single value for card height, content-zone offset, content-zone height, button height, and button position. No truncated button labels and no clamped subtitles.
+- Light and dark screenshots reviewed.
+- `/contracts/executive`, `/technical`, `/maintenance/executive`, `/incidents/executive` return 200.
+- After the user restarted `turbo dev` (13:43), the running API on port 4000 serves `GET /maintenance/dashboard/live` (200) and `/dashboard` loads on port 3000.
+- Not checked: the dashboard for a user who sees fewer than 11 cards, and the System theme setting specifically (light and dark were checked).
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 988/988 |
+| `pnpm --filter @recafco/api test` | ✓ 1816/1816 |
+| `pnpm --filter @recafco/web build` | ✓ compiled |
+| `pnpm db:migrate:status` | ✓ up to date |
+
 ## Risks
 
 - Incomplete module requirements
