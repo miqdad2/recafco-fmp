@@ -58,10 +58,126 @@ export interface MmsRecentRequestItem {
   openUrl: string;
 }
 
+// ── FMP-MAINT-04 — MMS executive-summary sections ────────────────────────────
+// Each section is null when MMS did not send it (older MMS build, or MMS could
+// not compute it). null is shown as "Not available from MMS live API yet" —
+// never as 0.
+
+export interface MmsLinks {
+  dashboard: string;
+  jobCards: string;
+  materialsRequests: string;
+  inventory: string;
+  assets: string;
+  vehicles: string;
+  workerActivity: string;
+  dailyActivity: string;
+}
+
+export interface MmsJobCardsSection {
+  totalJobCards: number;
+  activeJobs: number;
+  inProgress: number;
+  closureRequests: number;
+  completedThisMonth: number;
+  paused: number | null;
+  workingNow: number | null;
+  openUrl: string;
+}
+
+export interface MmsMaterialsRequestsSection {
+  totalMaterialsRequests: number;
+  pendingMaterialsRequests: number;
+  completedMaterialsRequests: number;
+  jobCardMaterialsRequests: number | null;
+  generalInventoryRequests: number | null;
+  /** Job cards still waiting on materials. */
+  materialsPending: number;
+  openUrl: string;
+}
+
+export interface MmsInventorySection {
+  totalMaterials: number;
+  /** Sum of unit balances — may be fractional or negative. */
+  currentBalance: number;
+  lowStockCount: number;
+  outOfStockCount: number | null;
+  /** null = MMS did not send cost figures. */
+  currentStockValueKwd: number | null;
+  receivedThisMonthKwd: number | null;
+  issuedThisMonthKwd: number | null;
+  openUrl: string;
+}
+
+export interface MmsAssetsSection {
+  totalAssets: number;
+  assetsAtSite: number;
+  activeMaintenance: number;
+  overdueReturn: number;
+  assetTypeBreakdown: { type: string; count: number }[];
+  openUrl: string;
+}
+
+export interface MmsVehicleExpiryAlert {
+  assetRef: string;
+  title: string;
+  expiryType: string;
+  /** YYYY-MM-DD */
+  expiryDate: string;
+  /** Negative when already expired. */
+  daysRemaining: number | null;
+  overdueDays: number;
+  openUrl: string;
+}
+
+export interface MmsVehicleComplianceSection {
+  vehicleExpiryAlerts: number;
+  expiringSoon: number;
+  expiredCount: number;
+  windowDays: number | null;
+  topVehicleExpiryAlerts: MmsVehicleExpiryAlert[];
+  openUrl: string;
+}
+
+export interface MmsLaborSection {
+  workingNow: number;
+  pausedWorkers: number;
+  laborHoursToday: number;
+  laborCostTodayKwd: number | null;
+  laborHoursThisWeek: number | null;
+  laborCostThisWeekKwd: number | null;
+  openUrl: string;
+}
+
+export interface MmsManagerAttentionItem {
+  /** closure_request | vehicle_expiry | overdue_job | waiting_materials | low_stock | unassigned_job | priority_job */
+  type: string;
+  ref: string;
+  title: string;
+  reason: string;
+  status: string | null;
+  priority: string | null;
+  openUrl: string;
+}
+
+export interface MmsManagerAttentionSection {
+  needsManagerAttention: number;
+  counts: {
+    closureRequests: number | null;
+    vehicleExpiryAlerts: number | null;
+    overdueJobs: number | null;
+    waitingMaterials: number | null;
+    lowStock: number | null;
+    unassignedJobs: number | null;
+  };
+  attentionItems: MmsManagerAttentionItem[];
+}
+
 export interface MmsLiveDashboard {
   status: MmsLiveStatus;
   message: string | null;
-  mmsBaseUrl: string;
+  /** PUBLIC address of the Maintenance Management System — the only MMS address the browser ever receives. */
+  mmsPublicBaseUrl: string;
   /** Browser auto-refresh interval in seconds (server-configured, minimum 15). */
   refreshSeconds: number;
   /** MMS's generatedAt for the data shown (null when there is no data). */
@@ -72,6 +188,15 @@ export interface MmsLiveDashboard {
   assignedToMeNote: string | null;
   needsAttention: MmsNeedsAttentionItem[];
   recentRequests: MmsRecentRequestItem[];
+  /** Real MMS routes on the configured MMS origin (present in every state). */
+  links: MmsLinks;
+  jobCards: MmsJobCardsSection | null;
+  materialsRequests: MmsMaterialsRequestsSection | null;
+  inventory: MmsInventorySection | null;
+  assets: MmsAssetsSection | null;
+  vehicleCompliance: MmsVehicleComplianceSection | null;
+  labor: MmsLaborSection | null;
+  managerAttention: MmsManagerAttentionSection | null;
 }
 
 export interface MmsApiError {

@@ -1,29 +1,42 @@
 import Link from 'next/link';
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowUpRight,
+  Boxes,
+  CarFront,
   CheckCircle2,
-  Hammer,
+  ClipboardCheck,
+  ClipboardList,
+  HardHat,
   Info,
   PackageSearch,
-  UserCheck,
+  Timer,
+  Truck,
   Wrench,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { fetchMmsLiveDashboard } from '@/lib/mms-api';
 import type { MmsLiveDashboard, MmsLiveStatus } from '@/lib/mms-api';
 import { MmsLiveControls } from './mms-live-controls';
+import { MmsCard, MmsCardNote } from './mms-card';
 import { MmsKpiCard } from './mms-kpi-card';
 import type { MmsKpiAccent } from './mms-kpi-card';
-import { MmsNeedsAttention } from './mms-needs-attention';
-import { MmsRecentTable } from './mms-recent-table';
-import { MmsSyncStrip } from './mms-sync-strip';
+import { ATTENTION_LIMIT, MmsManagerAttention } from './mms-manager-attention';
+import { MmsModulesSummary } from './mms-modules-summary';
+import { MmsRecentTable, RECENT_LIMIT } from './mms-recent-table';
 import { MmsQuickActions } from './mms-quick-actions';
-import { MmsUnavailableState } from './mms-unavailable-state';
-import { MMS_LIVE_STATUS_DISPLAY, formatSyncTime } from '../../_lib/mms-format';
+import { MMS_LIVE_STATUS_DISPLAY, fallbackMmsLinks, formatHours, formatSyncTime } from '../../_lib/mms-format';
 
-// Used only if the FMP API itself can't be reached (the API normally supplies
-// mmsBaseUrl from its MMS_BASE_URL config). Not a secret — the MMS web app URL.
-const FALLBACK_MMS_BASE_URL = 'http://192.168.1.17:81';
+// FMP-MAINT-06 — the PUBLIC Maintenance Management System address. Every
+// link a user can click points here. The FMP API normally supplies it (from
+// MMS_PUBLIC_BASE_URL); this constant is only used if the FMP API itself
+// can't be reached. The internal address the API uses to call MMS is never
+// sent to the browser.
+const FALLBACK_MMS_PUBLIC_URL = 'https://maintenance.recafco.online';
+/** User-facing wording: most users don't know what "MMS" means. */
+const OPEN_SYSTEM_LABEL = 'Open Maintenance Management System';
+const OPEN_SYSTEM_LABEL_SHORT = 'Open Maintenance System';
 const DEFAULT_REFRESH_SECONDS = 30;
 const OFFLINE_MESSAGE = 'Maintenance MMS is currently unavailable. Live data could not be loaded.';
 const NOT_ENABLED_MESSAGE =
@@ -32,14 +45,25 @@ const NOT_ENABLED_MESSAGE =
 // ---------------------------------------------------------------------------
 // FMP-MAINT-03 — the Maintenance Control Center, shared by the module's two
 // entry points: /maintenance/executive (Platform Dashboard card, executive
-// sidebar, module switcher — the page most users actually land on, which
-// until this unit still showed FMP-local data with quick links and an
-// oversized button) and /maintenance/dashboard (department sidebar).
+// sidebar, module switcher) and /maintenance/dashboard (department sidebar).
+//
+// FMP-MAINT-04 — expanded from a job-card dashboard into a live executive
+// summary of the whole MMS: job cards, materials requests, inventory, assets,
+// vehicle expiry, and labor, with MMS's Manager Attention up front.
 //
 // Data: the browser calls the FMP API only (GET /maintenance/dashboard/live),
 // which calls MMS's key-authenticated read-only live API server-to-server
 // (FMP-MAINT-02). Every number/row is real MMS data or an explicit
 // unavailable state — never a placeholder or a fake 0.
+//
+// FMP-MAINT-05 — one-screen executive layout. MAINT-04 stacked nine blocks
+// (header, banner, sync strip, two KPI rows, two attention lists, quick
+// actions, a full recent table, five expanded module panels) and read as a
+// long report. Now: a slim header, two slim KPI rows, and one two-column
+// grid — Manager Attention (top 5) + Recent Requests (latest 5) on the left,
+// Quick Actions (2x3) + a five-row module summary on the right. Why there
+// is no live data is said ONCE, in the single banner; cards show "—" and
+// sections a short muted line. Details live in MMS, one click away.
 // ---------------------------------------------------------------------------
 
 function apiErrorMessage(status: number): string {
@@ -51,93 +75,113 @@ function apiErrorMessage(status: number): string {
 interface KpiDef {
   label: string;
   value: number | null;
+  display?: string;
   helperText: string;
-  icon: typeof Wrench;
+  icon: LucideIcon;
   accent: MmsKpiAccent;
-  unavailableText?: string;
 }
 
-function buildKpis(d: MmsLiveDashboard | null): KpiDef[] {
-  const s = d?.summary ?? null;
+const alertAccent = (n: number | null | undefined, hot: MmsKpiAccent, calm: MmsKpiAccent): MmsKpiAccent => ((n ?? 0) > 0 ? hot : calm);
+
+/** The six headline numbers a manager acts on. */
+function buildPrimaryKpis(d: MmsLiveDashboard | null): KpiDef[] {
   return [
-    { label: 'Open Requests', value: s?.openRequests ?? null, helperText: 'Active maintenance workload', icon: Wrench, accent: 'teal' },
-    { label: 'In Progress', value: s?.inProgress ?? null, helperText: 'Work currently being handled', icon: Hammer, accent: 'info' },
-    { label: 'Waiting For Parts', value: s?.waitingForParts ?? null, helperText: 'Jobs delayed by material/parts', icon: PackageSearch, accent: 'secondary' },
+    { label: 'Active Jobs', value: d?.jobCards?.activeJobs ?? null, helperText: 'Job cards being worked on', icon: Wrench, accent: 'teal' },
     {
-      label: 'Overdue / Past Start Time',
-      value: s?.overdue ?? null,
-      helperText: 'Based on MMS start time rule',
-      icon: AlertTriangle,
-      accent: (s?.overdue ?? 0) > 0 ? 'error' : 'warning',
+      label: 'Closure Requests',
+      value: d?.jobCards?.closureRequests ?? null,
+      helperText: 'Awaiting manager closure',
+      icon: ClipboardCheck,
+      accent: alertAccent(d?.jobCards?.closureRequests, 'warning', 'neutral'),
     },
     {
-      label: 'Assigned To Me',
-      value: s?.assignedToMe ?? null,
-      helperText: 'Matched by FMP user email',
-      icon: UserCheck,
-      accent: 'neutral',
-      unavailableText: d?.assignedToMeNote ?? 'Unavailable — FMP user email not set',
+      label: 'Materials Pending',
+      value: d?.materialsRequests?.materialsPending ?? null,
+      helperText: 'Job cards waiting on materials',
+      icon: PackageSearch,
+      accent: alertAccent(d?.materialsRequests?.materialsPending, 'secondary', 'neutral'),
     },
-    { label: 'Completed This Month', value: s?.completedThisMonth ?? null, helperText: 'Closed this month', icon: CheckCircle2, accent: 'success' },
+    {
+      label: 'Low Stock / Needs Attention',
+      value: d?.inventory?.lowStockCount ?? null,
+      helperText: 'Low, out of, or negative stock',
+      icon: Boxes,
+      accent: alertAccent(d?.inventory?.lowStockCount, 'warning', 'neutral'),
+    },
+    { label: 'Total Assets', value: d?.assets?.totalAssets ?? null, helperText: 'Registered assets & equipment', icon: Truck, accent: 'info' },
+    {
+      label: 'Vehicle Expiry Alerts',
+      value: d?.vehicleCompliance?.vehicleExpiryAlerts ?? null,
+      helperText: 'Insurance / registration expiring',
+      icon: CarFront,
+      accent: alertAccent(d?.vehicleCompliance?.vehicleExpiryAlerts, 'error', 'neutral'),
+    },
   ];
 }
 
-/** Exactly one banner for any non-ONLINE state. */
-function StateBanner({ status, message, mmsBaseUrl }: { status: MmsLiveStatus; message: string | null; mmsBaseUrl: string }): React.JSX.Element | null {
+function buildSecondaryKpis(d: MmsLiveDashboard | null): KpiDef[] {
+  const hours = d?.labor?.laborHoursToday ?? null;
+  return [
+    { label: 'Total Job Cards', value: d?.jobCards?.totalJobCards ?? null, helperText: '', icon: ClipboardList, accent: 'neutral' },
+    { label: 'Materials Requests', value: d?.materialsRequests?.totalMaterialsRequests ?? null, helperText: '', icon: PackageSearch, accent: 'neutral' },
+    { label: 'Inventory Items', value: d?.inventory?.totalMaterials ?? null, helperText: '', icon: Boxes, accent: 'neutral' },
+    { label: 'Working Now', value: d?.labor?.workingNow ?? null, helperText: '', icon: HardHat, accent: 'success' },
+    { label: 'Labor Hours Today', value: hours, ...(hours !== null ? { display: formatHours(hours) } : {}), helperText: '', icon: Timer, accent: 'info' },
+    // From the original job-card summary, so it is present for every MMS build.
+    { label: 'Completed This Month', value: d?.summary?.completedThisMonth ?? null, helperText: '', icon: CheckCircle2, accent: 'success' },
+  ];
+}
+
+/**
+ * Exactly one compact banner for any non-ONLINE state — the only place the
+ * reason for missing live data is spelled out. `detail` is the FMP API's own
+ * specific explanation (never contains secrets).
+ */
+function StateBanner({ status, detail, mmsPublicUrl }: { status: MmsLiveStatus; detail: string | null; mmsPublicUrl: string }): React.JSX.Element | null {
   if (status === 'ONLINE') return null;
 
-  if (status === 'OFFLINE') {
-    return (
-      <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error bg-error-light px-4 py-3 text-sm text-error">
-        <span className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span className="font-semibold">{OFFLINE_MESSAGE}</span>
-        </span>
-        <a href={mmsBaseUrl} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
-          Open MMS
-        </a>
-      </div>
-    );
-  }
-
-  const banner =
-    status === 'AUTH_ERROR'
-      ? { box: 'border-error bg-error-light text-error', text: message ?? 'MMS integration authentication failed.' }
-      : status === 'SCOPE_RESTRICTED'
-        ? { box: 'border-border-strong bg-surface-secondary text-text-secondary', text: message ?? 'Live MMS data is restricted.' }
-        : // NOT_CONFIGURED (no key on FMP) and NOT_ENABLED (MMS endpoint not deployed / key missing on MMS)
-          { box: 'border-warning bg-warning-light text-warning', text: NOT_ENABLED_MESSAGE };
-
-  return (
-    <div role={status === 'AUTH_ERROR' ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm font-medium ${banner.box}`}>
-      <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-      <p>{banner.text}</p>
-    </div>
-  );
-}
-
-/** Section placeholder text — specific to WHY there is no live data. */
-function unavailableMessage(section: 'attention' | 'recent', status: MmsLiveStatus | null): string {
+  const isError = status === 'OFFLINE' || status === 'AUTH_ERROR';
+  const box = isError
+    ? 'border-error bg-error-light text-error'
+    : status === 'SCOPE_RESTRICTED'
+      ? 'border-border-strong bg-surface-secondary text-text-secondary'
+      : 'border-warning bg-warning-light text-warning';
+  // Said once. OFFLINE / AUTH_ERROR / SCOPE_RESTRICTED: the FMP API's own sentence
+  // already is the full message. NOT_CONFIGURED / NOT_ENABLED: the fixed
+  // instruction, plus only the specific reason after the API message's dash.
+  let headline: string;
+  let reason: string | null = null;
   if (status === 'NOT_CONFIGURED' || status === 'NOT_ENABLED') {
-    return section === 'attention'
-      ? 'Live MMS attention items will appear here after the MMS endpoint is deployed.'
-      : 'Live MMS recent requests are not available yet.';
+    headline = NOT_ENABLED_MESSAGE;
+    const dash = detail?.indexOf('—') ?? -1;
+    if (detail && dash !== -1) reason = detail.slice(dash + 1).trim();
+  } else if (status === 'OFFLINE') {
+    headline = detail ?? OFFLINE_MESSAGE;
+  } else if (status === 'AUTH_ERROR') {
+    headline = detail ?? 'MMS integration authentication failed.';
+  } else {
+    headline = detail ?? 'Live MMS data is restricted.';
   }
-  if (status === 'AUTH_ERROR') return 'Live MMS data is unavailable until the MMS integration credentials are corrected.';
-  if (status === 'SCOPE_RESTRICTED') return 'Live MMS data is shown only to users with all-department Maintenance access.';
-  return 'Live MMS data could not be loaded. It will appear here automatically once MMS is reachable.';
-}
+  const Icon = isError ? AlertTriangle : Info;
 
-function SectionHeading({ id, children, aside }: { id: string; children: React.ReactNode; aside?: React.ReactNode }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <h2 id={id} className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-        {children}
-      </h2>
-      {aside}
+    <div role={isError ? 'alert' : 'status'} className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border px-3.5 py-2 text-xs ${box}`}>
+      <span className="flex min-w-0 items-start gap-2">
+        <Icon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+        <span>
+          <span className="font-semibold">{headline}</span>
+          {reason && <span className="opacity-90"> Reason: {reason}</span>}
+        </span>
+      </span>
+      <a href={mmsPublicUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 font-semibold underline">
+        {OPEN_SYSTEM_LABEL_SHORT}
+      </a>
     </div>
   );
 }
+
+/** Short section note when there is no live data — the banner carries the detail. */
+const NO_LIVE_DATA = 'No live data.';
 
 interface Props {
   /** false on /maintenance/executive, whose ExecutiveModuleNav row already has this exact link directly above the header. */
@@ -151,149 +195,158 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
 
   const status = dashboard?.status ?? null;
   const isOnline = status === 'ONLINE' && dashboard !== null;
-  const mmsBaseUrl = dashboard?.mmsBaseUrl ?? FALLBACK_MMS_BASE_URL;
+  const mmsPublicUrl = dashboard?.mmsPublicBaseUrl ?? FALLBACK_MMS_PUBLIC_URL;
+  // Real MMS routes: from the FMP API when reachable, otherwise built on the fallback MMS address.
+  const links = dashboard?.links ?? fallbackMmsLinks(mmsPublicUrl);
   const refreshSeconds = dashboard?.refreshSeconds ?? DEFAULT_REFRESH_SECONDS;
   // Poll only states that can recover by themselves; config/auth/scope states need an admin.
   const autoRefresh =
     status === 'ONLINE' || status === 'OFFLINE' || (loadError !== null && loadError.status !== 401 && loadError.status !== 403);
   // One "now" per render so every relative time on the page is consistent.
   const now = Date.now();
-  const kpis = buildKpis(dashboard);
   const pill = status ? MMS_LIVE_STATUS_DISPLAY[status] : MMS_LIVE_STATUS_DISPLAY.OFFLINE;
+  const managerAttention = isOnline ? dashboard.managerAttention : null;
+  const attentionTotal = managerAttention?.needsManagerAttention ?? (isOnline ? dashboard.needsAttention.length : 0);
+  const recentCount = isOnline ? Math.min(dashboard.recentRequests.length, RECENT_LIMIT) : 0;
+  const smallLink = 'inline-flex items-center gap-0.5 text-[11px] font-semibold text-accent hover:underline';
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-border bg-surface px-5 py-4 shadow-sm">
-        <div className="flex min-w-0 items-center gap-3.5">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-teal-light text-teal">
-            <Wrench className="size-6" aria-hidden="true" />
+    <div className="space-y-2.5">
+      {/* Compact header */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-sm">
+        <div className="flex min-w-0 flex-1 basis-80 items-center gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-teal-light text-teal">
+            <Wrench className="size-5" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">Maintenance Management</h1>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${pill.pill}`}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <h1 className="text-xl font-bold leading-tight tracking-tight text-text-primary">Maintenance Management</h1>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${pill.pill}`}>
                 <span className={`size-1.5 rounded-full ${pill.dot}`} aria-hidden="true" />
                 {pill.label}
               </span>
               {isOnline && dashboard.generatedAt && (
-                <span className="text-xs text-text-muted">Last synced {formatSyncTime(dashboard.generatedAt)}</span>
+                <span className="text-[11px] text-text-muted">
+                  Last synced {formatSyncTime(dashboard.generatedAt)} · auto-refresh {refreshSeconds} s
+                </span>
               )}
             </div>
-            <p className="mt-1 text-sm text-text-secondary">
-              Live maintenance requests, work orders, parts delays, and technician progress from MMS.
-            </p>
+            <p className="text-xs text-text-secondary">Live MMS overview for job cards, materials, inventory, assets, vehicles, and labor.</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <MmsLiveControls refreshSeconds={refreshSeconds} autoRefresh={autoRefresh} />
           <a
-            href={mmsBaseUrl}
+            href={mmsPublicUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 font-medium text-accent-foreground hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-accent px-3 py-1.5 font-medium text-accent-foreground hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus"
           >
-            Open MMS
+            {OPEN_SYSTEM_LABEL}
             <ArrowUpRight className="size-3.5" aria-hidden="true" />
           </a>
           {showBackLink && (
-            <Link href="/dashboard" className="rounded-md border border-border bg-surface px-3 py-1.5 text-text-secondary hover:bg-surface-secondary">
-              Back to Platform Dashboard
+            <Link
+              href="/dashboard"
+              title="Back to Platform Dashboard"
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-border bg-surface px-3 py-1.5 text-text-secondary hover:bg-surface-secondary"
+            >
+              <ArrowLeft className="size-3.5" aria-hidden="true" />
+              Platform Dashboard
             </Link>
           )}
         </div>
       </div>
 
-      {/* Exactly one state banner */}
+      {/* Exactly one state banner (nothing when online) */}
       {loadError ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error bg-error-light px-4 py-3 text-sm font-semibold text-error">
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error bg-error-light px-3.5 py-2 text-xs font-semibold text-error">
           <span className="flex items-center gap-2">
-            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
             {apiErrorMessage(loadError.status)}
           </span>
-          <a href={mmsBaseUrl} target="_blank" rel="noopener noreferrer" className="underline">
-            Open MMS
+          <a href={mmsPublicUrl} target="_blank" rel="noopener noreferrer" className="underline">
+            {OPEN_SYSTEM_LABEL_SHORT}
           </a>
         </div>
       ) : (
-        status && <StateBanner status={status} message={dashboard?.message ?? null} mmsBaseUrl={mmsBaseUrl} />
+        status && <StateBanner status={status} detail={dashboard?.message ?? null} mmsPublicUrl={mmsPublicUrl} />
       )}
 
-      {/* Sync status strip */}
-      <MmsSyncStrip
-        status={status}
-        detail={dashboard?.message ?? (loadError ? 'The FMP API could not be reached.' : null)}
-        generatedAt={dashboard?.generatedAt ?? null}
-        cacheTtlSeconds={dashboard?.cacheTtlSeconds ?? null}
-        refreshSeconds={refreshSeconds}
-        mmsBaseUrl={mmsBaseUrl}
-      />
-
-      {/* KPI cards */}
-      <section aria-labelledby="mms-kpi-heading" className="space-y-3">
-        <SectionHeading id="mms-kpi-heading">Summary</SectionHeading>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          {kpis.map((kpi) => (
-            <MmsKpiCard
-              key={kpi.label}
-              label={kpi.label}
-              value={kpi.value}
-              helperText={kpi.helperText}
-              icon={kpi.icon}
-              accent={kpi.accent}
-              hasData={isOnline}
-              unavailableText={kpi.unavailableText}
-            />
+      {/* KPI rows: six headline tiles, then six mini-stats */}
+      <section aria-label="Executive summary" className="space-y-2">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {buildPrimaryKpis(dashboard).map((kpi) => (
+            <MmsKpiCard key={kpi.label} {...kpi} hasData={isOnline} />
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {buildSecondaryKpis(dashboard).map((kpi) => (
+            <MmsKpiCard key={kpi.label} {...kpi} hasData={isOnline} compact />
           ))}
         </div>
       </section>
 
-      {/* Needs Attention + Quick Actions */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[2fr_1fr]">
-        <section aria-labelledby="mms-attention-heading" className="space-y-3">
-          <SectionHeading
+      {/* Main grid: attention + recent (left), actions + modules (right) */}
+      <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-2.5">
+          <MmsCard
             id="mms-attention-heading"
+            title="Manager Attention"
+            className="flex-1"
             aside={
-              isOnline && dashboard.needsAttention.length > 0 ? (
-                <span className="rounded-full bg-warning-light px-2 py-0.5 text-[11px] font-semibold text-warning">
-                  {dashboard.needsAttention.length} item{dashboard.needsAttention.length === 1 ? '' : 's'}
+              isOnline && attentionTotal > 0 ? (
+                <span className="rounded-full bg-warning-light px-2 py-0.5 text-[11px] font-bold text-warning">
+                  {attentionTotal} need attention · top {ATTENTION_LIMIT}
                 </span>
               ) : undefined
             }
           >
-            Needs Attention
-          </SectionHeading>
-          {isOnline ? (
-            <MmsNeedsAttention items={dashboard.needsAttention} now={now} />
-          ) : (
-            <MmsUnavailableState message={unavailableMessage('attention', status)} />
-          )}
-        </section>
+            {isOnline ? (
+              <MmsManagerAttention attention={managerAttention} jobCardAttention={dashboard.needsAttention} links={links} />
+            ) : (
+              <MmsCardNote>{NO_LIVE_DATA}</MmsCardNote>
+            )}
+          </MmsCard>
 
-        <section aria-labelledby="mms-actions-heading" className="space-y-3">
-          <SectionHeading id="mms-actions-heading">Quick Actions</SectionHeading>
-          <MmsQuickActions mmsBaseUrl={mmsBaseUrl} />
-          <p className="rounded-lg bg-surface-secondary px-3 py-2.5 text-xs leading-relaxed text-text-muted">
-            <span className="font-semibold text-text-secondary">Overdue / Past Start Time</span> counts in-flight job cards whose MMS
-            start date/time has passed — MMS has no due-date field. MMS is the system of record; create or update job cards in MMS.
-          </p>
-        </section>
+          <MmsCard
+            id="mms-recent-heading"
+            title="Recent Maintenance Requests"
+            className={recentCount > 0 || !isOnline ? 'flex-1' : ''}
+            aside={
+              <a href={links.jobCards} target="_blank" rel="noopener noreferrer" className={smallLink}>
+                {recentCount > 0 ? `Latest ${recentCount} · all job cards` : 'All job cards'}
+                <ArrowUpRight className="size-3" aria-hidden="true" />
+              </a>
+            }
+          >
+            {isOnline ? <MmsRecentTable rows={dashboard.recentRequests} now={now} /> : <MmsCardNote>{NO_LIVE_DATA}</MmsCardNote>}
+          </MmsCard>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-2.5">
+          <MmsCard
+            id="mms-actions-heading"
+            title="Quick Actions"
+            aside={
+              <Link href="/maintenance" className={smallLink} title="FMP local maintenance records (not MMS)">
+                FMP local requests
+              </Link>
+            }
+          >
+            <MmsQuickActions links={links} />
+          </MmsCard>
+
+          <MmsCard id="mms-modules-heading" title="MMS Modules Summary" className="flex-1">
+            <MmsModulesSummary dashboard={dashboard} links={links} />
+          </MmsCard>
+        </div>
       </div>
 
-      {/* Recent Maintenance Requests */}
-      <section aria-labelledby="mms-recent-heading" className="space-y-3">
-        <SectionHeading
-          id="mms-recent-heading"
-          aside={isOnline ? <span className="text-xs text-text-muted">Live from MMS · latest {dashboard.recentRequests.length}</span> : undefined}
-        >
-          Recent Maintenance Requests
-        </SectionHeading>
-        {isOnline ? (
-          <MmsRecentTable rows={dashboard.recentRequests} now={now} />
-        ) : (
-          <MmsUnavailableState message={unavailableMessage('recent', status)} />
-        )}
-      </section>
+      <p className="hidden text-center text-[10px] leading-none text-text-muted [@media(min-height:900px)]:block">
+        Source: MMS Live API · read-only
+        {isOnline && dashboard.cacheTtlSeconds !== null ? ` · cache ${dashboard.cacheTtlSeconds}s` : ''} · MMS is the system of record
+      </p>
     </div>
   );
 }

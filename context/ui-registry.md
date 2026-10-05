@@ -2876,3 +2876,33 @@ Do not register one-off page markup. Do not create duplicate components with sli
 - **Theme-safe tints:** use the module base color with an alpha suffix (`${base}12`) for tile backgrounds. A fixed light pastel hex only works on a light surface.
 - **Verify layout numerically.** A Playwright script that reports the set of distinct card heights, button offsets, and content offsets across all cards catches 2px drift that a screenshot review misses.
 
+## MMS Executive Summary (FMP-MAINT-04)
+
+- **Optional external sections:** each MMS section arrives as `Section | null`. A panel takes the section plus an `unavailableText`; `null` renders that text ("Not available from MMS live API yet" when online, the offline/config reason otherwise). Never default a missing section to zeros.
+- `MmsKpiCard`: `display` shows a formatted value (e.g. "12.5 h") while `value` still decides availability; `compact` is the secondary-row variant (icon, value, label on one line).
+- `MmsManagerAttention`: a six-tile count row (tinted only when the count is above 0, each tile linking to the MMS page that lists it) above a divided list of typed items (`attentionTypeLabel` / `attentionTypeClasses`).
+- ~~`mms-panels.tsx`~~ **Removed 2026-10-03.** Its five expanded detail panels were replaced by `MmsModulesSummary` (FMP-MAINT-05) and the file was deleted. The `Section | null` rule above still applies to the summary rows.
+- Dates from another system that are date-only (`YYYY-MM-DD`) are formatted with `formatDateOnly` (string-based) so server and browser locale data cannot disagree.
+
+## One-Screen Executive Control Center (FMP-MAINT-05)
+
+- **Budget the height first.** A dashboard that must fit 1366x768 has about 700px under the app header. Maintenance uses: header 56, KPI tiles 56, mini-stats 32, one two-column grid about 400, gaps of 10.
+- **`MmsCard`** (`maintenance/_components/mms/mms-card.tsx`): slim uppercase header row with an optional right-side `aside`, body fills the rest. Two cards in a column both take `flex-1` so the column matches its neighbour. `MmsCardNote` is the one-line muted empty/unavailable text.
+- **KPI tiles are horizontal** (icon, number, label on one row; accent on the left edge, not the top). A mini-stat is label-left / value-right. Helper text moves to the tooltip.
+- **Lists are single-line rows** where the whole row is the link out; detail goes in the tooltip. Cap at 5 and say so in the card header ("top 5", "Latest 5 · all …").
+- **Module summary rows** instead of panels: icon, title, three inline `value label` pairs, arrow. Keep labels to one short word; long labels truncate first on a 1366px screen.
+- **Say why data is missing once.** One banner. Everywhere else: "—" for a value, one short line for a section. Never repeat the explanation per card.
+- **Drop columns, not readability.** The recent table hides Assigned To below `2xl` and Asset / Location below `xl` rather than scrolling sideways.
+- **Low-priority chrome can be height-gated:** `hidden [@media(min-height:900px)]:block` for the source line.
+- **Verifying a state the test accounts can't reach:** a throwaway local proxy that overrides one API response with sample data lets the real page be screenshotted. Label it as sample data in the report and keep it out of the repo.
+
+## Public links and user-facing wording for an external system (FMP-MAINT-06)
+
+- **Two addresses, two jobs.** An integrated system has an internal address (server-to-server calls) and a public one (links users click). Only the public one may appear in an API response or the page. Normalize every external link server-side in one function (`safeMmsUrl`): relative and known-host links go onto the public base; unknown hosts are dropped for a known route.
+- **Spell out system names on buttons.** "Open Maintenance Management System" in the header, "Open Maintenance System" where space is tight. Abbreviations like "MMS" are fine in status/source text ("Live from MMS").
+- **Repeated row tags: dot + quiet label, not filled pills.** In a list where most rows share a category, a filled colored pill per row outweighs the content. Use a `size-1.5` colored dot (`bg-current` inside the tag's text color, see `tagDotColor`) and a muted 10px label, in a fixed-width column.
+- **Fixed-width leading columns** (tag, ref) make single-line list rows scannable.
+- **An empty section should not stretch.** Give a card `flex-1` only when it has rows; its empty state is one short line.
+- **Compact button labels wrap, not truncate:** `line-clamp-2 leading-[1.1]` inside a fixed-height button.
+- **Header with a long primary button:** give the title block `flex-1 basis-80 min-w-0` so the title area wraps internally before the action buttons drop to a second row.
+

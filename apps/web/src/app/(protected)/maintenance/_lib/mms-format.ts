@@ -1,7 +1,95 @@
 // FMP-MAINT-01/02/03 — pure display helpers for the live MMS dashboard. Type-only
 // imports from '@/lib/mms-api' (which imports next/headers) so this file is
 // safe for client components too.
-import type { MmsLiveStatus, MmsNeedsAttentionItem } from '@/lib/mms-api';
+import type { MmsLinks, MmsLiveStatus, MmsNeedsAttentionItem, MmsVehicleExpiryAlert } from '@/lib/mms-api';
+
+// ── FMP-MAINT-04 — executive summary helpers ─────────────────────────────────
+
+export const SECTION_NOT_AVAILABLE = 'Not available from MMS live API yet';
+
+/** Real MMS routes — the same list the FMP API uses; only needed here when the FMP API itself is unreachable. */
+const MMS_ROUTES: MmsLinks = {
+  dashboard: '/dashboard',
+  jobCards: '/maintenance/work-orders',
+  materialsRequests: '/store/parts-requests',
+  inventory: '/store/offline-inventory',
+  assets: '/assets',
+  vehicles: '/assets/vehicles',
+  workerActivity: '/maintenance/assignments',
+  dailyActivity: '/maintenance/daily-activity',
+};
+
+export function fallbackMmsLinks(mmsBaseUrl: string): MmsLinks {
+  const base = mmsBaseUrl.replace(/\/+$/, '');
+  const prefix = (path: string): string => `${base}${path}`;
+  return {
+    dashboard: prefix(MMS_ROUTES.dashboard),
+    jobCards: prefix(MMS_ROUTES.jobCards),
+    materialsRequests: prefix(MMS_ROUTES.materialsRequests),
+    inventory: prefix(MMS_ROUTES.inventory),
+    assets: prefix(MMS_ROUTES.assets),
+    vehicles: prefix(MMS_ROUTES.vehicles),
+    workerActivity: prefix(MMS_ROUTES.workerActivity),
+    dailyActivity: prefix(MMS_ROUTES.dailyActivity),
+  };
+}
+
+/** KWD has three decimals. null (MMS sent no cost figure) is an em dash, never 0. */
+export function formatKwd(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return `${value.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} KWD`;
+}
+
+export function formatHours(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} h`;
+}
+
+export function formatQuantity(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return value.toLocaleString('en-US', { maximumFractionDigits: 3 });
+}
+
+const ATTENTION_TYPES: Record<string, { label: string; classes: string }> = {
+  closure_request: { label: 'Closure request', classes: 'bg-warning-light text-warning' },
+  vehicle_expiry: { label: 'Vehicle expiry', classes: 'bg-error-light text-error' },
+  overdue_job: { label: 'Past start time', classes: 'bg-error-light text-error' },
+  waiting_materials: { label: 'Waiting materials', classes: 'bg-secondary-accent-light text-secondary-accent' },
+  low_stock: { label: 'Low stock', classes: 'bg-warning-light text-warning' },
+  unassigned_job: { label: 'Unassigned job', classes: 'bg-info-light text-info' },
+  priority_job: { label: 'Priority job', classes: 'bg-warning-light text-warning' },
+};
+
+/** MMS manager-attention `type` → display label; an unknown type is shown readably, never dropped. */
+export function attentionTypeLabel(type: string): string {
+  const known = ATTENTION_TYPES[type];
+  if (known) return known.label;
+  const words = type.replace(/_/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export function attentionTypeClasses(type: string): string {
+  return ATTENTION_TYPES[type]?.classes ?? 'bg-surface-secondary text-text-secondary';
+}
+
+/** "Expired 12 days ago" / "Expires today" / "Expires in 5 days". */
+export function vehicleExpiryText(alert: Pick<MmsVehicleExpiryAlert, 'daysRemaining' | 'overdueDays'>): string {
+  const plural = (n: number): string => `${n} day${n === 1 ? '' : 's'}`;
+  if (alert.overdueDays > 0) return `Expired ${plural(alert.overdueDays)} ago`;
+  if (alert.daysRemaining === null) return 'Expiring';
+  if (alert.daysRemaining <= 0) return 'Expires today';
+  return `Expires in ${plural(alert.daysRemaining)}`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** YYYY-MM-DD → "29 Sep 2025". Pure string work: no timezone drift, no locale-data differences between server and browser. */
+export function formatDateOnly(isoDate: string): string {
+  const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number);
+  const month = m ? MONTHS[m - 1] : undefined;
+  if (!y || !d || !month) return isoDate;
+  return `${String(d).padStart(2, '0')} ${month} ${y}`;
+}
 
 /** Badge colors keyed by the RAW MMS status (chk_work_orders_status values plus legacy fallbacks). */
 export function statusClasses(status: string): string {

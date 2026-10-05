@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DepartmentAccessScope } from '@recafco/database';
 
+// What MMS itself is reached on / may put in its links (internal), and what users must be sent to (public).
 const BASE = 'http://192.168.1.17:81';
+const PUB = 'https://maintenance.recafco.online';
+const URLS = { publicBase: PUB, internalBase: BASE };
 vi.mock('../env', () => ({ getApiEnv: () => ({ mmsLiveRefreshSeconds: 30 }) }));
 
 import {
@@ -75,7 +78,7 @@ const mockGetScope = vi.fn();
 function makeService(): MmsDashboardService {
   const mms = {
     fetchLiveDashboard: mockFetchLive,
-    config: () => ({ baseUrl: BASE, endpoint: '/x', integrationKey: 'k', timeoutMs: 8000 }),
+    config: () => ({ baseUrl: BASE, publicBaseUrl: PUB, endpoint: '/x', integrationKey: 'k', timeoutMs: 8000 }),
   } as unknown as MmsLiveApiClient;
   const db = { getClient: () => ({ user: { findUnique: mockUserFindUnique } }) } as unknown as DatabaseService;
   const deptAccess = { getScope: mockGetScope } as unknown as DepartmentAccessService;
@@ -108,8 +111,41 @@ describe('MmsDashboardService.getLiveDashboard', () => {
     expect(r.cacheTtlSeconds).toBe(10);
     expect(r.refreshSeconds).toBe(30);
     expect(r.needsAttention[0]?.reasons).toEqual(['Overdue', 'Urgent priority']);
-    expect(r.recentRequests[0]?.openUrl).toBe(`${BASE}/maintenance/work-orders/wo-2`);
-    expect(r.mmsBaseUrl).toBe(BASE);
+    expect(r.recentRequests[0]?.openUrl).toBe(`${PUB}/maintenance/work-orders/wo-2`);
+    expect(r.mmsPublicBaseUrl).toBe(PUB);
+  });
+
+  it('FMP-MAINT-04: passes through MMS executive sections', async () => {
+    mockFetchLive.mockResolvedValue({
+      kind: 'ok',
+      body: mmsPayload({
+        jobCards: { totalJobCards: 40, activeJobs: 14, inProgress: 5, closureRequests: 2, completedThisMonth: 9, paused: 1, workingNow: 3 },
+        labor: { workingNow: 3, pausedWorkers: 1, laborHoursToday: 12.5, laborCostTodayKwd: 25.125 },
+      }),
+    });
+    const r = await makeService().getLiveDashboard(actor);
+    expect(r.status).toBe('ONLINE');
+    expect(r.jobCards).toMatchObject({ totalJobCards: 40, activeJobs: 14, openUrl: `${PUB}/maintenance/work-orders` });
+    expect(r.labor).toMatchObject({ laborHoursToday: 12.5, laborCostTodayKwd: 25.125 });
+    expect(r.inventory).toBeNull();
+    expect(r.links.inventory).toBe(`${PUB}/store/offline-inventory`);
+  });
+
+  it('FMP-MAINT-04: an older MMS payload still works, with every new section null', async () => {
+    const r = await makeService().getLiveDashboard(actor);
+    expect(r.status).toBe('ONLINE');
+    expect(r.summary?.openRequests).toBe(12);
+    for (const key of ['jobCards', 'materialsRequests', 'inventory', 'assets', 'vehicleCompliance', 'labor', 'managerAttention'] as const) {
+      expect(r[key]).toBeNull();
+    }
+  });
+
+  it('FMP-MAINT-04: offline states carry real MMS links and no sections', async () => {
+    mockFetchLive.mockResolvedValue({ kind: 'unavailable', reason: 'connection refused' });
+    const r = await makeService().getLiveDashboard(actor);
+    expect(r.status).toBe('OFFLINE');
+    expect(r.jobCards).toBeNull();
+    expect(r.links.jobCards).toBe(`${PUB}/maintenance/work-orders`);
   });
 
   it('keeps an MMS assignedToMe of 0 as 0', async () => {
@@ -152,7 +188,7 @@ describe('MmsDashboardService.getLiveDashboard', () => {
     expect(r.needsAttention).toEqual([]);
     expect(r.recentRequests).toEqual([]);
     expect(r.message).toBeTruthy();
-    expect(r.mmsBaseUrl).toBe(BASE);
+    expect(r.mmsPublicBaseUrl).toBe(PUB);
   });
 
   it('shows the required offline wording', async () => {
@@ -177,10 +213,10 @@ describe('MmsDashboardService.getLiveDashboard', () => {
 
 describe('parseMmsPayload', () => {
   it('rejects payloads that are not MMS_LIVE/online or have bad counts', () => {
-    expect(parseMmsPayload(null, BASE)).toBeNull();
-    expect(parseMmsPayload(mmsPayload({ online: false }), BASE)).toBeNull();
-    expect(parseMmsPayload(mmsPayload({ summary: { openRequests: -1 } }), BASE)).toBeNull();
-    expect(parseMmsPayload(mmsPayload({ summary: { ...(mmsPayload()['summary'] as object), overdue: '2' } }), BASE)).toBeNull();
+    expect(parseMmsPayload(null, URLS)).toBeNull();
+    expect(parseMmsPayload(mmsPayload({ online: false }), URLS)).toBeNull();
+    expect(parseMmsPayload(mmsPayload({ summary: { openRequests: -1 } }), URLS)).toBeNull();
+    expect(parseMmsPayload(mmsPayload({ summary: { ...(mmsPayload()['summary'] as object), overdue: '2' } }), URLS)).toBeNull();
   });
 
   it('drops malformed items and tolerates missing optional fields', () => {
@@ -189,7 +225,7 @@ describe('parseMmsPayload', () => {
         needsAttention: [{ id: 'x' }, { id: 'wo-9', ref: 'JC-9', status: 'Assigned', reasons: ['Unassigned', 5] }],
         recentRequests: 'nope',
       }),
-      BASE,
+      URLS,
     );
     expect(p?.needsAttention).toHaveLength(1);
     expect(p?.needsAttention[0]).toMatchObject({ ref: 'JC-9', title: 'Job Card', statusLabel: 'Assigned', reasons: ['Unassigned'], priority: null, updatedAt: null });
@@ -198,16 +234,45 @@ describe('parseMmsPayload', () => {
 });
 
 describe('safeOpenUrl', () => {
-  it('keeps an MMS openUrl on the configured MMS origin', () => {
-    expect(safeOpenUrl(`${BASE}/maintenance/work-orders/abc`, 'abc', BASE)).toBe(`${BASE}/maintenance/work-orders/abc`);
+  it('moves an internal MMS link onto the public domain, keeping its path', () => {
+    expect(safeOpenUrl(`${BASE}/maintenance/work-orders/abc`, 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc`);
   });
 
-  it('re-homes another origin (e.g. MMS misconfigured to localhost) onto MMS_BASE_URL', () => {
-    expect(safeOpenUrl('http://localhost:3000/maintenance/work-orders/abc', 'abc', BASE)).toBe(`${BASE}/maintenance/work-orders/abc`);
+  it('keeps a link MMS already built on the public domain', () => {
+    expect(safeOpenUrl(`${PUB}/maintenance/work-orders/abc?tab=costs`, 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc?tab=costs`);
   });
 
-  it('replaces non-http and missing URLs with the MMS job-card route', () => {
-    expect(safeOpenUrl('javascript:alert(1)', 'a b', BASE)).toBe(`${BASE}/maintenance/work-orders/a%20b`);
-    expect(safeOpenUrl(undefined, 'abc', BASE)).toBe(`${BASE}/maintenance/work-orders/abc`);
+  it('prefixes a relative link with the public domain', () => {
+    expect(safeOpenUrl('/maintenance/work-orders/abc', 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc`);
+  });
+
+  it('ignores any other domain, non-http links, and missing links — falls back to the job card route', () => {
+    expect(safeOpenUrl('https://evil.example/maintenance/work-orders/zzz', 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc`);
+    expect(safeOpenUrl('http://localhost:3000/somewhere', 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc`);
+    expect(safeOpenUrl('javascript:alert(1)', 'a b', URLS)).toBe(`${PUB}/maintenance/work-orders/a%20b`);
+    expect(safeOpenUrl(undefined, 'abc', URLS)).toBe(`${PUB}/maintenance/work-orders/abc`);
+  });
+});
+
+describe('no internal MMS address reaches the browser', () => {
+  it('returns only public-domain URLs when MMS sends internal ones', async () => {
+    const r = await makeService().getLiveDashboard(actor);
+    expect(r.status).toBe('ONLINE');
+    const json = JSON.stringify(r);
+    expect(json).not.toContain('192.168.1.17');
+    expect(json).not.toContain(':81');
+    expect(r.mmsPublicBaseUrl).toBe(PUB);
+    expect(Object.values(r.links).every((u) => u.startsWith(`${PUB}/`))).toBe(true);
+  });
+
+  it('returns only public-domain URLs in non-live states too', async () => {
+    mockFetchLive.mockResolvedValue({ kind: 'unavailable', reason: 'connection refused' });
+    const json = JSON.stringify(await makeService().getLiveDashboard(actor));
+    expect(json).not.toContain('192.168.1.17');
+  });
+
+  it('still calls MMS through the internal client, not the public URL', async () => {
+    await makeService().getLiveDashboard(actor);
+    expect(mockFetchLive).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,7 +12,10 @@ import { getApiEnv } from '../env';
 export const MMS_INTEGRATION_KEY_HEADER = 'x-fmp-integration-key';
 
 export interface MmsLiveApiConfig {
+  /** INTERNAL MMS address — the only URL this client ever calls. Never shown to users. */
   baseUrl: string;
+  /** PUBLIC MMS address — used only to build the links users click. Never called by FMP. */
+  publicBaseUrl: string;
   endpoint: string;
   integrationKey: string | null;
   timeoutMs: number;
@@ -41,6 +44,7 @@ export class MmsLiveApiClient {
     const env = getApiEnv();
     return {
       baseUrl: env.mmsBaseUrl,
+      publicBaseUrl: env.mmsPublicBaseUrl,
       endpoint: env.mmsLiveDashboardEndpoint,
       integrationKey: env.mmsIntegrationKey,
       timeoutMs: env.mmsQueryTimeoutMs,

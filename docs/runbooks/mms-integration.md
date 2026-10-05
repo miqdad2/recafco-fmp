@@ -2,7 +2,8 @@
 
 The FMP Maintenance Management dashboard (`/maintenance/dashboard`) shows live data
 from the existing **RECAFCO Maintenance Management System (MMS)** at
-`http://192.168.1.17:81`. MMS stays the system of record. FMP only **reads**.
+`https://maintenance.recafco.online` (internal address `http://192.168.1.17:81`). MMS stays the
+system of record. FMP only **reads**.
 
 ## Where it appears
 
@@ -32,11 +33,12 @@ Browser ──► FMP web (/maintenance/dashboard)
 
 1. **On MMS** (MMS team): deploy the MMS build that includes `/api/integrations/fmp/*` and its
    `proxy.ts` session bypass. Set `FMP_INTEGRATION_KEY` (≥ 32 characters) and
-   `MMS_PUBLIC_BASE_URL=http://192.168.1.17:81`.
+   `MMS_PUBLIC_BASE_URL=https://maintenance.recafco.online`.
 2. **On FMP** (repo-root `.env` on the FMP server; never commit it):
 
    ```
    MMS_BASE_URL=http://192.168.1.17:81
+   MMS_PUBLIC_BASE_URL=https://maintenance.recafco.online
    MMS_LIVE_DASHBOARD_ENDPOINT=/api/integrations/fmp/maintenance-dashboard/live
    MMS_INTEGRATION_KEY=<exactly the same value as MMS FMP_INTEGRATION_KEY>
    MMS_QUERY_TIMEOUT_MS=8000
@@ -69,9 +71,24 @@ Generate a key (PowerShell):
 | Assigned To Me | Open job cards where the matched MMS user is a technician or the supervisor |
 | Completed This Month | `Closed` and updated this calendar month |
 
-"Open in MMS" uses each item's `openUrl` from MMS. FMP only accepts it as an http(s) URL on the
-`MMS_BASE_URL` origin. Any other host is moved onto that origin, and anything that isn't
-http(s) is replaced with `{MMS_BASE_URL}/maintenance/work-orders/{id}`.
+### Internal and public addresses (FMP-MAINT-06)
+
+| Variable | Used for | Seen by users |
+|---|---|---|
+| `MMS_BASE_URL` (`http://192.168.1.17:81`) | The FMP API's server-to-server call to MMS, with the integration key | Never |
+| `MMS_PUBLIC_BASE_URL` (`https://maintenance.recafco.online`) | Every link on the dashboard: the "Open Maintenance Management System" button, quick actions, module rows, and each item's link | Yes |
+
+The FMP API rewrites every link MMS sends before it reaches the browser (`safeMmsUrl`):
+
+| MMS sends | FMP returns |
+|---|---|
+| A relative path (`/assets/vehicles`) | The public address + that path |
+| A link on the public host (http or https) | The same path on the public address |
+| A link on the internal host (`192.168.1.17:81`) | The same path on the public address |
+| Any other domain, `javascript:`, garbage, or nothing | A real MMS route on the public address (the job card, or that section's list page) |
+
+So the internal address never reaches the browser, and an MMS payload cannot send a user to
+another site. FMP never calls the public address and never sends the integration key to it.
 
 ## Dashboard states and troubleshooting
 

@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 // enforced by the FMP API (maintenance.read + Maintenance module scope).
 export default function MaintenanceDashboardPage(): React.JSX.Element {
   return (
-    <div className="mx-auto max-w-7xl px-5 py-6 lg:px-6">
+    <div className="mx-auto max-w-7xl px-5 py-2.5 lg:px-6">
       <MaintenanceControlCenter />
     </div>
   );

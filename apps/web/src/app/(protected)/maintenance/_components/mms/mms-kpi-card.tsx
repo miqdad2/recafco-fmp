@@ -1,56 +1,70 @@
-import { WifiOff } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type MmsKpiAccent = 'neutral' | 'teal' | 'info' | 'secondary' | 'warning' | 'success' | 'error';
 
 interface Props {
   label: string;
-  /** null = this metric cannot be computed for this user/data (shown as `unavailableText`). */
+  /** null = MMS did not send this metric (shown as "—" with a small "Not available yet"). */
   value: number | null;
+  /** Formatted form of `value` (e.g. "12.5 h"); `value` still decides availability. */
+  display?: string | undefined;
+  /** Shown as a tooltip only — the one-screen layout has no room for a helper line. */
   helperText: string;
   icon: LucideIcon;
   accent: MmsKpiAccent;
   /** false = no live data at all (MMS offline / not configured / restricted). */
   hasData: boolean;
-  unavailableText?: string | undefined;
+  /** Mini-stat variant for the second KPI row. */
+  compact?: boolean;
 }
 
 const ACCENT_CLASSES: Record<MmsKpiAccent, { chip: string; bar: string }> = {
-  neutral: { chip: 'bg-surface-secondary text-text-muted', bar: 'border-t-border-strong' },
-  teal: { chip: 'bg-teal-light text-teal', bar: 'border-t-teal' },
-  info: { chip: 'bg-info-light text-info', bar: 'border-t-info' },
-  secondary: { chip: 'bg-secondary-accent-light text-secondary-accent', bar: 'border-t-secondary-accent' },
-  warning: { chip: 'bg-warning-light text-warning', bar: 'border-t-warning' },
-  success: { chip: 'bg-success-light text-success', bar: 'border-t-success' },
-  error: { chip: 'bg-error-light text-error', bar: 'border-t-error' },
+  neutral: { chip: 'bg-surface-secondary text-text-muted', bar: 'border-l-border-strong' },
+  teal: { chip: 'bg-teal-light text-teal', bar: 'border-l-teal' },
+  info: { chip: 'bg-info-light text-info', bar: 'border-l-info' },
+  secondary: { chip: 'bg-secondary-accent-light text-secondary-accent', bar: 'border-l-secondary-accent' },
+  warning: { chip: 'bg-warning-light text-warning', bar: 'border-l-warning' },
+  success: { chip: 'bg-success-light text-success', bar: 'border-l-success' },
+  error: { chip: 'bg-error-light text-error', bar: 'border-l-error' },
 };
 
-// FMP-MAINT-01 — same visual language as TechnicalKpiCard (icon chip, top
-// accent bar, helper line), kept local to Maintenance so the Technical
-// dashboard is untouched. Adds a per-metric "not available" state: a metric
-// MMS data can't answer for this user shows that, never a fake 0.
-export function MmsKpiCard({ label, value, helperText, icon: Icon, accent, hasData, unavailableText }: Props): React.JSX.Element {
+const NOT_AVAILABLE = 'Not available yet';
+
+// FMP-MAINT-05 — one-screen KPI tiles. Two sizes, both a single horizontal
+// row (icon, number, label) so six fit across without height:
+// - primary: icon chip + large count + label, accent bar on the left edge.
+// - compact: label left, value right — a mini-stat about half as tall.
+// A metric with no value shows "—", never 0. When MMS is online but did not
+// send the metric, a small "Not available yet" replaces nothing else; when
+// there is no live data at all the page's single banner explains why.
+export function MmsKpiCard({ label, value, display, helperText, icon: Icon, accent, hasData, compact = false }: Props): React.JSX.Element {
   const { chip, bar } = ACCENT_CLASSES[accent];
   const metricUnavailable = hasData && value === null;
+  const shown = hasData && value !== null ? (display ?? value) : '—';
+  const tooltip = metricUnavailable ? `${label}: ${NOT_AVAILABLE}` : helperText || label;
+
+  if (compact) {
+    return (
+      <div title={tooltip} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 shadow-sm">
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-text-secondary">
+          <Icon className="hidden size-3.5 shrink-0 text-text-muted 2xl:block" aria-hidden="true" />
+          <span className="truncate">{label}</span>
+        </span>
+        <span className="shrink-0 text-sm font-bold text-text-primary">{shown}</span>
+      </div>
+    );
+  }
 
   return (
-    <div className={`flex min-h-[6.5rem] flex-col rounded-xl border border-border ${bar} border-t-[3px] bg-surface p-3.5 shadow-sm`}>
-      <div className="flex items-start justify-between gap-2">
-        <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${chip}`}>
-          <Icon className="size-4" aria-hidden="true" />
-        </span>
-        {!hasData && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-surface-secondary px-2 py-0.5 text-[10px] font-medium text-text-muted">
-            <WifiOff className="size-3" aria-hidden="true" />
-            Unavailable
-          </span>
-        )}
+    <div title={tooltip} className={`flex items-center gap-2.5 rounded-xl border border-l-[3px] border-border ${bar} bg-surface px-3 py-2 shadow-sm`}>
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${chip}`}>
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold leading-none text-text-primary">{shown}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] font-semibold leading-tight text-text-secondary">{label}</p>
+        {metricUnavailable && <p className="text-[10px] leading-tight text-text-muted">{NOT_AVAILABLE}</p>}
       </div>
-      <p className="mt-2.5 text-xl font-bold leading-none text-text-primary">{hasData && value !== null ? value : '—'}</p>
-      <p className="mt-1.5 text-sm font-semibold text-text-primary">{label}</p>
-      <p className="mt-0.5 text-xs leading-snug text-text-muted">
-        {metricUnavailable ? (unavailableText ?? 'Not available from MMS data yet') : helperText}
-      </p>
     </div>
   );
 }

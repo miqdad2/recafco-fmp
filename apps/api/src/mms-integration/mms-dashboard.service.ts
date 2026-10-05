@@ -6,6 +6,8 @@ import { getApiEnv } from '../env';
 import { MmsLiveApiClient } from './mms-live-api.client';
 import type { MmsFetchResult } from './mms-live-api.client';
 import type { AuthUser } from '../common/types/auth-user';
+import { emptyExecutiveSections, parseExecutiveSections, safeMmsUrl } from './mms-executive.parser';
+import type { MmsExecutiveSections, MmsUrlBases } from './mms-executive.parser';
 
 // ---------------------------------------------------------------------------
 // FMP-MAINT-02 — live Maintenance dashboard sourced from MMS's own read-only
@@ -67,10 +69,17 @@ export interface MmsRecentRequestItem {
   openUrl: string;
 }
 
-export interface MmsLiveDashboard {
+/**
+ * FMP-MAINT-04: the executive-summary sections (links, jobCards,
+ * materialsRequests, inventory, assets, vehicleCompliance, labor,
+ * managerAttention) are flattened in. Each section is null when MMS did not
+ * send it — never defaulted.
+ */
+export interface MmsLiveDashboard extends MmsExecutiveSections {
   status: MmsLiveStatus;
   message: string | null;
-  mmsBaseUrl: string;
+  /** PUBLIC MMS address for user-facing links (MMS_PUBLIC_BASE_URL). The internal address FMP calls is never returned. */
+  mmsPublicBaseUrl: string;
   /** How often the browser should auto-refresh (env MMS_LIVE_REFRESH_SECONDS, min 15). */
   refreshSeconds: number;
   /** MMS's own generatedAt for the data shown (null when no data). */
@@ -90,6 +99,7 @@ interface ValidPayload {
   summary: MmsSummary;
   needsAttention: MmsNeedsAttentionItem[];
   recentRequests: MmsRecentRequestItem[];
+  executive: MmsExecutiveSections;
 }
 
 // ── Payload validation (MMS is a separate system — never trust its shape) ────
@@ -99,28 +109,12 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !=
 const optStr = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
 const count = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
-/**
- * Use MMS's openUrl, but only as an http(s) URL on the configured MMS origin.
- * Anything else (javascript:, another host, MMS misconfigured to localhost) is
- * rebuilt on MMS_BASE_URL with the same path, or MMS's job-card route.
- */
-export function safeOpenUrl(raw: unknown, id: string, mmsBaseUrl: string): string {
-  const base = new URL(mmsBaseUrl);
-  if (typeof raw === 'string') {
-    try {
-      const u = new URL(raw);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
-        if (u.origin === base.origin) return u.toString();
-        return new URL(`${u.pathname}${u.search}`, base.origin).toString();
-      }
-    } catch {
-      // fall through
-    }
-  }
-  return `${base.origin}/maintenance/work-orders/${encodeURIComponent(id)}`;
+/** A job-card link from MMS, normalized onto the PUBLIC MMS origin (see safeMmsUrl); falls back to MMS's own job-card route. */
+export function safeOpenUrl(raw: unknown, id: string, urls: MmsUrlBases): string {
+  return safeMmsUrl(raw, `/maintenance/work-orders/${encodeURIComponent(id)}`, urls);
 }
 
-function parseBaseItem(v: unknown, mmsBaseUrl: string) {
+function parseBaseItem(v: unknown, urls: MmsUrlBases) {
   if (!isObj(v)) return null;
   const id = str(v['id']);
   const ref = str(v['ref']);
@@ -134,11 +128,11 @@ function parseBaseItem(v: unknown, mmsBaseUrl: string) {
     statusLabel: str(v['statusLabel']) ?? status,
     priority: optStr(v['priority']),
     updatedAt: optStr(v['updatedAt']),
-    openUrl: safeOpenUrl(v['openUrl'], id, mmsBaseUrl),
+    openUrl: safeOpenUrl(v['openUrl'], id, urls),
   };
 }
 
-export function parseMmsPayload(body: unknown, mmsBaseUrl: string): ValidPayload | null {
+export function parseMmsPayload(body: unknown, urls: MmsUrlBases): ValidPayload | null {
   if (!isObj(body) || body['source'] !== 'MMS_LIVE' || body['online'] !== true) return null;
   const s = body['summary'];
   if (!isObj(s)) return null;
@@ -153,13 +147,13 @@ export function parseMmsPayload(body: unknown, mmsBaseUrl: string): ValidPayload
   const assignedToMe = s['assignedToMe'] === null ? null : count(s['assignedToMe']);
 
   const needsAttention = (Array.isArray(body['needsAttention']) ? body['needsAttention'] : []).flatMap((v): MmsNeedsAttentionItem[] => {
-    const base = parseBaseItem(v, mmsBaseUrl);
+    const base = parseBaseItem(v, urls);
     if (!base || !isObj(v)) return [];
     const reasons = Array.isArray(v['reasons']) ? v['reasons'].filter((r): r is string => typeof r === 'string') : [];
     return [{ ...base, reasons }];
   });
   const recentRequests = (Array.isArray(body['recentRequests']) ? body['recentRequests'] : []).flatMap((v): MmsRecentRequestItem[] => {
-    const base = parseBaseItem(v, mmsBaseUrl);
+    const base = parseBaseItem(v, urls);
     if (!base || !isObj(v)) return [];
     return [{ ...base, assetOrLocation: optStr(v['assetOrLocation']), assignedTo: optStr(v['assignedTo']) }];
   });
@@ -171,6 +165,7 @@ export function parseMmsPayload(body: unknown, mmsBaseUrl: string): ValidPayload
     summary: { openRequests, inProgress, waitingForParts, overdue, assignedToMe, completedThisMonth },
     needsAttention,
     recentRequests,
+    executive: parseExecutiveSections(body, urls),
   };
 }
 
@@ -192,10 +187,16 @@ export class MmsDashboardService {
     private readonly deptAccess: DepartmentAccessService,
   ) {}
 
+  /** Internal base = where FMP calls MMS; public base = where every returned link points. */
+  private urlBases(): MmsUrlBases {
+    const { baseUrl, publicBaseUrl } = this.mms.config();
+    return { publicBase: publicBaseUrl, internalBase: baseUrl };
+  }
+
   async getLiveDashboard(actor: AuthUser): Promise<MmsLiveDashboard> {
-    const mmsBaseUrl = this.mms.config().baseUrl;
+    const urls = this.urlBases();
     const base = {
-      mmsBaseUrl,
+      mmsPublicBaseUrl: urls.publicBase,
       refreshSeconds: getApiEnv().mmsLiveRefreshSeconds,
       generatedAt: null,
       fetchedAt: new Date().toISOString(),
@@ -204,6 +205,7 @@ export class MmsDashboardService {
       assignedToMeNote: null,
       needsAttention: [],
       recentRequests: [],
+      ...emptyExecutiveSections(urls),
     };
 
     // MMS returns company-wide data and MMS departments have no mapping to
@@ -241,6 +243,7 @@ export class MmsDashboardService {
       assignedToMeNote,
       needsAttention: payload.needsAttention,
       recentRequests: payload.recentRequests,
+      ...payload.executive,
     };
   }
 
@@ -269,7 +272,7 @@ export class MmsDashboardService {
   }
 
   private async fetchOutcome(email: string | null): Promise<Outcome> {
-    const mmsBaseUrl = this.mms.config().baseUrl;
+    const urls = this.urlBases();
     let emailRejected = false;
     let result = await this.mms.fetchLiveDashboard(email);
     // MMS validates userEmail; if it rejects ours, still show the dashboard without Assigned To Me.
@@ -281,7 +284,7 @@ export class MmsDashboardService {
       this.logger.warn(`MMS live dashboard request failed: ${result.kind}${'reason' in result ? ` (${result.reason})` : ''}${'httpStatus' in result ? ` HTTP ${result.httpStatus}` : ''}`);
       return { ok: false, result };
     }
-    const payload = parseMmsPayload(result.body, mmsBaseUrl);
+    const payload = parseMmsPayload(result.body, urls);
     if (!payload) {
       this.logger.warn('MMS live dashboard returned an unexpected payload shape');
       return { ok: false, result: { kind: 'invalid' } };

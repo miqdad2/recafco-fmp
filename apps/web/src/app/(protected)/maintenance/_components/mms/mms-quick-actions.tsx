@@ -1,69 +1,45 @@
-import Link from 'next/link';
-import { ArrowUpRight, ClipboardCheck, ClipboardList, ExternalLink, FileText } from 'lucide-react';
+import { Boxes, ClipboardList, ExternalLink, HardHat, PackageSearch, Truck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { mmsJobCardsUrl } from '../../_lib/mms-format';
+import type { MmsLinks } from '@/lib/mms-api';
 
 interface Props {
-  mmsBaseUrl: string;
+  links: MmsLinks;
 }
 
-interface Action {
-  label: string;
-  description: string;
-  href: string;
-  icon: LucideIcon;
-  external: boolean;
-}
-
-const ROW_CLASS =
-  'group flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 transition hover:border-border-strong hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-focus';
-
-// FMP-MAINT-03 — replaces the old Quick Links + oversized "View Maintenance
-// Requests" button. Every link is a REAL route:
-// - MMS job-card list tabs `?status=Active` / `?status=ClosureRequested`
-//   (MMS app/(dashboard)/maintenance/work-orders). MMS has no exact
-//   "waiting for parts" or "past start time" list view (its report modes
-//   filter on legacy statuses no live record holds), so no link is offered
-//   for those rather than a misleading one.
-// - FMP's own pre-existing maintenance request log, clearly labelled as
-//   FMP-local records so it's never mistaken for MMS live data.
-export function MmsQuickActions({ mmsBaseUrl }: Props): React.JSX.Element {
-  const actions: Action[] = [
-    { label: 'Open MMS', description: 'Maintenance Management System home', href: mmsBaseUrl, icon: ExternalLink, external: true },
-    { label: 'Active Job Cards', description: 'All in-flight job cards in MMS', href: mmsJobCardsUrl(mmsBaseUrl, 'Active'), icon: ClipboardList, external: true },
-    { label: 'Closure Requests', description: 'Job cards awaiting closure approval in MMS', href: mmsJobCardsUrl(mmsBaseUrl, 'ClosureRequested'), icon: ClipboardCheck, external: true },
-    { label: 'FMP Maintenance Requests', description: 'FMP local maintenance records (not MMS)', href: '/maintenance', icon: FileText, external: false },
+// FMP-MAINT-03/04/05 — every link is a REAL MMS route, supplied by the FMP API
+// on the configured MMS origin. FMP-MAINT-05: a compact 2-column button grid
+// (was a tall list of rows with descriptions); the description is the
+// tooltip. FMP-MAINT-06: the first action is worded for users who don't know
+// the abbreviation "MMS" ("Open Maintenance System"; the header button has the
+// full name), and spacing is tightened below 2xl so that label fits unclipped
+// at 1366px. FMP's own local request log moved to a small link in the card
+// header (maintenance-control-center.tsx), still labelled as FMP-local.
+export function MmsQuickActions({ links }: Props): React.JSX.Element {
+  const actions: { label: string; description: string; href: string; icon: LucideIcon }[] = [
+    { label: 'Open Maintenance System', description: 'Open the Maintenance Management System dashboard', href: links.dashboard, icon: ExternalLink },
+    { label: 'Job Cards', description: 'All job cards in the Maintenance Management System', href: links.jobCards, icon: ClipboardList },
+    { label: 'Materials Requests', description: 'Job card and general materials requests', href: links.materialsRequests, icon: PackageSearch },
+    { label: 'Inventory Control', description: 'Stock balances, receipts, and issues', href: links.inventory, icon: Boxes },
+    { label: 'Assets & Equipment', description: 'Asset register and site movements', href: links.assets, icon: Truck },
+    { label: 'Worker Activity', description: 'Who is working, paused, or available', href: links.workerActivity, icon: HardHat },
   ];
 
   return (
-    <ul className="space-y-2">
-      {actions.map(({ label, description, href, icon: Icon, external }) => {
-        const body = (
-          <>
-            <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${external ? 'bg-teal-light text-teal' : 'bg-surface-secondary text-text-secondary'}`}>
-              <Icon className="size-4" aria-hidden="true" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-text-primary">{label}</span>
-              <span className="block truncate text-xs text-text-muted">{description}</span>
-            </span>
-            <ArrowUpRight className="size-3.5 shrink-0 text-text-muted transition group-hover:text-text-primary" aria-hidden="true" />
-          </>
-        );
-        return (
-          <li key={label}>
-            {external ? (
-              <a href={href} target="_blank" rel="noopener noreferrer" className={ROW_CLASS}>
-                {body}
-              </a>
-            ) : (
-              <Link href={href} className={ROW_CLASS}>
-                {body}
-              </Link>
-            )}
-          </li>
-        );
-      })}
+    <ul className="grid grid-cols-2 gap-1.5 p-2">
+      {actions.map(({ label, description, href, icon: Icon }) => (
+        <li key={label}>
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={description}
+            className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface px-1.5 text-[11px] font-semibold tracking-tight text-text-primary 2xl:gap-1.5 2xl:px-2 2xl:text-xs 2xl:tracking-normal transition hover:border-teal hover:bg-teal-light focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <Icon className="size-3.5 shrink-0 text-teal" aria-hidden="true" />
+            <span className="line-clamp-2 leading-[1.1]">{label}</span>
+          </a>
+        </li>
+      ))}
     </ul>
   );
 }

@@ -30,10 +30,13 @@ function isDatabaseUrl(url: string): boolean {
   return url.startsWith('postgresql://') || url.startsWith('postgres://');
 }
 
-// FMP-MAINT-01/02 — the live MMS (Maintenance Management System). FMP reads
-// MMS's read-only live dashboard API server-to-server; MMS_BASE_URL is also
-// used for "Open MMS" links shown to users (not a secret).
+// FMP-MAINT-01/02/06 — the live MMS (Maintenance Management System).
+// MMS_BASE_URL is the INTERNAL address the FMP API uses to call MMS's
+// read-only live dashboard API server-to-server; it is never shown to users.
+// MMS_PUBLIC_BASE_URL is the address users open in their browser — every
+// link FMP shows is built on it.
 const DEFAULT_MMS_BASE_URL = 'http://192.168.1.17:81';
+const DEFAULT_MMS_PUBLIC_BASE_URL = 'https://maintenance.recafco.online';
 const DEFAULT_MMS_LIVE_DASHBOARD_ENDPOINT = '/api/integrations/fmp/maintenance-dashboard/live';
 const DEFAULT_MMS_QUERY_TIMEOUT_MS = 8_000;
 const DEFAULT_MMS_LIVE_REFRESH_SECONDS = 30;
@@ -88,6 +91,12 @@ export const ApiEnvSchema = z
       .optional()
       .refine((v) => v === undefined || v === '' || isHttpUrl(v), {
         message: 'MMS_BASE_URL must use http:// or https:// scheme',
+      }),
+    MMS_PUBLIC_BASE_URL: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v === '' || isHttpUrl(v), {
+        message: 'MMS_PUBLIC_BASE_URL must use http:// or https:// scheme',
       }),
     MMS_LIVE_DASHBOARD_ENDPOINT: z
       .string()
@@ -145,6 +154,7 @@ export const ApiEnvSchema = z
       technicalDrawingAttachmentsDir:
         raw.TECHNICAL_DRAWING_ATTACHMENTS_DIR ?? './storage/technical-drawing-attachments',
       mmsBaseUrl: (raw.MMS_BASE_URL || DEFAULT_MMS_BASE_URL).replace(/\/+$/, ''),
+      mmsPublicBaseUrl: (raw.MMS_PUBLIC_BASE_URL || DEFAULT_MMS_PUBLIC_BASE_URL).replace(/\/+$/, ''),
       mmsLiveDashboardEndpoint: raw.MMS_LIVE_DASHBOARD_ENDPOINT || DEFAULT_MMS_LIVE_DASHBOARD_ENDPOINT,
       mmsIntegrationKey: raw.MMS_INTEGRATION_KEY?.trim() || null,
       mmsQueryTimeoutMs: parseIntWithDefault(raw.MMS_QUERY_TIMEOUT_MS, DEFAULT_MMS_QUERY_TIMEOUT_MS),

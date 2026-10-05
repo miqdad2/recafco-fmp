@@ -29,7 +29,7 @@ export default async function MaintenanceExecutivePage(): Promise<React.JSX.Elem
   if (!permissions.includes('maintenance.read')) notFound();
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-5 py-6 lg:px-6">
+    <div className="mx-auto max-w-7xl space-y-2.5 px-5 py-2.5 lg:px-6">
       <ExecutiveModuleNav code="MAINTENANCE_REQUESTS" permissions={permissions} />
       <MaintenanceControlCenter showBackLink={false} />
     </div>

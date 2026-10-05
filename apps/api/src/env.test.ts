@@ -144,4 +144,17 @@ describe('ApiEnvSchema', () => {
       ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_LIVE_DASHBOARD_ENDPOINT: 'http://evil/x' }),
     ).toThrow();
   });
+
+  // FMP-MAINT-06 — internal vs public MMS address
+  it('defaults the public MMS address to the public domain, separate from the internal one', () => {
+    const result = ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb });
+    expect(result.mmsBaseUrl).toBe('http://192.168.1.17:81');
+    expect(result.mmsPublicBaseUrl).toBe('https://maintenance.recafco.online');
+  });
+
+  it('parses MMS_PUBLIC_BASE_URL, strips the trailing slash, and rejects a non-http value', () => {
+    const result = ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_PUBLIC_BASE_URL: 'https://mms.example.com/' });
+    expect(result.mmsPublicBaseUrl).toBe('https://mms.example.com');
+    expect(() => ApiEnvSchema.parse({ NODE_ENV: 'development', ...validDb, MMS_PUBLIC_BASE_URL: 'maintenance.recafco.online' })).toThrow();
+  });
 });

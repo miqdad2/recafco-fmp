@@ -20,7 +20,8 @@ All environment variables are loaded from `.env` at the repo root.
 | `JWT_REFRESH_EXPIRES_IN` | No | Refresh token TTL (default: `7d`) | `7d` |
 | `CORS_ALLOWED_ORIGINS` | Yes | Comma-separated allowed origins. Wildcard `*` is **rejected** in production. | `http://fmp.recafco.local` |
 | `LOG_LEVEL` | No | Pino log level (default: `info`) | `info` |
-| `MMS_BASE_URL` | No | MMS web app URL. FMP calls MMS here server-to-server, and uses it for "Open MMS" links (default: `http://192.168.1.17:81`). Not a secret. | `http://192.168.1.17:81` |
+| `MMS_BASE_URL` | No | **Internal** MMS address. Used only by the FMP API to call MMS server-to-server. Never sent to the browser or shown to users (default: `http://192.168.1.17:81`). | `http://192.168.1.17:81` |
+| `MMS_PUBLIC_BASE_URL` | No | **Public** MMS address. Every link a user can click on the Maintenance dashboard is built on it; links MMS sends on the internal address are moved onto it (default: `https://maintenance.recafco.online`). FMP never calls this address. | `https://maintenance.recafco.online` |
 | `MMS_LIVE_DASHBOARD_ENDPOINT` | No | Path of MMS's read-only live dashboard API (default shown) | `/api/integrations/fmp/maintenance-dashboard/live` |
 | `MMS_INTEGRATION_KEY` | No | **Secret.** Must equal MMS's `FMP_INTEGRATION_KEY`. Sent only server-to-server in `x-fmp-integration-key`; never exposed to the browser or logged. Unset = dashboard shows "MMS integration not configured". See [mms-integration.md](runbooks/mms-integration.md). | Generate randomly (≥ 32 chars) |
 | `MMS_QUERY_TIMEOUT_MS` | No | Timeout for each MMS request (default: `8000`) | `8000` |

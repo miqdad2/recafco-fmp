@@ -13516,6 +13516,230 @@ In narrow cards (content box under 15.5rem, the 2-per-row tablet layout) a conta
 | `pnpm --filter @recafco/web build` | ✓ compiled |
 | `pnpm db:migrate:status` | ✓ up to date |
 
+## FMP-MAINT-04 — Maintenance dashboard expanded to a full MMS executive summary (2026-10-01)
+
+The Maintenance Control Center (`/maintenance/executive` and `/maintenance/dashboard`) now shows live MMS data for job cards, materials requests, inventory, assets, vehicle expiry, and labor, with MMS's Manager Attention up front. MMS stays the source of truth; FMP still only reads, through the FMP API. No FMP schema change, no new FMP route, no permission change. Not committed.
+
+### API (`apps/api/src/mms-integration/`)
+
+- New `mms-executive.parser.ts`: validates the sections MMS now adds to its live payload (`links`, `jobCards`, `materialsRequests`, `inventory`, `assets`, `vehicleCompliance`, `labor`, `managerAttention`). Each section is parsed on its own and is `null` when MMS does not send it or it is malformed. Links are forced onto the configured MMS origin (`safeMmsUrl`), falling back to real MMS routes.
+- `mms-dashboard.service.ts`: `MmsLiveDashboard` now includes those sections; non-ONLINE states return real links and every section `null`. Existing fields and statuses are unchanged, so an older MMS build still renders.
+
+### Web (`apps/web/src/app/(protected)/maintenance/`)
+
+- `maintenance-control-center.tsx`: new subtitle; six headline KPIs (Active Jobs, Closure Requests, Materials Pending, Low Stock / Needs Attention, Total Assets, Vehicle Expiry Alerts); six compact metrics (Total Job Cards, Materials Requests, Inventory Items, Working Now, Labor Hours Today, Completed This Month); Manager Attention; Quick Actions; Recent Maintenance Requests; five module panels.
+- New `mms-manager-attention.tsx` (six category counts linking to MMS, plus MMS's selected items) and `mms-panels.tsx` (Job Cards, Materials & Inventory, Assets & Equipment, Vehicle Expiry, Labor Snapshot).
+- `mms-quick-actions.tsx`: Open MMS Dashboard, Job Cards, Materials Requests, Inventory Control, Assets & Equipment, Worker Activity (real MMS routes) plus the existing FMP-local request log.
+- `mms-kpi-card.tsx`: `display` and `compact` props. `mms-format.ts`: KWD/hours/quantity/date formatting, attention-type labels, fallback links.
+
+### Missing-section and offline behaviour
+
+- MMS online but a section absent (older MMS build, or MMS returned `null`): that card or panel shows "Not available from MMS live API yet"; nothing is defaulted to 0. Cost values MMS withholds show "—".
+- MMS offline / not enabled / auth error / restricted: the existing single banner, every card "—", every section an unavailable message. Quick Actions and panel links still work.
+
+### Verification
+
+- The real payload from the updated MMS (run locally on port 3100) was parsed by `parseMmsPayload`: all seven sections present.
+- Not done: viewing the new page in a browser against live data. The deployed MMS at 192.168.1.17:81 does not serve the live endpoint yet, so the running FMP shows the "not enabled" state until MMS is deployed.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1824/1824 |
+| `pnpm --filter @recafco/web test` | ✓ 992/992 |
+| `pnpm --filter @recafco/web build` | ✓ compiled |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+## FMP-MAINT-05 — One-Screen Maintenance Executive Control Center (Completed 2026-10-01)
+
+### Summary
+
+The Maintenance Control Center (`/maintenance/executive` and `/maintenance/dashboard`, one shared component) is rebuilt as a compact one-screen layout. Web UI only: no API, MMS, schema, or permission change, and nothing is written to MMS. Not committed.
+
+### Layout before and after
+
+**Before (FMP-MAINT-04), nine stacked blocks:** header, banner, sync status strip, six large KPI cards, six secondary cards, Manager Attention (six count tiles + item list) with a second job-card attention list under it, Quick Actions (seven tall rows), a full Recent Maintenance Requests table, and five expanded MMS Module panels.
+
+**After, five blocks:**
+
+1. Compact header: icon, title, status pill, "Last synced HH:MM:SS · auto-refresh N s", subtitle, Refresh, Open MMS (plus Back to Platform Dashboard on the dashboard route).
+2. One banner, only when not online.
+3. KPI row of six tiles, then a row of six mini-stats.
+4. Two-column grid (2fr / 1fr): Manager Attention and Recent Maintenance Requests on the left; Quick Actions and MMS Modules Summary on the right.
+5. One source line ("Source: MMS Live API · read-only · MMS cache N s · MMS is the system of record"), shown only on screens at least 900px tall.
+
+### Measured page scroll (headless Chromium)
+
+| State | 1920x1080 | 1366x768 |
+|---|---|---|
+| Live data, executive route | 0 | 0 |
+| Live data, dashboard route | 0 | 0 |
+| Live data from an older MMS (no executive sections) | 0 | 0 |
+| Not enabled | 0 | 63px |
+| Offline | 0 | 27px |
+
+A headless viewport has no browser toolbar, so a real 1366x768 laptop has roughly 80–100px less height and will scroll slightly. Before this unit the live page at 1366x768 needed several screens of scrolling.
+
+### Files changed
+
+All under `apps/web/src/app/(protected)/maintenance/`:
+
+- `_components/mms/maintenance-control-center.tsx`: new layout; banner states its message once.
+- New `_components/mms/mms-card.tsx` (card shell + one-line note) and `_components/mms/mms-modules-summary.tsx`.
+- Rewritten compactly: `mms-kpi-card.tsx`, `mms-manager-attention.tsx`, `mms-recent-table.tsx`, `mms-quick-actions.tsx`.
+- Deleted (no longer used): `mms-needs-attention.tsx`, `mms-sync-strip.tsx`, `mms-unavailable-state.tsx`.
+- `executive/page.tsx`, `dashboard/page.tsx`: tighter page padding only.
+- New `_lib/mms-control-center.test.ts` (6 tests).
+- `_components/mms/mms-panels.tsx` (FMP-MAINT-04's five detailed panels) was left in place at first, then deleted on 2026-10-03. See the cleanup note below.
+
+### KPI compacting
+
+- Top row, six tiles: Active Jobs, Closure Requests, Materials Pending, Low Stock / Needs Attention, Total Assets, Vehicle Expiry Alerts. Each is one horizontal row (icon chip, large count, label) with a colored left edge, about 56px tall (was 104px). The helper text is now a tooltip.
+- Second row, six mini-stats: Total Job Cards, Materials Requests, Inventory Items, Working Now, Labor Hours Today, Completed This Month. Label left, value right, about 32px tall.
+- No value shows "—", never 0. When MMS is online but did not send a metric, the tile adds a small "Not available yet".
+
+### Manager Attention
+
+- One wrapped row of MMS's six category counts as small chips, each linking to the real MMS page.
+- At most 5 single-line items (type tag, ref, title — reason). The whole row opens the item in MMS. The header shows "N need attention · top 5".
+- The separate "job cards needing attention" list is gone. MMS's own Manager Attention is shown when MMS sends it; the job-card attention list is used only as a fallback for an older MMS build that does not.
+- Empty state: "No open MMS items need attention right now."
+
+### Recent Maintenance Requests
+
+- Latest 5 only, dense rows. The ref is the Open-in-MMS link. Header link "Latest 5 · all job cards" opens the full MMS list.
+- Columns: Ref, Request / Work Order, Asset / Location (from 1280px wide), Status, Assigned To (from 1536px wide), Updated.
+- Empty state: "No maintenance job cards in MMS yet."
+
+### MMS Modules Summary (Option A)
+
+Five one-line rows replace the five expanded panels. Each row is a link into MMS and shows three values:
+
+| Module | Values |
+|---|---|
+| Job Cards | Active, In progress, Waiting parts |
+| Materials & Inventory | Pending (requests), Low stock, Materials (total) |
+| Assets & Equipment | Total, In maint., At site |
+| Vehicle Expiry | Expired, Expiring, Alerts |
+| Labor Snapshot | Working, Today (hours), Cost (KWD, or "—" when MMS withholds it) |
+
+Problem counts above zero are highlighted. A section MMS did not send shows one muted "Not available yet".
+
+### Quick Actions
+
+A 2x3 grid of small buttons: Open MMS Dashboard, Job Cards, Materials Requests, Inventory Control, Assets & Equipment, Worker Activity (all real MMS routes). The FMP-local request log moved to a small "FMP local requests" link in the card header.
+
+### Unavailable and live states
+
+- Not configured / not enabled / offline / auth error / restricted: one compact banner carries the explanation. Tiles and module values show "—". Manager Attention and Recent Requests each show a single "No live data." line. Quick Actions and Open MMS still work. The detailed sync strip and the repeated "Not available from MMS live API yet" boxes are gone.
+- Live behavior is unchanged: same fetch, same statuses, same auto-refresh (pauses when the tab is hidden), same access rule (`maintenance.read` plus all-department Maintenance scope). The integration key stays on the FMP API.
+
+### Verification
+
+- Both UAT accounts are department-scoped and the deployed MMS does not serve the live endpoint, so live data cannot be shown through the real path. For layout checks only, a temporary proxy on port 4011 forwarded everything to the running API except `GET /maintenance/dashboard/live`, which it answered with **sample data** in FMP's own response shape (full payload, older-MMS payload, not-enabled, offline). A temporary web server ran on 3011. Both were stopped afterwards; nothing from the proxy or sample data is in the repo.
+- Screenshots reviewed at 1920x1080 (light and dark) and 1366x768. In every live case: 5 attention rows, 5 recent rows, 5 module rows, 6 actions, no horizontal overflow.
+- **Not verified:** real MMS data end to end (the MMS endpoint is still not deployed), and the restricted and auth-error states in a browser.
+
+### Test/build results (2026-10-01)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1824/1824 |
+| `pnpm --filter @recafco/web test` | ✓ 998/998 (+6) |
+| `pnpm --filter @recafco/web build` | ✓ both maintenance routes compiled |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+### Cleanup — `mms-panels.tsx` deleted (2026-10-03)
+
+Deleted `apps/web/src/app/(protected)/maintenance/_components/mms/mms-panels.tsx` at the user's request, because FMP-MAINT-05's `MmsModulesSummary` replaced it.
+
+- **Unused, confirmed before deleting:** no file in `apps/` or `packages/` imports `mms-panels` or any of its exports (`MmsJobCardsPanel`, `MmsMaterialsInventoryPanel`, `MmsAssetsPanel`, `MmsVehicleExpiryPanel`, `MmsLaborPanel`).
+- **Kept:** all MAINT-04 API parsing and data mapping (`mms-executive.parser.ts`, `mms-dashboard.service.ts`, the web types in `mms-api.ts`, and the `mms-format.ts` helpers). Only the web component file was removed.
+- **Docs:** `ui-registry.md` marks the entry as removed.
+- **Checks after deletion:** web typecheck ✓, `pnpm lint` ✓, web tests 998/998 ✓, web build ✓ (both maintenance routes compiled). On the running dev server, `/maintenance/executive` and `/maintenance/dashboard` return 200 and render Manager Attention, Recent Maintenance Requests, Quick Actions, and MMS Modules Summary.
+
+## FMP-MAINT-06 — Final Polish and Public MMS Domain Links (Completed 2026-10-05)
+
+### Summary
+
+Every MMS link a user can click now opens the public Maintenance Management System domain, `https://maintenance.recafco.online`. The internal address (`http://192.168.1.17:81`) is used only by the FMP API to call MMS and is never sent to the browser. Buttons say "Maintenance Management System" instead of "MMS". The one-screen layout is kept and lightly polished. No schema, permission, or MMS change; nothing is written to MMS. Not committed.
+
+### Link and domain handling
+
+- New env `MMS_PUBLIC_BASE_URL` (default `https://maintenance.recafco.online`). `MMS_BASE_URL` keeps its meaning for the server-to-server call only.
+- `MmsLiveApiClient.config()` now returns both `baseUrl` (internal, the only URL it calls) and `publicBaseUrl` (never called).
+- `safeMmsUrl(raw, fallbackPath, { publicBase, internalBase })` in `mms-executive.parser.ts` is the single normalizer; `safeOpenUrl` in the service delegates to it. Rules:
+
+| MMS sends | FMP returns |
+|---|---|
+| Relative path (`/assets/vehicles`) | Public base + path |
+| Link on the public host, http or https | Same path, query, and hash on the public base |
+| Link on the internal host | Same path, query, and hash on the public base |
+| Any other domain (including look-alikes, `//host`, `/\host`), `javascript:`, garbage, missing | The fallback MMS route on the public base |
+
+- **Behavior change from MAINT-02/04:** a link on an unknown host used to keep its path on the MMS origin. It is now ignored and replaced by the fallback route, as the ticket asks ("reject/ignore unsafe external domains").
+- The response field `mmsBaseUrl` is renamed `mmsPublicBaseUrl` and carries the public address. `links`, every section `openUrl`, and every item `openUrl` are public in all states, including offline and restricted.
+- Web fallback constant (used only when the FMP API is unreachable) changed from the internal address to the public domain.
+
+### Wording
+
+- Header button: "Open Maintenance Management System".
+- Quick action and banner link: "Open Maintenance System".
+- Tooltips: "Open in Maintenance Management System".
+- "Live from MMS", the "MMS Modules Summary" heading, and the source line keep "MMS".
+
+### Dashboard polish
+
+- **Manager Attention:** the filled reason pill on each row is replaced by a small colored dot and a quiet label. The reason label and the ref are fixed-width columns so rows line up; the title is in the primary text color. Still top 5, whole row opens the item.
+- **Recent Maintenance Requests:** when MMS has no recent job cards, the card no longer stretches; it is a single short line.
+- **MMS Modules Summary:** values are 14px bold with tabular figures, labels 11px. The third column is wider. Labor cost shows as "172.350 KWD".
+- **Quick Actions:** labels wrap to two lines instead of truncating; tighter spacing below 1536px so "Open Maintenance System" fits at 1366px.
+- **Header:** the title block takes the flexible width so the longer button does not push the header to a second row on the executive route. On the dashboard route the back link is shortened to "← Platform Dashboard".
+- **Source line:** 10px, muted: "Source: MMS Live API · read-only · cache 10s · MMS is the system of record".
+
+### Files changed
+
+- `packages/config/src/env/api.ts`
+- `apps/api/src/mms-integration/`: `mms-live-api.client.ts`, `mms-executive.parser.ts`, `mms-dashboard.service.ts`, both test files
+- `apps/api/src/env.test.ts`
+- `apps/web/src/lib/mms-api.ts`
+- `apps/web/src/app/(protected)/maintenance/_components/mms/`: `maintenance-control-center.tsx`, `mms-manager-attention.tsx`, `mms-recent-table.tsx`, `mms-quick-actions.tsx`, `mms-modules-summary.tsx`
+- `apps/web/src/app/(protected)/maintenance/_lib/`: both test files (sample URLs, new `tagDotColor` test)
+- `.env.example`, `docs/environment-variables.md`, `docs/runbooks/mms-integration.md`
+
+### Verification
+
+- **No internal address reaches users:** new API tests assert the JSON response contains no `192.168.1.17` and no `:81`, live and offline. The built web output (`.next/static` and `.next/server/app`) has 0 occurrences. No non-test web source file contains it. A rendered page had 24 MMS links, all on `https://maintenance.recafco.online`, and 0 occurrences of "Open MMS".
+- **The API still calls MMS internally:** the client builds its request from `baseUrl` only; `publicBaseUrl` is never passed to `fetch`. The existing client tests (URL, key header, no redirect following) are unchanged and pass.
+- **Running system:** the user's API on port 4000 returned `mmsPublicBaseUrl: https://maintenance.recafco.online`, a public `links.dashboard`, and no internal address (checked as `test.manager`, which only reaches the restricted state).
+- **Layout:** headless Chromium at 1920x1080 and 1366x768, both routes, live states: 0px scroll, no truncated quick-action or module labels. Light and dark screenshots reviewed.
+- **Layout checks used sample data** through a temporary local proxy, as in FMP-MAINT-05, because the UAT accounts cannot see live data. The proxy and data are not in the repo.
+- **Not verified:** clicking through to `https://maintenance.recafco.online` from this machine, and the page as seen by an all-department account with real MMS data. At 1280 px wide there is a small scroll (28–57px).
+
+### Test/build results (2026-10-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 1830/1830 |
+| `pnpm --filter @recafco/web test` | ✓ 999/999 |
+| `pnpm --filter @recafco/web build` | ✓ compiled |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+### Deployment notes
+
+- FMP: `MMS_PUBLIC_BASE_URL` defaults to the public domain, so it works without being set; add it to `.env` to be explicit. Restart only the FMP API after deploying.
+- MMS: set `MMS_PUBLIC_BASE_URL=https://maintenance.recafco.online` so MMS builds its own links on the public domain. FMP corrects internal links either way.
+
 ## Risks
 
 - Incomplete module requirements
