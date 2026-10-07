@@ -359,12 +359,8 @@ export class FactoryTasksService {
         message: 'You can only open your own tasks',
       });
     }
-    if (!task.responsibleDepartmentId) {
-      throw new UnprocessableEntityException({
-        code: 'TASK_RESPONSIBLE_DEPT_REQUIRED',
-        message: 'A responsible department must be set before opening a task',
-      });
-    }
+    // FMP-TASK-09 - a responsible department is optional (the column is nullable and
+    // tasks with no department are visible to everyone); opening never requires one.
 
     return this.transitionStatus(task, TaskStatus.OPEN, actor, {}, 'TASK_OPENED');
   }
@@ -1005,7 +1001,9 @@ export class FactoryTasksService {
     const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS);
     const where: Record<string, unknown> = { ...buildListWhere(query, actor) };
     if (deptFilter !== null) {
-      where['responsibleDepartmentId'] = deptFilter;
+      // FMP-TASK-09 - tasks with no department are visible to everyone (same rule as
+      // DepartmentAccessService.canAccessDepartment), so scope = own departments OR none.
+      where['AND'] = [deptScopeClause(deptFilter)];
     }
 
     const [items, total] = await Promise.all([
@@ -1099,7 +1097,7 @@ export class FactoryTasksService {
     const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
     const deptFilter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.FACTORY_TASKS);
-    const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
+    const deptWhere = deptFilter !== null ? deptScopeClause(deptFilter) : {};
 
     const [openTasks, assignedToMe, overdueTasks, blockedTasks, completedThisMonth] = await Promise.all([
       this.db.getClient().factoryTask.count({ where: { ...deptWhere, status: { in: ACTIVE_STATUSES } } }),
@@ -1168,7 +1166,7 @@ export class FactoryTasksService {
     const weekStart = new Date(todayStart.getTime() - weekDayIndex * 24 * 60 * 60 * 1000);
     const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const deptWhere = deptFilter !== null ? { responsibleDepartmentId: deptFilter } : {};
+    const deptWhere = deptFilter !== null ? deptScopeClause(deptFilter) : {};
 
     const [openTasks, assignedToMe, assignedByMe, overdueTasks, blockedTasks, completedThisMonth, dueToday, completedThisWeek, recentRaw] =
       await Promise.all([
@@ -1225,17 +1223,20 @@ export class FactoryTasksService {
   // People picker
   // ---------------------------------------------------------------------------
 
-  async listPeople(search?: string): Promise<{ id: string; displayName: string; username: string }[]> {
+  async listPeople(search?: string): Promise<{ id: string; displayName: string; username: string; department: { id: string; name: string } | null }[]> {
     const where: Record<string, unknown> = { isActive: true };
     if (search?.trim()) {
+      const term = search.trim();
       where['OR'] = [
-        { displayName: { contains: search.trim(), mode: 'insensitive' } },
-        { username: { contains: search.trim(), mode: 'insensitive' } },
+        { displayName: { contains: term, mode: 'insensitive' } },
+        { username: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+        { employeeNumber: { contains: term, mode: 'insensitive' } },
       ];
     }
     return this.db.getClient().user.findMany({
       where,
-      select: { id: true, displayName: true, username: true },
+      select: { id: true, displayName: true, username: true, department: { select: { id: true, name: true } } },
       orderBy: [{ displayName: 'asc' }],
       take: 20,
     });
@@ -1415,6 +1416,11 @@ export class FactoryTasksService {
     const resolvedPlantId = plantId ?? location.plantId ?? null;
     return { resolvedPlantId, resolvedLocationId: locationId };
   }
+}
+
+/** FMP-TASK-09 - department scope that still lets tasks without a department through. */
+function deptScopeClause(deptFilter: { in: string[] }): Record<string, unknown> {
+  return { OR: [{ responsibleDepartmentId: deptFilter }, { responsibleDepartmentId: null }] };
 }
 
 function buildListWhere(

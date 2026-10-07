@@ -2,6 +2,9 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
+import { authApi } from '@/lib/auth-api';
+import type { PersonRef } from '@/lib/factory-tasks-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
@@ -59,6 +62,24 @@ async function actionFetch(
     ...(code !== undefined ? { code } : {}),
     ...(message !== undefined ? { message } : {}),
   };
+}
+
+/**
+ * After a successful change, report success. Deliberately NO revalidatePath here: it makes Next
+ * push its own refresh that races with (and swallows) the calling client's router.refresh(),
+ * leaving the page showing stale data. Task pages are dynamic (no cache), so the client refresh is enough.
+ */
+function finishTaskChange(): ActionResult {
+  return { error: null };
+}
+
+/** After a successful change: refresh the cached task pages/lists, then show the task (so buttons and status are never stale). */
+function goToTask(taskId: string): never {
+  revalidatePath(`/factory-tasks/${taskId}`);
+  revalidatePath('/factory-tasks');
+  revalidatePath('/factory-tasks/executive');
+  revalidatePath('/dashboard');
+  redirect(`/factory-tasks/${taskId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +165,176 @@ export async function createTaskAction(
 }
 
 // ---------------------------------------------------------------------------
+// FMP-TASK-05 - simple Create Task (popup form)
+// ---------------------------------------------------------------------------
+
+export interface CreateTaskResult {
+  error: string | null;
+  fieldErrors?: Record<string, string[]>;
+  /** Set once the task exists. */
+  taskId?: string;
+  /** Task was created, but a follow-up step (assigning / a file upload) failed. */
+  warning?: string;
+}
+
+/** Plain-word priority from the form to the real backend value. */
+const PRIORITY_FROM_FORM: Record<string, string> = { NORMAL: 'MEDIUM', HIGH: 'HIGH', URGENT: 'URGENT' };
+
+/** Uploads one file. Returns true on success; technical details are logged server-side only. */
+async function uploadTaskAttachment(taskId: string, token: string | undefined, file: File): Promise<boolean> {
+  try {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    const res = await fetch(`${API_BASE}/factory-tasks/${taskId}/attachments`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body,
+      cache: 'no-store',
+    });
+    if (res.ok) return true;
+    console.error(`[tasks] attachment upload failed for task ${taskId}: HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  } catch (e) {
+    console.error(`[tasks] attachment upload error for task ${taskId}:`, e);
+  }
+  return false;
+}
+
+/**
+ * The popup/page "Create Task" form. Department is never asked and never required. Creator is always the
+ * logged-in user (the API sets it). Reuses the existing create -> open ->
+ * assign chain and the new attachment endpoint; does not redirect, so the
+ * popup can close and the page refresh.
+ */
+export async function createSimpleTaskAction(formData: FormData): Promise<CreateTaskResult> {
+  const title = (formData.get('title') as string | null)?.trim() ?? '';
+  const description = (formData.get('description') as string | null)?.trim() || null;
+  const priority = PRIORITY_FROM_FORM[(formData.get('priority') as string | null) ?? 'NORMAL'] ?? 'MEDIUM';
+  const dueDate = (formData.get('dueDate') as string | null) || null;
+  const assignedToUserId = (formData.get('assignedToUserId') as string | null) || null;
+  const assigneeDepartmentId = (formData.get('assigneeDepartmentId') as string | null) || null;
+
+  const fieldErrors: Record<string, string[]> = {};
+  if (!title) fieldErrors['title'] = ['Please enter a task name.'];
+  let dueAt: string | null = null;
+  if (dueDate) {
+    const d = new Date(`${dueDate}T23:59:00`);
+    if (isNaN(d.getTime())) fieldErrors['dueDate'] = ['Please choose a valid date.'];
+    else dueAt = d.toISOString();
+  }
+  if (Object.keys(fieldErrors).length > 0) return { error: null, fieldErrors };
+
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get('recafco_access')?.value;
+  } catch { /* ignore */ }
+
+  // Department is optional. With a selected person it follows that person (none if they have
+  // none); with no person it follows the logged-in user. Never an error, never asked for.
+  let departmentId: string | null = null;
+  if (assignedToUserId) {
+    departmentId = assigneeDepartmentId;
+  } else {
+    const me = await authApi.me(token ?? '').catch(() => null);
+    departmentId = me?.ok ? me.data.departmentId : null;
+  }
+
+  const body: Record<string, unknown> = { title, priority };
+  if (departmentId) body['responsibleDepartmentId'] = departmentId;
+  if (description) body['description'] = description;
+  if (dueAt) body['dueAt'] = dueAt;
+
+  const res = await fetch(`${API_BASE}/factory-tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    let message = 'Could not create the task. Please try again.';
+    try {
+      const json = (await res.json()) as { error?: { message?: string } };
+      message = json.error?.message ?? message;
+    } catch { /* ignore */ }
+    return { error: message };
+  }
+  const taskId = ((await res.json()) as { data: { id: string } }).data.id;
+
+  const problems: string[] = [];
+  if (assignedToUserId) {
+    // A new task starts as a draft; the existing lifecycle needs it opened before it can be assigned.
+    const opened = await actionFetch(`/factory-tasks/${taskId}/open`, 'POST').catch(() => ({ ok: false, message: undefined as string | undefined }));
+    const assigned = opened.ok
+      ? await actionFetch(`/factory-tasks/${taskId}/assign`, 'POST', { assignedToUserId }).catch(() => ({ ok: false, message: undefined as string | undefined }))
+      : opened;
+    if (!assigned.ok) {
+      console.error(`[tasks] assigning new task ${taskId} failed: ${assigned.message ?? 'no message'}`);
+      problems.push('it could not be assigned');
+    }
+  }
+
+  const files = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
+  let failedFiles = 0;
+  for (const file of files) {
+    if (!(await uploadTaskAttachment(taskId, token, file))) failedFiles += 1;
+  }
+
+  revalidatePath('/factory-tasks');
+  revalidatePath('/factory-tasks/executive');
+  revalidatePath('/dashboard');
+
+  const warnings: string[] = [];
+  if (problems.length > 0) warnings.push('Task was created, but it could not be assigned. Please try again.');
+  if (failedFiles > 0) {
+    warnings.push(
+      failedFiles === 1
+        ? 'Task was created, but one file could not be uploaded. Please open the task and upload it again.'
+        : `Task was created, but ${failedFiles} files could not be uploaded. Please open the task and upload them again.`,
+    );
+  }
+  return warnings.length > 0 ? { error: null, taskId, warning: warnings.join(' ') } : { error: null, taskId };
+}
+
+/** Type-ahead for the Assign To picker (name, username, email or employee number). */
+export async function searchPeopleAction(query: string): Promise<PersonRef[]> {
+  const result = await apiFetchResultPeople(query);
+  return result;
+}
+
+async function apiFetchResultPeople(query: string): Promise<PersonRef[]> {
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get('recafco_access')?.value;
+  } catch { /* ignore */ }
+  try {
+    const res = await fetch(`${API_BASE}/factory-tasks/people${query.trim() ? `?search=${encodeURIComponent(query.trim())}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    return ((await res.json()) as { data: PersonRef[] }).data;
+  } catch {
+    return [];
+  }
+}
+
+/** Adds files to an existing task (task detail page). Never returns technical text. */
+export async function uploadTaskFilesAction(taskId: string, formData: FormData): Promise<ActionResult> {
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get('recafco_access')?.value;
+  } catch { /* ignore */ }
+  const files = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length === 0) return { error: 'Please choose a file.' };
+  let failed = 0;
+  for (const file of files) {
+    if (!(await uploadTaskAttachment(taskId, token, file))) failed += 1;
+  }
+  revalidatePath(`/factory-tasks/${taskId}`);
+  if (failed > 0) return { error: failed === 1 ? 'File could not be uploaded. Please try again.' : `${failed} files could not be uploaded. Please try again.` };
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
 // Update own DRAFT
 // ---------------------------------------------------------------------------
 
@@ -174,7 +365,7 @@ export async function updateDraftTaskAction(
   if (dueAt !== null) body['dueAt'] = dueAt || null;
 
   const result = await actionFetch(`/factory-tasks/${taskId}`, 'PATCH', body);
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) goToTask(taskId);
   return { error: result.message ?? 'Failed to update task' };
 }
 
@@ -184,7 +375,7 @@ export async function updateDraftTaskAction(
 
 export async function openTaskAction(taskId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/open`, 'POST');
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to open task' };
 }
 
@@ -194,13 +385,13 @@ export async function openTaskAction(taskId: string): Promise<ActionResult> {
 
 export async function assignTaskAction(taskId: string, assignedToUserId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/assign`, 'POST', { assignedToUserId });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to assign task' };
 }
 
 export async function unassignTaskAction(taskId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/unassign`, 'POST');
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to unassign task' };
 }
 
@@ -210,7 +401,7 @@ export async function unassignTaskAction(taskId: string): Promise<ActionResult> 
 
 export async function startTaskAction(taskId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/start`, 'POST');
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to start task' };
 }
 
@@ -220,13 +411,13 @@ export async function startTaskAction(taskId: string): Promise<ActionResult> {
 
 export async function blockTaskAction(taskId: string, blockedReason: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/block`, 'POST', { blockedReason });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to block task' };
 }
 
 export async function unblockTaskAction(taskId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/unblock`, 'POST');
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to unblock task' };
 }
 
@@ -236,7 +427,7 @@ export async function unblockTaskAction(taskId: string): Promise<ActionResult> {
 
 export async function completeTaskAction(taskId: string, completionSummary: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/complete`, 'POST', { completionSummary });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to complete task' };
 }
 
@@ -246,7 +437,7 @@ export async function completeTaskAction(taskId: string, completionSummary: stri
 
 export async function closeTaskAction(taskId: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/close`, 'POST');
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to close task' };
 }
 
@@ -256,7 +447,7 @@ export async function closeTaskAction(taskId: string): Promise<ActionResult> {
 
 export async function reopenTaskAction(taskId: string, reason: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/reopen`, 'POST', { reason });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to reopen task' };
 }
 
@@ -266,7 +457,7 @@ export async function reopenTaskAction(taskId: string, reason: string): Promise<
 
 export async function cancelTaskAction(taskId: string, reason: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/cancel`, 'POST', { reason });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to cancel task' };
 }
 
@@ -276,7 +467,7 @@ export async function cancelTaskAction(taskId: string, reason: string): Promise<
 
 export async function updatePriorityAction(taskId: string, priority: string): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/priority`, 'PATCH', { priority });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to update priority' };
 }
 
@@ -286,7 +477,7 @@ export async function updatePriorityAction(taskId: string, priority: string): Pr
 
 export async function updateDueDateAction(taskId: string, dueAt: string | null): Promise<ActionResult> {
   const result = await actionFetch(`/factory-tasks/${taskId}/due-date`, 'PATCH', { dueAt });
-  if (result.ok) redirect(`/factory-tasks/${taskId}`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to update due date' };
 }
 
@@ -303,14 +494,14 @@ export async function addProgressAction(
   const pctRaw = formData.get('progressPercent') as string | null;
   const progressPercent = pctRaw ? parseInt(pctRaw, 10) : undefined;
 
-  if (!note) return { error: null, fieldErrors: { note: ['Progress note is required'] } };
+  if (!note) return { error: null, fieldErrors: { note: ['Please write a progress note.'] } };
 
   const body: Record<string, unknown> = { note };
   if (progressPercent !== undefined && !isNaN(progressPercent)) body['progressPercent'] = progressPercent;
 
   const result = await actionFetch(`/factory-tasks/${taskId}/progress`, 'POST', body);
-  if (result.ok) redirect(`/factory-tasks/${taskId}#progress`);
-  return { error: result.message ?? 'Failed to add progress note' };
+  if (result.ok) return finishTaskChange();
+  return { error: result.message ?? 'Progress could not be saved. Please try again.' };
 }
 
 // ---------------------------------------------------------------------------
@@ -323,9 +514,9 @@ export async function addTaskCommentAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const body = (formData.get('body') as string)?.trim();
-  if (!body) return { error: null, fieldErrors: { body: ['Comment cannot be empty'] } };
+  if (!body) return { error: null, fieldErrors: { body: ['Please write a comment.'] } };
 
   const result = await actionFetch(`/factory-tasks/${taskId}/comments`, 'POST', { body });
-  if (result.ok) redirect(`/factory-tasks/${taskId}#comments`);
+  if (result.ok) return finishTaskChange();
   return { error: result.message ?? 'Failed to post comment' };
 }

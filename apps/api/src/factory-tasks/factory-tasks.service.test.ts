@@ -271,13 +271,14 @@ describe('FactoryTasksService', () => {
       );
     });
 
-    it('throws TASK_RESPONSIBLE_DEPT_REQUIRED when responsibleDepartmentId is missing', async () => {
-      mockFactoryTaskFindUnique.mockResolvedValue(
-        makeTask({ responsibleDepartmentId: null }),
-      );
-      await expect(service.open('task-id-1', ACTOR_NO_MANAGE)).rejects.toThrow(
-        UnprocessableEntityException,
-      );
+    it('opens a DRAFT task even when it has no responsible department (FMP-TASK-09)', async () => {
+      mockFactoryTaskFindUnique.mockResolvedValue(makeTask({ responsibleDepartmentId: null }));
+      mockTxUpdateMany.mockResolvedValue({ count: 1 });
+      mockTxFindUniqueOrThrow.mockResolvedValue(makeTask({ status: TaskStatus.OPEN, responsibleDepartmentId: null }));
+      mockTxActivityCreate.mockResolvedValue({});
+
+      const result = await service.open('task-id-1', ACTOR_NO_MANAGE);
+      expect((result as Record<string, unknown>)['status']).toBe(TaskStatus.OPEN);
     });
 
     it('opens the task when DRAFT and responsible dept is set', async () => {
@@ -868,6 +869,21 @@ describe('FactoryTasksService', () => {
 
       const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
       expect(call.where['createdByUserId']).toBe('user-other-1');
+    });
+  });
+
+  describe('findAll department scope (FMP-TASK-09)', () => {
+    it('lets tasks with no department through for a department-scoped viewer', async () => {
+      (mockDeptAccess.buildDeptFilter as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ in: ['dept-1'] });
+      mockFactoryTaskFindMany.mockResolvedValueOnce([]);
+      mockFactoryTaskCount.mockResolvedValueOnce(0);
+
+      await service.findAll({}, ACTOR_NO_MANAGE);
+
+      const call = mockFactoryTaskFindMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+      expect(call.where['AND']).toEqual([
+        { OR: [{ responsibleDepartmentId: { in: ['dept-1'] } }, { responsibleDepartmentId: null }] },
+      ]);
     });
   });
 

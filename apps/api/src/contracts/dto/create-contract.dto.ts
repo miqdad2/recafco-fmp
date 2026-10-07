@@ -32,11 +32,23 @@ export class CreateContractDto {
   @MaxLength(10000)
   description?: string;
 
+  // Optional since FMP-CONTRACT-01: when firstPartyId is sent the service fills
+  // this from the selected Customer (First Party). ContractsService.create()
+  // rejects the request if neither is provided.
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(300)
   @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value))
-  counterpartyName!: string;
+  counterpartyName?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  firstPartyId?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  secondPartyId?: string;
 
   @IsOptional()
   @IsString()

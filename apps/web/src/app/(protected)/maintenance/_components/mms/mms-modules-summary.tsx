@@ -120,22 +120,22 @@ export function MmsModulesSummary({ dashboard, links }: Props): React.JSX.Elemen
             target="_blank"
             rel="noopener noreferrer"
             title={`Open ${title} in the Maintenance Management System`}
-            className="group flex items-center gap-2.5 px-3.5 py-1 hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus"
+            className="group flex items-center gap-2.5 px-3.5 py-1.5 hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus"
           >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-teal-light text-teal">
-              <Icon className="size-3.5" aria-hidden="true" />
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-teal-light text-teal">
+              <Icon className="size-4" aria-hidden="true" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold leading-tight text-text-primary">{title}</p>
+              <p className="truncate text-[13px] font-semibold leading-tight text-text-primary">{title}</p>
               {online && stats === null ? (
-                <p className="text-[11px] text-text-muted">Not available yet</p>
+                <p className="text-xs text-text-secondary">Not available yet</p>
               ) : (
-                <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.35fr)] gap-2">
+                <dl className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.1fr)_minmax(0,1.35fr)] gap-1.5">
                   {(stats ?? DASH_STATS[title] ?? []).map(({ label, value, alert }) => (
                     <div key={label} className="flex min-w-0 flex-row-reverse items-baseline justify-end gap-1">
-                      <dt className="truncate text-[11px] text-text-secondary">{label}</dt>
+                      <dt className="truncate text-xs text-text-secondary">{label}</dt>
                       <dd
-                        className={`shrink-0 text-sm font-bold tabular-nums leading-tight ${
+                        className={`shrink-0 text-base font-bold tabular-nums leading-tight ${
                           alert && typeof value === 'number' && value > 0 ? 'text-warning' : 'text-text-primary'
                         }`}
                       >
@@ -146,7 +146,7 @@ export function MmsModulesSummary({ dashboard, links }: Props): React.JSX.Elemen
                 </dl>
               )}
             </div>
-            <ArrowUpRight className="size-3.5 shrink-0 text-text-muted group-hover:text-accent" aria-hidden="true" />
+            <ArrowUpRight className="size-4 shrink-0 text-text-muted group-hover:text-accent" aria-hidden="true" />
           </a>
         </li>
       ))}

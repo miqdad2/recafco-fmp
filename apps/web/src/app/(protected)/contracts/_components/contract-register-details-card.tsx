@@ -1,5 +1,6 @@
 import type { Contract } from '@/lib/contracts-api';
 import { formatContractValue } from '../_lib/contract-ui-helpers';
+import { displaySecondParty } from '../_lib/contract-party-helpers';
 
 interface Props {
   contract: Contract;
@@ -24,6 +25,7 @@ export function ContractRegisterDetailsCard({ contract }: Props): React.JSX.Elem
     <section className="rounded-lg border border-border bg-surface p-5">
       <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-4">Register Details</h2>
       <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-4">
+        <Field label="Second Party" value={displaySecondParty(contract)} />
         <Field label="Job Order" value={contract.jobOrder || '—'} />
         <Field label="Contract Date" value={formatDate(contract.contractDate)} />
         <Field label="Quotation #" value={contract.quotationNumber || '—'} />

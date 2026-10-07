@@ -212,6 +212,10 @@ export function toBoqApiItems(rows: BoqRow[]): BoqApiItem[] {
 // migration needed, and existing stored values are completely unaffected.
 export const UNIT_OF_MEASURE_OPTIONS = ['m²', 'm³', 'lm', 'nos', 'ton', 'kg', 'set', 'lot', 'ls', 'other'];
 
+// FMP-BOQ-02A — the only units offered on New Contract Register. Edit Contract and
+// old data keep using the wider UNIT_OF_MEASURE_OPTIONS list above.
+export const REGISTER_UNIT_OPTIONS = ['nos', 'm²', 'm³', 'lm'];
+
 export const MIX_DESIGN_OPTIONS = [
   { value: 'GRAY', label: 'Gray' },
   { value: 'WHITE', label: 'White' },
@@ -252,4 +256,50 @@ export function boqRowsFromExisting(items: ExistingBoqItem[]): BoqRow[] {
     drawingQty: item.drawingQty ?? '',
     invoiceQty: item.invoiceQty ?? '',
   }));
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-01 — simple BOQ input for New Contract Register
+// ---------------------------------------------------------------------------
+
+/** Friendly unit labels for the simplified BOQ form; stored values are unchanged. */
+export const UNIT_LABELS: Record<string, string> = {
+  nos: 'Nos',
+  'm²': 'M²',
+  'm³': 'M³',
+  lm: 'LM',
+  set: 'Set',
+  ton: 'Ton',
+  kg: 'Kg',
+  lot: 'Lot',
+  ls: 'Lump Sum',
+  other: 'Other',
+};
+
+export function unitLabel(unit: string): string {
+  return UNIT_LABELS[unit] ?? unit;
+}
+
+/**
+ * Validates the simplified register BOQ (Item Description, Unit, Qty, Unit
+ * Price). A row nobody has started (all blank) is ignored, so the BOQ stays
+ * optional. Messages are plain language; with several rows they are prefixed
+ * "Item N:". Returns the first problem, or null.
+ */
+export function validateRegisterBoqRows(rows: BoqRow[]): string | null {
+  const started = rows.filter(boqRowHasAnyValue);
+  for (let i = 0; i < started.length; i++) {
+    const row = started[i]!;
+    const prefix = started.length > 1 ? `Item ${i + 1}: ` : '';
+    if (row.description.trim() === '') return `${prefix}Please enter item description.`;
+    if (row.unitOfMeasure.trim() === '') return `${prefix}Please select unit.`;
+    if (row.originalEstimatedQty.trim() === '') return `${prefix}Please enter Contract Qty.`;
+    const qty = parseFloat(row.originalEstimatedQty);
+    if (isNaN(qty) || qty <= 0) return `${prefix}Contract Qty must be more than 0.`;
+    if (row.unitPrice.trim() !== '') {
+      const price = parseFloat(row.unitPrice);
+      if (isNaN(price) || price < 0) return `${prefix}Unit price must be 0 or more.`;
+    }
+  }
+  return null;
 }

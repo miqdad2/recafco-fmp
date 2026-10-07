@@ -42,6 +42,27 @@ export interface ContractBoqItem {
   updatedAt: string;
 }
 
+// FMP-CONTRACT-01 — Contract Party master (Customer (First Party) / Second Party).
+export type ContractPartyType = 'FIRST_PARTY' | 'SECOND_PARTY';
+
+export interface ContractParty {
+  id: string;
+  name: string;
+  partyType: ContractPartyType;
+  contactNo: string | null;
+  email: string | null;
+  address: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContractPartyRef {
+  id: string;
+  name: string;
+  contactNo: string | null;
+}
+
 export interface Contract {
   id: string;
   referenceNumber: string;
@@ -52,6 +73,11 @@ export interface Contract {
   version: number;
   counterpartyName: string;
   counterpartyContact?: string;
+  // FMP-CONTRACT-01 — absent/null on contracts created before the party master existed.
+  firstPartyId?: string | null;
+  secondPartyId?: string | null;
+  firstParty?: ContractPartyRef | null;
+  secondParty?: ContractPartyRef | null;
   jobOrder?: string;
   contractDate?: string;
   quotationNumber?: string;
@@ -2089,6 +2115,15 @@ export const contractsApi = {
 
   people: () =>
     apiFetch<ContractPerson[]>('/contracts/people'),
+
+  // FMP-CONTRACT-01 — active parties only unless includeInactive is set.
+  parties: (params: { partyType?: ContractPartyType; includeInactive?: boolean } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.partyType) qs.set('partyType', params.partyType);
+    if (params.includeInactive) qs.set('includeInactive', 'true');
+    const suffix = qs.toString();
+    return apiFetch<ContractParty[]>(`/contracts/parties${suffix ? `?${suffix}` : ''}`);
+  },
 
   departments: () =>
     apiFetch<OrgRef[]>('/contracts/departments'),

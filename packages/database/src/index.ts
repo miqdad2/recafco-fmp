@@ -91,6 +91,7 @@ export {
   ContractBoqProductionStatus,
   ContractPaymentStatus,
   ContractScheduleStatus,
+  ContractPartyType,
   ContractWorkflowTeam,
   ContractWorkflowTaskStatus,
   ContractWorkflowTaskPriority,

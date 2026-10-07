@@ -12,7 +12,8 @@ interface Props {
 // tooltip. FMP-MAINT-06: the first action is worded for users who don't know
 // the abbreviation "MMS" ("Open Maintenance System"; the header button has the
 // full name), and spacing is tightened below 2xl so that label fits unclipped
-// at 1366px. FMP's own local request log moved to a small link in the card
+// at 1366px. FMP-UI-25: taller buttons (40px) with 13–14px labels and
+// normal letter spacing, so a two-line label is not cramped. FMP's own local request log moved to a small link in the card
 // header (maintenance-control-center.tsx), still labelled as FMP-local.
 export function MmsQuickActions({ links }: Props): React.JSX.Element {
   const actions: { label: string; description: string; href: string; icon: LucideIcon }[] = [
@@ -33,10 +34,10 @@ export function MmsQuickActions({ links }: Props): React.JSX.Element {
             target="_blank"
             rel="noopener noreferrer"
             title={description}
-            className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface px-1.5 text-[11px] font-semibold tracking-tight text-text-primary 2xl:gap-1.5 2xl:px-2 2xl:text-xs 2xl:tracking-normal transition hover:border-teal hover:bg-teal-light focus:outline-none focus:ring-2 focus:ring-focus"
+            className="flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 text-[13px] font-semibold text-text-primary 2xl:text-sm transition hover:border-teal hover:bg-teal-light focus:outline-none focus:ring-2 focus:ring-focus"
           >
-            <Icon className="size-3.5 shrink-0 text-teal" aria-hidden="true" />
-            <span className="line-clamp-2 leading-[1.1]">{label}</span>
+            <Icon className="size-4 shrink-0 text-teal" aria-hidden="true" />
+            <span className="line-clamp-2 leading-tight">{label}</span>
           </a>
         </li>
       ))}

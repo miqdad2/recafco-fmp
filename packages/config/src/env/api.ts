@@ -81,6 +81,7 @@ export const ApiEnvSchema = z
     ERECTION_START_ATTACHMENTS_DIR: z.string().optional(),
     ERECTION_CHECKLIST_ATTACHMENTS_DIR: z.string().optional(),
     INCIDENT_ATTACHMENTS_DIR: z.string().optional(),
+    TASK_ATTACHMENTS_DIR: z.string().optional(),
     TECHNICAL_DRAWING_ATTACHMENTS_DIR: z.string().optional(),
     // FMP-MAINT-02 — MMS live dashboard API. MMS_INTEGRATION_KEY is optional:
     // when absent, the Maintenance dashboard shows "MMS integration not
@@ -151,6 +152,7 @@ export const ApiEnvSchema = z
       erectionStartAttachmentsDir: raw.ERECTION_START_ATTACHMENTS_DIR ?? './storage/erection-start-attachments',
       erectionChecklistAttachmentsDir: raw.ERECTION_CHECKLIST_ATTACHMENTS_DIR ?? './storage/erection-checklist-attachments',
       incidentAttachmentsDir: raw.INCIDENT_ATTACHMENTS_DIR ?? './storage/incident-attachments',
+      taskAttachmentsDir: raw.TASK_ATTACHMENTS_DIR ?? './storage/task-attachments',
       technicalDrawingAttachmentsDir:
         raw.TECHNICAL_DRAWING_ATTACHMENTS_DIR ?? './storage/technical-drawing-attachments',
       mmsBaseUrl: (raw.MMS_BASE_URL || DEFAULT_MMS_BASE_URL).replace(/\/+$/, ''),

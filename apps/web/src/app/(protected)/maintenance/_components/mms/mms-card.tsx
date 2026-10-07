@@ -15,7 +15,7 @@ export function MmsCard({ id, title, aside, className = '', children }: Props): 
   return (
     <section aria-labelledby={id} className={`flex min-h-0 flex-col rounded-xl border border-border bg-surface shadow-sm ${className}`}>
       <header className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-1.5">
-        <h2 id={id} className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+        <h2 id={id} className="text-[13px] font-bold uppercase tracking-wide text-text-secondary">
           {title}
         </h2>
         {aside}
@@ -27,5 +27,5 @@ export function MmsCard({ id, title, aside, className = '', children }: Props): 
 
 /** One compact muted line for a section with nothing to show — never a large box. */
 export function MmsCardNote({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <p className="flex flex-1 items-center justify-center px-3.5 py-4 text-center text-xs text-text-muted">{children}</p>;
+  return <p className="flex flex-1 items-center justify-center px-3.5 py-4 text-center text-sm text-text-secondary">{children}</p>;
 }

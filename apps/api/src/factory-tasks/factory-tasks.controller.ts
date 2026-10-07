@@ -9,7 +9,21 @@ import {
   HttpCode,
   UseGuards,
   ParseUUIDPipe,
+  Delete,
+  Res,
+  StreamableFile,
+  UseInterceptors,
+  UploadedFile,
+  UnprocessableEntityException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { FactoryTaskAttachmentsService } from './factory-task-attachments.service';
+import {
+  TaskAttachmentStorageService,
+  TASK_ATTACHMENT_ALLOWED_MIME_TYPES,
+  TASK_ATTACHMENT_MAX_BYTES,
+} from './task-attachment-storage.service';
 import { FactoryTasksService } from './factory-tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto, UpdatePriorityDto, UpdateDueDateDto } from './dto/update-task.dto';
@@ -33,7 +47,11 @@ function meta(): { requestId?: string } {
 @Controller('factory-tasks')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class FactoryTasksController {
-  constructor(private readonly tasksService: FactoryTasksService) {}
+  constructor(
+    private readonly tasksService: FactoryTasksService,
+    private readonly attachmentsService: FactoryTaskAttachmentsService,
+    private readonly attachmentStorage: TaskAttachmentStorageService,
+  ) {}
 
   // summary, my, people MUST be declared before /:id to avoid route conflict
 
@@ -326,5 +344,77 @@ export class FactoryTasksController {
   ): Promise<ApiSuccessResponse<unknown[]>> {
     const activities = await this.tasksService.listActivities(id, actor);
     return { data: activities, meta: meta(), error: null };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Attachments (FMP-TASK-05)
+  // ---------------------------------------------------------------------------
+
+  @Get(':id/attachments')
+  @Permissions('tasks.read')
+  async listAttachments(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown[]>> {
+    const data = await this.attachmentsService.list(id, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Post(':id/attachments')
+  @HttpCode(201)
+  @Permissions('tasks.create')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: TASK_ATTACHMENT_MAX_BYTES },
+      fileFilter: (_req, file, callback) => {
+        if (!(TASK_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+          callback(
+            new UnprocessableEntityException({
+              code: 'TASK_ATTACHMENT_INVALID_TYPE',
+              message: 'Unsupported file type. Allowed: PDF, Word, Excel, JPG/PNG/WEBP photos, CSV and TXT files.',
+            }),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async uploadAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const data = await this.attachmentsService.create(id, file, actor);
+    return { data, meta: meta(), error: null };
+  }
+
+  @Get(':id/attachments/:attachmentId/download')
+  @Permissions('tasks.read')
+  async downloadAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.attachmentsService.getForDownload(id, attachmentId, actor);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.attachmentStorage.createReadStream(storagePath));
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @HttpCode(200)
+  @Permissions('tasks.create')
+  async deleteAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.attachmentsService.remove(id, attachmentId, actor);
+    return { data: null, meta: meta(), error: null };
   }
 }

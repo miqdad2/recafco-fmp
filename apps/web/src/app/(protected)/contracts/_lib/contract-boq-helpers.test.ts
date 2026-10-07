@@ -9,6 +9,10 @@ import {
   boqAmountRemaining,
   boqRowHasAnyValue,
   validateBoqRows,
+  validateRegisterBoqRows,
+  unitLabel,
+  REGISTER_UNIT_OPTIONS,
+  UNIT_OF_MEASURE_OPTIONS,
   toBoqApiItems,
   boqRowsFromExisting,
   type BoqRow,
@@ -265,5 +269,45 @@ describe('drawingQty is never read by any BOQ formula', () => {
   it('allows a blank Drawing Qty', () => {
     const row = makeRow({ description: 'Panels', originalEstimatedQty: '100', unitPrice: '25.5' });
     expect(validateBoqRows([row])).toBeNull();
+  });
+});
+
+describe('validateRegisterBoqRows (FMP-BOQ-01)', () => {
+  const ok = { description: 'Hollowcore Slab', unitOfMeasure: 'nos', originalEstimatedQty: '50', unitPrice: '12.5' };
+
+  it('ignores a row nobody has started, so the BOQ stays optional', () => {
+    expect(validateRegisterBoqRows([emptyBoqRow()])).toBeNull();
+  });
+  it('accepts a complete row, with or without a unit price', () => {
+    expect(validateRegisterBoqRows([makeRow(ok)])).toBeNull();
+    expect(validateRegisterBoqRows([makeRow({ ...ok, unitPrice: '' })])).toBeNull();
+    expect(validateRegisterBoqRows([makeRow({ ...ok, unitPrice: '0' })])).toBeNull();
+  });
+  it('uses the plain messages', () => {
+    expect(validateRegisterBoqRows([makeRow({ ...ok, description: ' ' })])).toBe('Please enter item description.');
+    expect(validateRegisterBoqRows([makeRow({ ...ok, unitOfMeasure: '' })])).toBe('Please select unit.');
+    expect(validateRegisterBoqRows([makeRow({ ...ok, originalEstimatedQty: '' })])).toBe('Please enter Contract Qty.');
+    expect(validateRegisterBoqRows([makeRow({ ...ok, originalEstimatedQty: '0' })])).toBe('Contract Qty must be more than 0.');
+    expect(validateRegisterBoqRows([makeRow({ ...ok, unitPrice: '-1' })])).toBe('Unit price must be 0 or more.');
+  });
+  it('prefixes the item number when there are several rows', () => {
+    expect(validateRegisterBoqRows([makeRow(ok), makeRow({ ...ok, description: '' })])).toBe('Item 2: Please enter item description.');
+  });
+});
+
+describe('unitLabel', () => {
+  it('shows friendly labels and falls back to the stored value', () => {
+    expect(unitLabel('m²')).toBe('M²');
+    expect(unitLabel('nos')).toBe('Nos');
+    expect(unitLabel('weird')).toBe('weird');
+  });
+});
+
+describe('REGISTER_UNIT_OPTIONS (FMP-BOQ-02A)', () => {
+  it('offers only Nos, M², M³ and LM on New Contract Register', () => {
+    expect(REGISTER_UNIT_OPTIONS.map(unitLabel)).toEqual(['Nos', 'M²', 'M³', 'LM']);
+  });
+  it('leaves the wider list used by Edit Contract unchanged', () => {
+    expect(UNIT_OF_MEASURE_OPTIONS).toContain('ton');
   });
 });

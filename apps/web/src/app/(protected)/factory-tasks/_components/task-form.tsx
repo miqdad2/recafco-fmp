@@ -2,13 +2,12 @@
 
 import { useActionState } from 'react';
 import type { ActionResult } from '../actions';
-import type { FactoryTask, OrgRef, UserRef } from '../../../../lib/factory-tasks-api';
+import type { FactoryTask, OrgRef } from '../../../../lib/factory-tasks-api';
 
 const PRIORITIES = [
-  { value: 'LOW',      label: 'Low' },
-  { value: 'MEDIUM',   label: 'Medium' },
-  { value: 'HIGH',     label: 'High' },
-  { value: 'URGENT', label: 'Urgent — must be addressed immediately' },
+  { value: 'MEDIUM', label: 'Normal' },
+  { value: 'HIGH',   label: 'High' },
+  { value: 'URGENT', label: 'Urgent' },
 ];
 
 const SELECT_CLASS = 'mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
@@ -22,11 +21,6 @@ interface Props {
   plants: OrgRef[];
   /** FMP-UI-20D — same distinction as `deptsFailed`, for plants/locations. */
   plantsFailed?: boolean | undefined;
-  /** FMP-UI-20B — real people list for "Assign To User". Only passed (non-empty) when the current viewer holds `tasks.assign` — see new/page.tsx. Omitted entirely on the edit form, which has no assignment step of its own. */
-  people?: UserRef[] | undefined;
-  /** FMP-UI-20B — true only when `people` is real AND the viewer holds `tasks.assign`. Gates the whole "Assign To User" field — never shown/rendered when this is false, so nothing on the page implies assignment works when it doesn't. */
-  canAssign?: boolean | undefined;
-  canLinkIncident?: boolean | undefined;
   defaultValues?: Partial<FactoryTask> | undefined;
 }
 
@@ -188,7 +182,7 @@ function DepartmentAndPlantFields({ departments, deptsFailed, plants, plantsFail
  * button when Responsible Department is required but genuinely
  * unselectable (no options AND no existing value to fall back to).
  */
-export function TaskForm({ action, submitLabel, departments, deptsFailed = false, plants, plantsFailed = false, people, canAssign, canLinkIncident, defaultValues }: Props): React.JSX.Element {
+export function TaskForm({ action, submitLabel, departments, deptsFailed = false, plants, plantsFailed = false, defaultValues }: Props): React.JSX.Element {
   const [state, dispatch, pending] = useActionState(action, { error: null });
   const isEdit = Boolean(defaultValues?.id);
   const hasExistingDept = Boolean(defaultValues?.responsibleDepartmentId);
@@ -236,43 +230,6 @@ export function TaskForm({ action, submitLabel, departments, deptsFailed = false
         </div>
       </SectionCard>
 
-      {!isEdit && (
-        <SectionCard title="Assignment">
-          {canAssign && people ? (
-            <div>
-              <label htmlFor="assignedToUserId" className="block text-sm font-medium text-text-primary">
-                Assign To User
-              </label>
-              <select
-                id="assignedToUserId"
-                name="assignedToUserId"
-                defaultValue=""
-                className={SELECT_CLASS}
-              >
-                <option value="">Select user to complete this task</option>
-                {people.map((u) => (
-                  <option key={u.id} value={u.id}>{u.displayName} (@{u.username})</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-text-muted">The selected user will see this task under My Tasks.</p>
-            </div>
-          ) : (
-            <p className="text-xs text-text-muted">
-              This task will be created under the selected responsible department.
-            </p>
-          )}
-
-          <DepartmentAndPlantFields
-            departments={departments}
-            deptsFailed={deptsFailed}
-            plants={plants}
-            plantsFailed={plantsFailed}
-            defaultValues={defaultValues}
-            fieldErrors={state.fieldErrors}
-          />
-        </SectionCard>
-      )}
-
       {isEdit && (
         <SectionCard title="Assignment">
           <DepartmentAndPlantFields
@@ -297,6 +254,7 @@ export function TaskForm({ action, submitLabel, departments, deptsFailed = false
             defaultValue={defaultValues?.priority ?? 'MEDIUM'}
             className={SELECT_CLASS}
           >
+            {defaultValues?.priority === 'LOW' && <option value="LOW">Low</option>}
             {PRIORITIES.map((p) => (
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
@@ -318,30 +276,6 @@ export function TaskForm({ action, submitLabel, departments, deptsFailed = false
           <FieldError errors={state.fieldErrors?.['dueAt']} />
         </div>
       </SectionCard>
-
-      {!isEdit && (
-        <SectionCard title="Additional Details">
-          {canLinkIncident && (
-            <div>
-              <label htmlFor="incidentId" className="block text-sm font-medium text-text-primary">
-                Linked incident reference
-              </label>
-              <input
-                id="incidentId"
-                name="incidentId"
-                type="text"
-                defaultValue={defaultValues?.incidentId ?? ''}
-                placeholder="Incident ID (UUID)"
-                className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm font-mono text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-              <p className="mt-1 text-xs text-text-muted">Leave blank if this task is not linked to an incident.</p>
-            </div>
-          )}
-          <p className="text-xs text-text-muted">
-            Attachments are not available for tasks yet. Comments can be added once this task has been created.
-          </p>
-        </SectionCard>
-      )}
 
       <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
         <a

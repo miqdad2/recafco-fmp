@@ -1,30 +1,35 @@
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
-import type { Metadata } from 'next';
+import { CalendarClock, CircleDot, Download, File, FileSpreadsheet, FileText, Flag, Image as ImageIcon, User } from 'lucide-react';
 import { Breadcrumbs } from '../../_components/breadcrumbs';
 import { TaskStatusBadge } from '../_components/task-status-badge';
 import { TaskPriorityBadge } from '../_components/task-priority-badge';
+import { authApi } from '@/lib/auth-api';
+import { TaskAttachmentUpload } from '../_components/task-attachment-upload';
 import { TaskActivityTimeline } from '../_components/task-activity-timeline';
 import { TaskTransitionsPanel } from '../_components/task-transitions';
 import { TaskModuleNav } from '../_components/task-module-nav';
 import { AddProgressForm } from '../_components/add-progress-form';
 import { AddTaskCommentForm } from '../_components/add-comment-form';
-import { computeTaskNextActionText, computeTaskNextStepGuidance } from '../_lib/task-control-center-helpers';
+import { computeTaskNextStepGuidance } from '../_lib/task-control-center-helpers';
 import { tasksApi } from '../../../../lib/factory-tasks-api';
-import type { TaskStatus, TaskPriority } from '../../../../lib/factory-tasks-api';
+import type { TaskStatus, TaskPriority, TaskAttachment } from '../../../../lib/factory-tasks-api';
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+/**
+ * The login token carries only the user id (no permissions), so the real
+ * permission list comes from /auth/me - same source the other task pages use.
+ */
 async function getJwtPayload(): Promise<{ sub?: string; permissions?: string[] }> {
   try {
     const store = await cookies();
     const token = store.get('recafco_access')?.value;
     if (!token) return {};
-    const raw = token.split('.')[1];
-    if (!raw) return {};
-    return JSON.parse(Buffer.from(raw, 'base64url').toString()) as { sub?: string; permissions?: string[] };
+    const me = await authApi.me(token);
+    return me.ok ? { sub: me.data.id, permissions: me.data.permissions } : {};
   } catch {
     return {};
   }
@@ -49,98 +54,57 @@ function isOverdue(dueAt: string | null, status: TaskStatus): boolean {
   return new Date(dueAt) < new Date();
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const { id } = await params;
-  try {
-    const task = await tasksApi.get(id);
-    return { title: `${task.referenceNumber} — RECAFCO FMP` };
-  } catch {
-    return { title: 'Task — RECAFCO FMP' };
-  }
+const CARD = 'rounded-xl border border-border bg-surface p-5 shadow-sm';
+const SECTION_TITLE = 'text-lg font-semibold text-text-primary';
+
+function FileIcon({ file }: { file: TaskAttachment }): React.JSX.Element {
+  const cls = 'size-6 shrink-0 text-text-muted';
+  if (file.mimeType.startsWith('image/')) return <ImageIcon className={cls} aria-hidden="true" />;
+  if (/spreadsheet|ms-excel|csv/.test(file.mimeType)) return <FileSpreadsheet className={cls} aria-hidden="true" />;
+  if (/pdf|word|text\/plain/.test(file.mimeType)) return <FileText className={cls} aria-hidden="true" />;
+  return <File className={cls} aria-hidden="true" />;
+}
+
+function SummaryItem({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-lg border border-border bg-surface-secondary px-4 py-3">
+      <Icon className="mt-0.5 size-5 shrink-0 text-text-muted" aria-hidden="true" />
+      <div className="min-w-0">
+        <dt className="text-sm text-text-secondary">{label}</dt>
+        <dd className="mt-0.5 text-base font-semibold text-text-primary break-words">{children}</dd>
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5">
+      <dt className="shrink-0 text-sm text-text-secondary">{label}</dt>
+      <dd className="min-w-0 text-right text-base font-medium text-text-primary break-words">{children}</dd>
+    </div>
+  );
 }
 
 /**
- * FMP-UI-20E — polished per direct feedback that this page "felt too empty"
- * and that the Actions panel showing only "Cancel task" for some viewers
- * made the task lifecycle unclear. Same data/route/permissions as before —
- * only the presentation changed:
- *   - A new "Task Summary" card leads the left column: reference number,
- *     title, then a labeled Status:/Priority:/Assigned to:/Responsible
- *     department:/Due: grid (badges kept for Status/Priority — this is the
- *     SAME real data the old floating badge row already showed, just
- *     organized as a proper summary instead of loose chips next to the
- *     title).
- *   - The old single "Details" sidebar panel is split into "Assignment
- *     Details" (who/where: Assigned To, Created By, Requested By,
- *     Responsible/Requesting Department, Plant / Location) and "Dates"
- *     (when: Created, Due, Blocked, Completed, Closed, plus the linked
- *     incident reference, which didn't fit cleanly into either) — same
- *     fields as before, just grouped so each panel answers one question.
- *   - "Actions" → "Available Actions", and `TaskTransitionsPanel` no
- *     longer renders as silently empty when no transition applies to the
- *     current viewer (see that component's own doc comment) — the heading
- *     stays, with an honest one-line explanation instead of nothing.
- *   - Activity wording fixed in `TaskActivityTimeline` itself (see that
- *     component) — "Task created by manager" instead of "manager Task
- *     created."
- *
- * FMP-UI-20F — added the navigation this page never had (per direct
- * feedback: "users may feel stuck after opening a task"). A new
- * `TaskDetailNav` row (Back to Platform Dashboard / Back to Task
- * Management / Previous: Maintenance Management / Switch module) sits
- * above the breadcrumb, same order `ExecutiveModuleNav` already uses
- * elsewhere. The breadcrumb itself is now 3 levels — "Platform Dashboard >
- * Task Management > {reference}" (was "Factory Tasks Management >
- * {reference}", 2 levels, linking to the OLD `/factory-tasks` list) — and
- * "Task Management" is the label used consistently everywhere on this page
- * now (the internal route/permission names — `/factory-tasks`,
- * `tasks.read`, etc. — are unchanged; only user-facing wording changed).
- * The Task Summary card gained a small "Task Detail" eyebrow label above
- * the reference number, per this unit's own requested header copy.
- *
- * FMP-UI-20G — per direct feedback that the page still didn't explain the
- * next step: the Task Summary card gained a "Next Action:" row
- * (`computeTaskNextActionText()`, the SAME function/text the Task Control
- * Center's list already uses — one source of truth for "what's next," not
- * a second copy) and a "Next Step" guidance callout beneath the grid
- * (`computeTaskNextStepGuidance()`, a plain sentence keyed on real
- * status/assignment, never fabricated). "Due:" now shows date AND time
- * (was date-only) to match this unit's own header example. Description and
- * Comments & Activity are now inside the same card style every other
- * section on this page already uses, with an honest "No description
- * provided." empty state (was: hidden entirely when blank) instead of
- * silently disappearing. Nav order swapped in `TaskDetailNav` itself (see
- * that component). Button wording ("Open task" → "Open for Work", "Cancel
- * task"/"Edit draft" → Title Case) changed in `task-transitions.tsx` — same
- * `openTaskAction`/`cancelTaskAction` calls, same permissions, label only.
- *
- * FMP-UI-20H — the nav row (breadcrumb + `TaskDetailNav`) read as visually
- * attached to the Task Summary card below it, per direct feedback ("feels
- * cramped and visually unfinished"). The gap between them is now an
- * explicit `mt-8` (32px, was `mt-6`/24px) on the content grid — deliberately
- * ABOVE the top of this unit's own suggested 16–24px range, so the
- * separation reads as clearly intentional rather than borderline. The
- * breadcrumb's own default `mb-4` (which depended on CSS margin-collapsing
- * with the `space-y-2` wrapper's top-margin for its gap to `TaskDetailNav`
- * — technically correct, but an indirect way to get there) is now
- * overridden to `mb-0`, with that gap set directly and deterministically
- * by the wrapper's own `space-y-3` instead.
- *
- * FMP-UI-20I — `TaskDetailNav` renamed to `TaskModuleNav` (see that
- * component's own file) since it's now reused verbatim by
- * `factory-tasks/page.tsx` (the Task List page) too — no behavior change
- * on this page, only the import/usage name.
+ * FMP-TASK-11 - Task Detail redesigned as a simple two-column work page.
+ * Left: header card (number, title, status / priority / assigned to / due),
+ * What needs to be done, Files, Update progress, Comments & history.
+ * Right: Actions, Task summary, Next step. Same data and the same real
+ * actions as before - only layout and wording changed (status transitions,
+ * attachments, progress notes and comments are untouched).
  */
 export default async function TaskDetailPage({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
-  const [jwt, taskRes, progressRes, commentsRes, activitiesRes, peopleRes] = await Promise.allSettled([
+  const [jwt, taskRes, progressRes, commentsRes, activitiesRes, peopleRes, attachmentsRes] = await Promise.allSettled([
     getJwtPayload(),
     tasksApi.get(id),
     tasksApi.listProgress(id),
     tasksApi.listComments(id),
     tasksApi.listActivities(id),
     tasksApi.people(),
+    tasksApi.listAttachments(id),
   ]);
 
   if (taskRes.status === 'rejected') notFound();
@@ -150,24 +114,25 @@ export default async function TaskDetailPage({ params }: PageProps): Promise<Rea
   const comments = commentsRes.status === 'fulfilled' ? commentsRes.value : [];
   const activities = activitiesRes.status === 'fulfilled' ? activitiesRes.value : [];
   const people = peopleRes.status === 'fulfilled' ? peopleRes.value : [];
+  const attachments = attachmentsRes.status === 'fulfilled' ? attachmentsRes.value : [];
 
   const payload = jwt.status === 'fulfilled' ? jwt.value : {};
   const currentUserId = payload.sub ?? '';
   const permissions = payload.permissions ?? [];
 
   const has = (perm: string): boolean => permissions.includes(perm);
+  const canUploadFiles = has('tasks.create') && (task.createdByUserId === currentUserId || has('tasks.manage'));
   const status = task.status as TaskStatus;
   const canAddProgress = (status === 'IN_PROGRESS' || status === 'BLOCKED') &&
     (task.assignedToUserId === currentUserId || has('tasks.manage'));
   const canComment = has('tasks.comment');
   const overdue = isOverdue(task.dueAt, status);
-  const plantLocationText = [task.plant?.name, task.location?.name].filter(Boolean).join(' — ') || '—';
-  const nextActionText = computeTaskNextActionText(task, currentUserId, permissions);
+  const locationText = [task.plant?.name, task.location?.name].filter(Boolean).join(' — ') || 'Not set';
   const nextStepGuidance = computeTaskNextStepGuidance(status, Boolean(task.assignedToUserId));
 
   return (
-    <div className="min-h-full p-8">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-full px-4 py-6 lg:px-6">
+      <div className="mx-auto w-full max-w-screen-2xl">
         <div className="space-y-3">
           <Breadcrumbs items={[
             { label: 'Platform Dashboard', href: '/dashboard' },
@@ -177,137 +142,131 @@ export default async function TaskDetailPage({ params }: PageProps): Promise<Rea
           <TaskModuleNav permissions={permissions} />
         </div>
 
-        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* ── Left column ── */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Task Summary */}
-            <section className="rounded-xl border border-border bg-surface p-5 shadow-sm space-y-4">
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          {/* ── Main column ── */}
+          <div className="min-w-0 space-y-6">
+            {/* Header card */}
+            <section className={`${CARD} space-y-4`}>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-text-muted">Task Detail</p>
-                <p className="mt-1 font-mono text-xs text-text-muted">{task.referenceNumber}</p>
-                <h1 className="mt-0.5 text-2xl font-semibold text-text-primary break-words">{task.title}</h1>
+                <p className="text-sm font-semibold text-text-secondary">Task Details</p>
+                <p className="mt-1 font-mono text-sm text-accent">{task.referenceNumber}</p>
+                <h1 className="mt-1 text-3xl font-semibold text-text-primary break-words">{task.title}</h1>
               </div>
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 text-sm sm:grid-cols-2">
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Status:</dt>
-                  <dd><TaskStatusBadge status={status} /></dd>
-                </div>
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Priority:</dt>
-                  <dd><TaskPriorityBadge priority={task.priority as TaskPriority} /></dd>
-                </div>
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Assigned to:</dt>
-                  <dd className="font-medium text-text-primary">{task.assignedToUser?.displayName ?? 'Not assigned'}</dd>
-                </div>
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Responsible department:</dt>
-                  <dd className="text-text-primary">{task.responsibleDepartment?.name ?? '—'}</dd>
-                </div>
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Due:</dt>
-                  <dd className={overdue ? 'font-medium text-danger' : 'text-text-primary'}>
-                    {task.dueAt ? formatDateTime(task.dueAt) : '—'}
-                    {overdue && <span className="ml-1 text-xs">(Overdue)</span>}
-                  </dd>
-                </div>
-                <div className="flex items-center gap-2">
-                  <dt className="text-text-secondary">Next Action:</dt>
-                  <dd className="font-medium text-text-primary">{nextActionText}</dd>
-                </div>
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <SummaryItem icon={CircleDot} label="Status"><TaskStatusBadge status={status} className="px-3! py-1! text-sm!" /></SummaryItem>
+                <SummaryItem icon={Flag} label="Priority"><TaskPriorityBadge priority={task.priority as TaskPriority} className="px-3! py-1! text-sm!" /></SummaryItem>
+                <SummaryItem icon={User} label="Assigned to">
+                  {task.assignedToUser?.displayName ?? <span className="font-normal text-text-muted">Not assigned</span>}
+                </SummaryItem>
+                <SummaryItem icon={CalendarClock} label="Due date">
+                  {task.dueAt ? (
+                    <span className={overdue ? 'text-error' : ''}>
+                      {formatDateTime(task.dueAt)}{overdue && <span className="ml-1 text-sm font-medium">(Overdue)</span>}
+                    </span>
+                  ) : (
+                    <span className="font-normal text-text-muted">Not set</span>
+                  )}
+                </SummaryItem>
               </dl>
-
-              {/* Next Step guidance */}
-              {nextStepGuidance && (
-                <div className="rounded-lg border border-accent/20 bg-accent-light px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-accent">Next Step</p>
-                  <p className="mt-1 text-sm text-text-primary">{nextStepGuidance}</p>
-                </div>
-              )}
             </section>
 
-            {/* Description */}
-            <section className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-              <h2 className="text-base font-semibold text-text-primary mb-3">Description</h2>
+            {/* What needs to be done */}
+            <section className={CARD}>
+              <h2 className={`${SECTION_TITLE} mb-3`}>What needs to be done</h2>
               {task.description ? (
-                <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">{task.description}</p>
+                <p className="whitespace-pre-wrap break-words rounded-lg bg-surface-secondary px-4 py-3 text-base text-text-primary">{task.description}</p>
               ) : (
-                <p className="text-sm text-text-muted">No description provided.</p>
+                <p className="text-base text-text-muted">No details were added.</p>
               )}
             </section>
 
             {/* Blocked reason */}
             {task.blockedReason && (
-              <section>
-                <h2 className="text-base font-semibold text-danger mb-2">Blocked</h2>
-                <div className="rounded-lg border border-danger bg-danger-light p-4">
-                  <p className="text-sm text-text-primary whitespace-pre-wrap break-words">{task.blockedReason}</p>
-                  {task.blockedAt && (
-                    <p className="mt-2 text-xs text-text-muted">
-                      Blocked on {formatDateTime(task.blockedAt)}
-                    </p>
-                  )}
-                </div>
+              <section className="rounded-xl border border-error bg-error-light p-5">
+                <h2 className="mb-2 text-lg font-semibold text-error">This task is blocked</h2>
+                <p className="whitespace-pre-wrap break-words text-base text-text-primary">{task.blockedReason}</p>
+                {task.blockedAt && <p className="mt-2 text-sm text-text-secondary">Blocked on {formatDateTime(task.blockedAt)}</p>}
               </section>
             )}
 
             {/* Completion summary */}
             {task.completionSummary && (status === 'COMPLETED' || status === 'CLOSED') && (
-              <section>
-                <h2 className="text-base font-semibold text-text-primary mb-3">Completion summary</h2>
-                <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">{task.completionSummary}</p>
+              <section className={CARD}>
+                <h2 className={`${SECTION_TITLE} mb-3`}>What was done</h2>
+                <p className="whitespace-pre-wrap break-words text-base text-text-primary">{task.completionSummary}</p>
                 {task.completedAt && (
-                  <p className="mt-2 text-xs text-text-muted">
-                    Completed on {formatDateTime(task.completedAt)}
-                    {task.completedByUserId && ` by ${task.assignedToUser?.displayName ?? 'unknown'}`}
-                  </p>
+                  <p className="mt-2 text-sm text-text-secondary">Completed on {formatDateTime(task.completedAt)}</p>
                 )}
               </section>
             )}
 
-            {/* Progress notes */}
-            {progressItems.length > 0 && (
-              <section id="progress">
-                <h2 className="text-base font-semibold text-text-primary mb-3">
-                  Progress notes{' '}
-                  <span className="text-sm font-normal text-text-muted">({progressItems.length})</span>
+            {/* Files */}
+            {(attachments.length > 0 || canUploadFiles) && (
+              <section id="attachments" className={CARD}>
+                <h2 className={`${SECTION_TITLE} mb-3`}>
+                  Files <span className="text-base font-normal text-text-muted">({attachments.length})</span>
                 </h2>
-                <div className="space-y-3">
-                  {progressItems.map((p) => (
-                    <div key={p.id} className="rounded-lg border border-border bg-surface p-4">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-text-primary">
-                            {p.authorUser?.displayName ?? 'Unknown'}
-                          </span>
-                          {p.progressPercent !== null && p.progressPercent !== undefined && (
-                            <span className="rounded-full bg-accent-light text-accent px-2 py-0.5 text-xs font-medium">
-                              {p.progressPercent}%
-                            </span>
-                          )}
+                {attachments.length === 0 ? (
+                  <p className="text-base text-text-muted">No files added yet.</p>
+                ) : (
+                  <ul className="divide-y divide-border rounded-lg border border-border">
+                    {attachments.map((a) => (
+                      <li key={a.id} className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-secondary/60">
+                        <FileIcon file={a} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-base font-medium text-text-primary" title={a.originalFileName}>{a.originalFileName}</p>
+                          <p className="text-sm text-text-secondary">
+                            Uploaded by {a.uploadedByUser?.displayName ?? 'Unknown'} · {formatDateTime(a.createdAt)}
+                          </p>
                         </div>
-                        <span className="text-xs text-text-muted shrink-0">{formatDateTime(p.createdAt)}</span>
-                      </div>
-                      <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">{p.note}</p>
-                    </div>
-                  ))}
-                </div>
+                        <a
+                          href={`/factory-tasks/${task.id}/attachments/${a.id}/download`}
+                          className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+                        >
+                          <Download className="size-4" aria-hidden="true" /> Download
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {canUploadFiles && <TaskAttachmentUpload taskId={task.id} />}
               </section>
             )}
 
-            {/* Add progress */}
-            {canAddProgress && (
-              <section>
-                <h2 className="text-base font-semibold text-text-primary mb-3">Add progress note</h2>
-                <AddProgressForm taskId={id} />
+            {/* Update progress */}
+            {(canAddProgress || progressItems.length > 0) && (
+              <section id="progress" className={CARD}>
+                <h2 className={`${SECTION_TITLE} mb-3`}>Update progress</h2>
+                {canAddProgress && <AddProgressForm taskId={id} />}
+                {progressItems.length > 0 && (
+                  <div className={canAddProgress ? 'mt-5 border-t border-border pt-4' : ''}>
+                    <h3 className="mb-2 text-base font-semibold text-text-primary">
+                      Earlier updates <span className="text-sm font-normal text-text-muted">({progressItems.length})</span>
+                    </h3>
+                    <ul className="space-y-3">
+                      {progressItems.map((p) => (
+                        <li key={p.id} className="rounded-lg border border-border bg-surface-secondary p-3">
+                          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                            <span className="flex items-center gap-2 text-base font-medium text-text-primary">
+                              {p.authorUser?.displayName ?? 'Unknown'}
+                              {p.progressPercent !== null && p.progressPercent !== undefined && (
+                                <span className="rounded-full bg-accent-light px-2 py-0.5 text-sm font-medium text-accent">{p.progressPercent}%</span>
+                              )}
+                            </span>
+                            <span className="text-sm text-text-muted">{formatDateTime(p.createdAt)}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words text-base text-text-secondary">{p.note}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </section>
             )}
 
-            {/* Comments & activity */}
-            <section id="comments" className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-              <h2 className="text-base font-semibold text-text-primary mb-4">
-                Comments &amp; activity
-              </h2>
+            {/* Comments & history */}
+            <section id="comments" className={CARD}>
+              <h2 className={`${SECTION_TITLE} mb-4`}>Comments &amp; history</h2>
               {canComment && (
                 <div className="mb-6">
                   <AddTaskCommentForm taskId={id} />
@@ -317,11 +276,10 @@ export default async function TaskDetailPage({ params }: PageProps): Promise<Rea
             </section>
           </div>
 
-          {/* ── Right column ── */}
-          <div className="space-y-6">
-            {/* Available Actions */}
-            <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-              <h2 className="text-sm font-semibold text-text-primary mb-3">Available Actions</h2>
+          {/* ── Side column ── */}
+          <div className="min-w-0 space-y-6">
+            <div className={CARD}>
+              <h2 className={`${SECTION_TITLE} mb-3`}>Actions</h2>
               <TaskTransitionsPanel
                 task={task}
                 currentUserId={currentUserId}
@@ -330,83 +288,28 @@ export default async function TaskDetailPage({ params }: PageProps): Promise<Rea
               />
             </div>
 
-            {/* Assignment Details */}
-            <div className="rounded-xl border border-border bg-surface p-5 shadow-sm space-y-3">
-              <h2 className="text-sm font-semibold text-text-primary">Assignment Details</h2>
-              <dl className="space-y-2 text-sm">
-                <div>
-                  <dt className="text-xs text-text-muted">Assigned To</dt>
-                  <dd className="font-medium text-text-secondary">{task.assignedToUser?.displayName ?? 'Not assigned'}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-text-muted">Created By</dt>
-                  <dd className="text-text-secondary">{task.createdByUser.displayName}</dd>
-                </div>
-                {task.requestedByUserId !== task.createdByUserId && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Requested By</dt>
-                    <dd className="text-text-secondary">{task.requestedByUser.displayName}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-xs text-text-muted">Responsible Department</dt>
-                  <dd className="text-text-secondary">{task.responsibleDepartment?.name ?? '—'}</dd>
-                </div>
-                {task.requestingDepartment && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Requesting Department</dt>
-                    <dd className="text-text-secondary">{task.requestingDepartment.name}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-xs text-text-muted">Plant / Location</dt>
-                  <dd className="text-text-secondary">{plantLocationText}</dd>
-                </div>
+            <div className={CARD}>
+              <h2 className={SECTION_TITLE}>Task summary</h2>
+              <dl className="mt-2 divide-y divide-border">
+                <SummaryRow label="Assigned to">{task.assignedToUser?.displayName ?? <span className="font-normal text-text-muted">Not assigned</span>}</SummaryRow>
+                <SummaryRow label="Created by">{task.createdByUser?.displayName ?? <span className="font-normal text-text-muted">Unknown</span>}</SummaryRow>
+                <SummaryRow label="Department">{task.responsibleDepartment?.name ?? <span className="font-normal text-text-muted">Not set</span>}</SummaryRow>
+                <SummaryRow label="Location">{locationText === 'Not set' ? <span className="font-normal text-text-muted">Not set</span> : locationText}</SummaryRow>
+                <SummaryRow label="Created">{formatDate(task.createdAt)}</SummaryRow>
+                <SummaryRow label="Due date">
+                  {task.dueAt ? <span className={overdue ? 'text-error' : ''}>{formatDateTime(task.dueAt)}</span> : <span className="font-normal text-text-muted">Not set</span>}
+                </SummaryRow>
+                {task.completedAt && <SummaryRow label="Completed">{formatDate(task.completedAt)}</SummaryRow>}
+                {task.incident && <SummaryRow label="Linked incident"><span className="font-mono text-sm">{task.incident.referenceNumber}</span></SummaryRow>}
               </dl>
             </div>
 
-            {/* Dates */}
-            <div className="rounded-xl border border-border bg-surface p-5 shadow-sm space-y-3">
-              <h2 className="text-sm font-semibold text-text-primary">Dates</h2>
-              <dl className="space-y-2 text-sm">
-                <div>
-                  <dt className="text-xs text-text-muted">Created</dt>
-                  <dd className="text-text-secondary">{formatDate(task.createdAt)}</dd>
-                </div>
-                {task.dueAt && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Due</dt>
-                    <dd className={overdue ? 'font-medium text-danger' : 'text-text-secondary'}>
-                      {formatDateTime(task.dueAt)}
-                    </dd>
-                  </div>
-                )}
-                {task.blockedAt && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Blocked</dt>
-                    <dd className="text-text-secondary">{formatDate(task.blockedAt)}</dd>
-                  </div>
-                )}
-                {task.completedAt && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Completed</dt>
-                    <dd className="text-text-secondary">{formatDate(task.completedAt)}</dd>
-                  </div>
-                )}
-                {task.closedAt && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Closed</dt>
-                    <dd className="text-text-secondary">{formatDate(task.closedAt)}</dd>
-                  </div>
-                )}
-                {task.incident && (
-                  <div>
-                    <dt className="text-xs text-text-muted">Linked Incident</dt>
-                    <dd className="font-mono text-xs text-text-secondary">{task.incident.referenceNumber}</dd>
-                  </div>
-                )}
-              </dl>
-            </div>
+            {nextStepGuidance && (
+              <div className="rounded-xl border border-accent/20 bg-accent-light p-5">
+                <h2 className={SECTION_TITLE}>Next step</h2>
+                <p className="mt-1 text-base text-text-primary">{nextStepGuidance}</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

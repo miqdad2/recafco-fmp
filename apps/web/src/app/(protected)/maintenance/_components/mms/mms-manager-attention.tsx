@@ -83,7 +83,7 @@ export function MmsManagerAttention({ attention, jobCardAttention, links }: Prop
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-focus ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-focus ${
                   value !== null && value > 0 ? 'bg-warning-light text-warning' : 'bg-surface-secondary text-text-secondary'
                 }`}
               >
@@ -96,7 +96,7 @@ export function MmsManagerAttention({ attention, jobCardAttention, links }: Prop
       )}
 
       {rows.length === 0 ? (
-        <p className="flex flex-1 items-center justify-center gap-2 px-3.5 py-4 text-xs font-medium text-success">
+        <p className="flex flex-1 items-center justify-center gap-2 px-3.5 py-4 text-sm font-medium text-success">
           <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
           No open MMS items need attention right now.
         </p>
@@ -109,22 +109,22 @@ export function MmsManagerAttention({ attention, jobCardAttention, links }: Prop
                 target="_blank"
                 rel="noopener noreferrer"
                 title={row.detail ? `${row.title} — ${row.detail}` : row.title}
-                className="group flex items-center gap-2 px-3.5 py-1 text-xs hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus"
+                className="group flex items-center gap-2.5 px-3.5 py-1.5 text-[13px] hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus"
               >
                 {/* FMP-MAINT-06 — the reason is a small colored dot + quiet label, not a
                     filled pill: five identical red "Vehicle expiry" pills in a row
                     outweighed the content. The dot keeps the color cue; fixed-width
                     tag and ref columns line the rows up for scanning. */}
-                <span className="flex w-28 shrink-0 items-center gap-1.5 text-[10px] font-medium text-text-secondary">
-                  <span className={`size-1.5 shrink-0 rounded-full bg-current ${tagDotColor(row.tagClasses)}`} aria-hidden="true" />
+                <span className="flex w-32 shrink-0 items-center gap-1.5 text-xs font-medium text-text-secondary">
+                  <span className={`size-2 shrink-0 rounded-full bg-current ${tagDotColor(row.tagClasses)}`} aria-hidden="true" />
                   <span className="truncate">{row.tag}</span>
                 </span>
-                <span className="w-28 shrink-0 truncate font-semibold text-text-primary">{row.ref}</span>
+                <span className="w-32 shrink-0 truncate font-bold text-text-primary">{row.ref}</span>
                 <span className="min-w-0 flex-1 truncate text-text-primary">
                   {row.title}
-                  {row.detail && <span className="text-text-muted"> — {row.detail}</span>}
+                  {row.detail && <span className="text-text-secondary"> — {row.detail}</span>}
                 </span>
-                <ArrowUpRight className="size-3.5 shrink-0 text-text-muted group-hover:text-accent" aria-label="Open in Maintenance Management System" />
+                <ArrowUpRight className="size-4 shrink-0 text-text-muted group-hover:text-accent" aria-label="Open in Maintenance Management System" />
               </a>
             </li>
           ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import {
@@ -129,6 +129,8 @@ const CONTRACT_ITEMS: NavItem[] = [
     // does not see this item — the module-level closeout register is a manager tool.
     anyPermission: ['contracts.update', 'contracts.close'],
   },
+  // FMP-CONTRACT-01 — master list of Customer (First Party) / Second Party companies.
+  { label: 'Contract Parties', href: '/contracts/parties', icon: Users, module: 'CONTRACTS_MANAGEMENT' },
 ];
 
 /**
@@ -220,7 +222,7 @@ const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
-const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'erection-dashboard', 'technical', 'executive', 'erection-executive'];
+const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'parties', 'erection-dashboard', 'technical', 'executive', 'erection-executive'];
 
 const ADMIN_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/administration/dashboard', icon: Settings },
@@ -298,6 +300,20 @@ function isExecutiveItemActive(href: string, pathname: string): boolean {
   return isActive(href, pathname);
 }
 
+/**
+ * FMP-UI-26 — active state for the Contract Management submenu shown under the
+ * flat executive sidebar. The Dashboard item points at the executive landing
+ * (/contracts/executive), so it also stays highlighted on the operational
+ * /contracts/dashboard page; every other item reuses the dropdown's own
+ * isContractItemActive() rules.
+ */
+function isExecutiveContractSubItemActive(href: string, pathname: string): boolean {
+  if (href === '/contracts/executive') {
+    return pathname === '/contracts/executive' || pathname === '/contracts/dashboard';
+  }
+  return isContractItemActive(href, pathname);
+}
+
 export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): React.JSX.Element {
   const isInContracts = pathname.startsWith('/contracts');
   const [contractsExpanded, setContractsExpanded] = useState(isInContracts);
@@ -335,6 +351,26 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
         ? { ...item, label: 'Erection Status' }
         : item
     ));
+
+  // FMP-UI-26 — the executive sidebar's Contract Management row gets the same
+  // submenu the dropdown uses, built from that same permission-filtered list.
+  // It only opens while a submenu route is the current page, so other
+  // modules' pages keep the flat list unchanged.
+  const executiveContractSubItems = visibleContractItems.map((item) =>
+    item.href === '/contracts/dashboard' ? { ...item, href: '/contracts/executive' } : item,
+  );
+  const executiveContractSubActive = executiveContractSubItems.some((item) =>
+    item.href ? isExecutiveContractSubItemActive(item.href, pathname) : false,
+  );
+
+  // FMP-UI-27 — open state for that submenu. Starts open when the current page
+  // is a submenu route, and re-opens whenever the user navigates into one. A
+  // manual collapse is kept until the next entry, so the chevron always shows
+  // the real state.
+  const [executiveContractsOpen, setExecutiveContractsOpen] = useState(executiveContractSubActive);
+  useEffect(() => {
+    if (executiveContractSubActive) setExecutiveContractsOpen(true);
+  }, [executiveContractSubActive]);
 
   // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:
   // no duplicate top-level Dashboard link, and Contract Management becomes its own
@@ -394,6 +430,63 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           // permission, so hasAnyAdminPermission is already false for them).
           <div className="px-2 space-y-1.5">
             {EXECUTIVE_SIDEBAR_ITEMS.map((item) => {
+              // FMP-UI-27 — the Contract Management row is a disclosure button,
+              // not a link: it toggles its submenu and shows a chevron. Its
+              // own dashboard is reached through the submenu's Dashboard item.
+              if (item.href === '/contracts/executive') {
+                const cmActive = executiveContractSubActive || isExecutiveItemActive(item.href, pathname);
+                const cmOpen = executiveContractsOpen && executiveContractSubItems.length > 0;
+                return (
+                  <Fragment key={item.label}>
+                    <button
+                      type="button"
+                      onClick={() => setExecutiveContractsOpen((v) => !v)}
+                      aria-expanded={cmOpen}
+                      aria-controls="executive-contracts-nav-items"
+                      aria-current={cmActive ? 'page' : undefined}
+                      className={[
+                        'flex w-full items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-left text-base leading-snug transition-colors duration-150',
+                        cmActive
+                          ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                          : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
+                      ].join(' ')}
+                    >
+                      <item.icon className="size-5 shrink-0" aria-hidden="true" />
+                      <span className="flex-1">{item.label}</span>
+                      {cmOpen ? (
+                        <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                      )}
+                    </button>
+                    {cmOpen && (
+                      <div id="executive-contracts-nav-items" className="ml-6 mb-1 space-y-0.5 border-l border-nav-hover pl-1">
+                        {executiveContractSubItems.map((sub) => {
+                          if (!sub.href) return null;
+                          const subActive = isExecutiveContractSubItemActive(sub.href, pathname);
+                          return (
+                            <Link
+                              key={sub.label}
+                              href={sub.href}
+                              onClick={onClose}
+                              aria-current={subActive ? 'page' : undefined}
+                              className={[
+                                'flex items-center gap-2.5 rounded-r-md border-l-4 py-2.5 pl-3 pr-3 text-base leading-snug transition-colors duration-150',
+                                subActive
+                                  ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                                  : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
+                              ].join(' ')}
+                            >
+                              <sub.icon className="size-4 shrink-0" aria-hidden="true" />
+                              {sub.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Fragment>
+                );
+              }
               const active = isExecutiveItemActive(item.href, pathname);
               return (
                 <Link

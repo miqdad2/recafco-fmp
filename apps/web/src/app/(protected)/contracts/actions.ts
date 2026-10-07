@@ -137,10 +137,16 @@ export async function createContractAction(
   formData: FormData,
 ): Promise<ActionResult> {
   const title = (formData.get('title') as string)?.trim();
-  const counterpartyName = (formData.get('counterpartyName') as string)?.trim();
+  // FMP-CONTRACT-01 — the register form now sends the selected Contract Party
+  // ids; the API copies the Customer (First Party) name into counterpartyName.
+  // counterpartyName is still read so any older caller keeps working.
+  const counterpartyName = (formData.get('counterpartyName') as string | null)?.trim() || undefined;
+  const firstPartyId = (formData.get('firstPartyId') as string | null)?.trim() || undefined;
+  const secondPartyId = (formData.get('secondPartyId') as string | null)?.trim() || undefined;
 
-  if (!title) return { error: 'Title is required' };
-  if (!counterpartyName) return { error: 'Counterparty name is required' };
+  if (!firstPartyId && !counterpartyName) return { error: 'Please select Customer (First Party).' };
+  if (firstPartyId && !secondPartyId) return { error: 'Please select Second Party.' };
+  if (!title) return { error: 'Please enter Project Name.' };
 
   const description = (formData.get('description') as string | null)?.trim() || undefined;
   const counterpartyContact = (formData.get('counterpartyContact') as string | null)?.trim() || undefined;
@@ -190,7 +196,9 @@ export async function createContractAction(
 
   const result = await actionFetch('/contracts', 'POST', {
     title,
-    counterpartyName,
+    ...(counterpartyName !== undefined ? { counterpartyName } : {}),
+    ...(firstPartyId !== undefined ? { firstPartyId } : {}),
+    ...(secondPartyId !== undefined ? { secondPartyId } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(counterpartyContact !== undefined ? { counterpartyContact } : {}),
     ...(jobOrder !== undefined ? { jobOrder } : {}),

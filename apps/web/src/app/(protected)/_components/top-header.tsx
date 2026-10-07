@@ -85,9 +85,22 @@ export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Eleme
 
       {/* Right: user info + logout */}
       <div className="flex items-center gap-3 shrink-0">
-        <div className="text-right hidden sm:block">
-          <p className="text-sm font-medium text-text-primary leading-tight">{user.displayName}</p>
-          <p className="text-xs text-text-muted leading-tight">{user.roleName}</p>
+        {/* FMP-UI-25 — avatar (first letter or digit of the display name; no profile
+            image exists yet) beside the name and role. Neutral surface tokens
+            so it reads the same in light and dark. The avatar stays visible
+            on mobile, where the name/role text is hidden; both lines
+            truncate instead of pushing Sign out off the header. */}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-strong bg-surface-secondary text-sm font-bold uppercase text-text-primary"
+          >
+            {avatarInitial(user.displayName)}
+          </span>
+          <div className="hidden min-w-0 max-w-48 sm:block">
+            <p className="truncate text-sm font-semibold leading-tight text-text-primary">{user.displayName}</p>
+            <p className="truncate text-[13px] leading-tight text-text-secondary">{user.roleName}</p>
+          </div>
         </div>
 
         {/* FMP-UI-18 — was a neutral outline button (`border-border`/
@@ -120,6 +133,11 @@ export function TopHeader({ user, onMenuOpen }: TopHeaderProps): React.JSX.Eleme
       </div>
     </header>
   );
+}
+
+/** First letter or digit of the name ("[UAT] Manager" → "U"); "?" when there is none. */
+function avatarInitial(displayName: string): string {
+  return displayName.match(/[\p{L}\p{N}]/u)?.[0] ?? '?';
 }
 
 // Separate client component just for the mobile button (receives callback from AppShell)

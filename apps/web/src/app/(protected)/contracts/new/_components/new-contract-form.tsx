@@ -4,28 +4,35 @@ import { useActionState, useState } from 'react';
 import Link from 'next/link';
 import { HandCoins, Shield, ShieldCheck, Umbrella, Receipt, Landmark } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { ContractParty } from '@/lib/contracts-api';
 import type { ActionResult } from '../../actions';
 import { createContractAction } from '../../actions';
 import { ContractBoqRegisterTable } from '../../_components/contract-boq-register-table';
 import {
   InfoBox,
-  inputCls,
-  labelCls,
-  gridCls3,
   ScopeOfWorkFieldset,
   ContractDatesFields,
   ContractValueFields,
 } from '../../_components/contract-form-fields';
+import { BasicContractDetailsFields } from './basic-contract-details-fields';
+import { validateBasicDetails } from '../../_lib/contract-party-helpers';
+import type { BasicDetailsErrors } from '../../_lib/contract-party-helpers';
 import { PAYMENT_TERM_OPTIONS, formatContractValue } from '../../_lib/contract-ui-helpers';
 import {
   type BoqRow,
-  emptyRegisterBoqRow,
+  emptyBoqRow,
   boqLineTotal,
-  validateBoqRows,
+  validateRegisterBoqRows,
   toBoqApiItems,
 } from '../../_lib/contract-boq-helpers';
 
 interface Props {
+  /** Active Customer (First Party) records from the Contract Party master. */
+  firstParties: ContractParty[];
+  /** Active Second Party records from the Contract Party master (RECAFCO is the default). */
+  secondParties: ContractParty[];
+  /** Viewer may add a new customer from the form (contracts.create). */
+  canAddParty: boolean;
   /** Current user's Contract Management department-access scope, used to explain department assignment on create. */
   scope?: { type: 'OWN_DEPARTMENT' | 'SELECTED_DEPARTMENTS' | 'ALL_DEPARTMENTS'; departmentNames: string[] } | undefined;
 }
@@ -77,9 +84,10 @@ function formatKwd(amount: number): string {
   return formatContractValue(amount.toString(), 'KWD');
 }
 
-const INITIAL_BOQ_ROW_COUNT = 5;
+// One blank row to start; an untouched row is ignored on save (BOQ stays optional).
+const INITIAL_BOQ_ROW_COUNT = 1;
 
-export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element {
+export function NewContractForm({ scope: deptScope, firstParties, secondParties, canAddParty }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(
     createContractAction,
     { error: null },
@@ -87,8 +95,9 @@ export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element 
   const [exFactory, setExFactory] = useState(false);
   const [scope, setScope] = useState<Record<string, boolean>>({});
   const [otherDescription, setOtherDescription] = useState('');
-  const [boqRows, setBoqRows] = useState<BoqRow[]>(() => Array.from({ length: INITIAL_BOQ_ROW_COUNT }, () => emptyRegisterBoqRow()));
+  const [boqRows, setBoqRows] = useState<BoqRow[]>(() => Array.from({ length: INITIAL_BOQ_ROW_COUNT }, () => emptyBoqRow()));
   const [boqError, setBoqError] = useState<string | null>(null);
+  const [basicErrors, setBasicErrors] = useState<BasicDetailsErrors>({});
   // Save Draft and Register Contract submit the same <form> to the same
   // createContractAction — there is no separate draft/register backend status
   // (ContractsService.create() always writes ContractStatus.DRAFT), so both
@@ -98,9 +107,16 @@ export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element 
   const [clickedAction, setClickedAction] = useState<'save' | 'create' | null>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
-    const validationError = validateBoqRows(boqRows);
+    const formData = new FormData(e.currentTarget);
+    const found = validateBasicDetails({
+      firstPartyId: String(formData.get('firstPartyId') ?? ''),
+      secondPartyId: String(formData.get('secondPartyId') ?? ''),
+      title: String(formData.get('title') ?? ''),
+    });
+    setBasicErrors(found);
+    const validationError = validateRegisterBoqRows(boqRows);
     setBoqError(validationError);
-    if (validationError) {
+    if (validationError || Object.keys(found).length > 0) {
       e.preventDefault();
     }
   }
@@ -136,44 +152,13 @@ export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element 
         <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-start">
           {/* Section 1 — Basic Contract Details */}
           <SectionCard badge="1" title="Basic Contract Details">
-            <div className={gridCls3}>
-              <div>
-                <label htmlFor="jobOrder" className={labelCls}>Job Order</label>
-                <input id="jobOrder" name="jobOrder" type="text" maxLength={100} placeholder="Enter job order" className={inputCls} />
-              </div>
-
-              <div>
-                <label htmlFor="contractDate" className={labelCls}>Date</label>
-                <input id="contractDate" name="contractDate" type="date" className={inputCls} />
-              </div>
-
-              <div>
-                <label htmlFor="quotationNumber" className={labelCls}>Quotation #</label>
-                <input id="quotationNumber" name="quotationNumber" type="text" maxLength={100} placeholder="Enter quotation number" className={inputCls} />
-              </div>
-
-              <div>
-                <label htmlFor="counterpartyName" className={labelCls}>
-                  Company Name <span className="text-error">*</span>
-                </label>
-                <input
-                  id="counterpartyName" name="counterpartyName" type="text" required maxLength={300}
-                  placeholder="Enter company name" className={inputCls}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="title" className={labelCls}>
-                  Project Name <span className="text-error">*</span>
-                </label>
-                <input id="title" name="title" type="text" required maxLength={300} placeholder="Enter project name" className={inputCls} />
-              </div>
-
-              <div>
-                <label htmlFor="projectNumber" className={labelCls}>Project Number</label>
-                <input id="projectNumber" name="projectNumber" type="text" maxLength={100} placeholder="Enter project number" className={inputCls} />
-              </div>
-            </div>
+            <BasicContractDetailsFields
+              firstParties={firstParties}
+              secondParties={secondParties}
+              canAddParty={canAddParty}
+              errors={basicErrors}
+              onClearError={(field) => setBasicErrors((prev) => ({ ...prev, [field]: undefined }))}
+            />
           </SectionCard>
 
           {/* Section 2 — Scope of Work */}
@@ -229,14 +214,11 @@ export function NewContractForm({ scope: deptScope }: Props): React.JSX.Element 
         </SectionCard>
 
         {/* Section 6 — Contract BOQ / Items */}
-        <SectionCard badge="6" title="Contract BOQ / Items">
+        <SectionCard badge="6" title="BOQ / Items">
           <ContractBoqRegisterTable rows={boqRows} onRowsChange={setBoqRows} formatTotal={formatKwd} />
 
           <div className="mt-3">
-            <InfoBox variant="subtle">
-              BOQ Qty / Area is the original contract quantity. Drawing Qty can be updated when drawing/calculation
-              quantity is confirmed. Progress / Invoice % is calculated from Invoice Qty against BOQ Qty / Area.
-            </InfoBox>
+            <InfoBox variant="subtle">Final piece quantity will be confirmed from Technical drawings.</InfoBox>
           </div>
 
           <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(3) : ''} />

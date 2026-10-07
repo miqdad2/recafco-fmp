@@ -220,7 +220,7 @@ export function ExecutiveModuleCard({
           {title}
         </h2>
         <span
-          className={`order-3 inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase leading-4 tracking-wide @max-[15.5rem]:order-2 @max-[15.5rem]:ml-auto ${
+          className={`order-3 inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide @max-[15.5rem]:order-2 @max-[15.5rem]:ml-auto ${
             isPlaceholder ? 'border-border bg-surface-secondary text-text-secondary' : 'border-transparent bg-success-light text-success'
           }`}
         >
@@ -228,7 +228,7 @@ export function ExecutiveModuleCard({
         </span>
       </div>
       {/* Two lines always reserved, so the content zone starts at the same offset on every card. */}
-      <p className="mt-1.5 line-clamp-2 min-h-[1.875rem] text-[11px] leading-[0.9375rem] text-text-muted" title={description}>
+      <p className="mt-1.5 line-clamp-2 min-h-8 text-xs leading-4 text-text-secondary" title={description}>
         {description}
       </p>
 
@@ -240,18 +240,18 @@ export function ExecutiveModuleCard({
             style={{ backgroundColor: tint, borderColor: `${palette.base}40` }}
           >
             <p className="text-sm font-bold text-text-primary">Setup Pending</p>
-            <p className="mt-1 text-[11px] leading-snug text-text-muted">Module will be configured in a future unit.</p>
+            <p className="mt-1 text-xs leading-snug text-text-secondary">Module will be configured in a future unit.</p>
           </div>
         ) : (
           <div className="grid flex-1 auto-rows-fr grid-cols-2 gap-2">
             {metrics.map((m) => (
               <div key={m.label} className="flex min-h-12 flex-col justify-center rounded-xl px-2.5 py-1.5" style={{ backgroundColor: tint }}>
                 {m.value !== null ? (
-                  <p className="text-lg font-extrabold leading-none text-text-primary">{m.value}</p>
+                  <p className="text-xl font-extrabold tabular-nums leading-none text-text-primary">{m.value}</p>
                 ) : (
-                  <p className="text-[11px] font-medium leading-[1.125rem] text-text-muted">Not available</p>
+                  <p className="text-xs font-medium leading-[1.125rem] text-text-secondary">Not available</p>
                 )}
-                <p className="mt-1 flex items-start gap-1.5 text-[11px] font-semibold leading-tight text-text-secondary">
+                <p className="mt-1 flex items-start gap-1.5 text-xs font-semibold leading-tight text-text-secondary">
                   <span className="mt-[0.1875rem] inline-block size-1.5 shrink-0 rounded-full" style={{ backgroundColor: palette.base }} aria-hidden="true" />
                   <span>{m.label}</span>
                 </p>

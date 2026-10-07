@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ContractStatus, ContractScheduleStatus, ContractClaimStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { resolveContractParties } from './contract-party-resolve';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsRefService } from './contracts-ref.service';
 import type { AuthUser } from '../common/types/auth-user';
@@ -127,8 +128,12 @@ const CONTRACT_SELECT = {
   cancelledByUserId: true,
   cancellationReason: true,
   scheduleStatus: true,
+  firstPartyId: true,
+  secondPartyId: true,
   createdAt: true,
   updatedAt: true,
+  firstParty: { select: { id: true, name: true, contactNo: true } },
+  secondParty: { select: { id: true, name: true, contactNo: true } },
   ownerUser: { select: { id: true, displayName: true } },
   createdByUser: { select: { id: true, displayName: true } },
   activatedByUser: { select: { id: true, displayName: true } },
@@ -556,19 +561,33 @@ export class ContractsService {
     const year = now.getUTCFullYear();
 
     const contract = await this.db.getClient().$transaction(async (tx) => {
+      // FMP-CONTRACT-01 — selected parties from the Contract Party master. The
+      // chosen Customer (First Party) name/contact is copied into the existing
+      // counterparty text fields so every older page keeps working unchanged.
+      const parties = await resolveContractParties(tx, dto);
+      const counterpartyName = parties?.firstParty.name ?? dto.counterpartyName;
+      if (!counterpartyName) {
+        throw new UnprocessableEntityException({
+          code: 'CONTRACT_FIRST_PARTY_REQUIRED',
+          message: 'Please select Customer (First Party).',
+        });
+      }
+      const counterpartyContact = dto.counterpartyContact ?? parties?.firstParty.contactNo ?? undefined;
+
       const referenceNumber = await this.ref.nextRef(tx, year);
 
       const created = await tx.contract.create({
         data: {
           referenceNumber,
           title: dto.title,
-          counterpartyName: dto.counterpartyName,
+          counterpartyName,
           status: ContractStatus.DRAFT,
           version: 1,
           ownerUserId,
           createdByUserId: actor.id,
           ...(dto.description !== undefined ? { description: dto.description } : {}),
-          ...(dto.counterpartyContact !== undefined ? { counterpartyContact: dto.counterpartyContact } : {}),
+          ...(counterpartyContact !== undefined ? { counterpartyContact } : {}),
+          ...(parties ? { firstPartyId: parties.firstParty.id, secondPartyId: parties.secondParty.id } : {}),
           ...(dto.jobOrder !== undefined ? { jobOrder: dto.jobOrder } : {}),
           ...(dto.contractDate !== undefined ? { contractDate: new Date(dto.contractDate) } : {}),
           ...(dto.quotationNumber !== undefined ? { quotationNumber: dto.quotationNumber } : {}),

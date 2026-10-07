@@ -27,7 +27,11 @@ const EVENT_LABELS: Record<string, string> = {
   TASK_UPDATED:        'Task updated',
   PROGRESS_ADDED:      'Progress note added',
   COMMENT_ADDED:       'Comment posted',
+  TASK_ATTACHMENT_UPLOADED: 'File uploaded',
+  TASK_ATTACHMENT_DELETED:  'File removed',
 };
+
+const PRIORITY_WORDS: Record<string, string> = { LOW: 'Low', MEDIUM: 'Normal', HIGH: 'High', URGENT: 'Urgent' };
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -49,29 +53,31 @@ export function TaskActivityTimeline({ activities, comments }: Props): React.JSX
   ].sort((a, b) => new Date(a.data.createdAt).getTime() - new Date(b.data.createdAt).getTime());
 
   if (items.length === 0) {
-    return <p className="text-sm text-text-muted py-4">No activity yet.</p>;
+    return <p className="text-sm text-text-muted py-4">Nothing has happened on this task yet.</p>;
   }
 
   return (
-    <ol className="space-y-4" aria-label="Task activity timeline">
+    <ol className="space-y-4" aria-label="Task history">
       {items.map((item) => {
         if (item.kind === 'activity') {
           const a = item.data;
           const label = EVENT_LABELS[a.event] ?? a.event.replace(/_/g, ' ').toLowerCase();
           const actorName = a.actorName ?? 'System';
 
+          // Plain-language detail only; raw status transitions (e.g. ASSIGNED -> IN PROGRESS) are not shown.
           let detail: string | null = null;
           if (a.event === 'TASK_ASSIGNED' && a.metadata) {
             const m = a.metadata as { assignedToName?: string };
             detail = m.assignedToName ? `Assigned to ${m.assignedToName}` : null;
           } else if (a.event === 'TASK_PRIORITY_CHANGED' && a.metadata) {
-            const m = a.metadata as { previousPriority?: string; newPriority?: string };
-            detail = `${m.previousPriority ?? '?'} → ${m.newPriority ?? '?'}`;
+            const m = a.metadata as { newPriority?: string };
+            detail = m.newPriority ? `Priority is now ${PRIORITY_WORDS[m.newPriority] ?? m.newPriority}` : null;
+          } else if (a.event === 'TASK_ATTACHMENT_UPLOADED' && a.metadata) {
+            const m = a.metadata as { fileName?: string };
+            detail = m.fileName ?? null;
           } else if ((a.event === 'TASK_REOPENED' || a.event === 'TASK_CANCELLED') && a.metadata) {
             const m = a.metadata as { hasReason?: boolean };
-            detail = m.hasReason ? 'Reason recorded' : null;
-          } else if (a.previousStatus && a.newStatus) {
-            detail = `${a.previousStatus.replace(/_/g, ' ')} → ${a.newStatus.replace(/_/g, ' ')}`;
+            detail = m.hasReason ? 'A reason was added' : null;
           }
 
           return (
@@ -80,14 +86,14 @@ export function TaskActivityTimeline({ activities, comments }: Props): React.JSX
                 ●
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-text-secondary">
+                <p className="text-base text-text-secondary">
                   {label}{' by '}
                   <span className="font-medium text-text-primary">{actorName}</span>
                 </p>
                 {detail && (
-                  <p className="text-xs text-text-muted font-mono mt-0.5">{detail}</p>
+                  <p className="text-sm text-text-secondary mt-0.5 break-words">{detail}</p>
                 )}
-                <p className="text-xs text-text-muted mt-0.5">{formatDate(a.createdAt)}</p>
+                <p className="text-sm text-text-muted mt-0.5">{formatDate(a.createdAt)}</p>
               </div>
             </li>
           );
@@ -102,12 +108,12 @@ export function TaskActivityTimeline({ activities, comments }: Props): React.JSX
             </span>
             <div className="flex-1 min-w-0 rounded-lg border border-border bg-surface p-3">
               <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="text-sm font-medium text-text-primary">
+                <span className="text-base font-medium text-text-primary">
                   {c.authorUser?.displayName ?? 'Unknown'}
                 </span>
-                <span className="text-xs text-text-muted shrink-0">{formatDate(c.createdAt)}</span>
+                <span className="text-sm text-text-muted shrink-0">{formatDate(c.createdAt)}</span>
               </div>
-              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">{c.body}</p>
+              <p className="text-base text-text-secondary whitespace-pre-wrap break-words">{c.body}</p>
             </div>
           </li>
         );

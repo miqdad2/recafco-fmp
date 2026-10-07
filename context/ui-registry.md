@@ -282,13 +282,15 @@ Living document. Update after every reusable component or established visual pat
 - Reusable takeaway: when a design correction says an element "looks disconnected/too large" against its surrounding surface, the fix is usually to shrink the CONTRAST-NEEDING PART down to just what needs it (here, the logo alone gets a chip) rather than extending the contrasting background outward to cover more of the surface — the latter is what created the "disconnected panel" feeling being complained about in the first place.
 - Notes: the logo source (`recafco-logo.png`, transparent PNG) was cropped to its real content bounding box and downscaled before being placed in `apps/web/public/` — the original file ships with ~20% of surrounding transparent padding baked into its square canvas. The same cropped asset (larger, in its own white chip) is reused on the login page (`apps/web/src/app/login/page.tsx`); the ORIGINAL uncropped square file was resized separately to `apps/web/src/app/icon.png` for the browser favicon (Next.js App Router auto-detects this filename — no metadata code needed).
 
-### TopHeader (Sign out button restyled in FMP-UI-18)
+### TopHeader (Sign out button restyled in FMP-UI-18; user avatar added in FMP-UI-25)
 - Path: `apps/web/src/app/(protected)/_components/top-header.tsx`
 - Purpose: Top bar with mobile hamburger, user info, and logout button. Also renders each page's contextual middle slot: 8 different Contract Management breadcrumb variants. **FMP-UI-14** removed the Executive Dashboard's title from this header entirely (see "Executive Dashboard hero title" below for where it lives now) — this header's only job now is navigation chrome (hamburger, breadcrumb slot, user info, Sign out), never a page's own main heading.
 - Variants: Single variant; hamburger only visible on mobile (`md:hidden`).
 - Key tokens/classes: `relative h-14 bg-surface border-b border-border`.
 - Accessibility behavior: Hamburger calls `onMenuOpen(e.currentTarget)` for focus restoration.
 - Used by: `AppShell`
+- **User area (FMP-UI-25):** `[avatar] name / role [Sign out]`. Avatar is a 36px circle (`size-9 rounded-full border border-border-strong bg-surface-secondary text-sm font-bold text-text-primary`, `aria-hidden`) showing `avatarInitial(displayName)` — the first letter or digit, so a bracketed name like "[UAT] Manager" gives "U"; "?" when there is none. Neutral surface tokens only, so it needs no `dark:` variant. Name is `text-sm font-semibold`, role `text-[13px] text-text-secondary`; both `truncate` inside `max-w-48`. The avatar stays visible below `sm`, where the name/role block is hidden. No profile image support yet — when one is added, render it inside the same circle.
+- **Readability floor (FMP-UI-25):** dashboard text is 12px minimum (13px for row/body text, 16–24px for values); 10–11px is no longer used for labels on the Maintenance dashboard. Meaningful helper text uses `text-text-secondary`, not `text-text-muted`. `MmsCard`, `MmsKpiCard`, Manager Attention, Recent table, Quick Actions and Modules Summary all follow this; the Platform Dashboard card's Live / Setup Pending badge is the one 11px exception.
 - Notes: `'use client'`; logout via `<form action={logoutAction}>` server action. Props: `user: ShellUser`, `onMenuOpen: (el: HTMLElement) => void`. Reads `usePathname()` itself (no prop needed) to decide its middle slot. `EXECUTIVE_DASHBOARD_PATH`/`isExecutiveDashboard` are still present internally, now solely to keep the breadcrumb slot suppressed on `/dashboard` (unchanged behavior — that route never had a breadcrumb).
 - **Sign out button (FMP-UI-18):** neutral outline (`h-9 px-3 rounded-md border-border bg-surface text-text-secondary`, barely-different hover) → soft RECAFCO-red badge treatment: `border-accent/30 bg-accent-light text-accent font-semibold rounded-lg px-4`, hover inverts to a solid `bg-accent`/`text-accent-foreground` fill (white text), focus ring gained an offset (`focus:ring-focus focus:ring-offset-2`, matching every other header/executive button's own standard focus token). Reuses the exact `bg-accent-light`/`text-accent` combo already established for red status badges elsewhere (e.g. `workflow-task-priority-badge.tsx`'s CRITICAL badge) rather than a new token or a first `dark:` variant — see reusable takeaway below. `logoutAction`/form wiring untouched.
 - Reusable takeaway (FMP-UI-18) — when a "make this more visible/less alarming" request calls for a red-but-not-destructive tone, prefer `--color-accent` (RECAFCO brand red, used for normal emphasis) over `--color-error` (reserved for actual fault/error states) — and reuse the `bg-accent-light`/`text-accent` pairing already established for status badges app-wide rather than introducing a new token or a first-ever `dark:` Tailwind variant. Those `-light` tokens are deliberately not re-tinted between themes (see globals.css's own FMP-UI-11 note), so reusing them keeps this button visually consistent with every other red badge already shipping correctly in dark mode, instead of creating a one-off inconsistency.
@@ -339,6 +341,14 @@ Living document. Update after every reusable component or established visual pat
 - Accessibility behavior: the whole card is a real `<Link>`; focus ring via `focus:ring-2 focus:ring-focus focus:ring-offset-2` on that root element (moved here in FMP-UI-07B, previously on the inner button).
 - Used by: `(protected)/dashboard/page.tsx`, in a `grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4` grid (FMP-UI-23 — eased back from `xl:grid-cols-5`, FMP-UI-10's own 10-card width, now that Estimation makes 11 cards: 5 columns would orphan the 11th card alone on its own row (5+5+1); 4 columns gives a clean 3-row 4+4+3 spread instead), `gap-2.5` (**FMP-UI-23B**, was `gap-3`). Sits directly under the page's error/empty states — FMP-UI-04B removed the page's own hero card entirely (see `TopHeader`'s centered title for where it went).
 - Notes: Props: `title`, `description`, `href`, `icon: LucideIcon`, `metrics: PlatformMetric[]` (`{ label: string; value: number | null }`, from `@/lib/platform-api`), `accent: ModuleAccent` (exported type, unchanged shape across every round; the page's own `CARD_ACCENTS: Record<PlatformModuleCode, ModuleAccent>` maps each card to its accent). FMP-UI-01 (original) → FMP-UI-03 (compact/colored) → FMP-UI-04 (density pass) → FMP-UI-04B (layout hardening, hero removed) → FMP-UI-04C (dual-path color fix, still failed live) → FMP-UI-04D (all per-module button color removed) → FMP-UI-05 (per-module button color restored via literal hex, never a token) → FMP-UI-06 (card/metric-tile/typography weight polish; icon badges folded into the same literal-hex `ACCENT_PALETTE` the button already used) → FMP-UI-06B (metric tiles diluted further — solid tint still read as "color-blocked"; header title moved out of this component's own remit into `TopHeader`, sized up, subtitle removed) → FMP-UI-07 (`ACCENT_PALETTE`/`ModuleAccent` extracted out to `_lib/module-accent.ts` so the new Executive Module Landing Pages can reuse the exact same colors; this file now imports and re-exports them — zero visual change here. `href`s now come from `PlatformDashboardService` pointing at each module's landing page instead of its operational dashboard — see `ExecutiveModuleNav` below) → FMP-UI-07B (root element became the `<Link>` itself so the whole card is clickable; the button became a `<span>` — see this component's own note above) → **FMP-UI-23B** (every size dimension eased down one more notch — see this entry's own "Key tokens/classes" line above for the full list — so 11 cards in 3 rows fit a normal 1920×1080 viewport with no page scroll; zero mechanism change). Label is literally `Open {title}`, which already equals the exact required string since that's the card's own title from `PlatformDashboardService`; never a separate label lookup table. (The previous `ModuleCard` component was removed in FMP-UI-01 — its only caller, the old root dashboard, was replaced by this page.)
+
+### Contract Management submenu in the executive sidebar (FMP-UI-26)
+- Path: `apps/web/src/app/(protected)/_components/sidebar.tsx` (executive branch of `<nav>`, `executiveContractSubItems`, `isExecutiveContractSubItemActive`).
+- Pattern: a flat executive row with children. The child list is the same permission-filtered `visibleContractItems` the non-executive dropdown uses, so a permission change affects both. It renders only while one of its routes is current, which keeps other modules to one open list at a time.
+- Child styling: indented `ml-6` with a `border-nav-hover` rule, `text-[15px]` labels, `size-4` icons, `py-2`. Active child: `border-l-4 border-accent bg-nav-active font-semibold`.
+- Parent active rule: the row is active on its own landing page or while any child is current. Technical and Erection keep their own flat rows and do not light up Contract Management.
+- **FMP-UI-27 — the parent is a disclosure button, not a link.** It toggles the child list (`aria-expanded`, `aria-controls="executive-contracts-nav-items"`) and shows a right-aligned `ChevronRight` when collapsed or `ChevronDown` when expanded. Open state starts `true` on submenu routes and re-opens on navigation in (`executiveContractsOpen` + effect). Child labels were raised to `text-base` / `py-2.5` for older users. Its own dashboard is reached through the child "Dashboard" item.
+- Reusable takeaway: when a sidebar has two render branches (flat for one persona, grouped for others), a feature added to only one branch is invisible to the other persona. Check every branch before concluding a menu is missing.
 
 ### Executive-only sidebar mode (FMP-UI-03)
 - Path: `apps/web/src/app/(protected)/_components/sidebar.tsx` (`EXECUTIVE_SIDEBAR_ITEMS`, `isExecutiveItemActive`, the `executiveMode` branch inside `<nav>`); classifier in `apps/web/src/app/(protected)/_lib/module-visibility.ts` (`isExecutiveManagerAccess`)
@@ -2906,3 +2916,51 @@ Do not register one-off page markup. Do not create duplicate components with sli
 - **Compact button labels wrap, not truncate:** `line-clamp-2 leading-[1.1]` inside a fixed-height button.
 - **Header with a long primary button:** give the title block `flex-1 basis-80 min-w-0` so the title area wraps internally before the action buttons drop to a second row.
 
+
+### FMP-TASK-01 — Task Control Center tabs and list
+`TaskControlCenterList` rows show "Assigned by / Assigned to" in one column; tab order and empty states live in `TASK_CONTROL_CENTER_TABS`; pure helpers `isTaskUrgent`, `sortCompletedTasks`, `getAssignedByLabel`, `PENDING_STATUSES` in `task-control-center-helpers.ts`.
+
+### FMP-TASK-02 — Task work-queue rows and compact overview card
+`TaskControlCenterList` is now a row list (From:/To: labels, no table, no horizontal scroll). `TaskOverviewCard` (`factory-tasks/_components/`) is the compact icon+count+label card used for the task overview row.
+
+### FMP-TASK-03 — Task View popup
+`TaskViewModal` (`factory-tasks/_components/`) is the simple "Task Details" dialog opened by View on `TaskControlCenterList` rows (dashboard + Task List page). Button rules come from `computeTaskViewActions()`; the list now needs a `people` prop for its Assign form.
+
+### FMP-TASK-04 — Task List tabs
+The Task List page reuses `TASK_CONTROL_CENTER_TABS` (pill tabs via `?tab=`) and one plain-word filter row; no component changes.
+
+### FMP-TASK-05 — Create Task popup
+`NewTaskButton` (popup + success message) and `NewTaskForm` (Task Name, Task Details, searchable `PersonPicker`, Priority, Due Date, file list with Remove) in `factory-tasks/_components/`; `NewTaskPageForm` wraps the same form for `/factory-tasks/new`. `TaskForm` is now edit-draft only.
+
+### FMP-TASK-06 — Form field states
+Create Task fields use `fieldClass(hasError)`: neutral border + soft accent ring on focus; solid `error` border only with a visible message. Use `error` tokens (there is no `danger` token). Popup layout: fixed header, scrolling body, fixed footer, `max-h-[85vh]`.
+
+### FMP-TASK-07 — Attachment list in popups
+In `NewTaskForm` the upload box collapses to a one-line "Add more files" strip once files exist, selected files are cards (icon / truncated name / size / Remove), and the popup body scrolls the list into view above a fixed footer.
+
+### FMP-TASK-08 — Dashboard "Recent Tasks" header
+Task dashboard list is capped at 5 rows with a header (Recent Tasks / "Showing latest 5 of N tasks" / View All Tasks button).
+
+### FMP-TASK-09 — "Department: Not set"
+Task rows, the View popup and the Assign To picker show "Not set" when a task/person has no department; it is never an error.
+
+### FMP-TASK-10 — Add Files on task page
+`TaskAttachmentUpload` (task detail "Attachments" section): "Add Files" button with the same type/size rules as Create Task and friendly error text.
+
+### FMP-TASK-11 — Task Detail page layout
+Two-column work page: header card with a 4-item summary strip (`SummaryItem`), section cards (What needs to be done / Files / Update progress / Comments & history) and a side column (Actions / Task summary (`SummaryRow`) / Next step). `AddProgressForm` and `AddTaskCommentForm` now submit via client handlers and refresh the page; `TaskActivityTimeline` shows plain-language history only.
+
+### FMP-CONTRACT-01 — Contract Parties and Basic Contract Details
+- `PartyFormModal` (`contracts/parties/_components/`) — Add/Edit party popup. `compact` + `fixedType` gives the quick "Add new customer" (Company Name + Contact No only); the New Contract Register renders it through a portal so its own `<form>` is never nested in the register form.
+- `PartyList` — Contract Parties table (Company Name / Type / Contact No / Status / Actions) with Add Party, Edit, Deactivate/Activate. Parties are never deleted.
+- `BasicContractDetailsFields` (`contracts/new/_components/`) — Customer (First Party) + Second Party dropdowns (Second Party starts on RECAFCO), Job Order, Quotation No, Project Number, Project Name; field errors under each field.
+- Wording lives in `_lib/contract-party-helpers.ts` (`PARTY_TYPE_LABELS`, `validateBasicDetails`, `displayFirstParty`, `displaySecondParty`); do not reintroduce "Company Name" / "Counterparty" in this form.
+
+### FMP-CONTRACT-02 — Contract Parties two-panel layout
+`PartyList` now renders two `PartyPanel`s (Customer (First Party) | Second Party) of list rows instead of one table: count in each panel header ("Customer (First Party) — 1"), per-panel "+ Add Customer" / "+ Add Second Party" (preselects the Type via `PartyFormModal`'s `defaultType`, still editable), plain empty states, and one search box (`filterParties`) over both panels. Stacks on screens below `lg`, customers first.
+
+### FMP-BOQ-01 — Simple BOQ input on New Contract Register
+`ContractBoqRegisterTable` is now a list of card rows (Item Description | Unit | Qty | Unit Price | calculated Total | Remove) with one column header on desktop and per-field labels on small screens — no horizontal scroll. "+ Add Item" and a Total Amount box sit below. Validation is `validateRegisterBoqRows` (plain messages); unit names come from `unitLabel`. Edit Contract keeps its own `ContractBoqTable`.
+
+### FMP-BOQ-02A — BOQ columns on New Contract Register
+`ContractBoqRegisterTable` columns: S/N, Item Description, Unit (only Nos / M² / M³ / LM via `REGISTER_UNIT_OPTIONS`), **Contract Qty** (never plain "Qty"), Unit Price, Total, Remove. Note under the table: "Final piece quantity will be confirmed from Technical drawings."

@@ -18,7 +18,36 @@ export function isTaskRowOverdue(dueAt: string | null, status: TaskStatus): bool
   return new Date(dueAt) < new Date();
 }
 
-export type TaskControlCenterTabKey = 'my' | 'assigned-by-me' | 'all' | 'overdue' | 'completed';
+/** FMP-TASK-01 — "Pending" = every real status that is not COMPLETED/CLOSED/CANCELLED. No new enum values. */
+export const PENDING_STATUSES: TaskStatus[] = ['DRAFT', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'BLOCKED'];
+
+type UrgencyRow = Pick<FactoryTask, 'priority' | 'dueAt' | 'status'>;
+
+export function isTaskDueToday(dueAt: string | null, status: TaskStatus): boolean {
+  if (!dueAt || !OVERDUE_ELIGIBLE_STATUSES.includes(status)) return false;
+  const d = new Date(dueAt);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+/** FMP-TASK-01 — Urgent tab rule: an active task that is HIGH/URGENT priority, overdue, or due today. */
+export function isTaskUrgent(task: UrgencyRow): boolean {
+  if (!OVERDUE_ELIGIBLE_STATUSES.includes(task.status)) return false;
+  return task.priority === 'HIGH' || task.priority === 'URGENT' || isTaskRowOverdue(task.dueAt, task.status) || isTaskDueToday(task.dueAt, task.status);
+}
+
+/** FMP-TASK-01 — Completed tab order: latest completion first, falling back to the last update. */
+export function sortCompletedTasks<T extends Pick<FactoryTask, 'completedAt' | 'updatedAt'>>(tasks: T[]): T[] {
+  const stamp = (t: T): number => new Date(t.completedAt ?? t.updatedAt).getTime();
+  return [...tasks].sort((a, b) => stamp(b) - stamp(a));
+}
+
+/** FMP-TASK-01 — "Assigned By" text; the creator is the person who gave the task. */
+export function getAssignedByLabel(task: { createdByUser?: { displayName: string } | null }): string {
+  return task.createdByUser?.displayName ?? 'Unknown';
+}
+
+export type TaskControlCenterTabKey = 'all' | 'my' | 'assigned' | 'urgent' | 'pending' | 'completed';
 
 export interface TaskControlCenterTab {
   key: TaskControlCenterTabKey;
@@ -31,21 +60,18 @@ export interface TaskControlCenterTab {
 }
 
 /**
- * The 5 required tabs, in the brief's own order. My Tasks / Assigned by Me /
- * Overdue / Completed are always visible to any viewer who can reach this
- * page at all (each is scoped to the viewer's OWN tasks, exactly like the
- * existing `/factory-tasks/my` page already is). "All Tasks" is the one tab
- * that shows OTHER people's tasks too, so it's gated behind `tasks.manage`
- * — the existing manager-tier permission `task-transitions.tsx` already
- * uses for broader oversight actions (cancel any task, reopen a closed
- * one) — rather than inventing a brand-new "view all tasks" permission.
+ * FMP-TASK-01 — the 6 tabs in the required order. Every tab is visible to
+ * any `tasks.read` viewer: the list endpoint is itself `tasks.read` and
+ * scopes results server-side, so "All Tasks" means "all tasks this viewer
+ * is allowed to see" (previously hidden behind tasks.manage).
  */
 export const TASK_CONTROL_CENTER_TABS: TaskControlCenterTab[] = [
-  { key: 'my', label: 'My Tasks', viewAllHref: '/factory-tasks/my', emptyMessage: 'No tasks assigned to you.' },
-  { key: 'assigned-by-me', label: 'Assigned by Me', viewAllHref: '/factory-tasks/assigned-by-me', emptyMessage: 'No tasks assigned by you.' },
-  { key: 'all', label: 'All Tasks', viewAllHref: '/factory-tasks', emptyMessage: 'No tasks found.', requiresPermission: 'tasks.manage' },
-  { key: 'overdue', label: 'Overdue', viewAllHref: '/factory-tasks?overdue=true', emptyMessage: 'No overdue tasks.' },
-  { key: 'completed', label: 'Completed', viewAllHref: '/factory-tasks?status=COMPLETED,CLOSED', emptyMessage: 'No completed tasks.' },
+  { key: 'all', label: 'All Tasks', viewAllHref: '/factory-tasks', emptyMessage: 'No tasks found.' },
+  { key: 'my', label: 'My Tasks', viewAllHref: '/factory-tasks?tab=my', emptyMessage: 'No tasks assigned to you.' },
+  { key: 'assigned', label: 'Tasks I Assigned', viewAllHref: '/factory-tasks?tab=assigned', emptyMessage: 'No tasks assigned by you.' },
+  { key: 'urgent', label: 'Urgent', viewAllHref: '/factory-tasks?tab=urgent', emptyMessage: 'No urgent tasks right now.' },
+  { key: 'pending', label: 'Pending', viewAllHref: '/factory-tasks?tab=pending', emptyMessage: 'No pending tasks.' },
+  { key: 'completed', label: 'Completed', viewAllHref: '/factory-tasks?tab=completed', emptyMessage: 'No completed tasks found.' },
 ];
 
 /** Tabs the current viewer is actually allowed to see, in the same fixed order — "do not show tabs the user cannot access." */
@@ -80,11 +106,11 @@ export function computeTaskNextActionText(task: ActionRow, currentUserId: string
 
   switch (task.status) {
     case 'DRAFT':
-      // FMP-UI-20G — "Open Task" renamed to "Open for Work" to match the
+      // FMP-UI-20G — "Open Task" renamed to "Start Work" to match the
       // real button's own new label (task-transitions.tsx) — the phrase
       // now names the actual lifecycle move (DRAFT → OPEN) instead of
       // reading as "open the page you're already viewing."
-      return isCreator || has('tasks.manage') ? 'Open for Work' : 'No action needed';
+      return isCreator || has('tasks.manage') ? 'Start Work' : 'No action needed';
     case 'OPEN':
       if (has('tasks.assign')) return 'Assign Task';
       return isCreator || has('tasks.manage') ? 'Cancel Task' : 'No action needed';
@@ -148,7 +174,33 @@ export function computeTaskNextStepGuidance(status: TaskStatus, hasAssignee: boo
   }
 }
 
-export type TaskQuickActionType = 'assign' | 'complete' | 'close';
+export interface TaskViewActions {
+  assign: boolean;
+  start: boolean;
+  complete: boolean;
+}
+
+/**
+ * FMP-TASK-03 — which buttons the task View popup / row may show. Mirrors the
+ * exact rules `task-transitions.tsx` already applies on the full page
+ * (Assign: OPEN + tasks.assign; Start Work: DRAFT creator/manager via
+ * openTaskAction, or ASSIGNED assignee/tasks.start; Complete: IN_PROGRESS
+ * assignee/tasks.complete) — never a button the real page would hide.
+ */
+export function computeTaskViewActions(task: ActionRow, currentUserId: string, permissions: string[]): TaskViewActions {
+  const has = (p: string): boolean => permissions.includes(p);
+  const isAssignee = task.assignedToUserId === currentUserId;
+  const isCreator = task.createdByUserId === currentUserId;
+  return {
+    assign: task.status === 'OPEN' && has('tasks.assign'),
+    start:
+      (task.status === 'DRAFT' && (isCreator || has('tasks.manage'))) ||
+      (task.status === 'ASSIGNED' && (isAssignee || has('tasks.start'))),
+    complete: task.status === 'IN_PROGRESS' && (isAssignee || has('tasks.complete')),
+  };
+}
+
+export type TaskQuickActionType ='assign' | 'complete' | 'close';
 
 export interface TaskQuickAction {
   type: TaskQuickActionType;

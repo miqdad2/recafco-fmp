@@ -7,6 +7,10 @@ import {
   computeTaskNextActionText,
   computeTaskNextStepGuidance,
   computeTaskQuickAction,
+  isTaskUrgent,
+  computeTaskViewActions,
+  sortCompletedTasks,
+  getAssignedByLabel,
 } from './task-control-center-helpers';
 
 describe('isTaskRowOverdue', () => {
@@ -37,54 +41,82 @@ describe('isTaskRowOverdue', () => {
 });
 
 describe('TASK_CONTROL_CENTER_TABS', () => {
-  it('has exactly the 5 required tabs, in the required order', () => {
-    expect(TASK_CONTROL_CENTER_TABS.map((t) => t.key)).toEqual(['my', 'assigned-by-me', 'all', 'overdue', 'completed']);
+  it('has exactly the 6 required tabs, in the required order', () => {
+    expect(TASK_CONTROL_CENTER_TABS.map((t) => t.label)).toEqual([
+      'All Tasks', 'My Tasks', 'Tasks I Assigned', 'Urgent', 'Pending', 'Completed',
+    ]);
+    expect(TASK_CONTROL_CENTER_TABS.map((t) => t.key)).toEqual(['all', 'my', 'assigned', 'urgent', 'pending', 'completed']);
   });
 
-  it('every tab has a real viewAllHref and a non-empty empty-state message', () => {
+  it('every tab has a real viewAllHref and the required empty-state message', () => {
     for (const tab of TASK_CONTROL_CENTER_TABS) {
       expect(tab.viewAllHref.startsWith('/factory-tasks')).toBe(true);
-      expect(tab.emptyMessage.length).toBeGreaterThan(0);
     }
+    expect(TASK_CONTROL_CENTER_TABS.map((t) => t.emptyMessage)).toEqual([
+      'No tasks found.', 'No tasks assigned to you.', 'No tasks assigned by you.',
+      'No urgent tasks right now.', 'No pending tasks.', 'No completed tasks found.',
+    ]);
   });
 });
 
 describe('getVisibleTaskControlCenterTabs', () => {
-  it('hides "All Tasks" from a viewer without tasks.manage', () => {
-    const visible = getVisibleTaskControlCenterTabs(['tasks.read']);
-    expect(visible.map((t) => t.key)).toEqual(['my', 'assigned-by-me', 'overdue', 'completed']);
-  });
-
-  it('shows all 5 tabs to a viewer with tasks.manage', () => {
-    const visible = getVisibleTaskControlCenterTabs(['tasks.read', 'tasks.manage']);
-    expect(visible.map((t) => t.key)).toEqual(['my', 'assigned-by-me', 'all', 'overdue', 'completed']);
+  it('shows all 6 tabs to any tasks.read viewer', () => {
+    expect(getVisibleTaskControlCenterTabs(['tasks.read']).map((t) => t.key)).toEqual(['all', 'my', 'assigned', 'urgent', 'pending', 'completed']);
   });
 });
 
 describe('isValidTaskControlCenterTab', () => {
-  it('accepts every tab key the viewer can actually see', () => {
-    expect(isValidTaskControlCenterTab('my', [])).toBe(true);
-    expect(isValidTaskControlCenterTab('all', ['tasks.manage'])).toBe(true);
-  });
-
-  it('rejects a tab the viewer cannot access, even if the key is real', () => {
-    expect(isValidTaskControlCenterTab('all', [])).toBe(false);
+  it('accepts real tab keys', () => {
+    expect(isValidTaskControlCenterTab('all', [])).toBe(true);
+    expect(isValidTaskControlCenterTab('assigned', [])).toBe(true);
   });
 
   it('rejects an unknown or missing value', () => {
-    expect(isValidTaskControlCenterTab('bogus', ['tasks.manage'])).toBe(false);
-    expect(isValidTaskControlCenterTab(undefined, ['tasks.manage'])).toBe(false);
+    expect(isValidTaskControlCenterTab('bogus', [])).toBe(false);
+    expect(isValidTaskControlCenterTab(undefined, [])).toBe(false);
+  });
+});
+
+describe('isTaskUrgent', () => {
+  const past = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const future = new Date(Date.now() + 5 * 86_400_000).toISOString();
+  it('is true for active HIGH/URGENT priority', () => {
+    expect(isTaskUrgent({ priority: 'HIGH', dueAt: null, status: 'OPEN' })).toBe(true);
+    expect(isTaskUrgent({ priority: 'URGENT', dueAt: future, status: 'IN_PROGRESS' })).toBe(true);
+  });
+  it('is true for overdue and due-today tasks', () => {
+    expect(isTaskUrgent({ priority: 'LOW', dueAt: past, status: 'ASSIGNED' })).toBe(true);
+    expect(isTaskUrgent({ priority: 'LOW', dueAt: new Date().toISOString(), status: 'OPEN' })).toBe(true);
+  });
+  it('is false for low-risk or finished tasks', () => {
+    expect(isTaskUrgent({ priority: 'MEDIUM', dueAt: future, status: 'OPEN' })).toBe(false);
+    expect(isTaskUrgent({ priority: 'URGENT', dueAt: past, status: 'COMPLETED' })).toBe(false);
+  });
+});
+
+describe('sortCompletedTasks / getAssignedByLabel', () => {
+  it('sorts latest completion first, falling back to updatedAt', () => {
+    const sorted = sortCompletedTasks([
+      { id: 'a', completedAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 'b', completedAt: null, updatedAt: '2026-03-01T00:00:00Z' },
+      { id: 'c', completedAt: '2026-02-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' },
+    ]);
+    expect(sorted.map((t) => t.id)).toEqual(['b', 'c', 'a']);
+  });
+  it('names the creator, else Unknown', () => {
+    expect(getAssignedByLabel({ createdByUser: { displayName: 'Sara' } })).toBe('Sara');
+    expect(getAssignedByLabel({})).toBe('Unknown');
   });
 });
 
 describe('computeTaskNextActionText', () => {
   const CURRENT_USER = 'user-1';
 
-  it('DRAFT: creator sees "Open for Work", a non-creator without tasks.manage sees "No action needed"', () => {
+  it('DRAFT: creator sees "Start Work", a non-creator without tasks.manage sees "No action needed"', () => {
     const task = { status: 'DRAFT' as const, createdByUserId: CURRENT_USER, assignedToUserId: null };
-    expect(computeTaskNextActionText(task, CURRENT_USER, [])).toBe('Open for Work');
+    expect(computeTaskNextActionText(task, CURRENT_USER, [])).toBe('Start Work');
     expect(computeTaskNextActionText(task, 'someone-else', [])).toBe('No action needed');
-    expect(computeTaskNextActionText(task, 'someone-else', ['tasks.manage'])).toBe('Open for Work');
+    expect(computeTaskNextActionText(task, 'someone-else', ['tasks.manage'])).toBe('Start Work');
   });
 
   it('OPEN: a viewer with tasks.assign sees "Assign Task"', () => {
@@ -173,5 +205,25 @@ describe('computeTaskNextStepGuidance', () => {
     expect(computeTaskNextStepGuidance('ASSIGNED', true)).toMatch(/assigned/i);
     expect(computeTaskNextStepGuidance('IN_PROGRESS', true)).toMatch(/progress/i);
     expect(computeTaskNextStepGuidance('BLOCKED', true)).toMatch(/blocked/i);
+  });
+});
+
+describe('computeTaskViewActions', () => {
+  const ME = 'me';
+  it('Assign only for OPEN tasks with tasks.assign', () => {
+    const t = { status: 'OPEN' as const, createdByUserId: 'x', assignedToUserId: null };
+    expect(computeTaskViewActions(t, ME, ['tasks.assign']).assign).toBe(true);
+    expect(computeTaskViewActions(t, ME, []).assign).toBe(false);
+    expect(computeTaskViewActions({ ...t, status: 'ASSIGNED' }, ME, ['tasks.assign']).assign).toBe(false);
+  });
+  it('Start Work: draft creator, or assigned assignee', () => {
+    expect(computeTaskViewActions({ status: 'DRAFT', createdByUserId: ME, assignedToUserId: null }, ME, []).start).toBe(true);
+    expect(computeTaskViewActions({ status: 'DRAFT', createdByUserId: 'x', assignedToUserId: null }, ME, []).start).toBe(false);
+    expect(computeTaskViewActions({ status: 'ASSIGNED', createdByUserId: 'x', assignedToUserId: ME }, ME, []).start).toBe(true);
+  });
+  it('Complete: in-progress assignee or tasks.complete', () => {
+    expect(computeTaskViewActions({ status: 'IN_PROGRESS', createdByUserId: 'x', assignedToUserId: ME }, ME, []).complete).toBe(true);
+    expect(computeTaskViewActions({ status: 'IN_PROGRESS', createdByUserId: 'x', assignedToUserId: 'y' }, ME, []).complete).toBe(false);
+    expect(computeTaskViewActions({ status: 'IN_PROGRESS', createdByUserId: 'x', assignedToUserId: 'y' }, ME, ['tasks.complete']).complete).toBe(true);
   });
 });

@@ -46,24 +46,24 @@ export function MmsKpiCard({ label, value, display, helperText, icon: Icon, acce
   if (compact) {
     return (
       <div title={tooltip} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 shadow-sm">
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-text-secondary">
-          <Icon className="hidden size-3.5 shrink-0 text-text-muted 2xl:block" aria-hidden="true" />
-          <span className="truncate">{label}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium leading-tight text-text-secondary 2xl:text-[13px]">
+          <Icon className="hidden size-4 shrink-0 text-text-muted 2xl:block" aria-hidden="true" />
+          <span className="line-clamp-2">{label}</span>
         </span>
-        <span className="shrink-0 text-sm font-bold text-text-primary">{shown}</span>
+        <span className="shrink-0 text-base font-bold tabular-nums text-text-primary">{shown}</span>
       </div>
     );
   }
 
   return (
     <div title={tooltip} className={`flex items-center gap-2.5 rounded-xl border border-l-[3px] border-border ${bar} bg-surface px-3 py-2 shadow-sm`}>
-      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${chip}`}>
-        <Icon className="size-4" aria-hidden="true" />
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${chip}`}>
+        <Icon className="size-[18px]" aria-hidden="true" />
       </span>
       <div className="min-w-0">
-        <p className="text-2xl font-bold leading-none text-text-primary">{shown}</p>
-        <p className="mt-1 line-clamp-2 text-[11px] font-semibold leading-tight text-text-secondary">{label}</p>
-        {metricUnavailable && <p className="text-[10px] leading-tight text-text-muted">{NOT_AVAILABLE}</p>}
+        <p className="text-2xl font-extrabold tabular-nums leading-none text-text-primary">{shown}</p>
+        <p className="mt-1.5 line-clamp-2 text-xs font-semibold leading-tight text-text-secondary 2xl:text-[13px]">{label}</p>
+        {metricUnavailable && <p className="text-xs leading-tight text-text-secondary">{NOT_AVAILABLE}</p>}
       </div>
     </div>
   );

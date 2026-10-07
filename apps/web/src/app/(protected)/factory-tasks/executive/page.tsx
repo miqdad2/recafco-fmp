@@ -2,26 +2,32 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ClipboardList, ListTodo, Send, AlertTriangle, CalendarClock } from 'lucide-react';
+import { ClipboardList, ListTodo, Send, AlertTriangle, CalendarClock, CheckCircle2 } from 'lucide-react';
 import { tasksApi } from '@/lib/factory-tasks-api';
-import type { TaskDashboardData, FactoryTask, TaskListQuery } from '@/lib/factory-tasks-api';
+import type { TaskDashboardData, FactoryTask, TaskListQuery, UserRef } from '@/lib/factory-tasks-api';
 import { authApi } from '@/lib/auth-api';
 import { ExecutiveModuleNav } from '../../_components/executive-module-nav';
 import { ExecutiveModuleTitle } from '../../_components/executive-module-title';
-import { MetricCard } from '../../_components/metric-card';
-import type { MetricStatus } from '../../_components/metric-card';
+import { TaskOverviewCard } from '../_components/task-overview-card';
 import {
   TASK_CONTROL_CENTER_TABS,
   getVisibleTaskControlCenterTabs,
   isValidTaskControlCenterTab,
+  isTaskUrgent,
+  sortCompletedTasks,
+  PENDING_STATUSES,
 } from '../_lib/task-control-center-helpers';
 import type { TaskControlCenterTabKey } from '../_lib/task-control-center-helpers';
+import { NewTaskButton } from '../_components/new-task-button';
 import { TaskControlCenterList } from '../_components/task-control-center-list';
 
 export const metadata: Metadata = { title: 'Task Management — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
-const PREVIEW_PAGE_SIZE = 8;
+const PREVIEW_PAGE_SIZE = 5;
+const URGENT_SCAN_SIZE = 100;
+const COMPLETED_SCAN_SIZE = 50;
+const ACTIVE_STATUSES = 'OPEN,ASSIGNED,IN_PROGRESS,BLOCKED';
 
 interface PageProps {
   searchParams: Promise<{ tab?: string }>;
@@ -80,33 +86,52 @@ export default async function FactoryTasksExecutivePage({ searchParams }: PagePr
   const requestedTab = params.tab;
   const activeTabKey: TaskControlCenterTabKey = isValidTaskControlCenterTab(requestedTab, permissions)
     ? requestedTab
-    : 'my';
+    : 'all';
   const activeTab = TASK_CONTROL_CENTER_TABS.find((t) => t.key === activeTabKey)!;
 
   const data: TaskDashboardData | null = dashboardResult.status === 'fulfilled' ? dashboardResult.value : null;
   const canCreate = permissions.includes('tasks.create');
-  const metricsStatus: MetricStatus = data ? 'ok' : 'unavailable';
+
+  // Assignable people for the View popup's Assign form — only fetched for viewers who can assign.
+  let people: UserRef[] = [];
+  if (permissions.includes('tasks.assign')) {
+    try { people = await tasksApi.people(); } catch { people = []; }
+  }
 
   let previewTasks: FactoryTask[] = [];
+  // Total tasks matching the selected tab, so the header can say "latest 5 of 7".
+  let previewTotal = 0;
   let previewError = false;
   try {
     const query: TaskListQuery = { pageSize: PREVIEW_PAGE_SIZE };
-    const result =
-      activeTabKey === 'my' ? await tasksApi.my(query) :
-      activeTabKey === 'assigned-by-me' ? await tasksApi.assignedByMe(query) :
-      activeTabKey === 'overdue' ? await tasksApi.list({ ...query, overdue: true }) :
-      activeTabKey === 'completed' ? await tasksApi.list({ ...query, status: 'COMPLETED,CLOSED' }) :
-      await tasksApi.list(query);
-    previewTasks = result.items;
+    if (activeTabKey === 'urgent') {
+      // No server-side "urgent" filter exists: fetch the active population and apply the real rule here.
+      const result = await tasksApi.list({ pageSize: URGENT_SCAN_SIZE, status: ACTIVE_STATUSES });
+      const urgent = result.items.filter(isTaskUrgent);
+      previewTotal = urgent.length;
+      previewTasks = urgent.slice(0, PREVIEW_PAGE_SIZE);
+    } else if (activeTabKey === 'completed') {
+      const result = await tasksApi.list({ pageSize: COMPLETED_SCAN_SIZE, status: 'COMPLETED,CLOSED' });
+      previewTotal = result.pagination.total;
+      previewTasks = sortCompletedTasks(result.items).slice(0, PREVIEW_PAGE_SIZE);
+    } else {
+      const result =
+        activeTabKey === 'my' ? await tasksApi.my(query) :
+        activeTabKey === 'assigned' ? await tasksApi.assignedByMe(query) :
+        activeTabKey === 'pending' ? await tasksApi.list({ ...query, status: PENDING_STATUSES.join(',') }) :
+        await tasksApi.list(query);
+      previewTotal = result.pagination.total;
+      previewTasks = result.items;
+    }
   } catch {
     previewError = true;
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-6">
+    <div className="mx-auto w-full max-w-screen-2xl space-y-4 px-4 py-4 lg:px-6">
       <ExecutiveModuleNav code="FACTORY_TASKS" permissions={permissions} />
 
-      <div className="rounded-xl border border-border bg-surface p-5 shadow-sm lg:p-6">
+      <div className="rounded-xl border border-border bg-surface px-5 py-4 shadow-sm">
         <ExecutiveModuleTitle
           title="Task Management"
           description="Create, assign, track, and close operational tasks across departments."
@@ -114,12 +139,7 @@ export default async function FactoryTasksExecutivePage({ searchParams }: PagePr
           accent="tasks"
           actions={
             canCreate ? (
-              <Link
-                href="/factory-tasks/new"
-                className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
-              >
-                + New Task
-              </Link>
+              <NewTaskButton canAssign={permissions.includes('tasks.assign')} />
             ) : undefined
           }
         />
@@ -132,30 +152,33 @@ export default async function FactoryTasksExecutivePage({ searchParams }: PagePr
       )}
 
       <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">Overview</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <MetricCard
-            label="My Open Tasks" value={data?.metrics.assignedToMe} icon={ListTodo} iconColor="text-info"
-            href="/factory-tasks/my" status={metricsStatus}
-          />
-          <MetricCard
-            label="Assigned by Me" value={data?.metrics.assignedByMe} icon={Send} iconColor="text-teal"
-            href="/factory-tasks/assigned-by-me" status={metricsStatus}
-          />
-          <MetricCard
-            label="Overdue" value={data?.metrics.overdueTasks} icon={AlertTriangle} iconColor="text-danger"
-            href="/factory-tasks?overdue=true" status={metricsStatus}
-          />
-          <MetricCard
-            label="Due Today" value={data?.metrics.dueToday} icon={CalendarClock} iconColor="text-warning"
-            status={metricsStatus}
-          />
+        <h2 className="sr-only">Overview</h2>
+        <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+          <TaskOverviewCard label="All Open Tasks" value={data?.metrics.openTasks} icon={ClipboardList} iconColor="text-accent" href="/factory-tasks/executive?tab=pending" />
+          <TaskOverviewCard label="My Tasks" value={data?.metrics.assignedToMe} icon={ListTodo} iconColor="text-info" href="/factory-tasks/executive?tab=my" />
+          <TaskOverviewCard label="Tasks I Assigned" value={data?.metrics.assignedByMe} icon={Send} iconColor="text-teal" href="/factory-tasks/executive?tab=assigned" />
+          <TaskOverviewCard label="Urgent / Overdue" value={data?.metrics.overdueTasks} icon={AlertTriangle} iconColor="text-danger" href="/factory-tasks/executive?tab=urgent" />
+          <TaskOverviewCard label="Due Today" value={data?.metrics.dueToday} icon={CalendarClock} iconColor="text-warning" href="/factory-tasks/executive?tab=urgent" />
+          <TaskOverviewCard label="Completed This Month" value={data?.metrics.completedThisMonth} icon={CheckCircle2} iconColor="text-success" href="/factory-tasks/executive?tab=completed" />
         </div>
       </section>
 
       <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">Tasks</h2>
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <h2 className="text-lg font-semibold text-text-primary">Recent Tasks</h2>
+            {!previewError && previewTotal > PREVIEW_PAGE_SIZE && (
+              <p className="text-sm text-text-secondary">Showing latest {PREVIEW_PAGE_SIZE} of {previewTotal} tasks</p>
+            )}
+          </div>
+          <Link
+            href={activeTab.viewAllHref}
+            className="inline-flex items-center rounded-md border border-border bg-surface px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-colors hover:border-border-strong hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            View All Tasks
+          </Link>
+        </div>
+        <div className="mb-2 flex flex-wrap gap-2">
           {visibleTabs.map((tab) => (
             <Link
               key={tab.key}
@@ -163,8 +186,8 @@ export default async function FactoryTasksExecutivePage({ searchParams }: PagePr
               aria-current={tab.key === activeTabKey ? 'page' : undefined}
               className={
                 tab.key === activeTabKey
-                  ? 'rounded-full border border-accent bg-accent px-3.5 py-1.5 text-sm font-semibold text-white transition-colors'
-                  : 'rounded-full border border-border bg-surface px-3.5 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary'
+                  ? 'rounded-full border border-accent bg-accent px-4 py-2 text-base font-semibold text-white transition-colors'
+                  : 'rounded-full border border-border bg-surface px-4 py-2 text-base font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary'
               }
             >
               {tab.label}
@@ -182,15 +205,9 @@ export default async function FactoryTasksExecutivePage({ searchParams }: PagePr
               tasks={previewTasks}
               currentUserId={currentUserId}
               permissions={permissions}
+              people={people}
               emptyMessage={activeTab.emptyMessage}
             />
-            {previewTasks.length > 0 && (
-              <div className="mt-3">
-                <Link href={activeTab.viewAllHref} className="text-sm font-medium text-accent hover:underline">
-                  View all {activeTab.label.toLowerCase()} →
-                </Link>
-              </div>
-            )}
           </>
         )}
       </section>

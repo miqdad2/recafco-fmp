@@ -179,17 +179,18 @@ model User {
   location   Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
   sessions   UserSession[]
 
-  incidentsReported           Incident[]           @relation("IncidentReportedBy")
-  incidentsReportedFor        Incident[]           @relation("IncidentReportedFor")
-  incidentsAssigned           Incident[]           @relation("IncidentAssignedTo")
-  incidentsReviewed           Incident[]           @relation("IncidentReviewedBy")
-  incidentsResolved           Incident[]           @relation("IncidentResolvedBy")
-  incidentsClosed             Incident[]           @relation("IncidentClosedBy")
-  incidentActionsAssigned     IncidentAction[]     @relation("IncidentActionAssignedTo")
-  incidentActionsCompleted    IncidentAction[]     @relation("IncidentActionCompletedBy")
-  incidentActionsCreated      IncidentAction[]     @relation("IncidentActionCreatedBy")
-  incidentComments            IncidentComment[]    @relation("IncidentCommentAuthor")
-  incidentAttachmentsUploaded IncidentAttachment[] @relation("IncidentAttachmentUploadedBy")
+  incidentsReported           Incident[]              @relation("IncidentReportedBy")
+  incidentsReportedFor        Incident[]              @relation("IncidentReportedFor")
+  incidentsAssigned           Incident[]              @relation("IncidentAssignedTo")
+  incidentsReviewed           Incident[]              @relation("IncidentReviewedBy")
+  incidentsResolved           Incident[]              @relation("IncidentResolvedBy")
+  incidentsClosed             Incident[]              @relation("IncidentClosedBy")
+  incidentActionsAssigned     IncidentAction[]        @relation("IncidentActionAssignedTo")
+  incidentActionsCompleted    IncidentAction[]        @relation("IncidentActionCompletedBy")
+  incidentActionsCreated      IncidentAction[]        @relation("IncidentActionCreatedBy")
+  incidentComments            IncidentComment[]       @relation("IncidentCommentAuthor")
+  incidentAttachmentsUploaded IncidentAttachment[]    @relation("IncidentAttachmentUploadedBy")
+  taskAttachmentsUploaded     FactoryTaskAttachment[] @relation("TaskAttachmentUploadedBy")
 
   factoryTasksCreated     FactoryTask[]        @relation("TaskCreatedBy")
   factoryTasksRequestedBy FactoryTask[]        @relation("TaskRequestedBy")
@@ -643,9 +644,10 @@ model FactoryTask {
   location              Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
   incident              Incident?   @relation(fields: [incidentId], references: [id], onDelete: Restrict)
 
-  progress   FactoryTaskProgress[]
-  comments   FactoryTaskComment[]
-  activities FactoryTaskActivity[]
+  progress    FactoryTaskProgress[]
+  comments    FactoryTaskComment[]
+  activities  FactoryTaskActivity[]
+  attachments FactoryTaskAttachment[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([priority, status])
@@ -656,6 +658,27 @@ model FactoryTask {
   @@index([incidentId])
   @@index([dueAt])
   @@map("factory_tasks")
+}
+
+// FMP-TASK-05 - Task attachments. Additive only; same shape as
+// IncidentAttachment (file on local disk under TASK_ATTACHMENTS_DIR, row
+// holds display name, type, size and the random on-disk path).
+model FactoryTaskAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  taskId           String   @map("task_id") @db.Uuid
+  fileName         String   @map("file_name") @db.VarChar(255)
+  originalFileName String   @map("original_file_name") @db.VarChar(255)
+  mimeType         String   @map("mime_type") @db.VarChar(150)
+  fileSize         Int      @map("file_size")
+  storagePath      String   @map("storage_path") @db.VarChar(500)
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task           FactoryTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedByUser User        @relation("TaskAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt(sort: Desc)])
+  @@map("factory_task_attachments")
 }
 
 model FactoryTaskProgress {
@@ -1176,6 +1199,10 @@ model Contract {
   // CM-55 — see ContractScheduleStatus above. Additive/nullable; never set
   // by activate/terminate/close, never read by closeout eligibility checks.
   scheduleStatus           ContractScheduleStatus? @map("schedule_status")
+  // FMP-CONTRACT-01 — optional links to the Contract Party master. Nullable so
+  // every pre-existing contract (which only has counterpartyName) stays valid.
+  firstPartyId             String?                 @map("first_party_id") @db.Uuid
+  secondPartyId            String?                 @map("second_party_id") @db.Uuid
   createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -1188,6 +1215,8 @@ model Contract {
   department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
   location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  firstParty       ContractParty? @relation("ContractFirstParty", fields: [firstPartyId], references: [id], onDelete: Restrict)
+  secondParty      ContractParty? @relation("ContractSecondParty", fields: [secondPartyId], references: [id], onDelete: Restrict)
 
   comments                          ContractComment[]
   activities                        ContractActivity[]
@@ -1236,6 +1265,32 @@ model Contract {
 // both are always derived from invoiceQty/totalPrice (see
 // boqProgressPercent()/boqAmountRemaining() in the web app's
 // contract-boq-helpers.ts), never trusted/stored values.
+// FMP-CONTRACT-01 — master list of companies used as Customer (First Party) or
+// Second Party on contracts. Parties are deactivated, never deleted, once used.
+enum ContractPartyType {
+  FIRST_PARTY
+  SECOND_PARTY
+}
+
+model ContractParty {
+  id        String            @id @default(uuid()) @db.Uuid
+  name      String            @db.VarChar(300)
+  partyType ContractPartyType @map("party_type")
+  contactNo String?           @map("contact_no") @db.VarChar(50)
+  email     String?           @db.VarChar(200)
+  address   String?           @db.VarChar(500)
+  isActive  Boolean           @default(true) @map("is_active")
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  firstPartyContracts  Contract[] @relation("ContractFirstParty")
+  secondPartyContracts Contract[] @relation("ContractSecondParty")
+
+  @@unique([name, partyType])
+  @@index([partyType, isActive])
+  @@map("contract_parties")
+}
+
 model ContractBoqItem {
   id                     String                    @id @default(uuid()) @db.Uuid
   contractId             String                    @map("contract_id") @db.Uuid

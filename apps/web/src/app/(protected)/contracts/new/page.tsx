@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { contractsApi } from '../../../../lib/contracts-api';
+import { getUserPermissions } from '../_lib/get-user-permissions';
 import { NewContractForm, NEW_CONTRACT_FORM_ID } from './_components/new-contract-form';
 
 export const metadata: Metadata = { title: 'New Contract Register — RECAFCO FMP' };
@@ -12,7 +13,12 @@ export const metadata: Metadata = { title: 'New Contract Register — RECAFCO FM
 // Only the actor's own dashboard scope (for the "created under your
 // department" banner) is still needed.
 export default async function NewContractPage(): Promise<React.JSX.Element> {
-  const dashboardRes = await contractsApi.dashboard().catch(() => null);
+  const [dashboardRes, permissions, firstParties, secondParties] = await Promise.all([
+    contractsApi.dashboard().catch(() => null),
+    getUserPermissions(),
+    contractsApi.parties({ partyType: 'FIRST_PARTY' }).catch(() => []),
+    contractsApi.parties({ partyType: 'SECOND_PARTY' }).catch(() => []),
+  ]);
   const scope = dashboardRes?.scope;
 
   return (
@@ -44,7 +50,12 @@ export default async function NewContractPage(): Promise<React.JSX.Element> {
         </div>
       </div>
 
-      <NewContractForm scope={scope} />
+      <NewContractForm
+        scope={scope}
+        firstParties={firstParties}
+        secondParties={secondParties}
+        canAddParty={permissions.includes('contracts.create')}
+      />
     </div>
   );
 }

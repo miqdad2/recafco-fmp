@@ -13740,6 +13740,160 @@ Every MMS link a user can click now opens the public Maintenance Management Syst
 - FMP: `MMS_PUBLIC_BASE_URL` defaults to the public domain, so it works without being set; add it to `.env` to be explicit. Restart only the FMP API after deploying.
 - MMS: set `MMS_PUBLIC_BASE_URL=https://maintenance.recafco.online` so MMS builds its own links on the public domain. FMP corrects internal links either way.
 
+## FMP-UI-25 — Accessibility and Readability Polish for Enterprise Users (Completed 2026-10-05)
+
+UI polish only: class changes in ten web files. No API, schema, permission, route or MMS-integration change.
+
+### Top-right user area (shared `TopHeader`, every protected page)
+
+- Circular avatar (36px) with the first letter or digit of the display name ("[UAT] Manager" → "U"; "?" if none). Neutral surface tokens (`bg-surface-secondary`, `border-border-strong`, `text-text-primary`), so it follows light/dark automatically. No profile-image upload.
+- Name 14px semibold, role 13px in `text-text-secondary` (was 12px muted). Both truncate at a 12rem max width instead of pushing Sign out.
+- The avatar stays visible on mobile, where the name/role text is hidden as before.
+- Sign out button unchanged (36px, red soft-outline, FMP-UI-18). Header height unchanged (56px).
+
+### Maintenance dashboard (`maintenance/_components/mms/`)
+
+No text below 12px remains on the page (was 10–11px in 15 places).
+
+| Area | Before | After |
+|---|---|---|
+| Card headings | 12px semibold | 13px bold |
+| KPI value / label | 24px bold / 11px | 24px extrabold, tabular / 13px (12px below 1536px) |
+| Mini-stat label / value | 11px / 14px | 13px (12px below 1536px, wraps to 2 lines instead of truncating) / 16px |
+| Attention count pills | 11px | 12px, taller |
+| Attention rows | 12px, reason 10px | 13px, reason 12px, bold ref, larger dot, taller row |
+| Recent table | 12px, headers and status 10px | 13px, headers and status 12px, wider Ref/Status/Updated columns |
+| Quick Actions | 32px high, 11px, tight tracking | 40px high, 13px (14px from 1536px), normal tracking, 16px icons |
+| Modules Summary | title 12px, labels 11px, values 14px | title 13px, labels 12px, values 16px, larger icon tile |
+| Status pill, sync line, small links, banners | 10–12px | 12–13px |
+| Source line | 10px muted | 12px secondary |
+
+Muted helper text that carries meaning (empty states, "Not available yet", sync time, row detail) moved from `text-text-muted` to `text-text-secondary` for contrast. The header description is one truncated line (full text in its tooltip).
+
+### Platform Dashboard cards (`executive-module-card.tsx`)
+
+Description, metric labels, "Not available" and the setup note 11px → 12px (secondary color); metric values 18px → 20px; Live / Setup Pending badge 10px → 11px (kept under 12px so the card title row does not wrap).
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/top-header.tsx`
+- `apps/web/src/app/(protected)/dashboard/_components/executive-module-card.tsx`
+- `apps/web/src/app/(protected)/maintenance/_components/mms/`: `maintenance-control-center.tsx`, `mms-card.tsx`, `mms-kpi-card.tsx`, `mms-manager-attention.tsx`, `mms-modules-summary.tsx`, `mms-quick-actions.tsx`, `mms-recent-table.tsx`
+
+### Verification
+
+Headless Chromium against a temporary web server (port 3011) as `test.manager`. As in FMP-MAINT-05/06, the live dashboard was fed **sample data** through a temporary proxy (port 4011) because the UAT account cannot see live MMS data; every other request went to the running API. Both were stopped afterwards and nothing from them is in the repo.
+
+| Page | 1920x1080 | 1366x768 | 1280x720 |
+|---|---|---|---|
+| `/maintenance/dashboard` | 0px scroll | 61px (was 0) | 109px (was 28–57) |
+| `/maintenance/executive` | 0px scroll | 91px (was 0) | 139px |
+| `/dashboard` (Platform) | 0px scroll | 522px (was 490 before this unit) | 570px |
+
+- No horizontal scroll anywhere. Live sections render 5 attention rows, 5 recent rows, 5 module rows, 6 actions.
+- One label still truncates at 1366px: "Today" in the Labor Snapshot row. At 1280px a few more module labels truncate.
+- Header: 56px, avatar present on `/technical`, `/contracts/dashboard`, `/contracts/executive`, `/dashboard` and both maintenance routes (all 200). At 390px wide the header does not overflow.
+- Dark mode: `.dark` applied, screenshots reviewed at 1920 and 1366.
+- **Not verified:** the page with real MMS data as an all-department account, System theme following the OS setting, and a keyboard-only pass.
+
+### Test/build results (2026-10-05)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 999/999 |
+| `pnpm --filter @recafco/web build` | ✓ compiled |
+| `pnpm db:migrate:status` | ✓ up to date (51 migrations) |
+
+API tests were not run (no API file changed).
+
+## FMP-UI-26 — Contract Management Submenu in Manager Sidebar (Completed 2026-10-06)
+
+Navigation-only change in one file: `apps/web/src/app/(protected)/_components/sidebar.tsx`.
+
+### Why the submenu did not appear
+
+The Contract Management dropdown already existed, but only in the sidebar's non-executive branch. A manager with the executive permission set gets the flat `executiveMode` list (`EXECUTIVE_SIDEBAR_ITEMS`), and that list had only a single "Contract Management" link to `/contracts/executive`. The dropdown code was never rendered for that user.
+
+### Change
+
+- The executive list's Contract Management row now renders the same permission-filtered items the dropdown uses (`visibleContractItems`), indented under it, with 15px labels and 16px icons. The submenu opens only while one of its routes is the current page; on other modules it stays hidden, so no module shows more than one submenu.
+- The parent row reads as active while any submenu route is current. The Dashboard item is the exception: it points at `/contracts/executive` and also stays highlighted on `/contracts/dashboard`.
+- The non-executive branch, Technical and Erection rows, and every other module are unchanged.
+
+### Submenu items and route mapping (all existing routes; none added)
+
+| Submenu item | Route | Active on |
+|---|---|---|
+| Dashboard | `/contracts/executive` | `/contracts/executive`, `/contracts/dashboard` |
+| Contract List | `/contracts` | `/contracts` and contract detail pages (existing rule) |
+| Schedule | `/contracts/schedule` | `/contracts/schedule/...` |
+| Workflow & Team Tasks | `/contracts/workflow` | `/contracts/workflow/...` |
+| Erection Status | `/contracts/erection-dashboard` (label relabelled for monitor-only viewers) | `/contracts/erection-dashboard` |
+| Payments | `/contracts/payments` | `/contracts/payments/...` |
+| Issue Log | `/contracts/issues` | `/contracts/issues/...` |
+| Claim Log | `/contracts/claims` | `/contracts/claims/...` |
+| Closeout Requests | `/contracts/closeouts` | `/contracts/closeouts/...` |
+
+The ticket's `/contracts/list`, `/contracts/erection` and `/contracts/closeout` paths were not used: `/contracts/list` does not exist and the other two are not the pages these items open. `/contracts/closeout` has only a `[requestId]` attachment route, not the list.
+
+### Missing routes
+
+None. Every submenu item maps to an existing page. Closeout Requests keeps its existing `contracts.update` / `contracts.close` gate.
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 999/999 |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+No backend, schema, permission, or route change. Live browser clicks were not run in this unit.
+
+## FMP-UI-27 — Expand/Collapse Chevron on Contract Management Sidebar Parent (Completed 2026-10-06)
+
+Navigation-only change in `apps/web/src/app/(protected)/_components/sidebar.tsx`.
+
+### Interaction chosen
+
+Clicking the parent row toggles its submenu (the ticket's preferred option). The row is now a disclosure button, not a link. Its own dashboard is reached through the submenu's "Dashboard" item, which still opens `/contracts/executive`.
+
+### Chevron
+
+A right-aligned `ChevronRight` when collapsed and `ChevronDown` when expanded (both already imported and used by the non-executive dropdown). `aria-expanded` and `aria-controls` expose the state to assistive technology.
+
+### State and active logic
+
+- The submenu opens automatically when the current page is one of its routes, and re-opens when the user navigates into one.
+- A manual collapse persists until the next entry into a submenu route.
+- The parent stays highlighted (`aria-current`, accent border, `bg-nav-active`) whenever a submenu route is current, whether or not the submenu is open.
+- The submenu's own active highlighting is unchanged.
+
+### Readability
+
+Submenu labels went from 15px to 16px with `py-2.5` spacing, matching the main executive list's text size.
+
+### Other modules
+
+Not changed. The flat rows for Technical, Erection, and the other modules still render through the unchanged link branch.
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 999/999 |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+No backend, schema, permission, or route change. Browser checks were not run in this unit, so the chevron rendering and the mobile drawer are verified by typecheck and build only.
+
 ## Risks
 
 - Incomplete module requirements
@@ -13748,3 +13902,126 @@ Every MMS link a user can click now opens the public Maintenance Management Syst
 - Existing maintenance migration risk
 - Dependence on external SAP consultant
 - Pressure to make unfinished workflows appear complete
+
+## FMP-TASK-01 — Redesign Task Management Tabs, Overview Cards, and Task List (Completed 2026-10-06)
+
+Frontend only (`factory-tasks/executive/page.tsx`, `_lib/task-control-center-helpers.ts`, `_components/task-control-center-list.tsx`, helper tests). No schema, backend, permission, or route changes.
+
+- Tabs (exact order, default All Tasks): All Tasks, My Tasks, Tasks I Assigned, Urgent, Pending, Completed. "Assigned by Me" label replaced (the `/factory-tasks/assigned-by-me` route is unchanged). The "All Tasks" tab is no longer hidden behind `tasks.manage` in the UI — the list endpoint is `tasks.read` and server-scoped, so it shows what the viewer is already allowed to see.
+- Cards (6): All Open Tasks, My Tasks, Tasks I Assigned, Urgent / Overdue, Due Today, Completed This Month — all from `tasksApi.dashboard()`. Caveat: "Urgent / Overdue" count is the real overdue metric; the dashboard has no high-priority count, so the Urgent tab can list more (HIGH/URGENT priority, due today).
+- Filters: Urgent = active status (OPEN/ASSIGNED/IN_PROGRESS/BLOCKED) AND (HIGH/URGENT priority OR overdue OR due today), scanned from the latest 100 active tasks, client-side. Pending = DRAFT/OPEN/ASSIGNED/IN_PROGRESS/BLOCKED. Completed = COMPLETED/CLOSED, sorted by completedAt else updatedAt, newest first.
+- List rows now show "Assigned by" (creator, "Unknown" if missing) and "Assigned to" ("Not assigned" if empty); larger fonts for tabs, titles, buttons, empty state. Empty messages per tab as specified.
+
+## FMP-TASK-02 — Task Management Layout: Full Width, No Horizontal Scroll (Completed 2026-10-06)
+
+Frontend only; no schema/backend/permission/route changes.
+- `factory-tasks/executive/page.tsx`: container `max-w-6xl` → `max-w-screen-2xl`, tighter vertical spacing, section headings made screen-reader-only, "View all tasks →" link.
+- New `_components/task-overview-card.tsx`: compact horizontal card; 6 cards in one row at xl (3×2 on md, 2×3 on mobile).
+- `_components/task-control-center-list.tsx`: table replaced with work-queue rows (identity | From / To / department | priority, status, due, Open + quick action). Stacks on small screens; no horizontal scroll. Compact empty state.
+- Tab order, filters and empty-state text unchanged from FMP-TASK-01.
+
+## FMP-TASK-03 — Simple Task List and Task View Popup (Completed 2026-10-06)
+
+Frontend only; no schema/backend/permission/route changes.
+- New `factory-tasks/_components/task-view-modal.tsx`: "Task Details" popup (From, To, department, priority, status, due, created, last updated) with Assign Task / Start Work / Mark Completed / Open Full Page / Close. Reuses the existing `assignTaskAction`, `openTaskAction`, `startTaskAction`, `completeTaskAction` unchanged — so, as on the full page, a successful action redirects to the full task page.
+- `task-control-center-list.tsx` is now a client component shared by the dashboard and Task List page; buttons are View (opens popup) and Assign (OPEN + `tasks.assign`; opens the popup's assign form). New `computeTaskViewActions()` helper mirrors the full page's own button rules.
+- `factory-tasks/page.tsx` (Task List): table removed, uses the shared rows, full width, larger filter text, "View, filter, and manage tasks." No horizontal scroll. Filters/pagination/back links unchanged.
+- Wording: "Open for Work"/"Start work" → "Start Work" (also on the full detail page's button); "Open" → "View".
+
+## FMP-TASK-04 — Simplify Task List Page (Completed 2026-10-06)
+
+Frontend only; no schema/backend/permission/route changes. `factory-tasks/page.tsx` + `_lib/task-control-center-helpers.ts` (view-all links only).
+- Removed the Active / Overdue / Blocked / Completed chips and the "My tasks →" / "Assigned by me →" links. Added the same 6 tabs as the dashboard (`?tab=`): All Tasks, My Tasks, Tasks I Assigned, Urgent, Pending, Completed — each with its tab-specific empty message. Same data rules as the dashboard (Urgent scans the 100 latest active tasks client-side and is not paged).
+- Subtitle: "Search and view all tasks." Filters in one row: Search (task number or title), Status, Priority, Due from/to, Search button, Clear. Status uses plain words: Draft, Open (open+assigned), In Progress (in progress+blocked), Completed (completed+closed), Cancelled. Older `?status=` / `?overdue=` links still work.
+- "Blocked" is no longer a filter anywhere on this page; a blocked task only shows a "Blocked" badge on its own row.
+- Dashboard "View all tasks" links now open the matching tab on this page. Rows and the View popup are the shared FMP-TASK-03 components.
+
+## FMP-TASK-05 — Simple Create Task Popup with User Assignment and Attachments (Completed 2026-10-06)
+
+- **Popup:** "+ New Task" (dashboard + Task List) opens a "Create Task" popup (`new-task-button.tsx` → `new-task-form.tsx`); `/factory-tasks/new` stays and shows the same form in a centered card. Fields: Task Name, Task Details, Assign To (searchable by name/username/email/employee number, shows the person's department), Priority (Normal/High/Urgent; Normal = MEDIUM), Due Date (end of day), Attach Files. Success: popup closes, page refreshes, "Task created successfully." message. Removed: Responsible/Requesting Department, Plant/Location, incident link, "attachments not available" text.
+- **Department:** never asked. Taken from the selected person, else the logged-in user; if neither: "Department could not be detected. Please select a user with department." Creator = logged-in user. With an assignee the existing create → open → assign chain runs; a failure there (or in a file upload) now shows a visible warning instead of failing silently.
+- **Attachments backend (additive):** table `factory_task_attachments` (migration `20261006000000_add_factory_task_attachments`, applied with `migrate deploy`); `TASK_ATTACHMENTS_DIR` (default `./storage/task-attachments`); endpoints `GET/POST /factory-tasks/:id/attachments`, `GET …/:attachmentId/download`, `DELETE …/:attachmentId`. Allow-list: PDF, DOC/DOCX, XLS/XLSX, JPG/PNG/WEBP, CSV, TXT; 25 MB each. Upload = `tasks.create` + task creator or `tasks.manage`; delete = uploader or `tasks.manage`; list/download = `tasks.read` + department access. Task detail page lists attachments with download links (proxy route). `next.config.ts` raises the server-action body limit to 30 MB.
+- **People endpoint:** `GET /factory-tasks/people` now also returns each person's department and searches email/employee number (additive fields).
+- **Priority wording:** MEDIUM now displays as "Normal" everywhere; Low removed from the create form, list filter and edit-draft options (an existing Low task still shows Low).
+- Verified live on temp ports 4011/3011: created + assigned a task with a PDF, From/To correct, download works, .exe rejected; 1836 API and 1005 web tests pass.
+
+## FMP-TASK-06 — Polish Create Task Popup UI and Validation (Completed 2026-10-06)
+
+Frontend only (`new-task-form.tsx`, `new-task-button.tsx`, `new/page.tsx`; no backend/schema/permission changes).
+- **Focus vs error:** brand red is kept for buttons/active accents, so normal focus is now a neutral border plus a soft red ring; a red border now only appears on a real error and always comes with a message under the field. Root cause of the "always red" look: `--color-accent` is red. Also found that the app has NO `danger` colour token (`text-danger`/`border-danger` render as default colour); the Create Task, task View popup and task row files now use the real `error` tokens. About 60 older files still use `danger` classes (e.g. the Urgent priority badge, Blocked status badge) — not changed here.
+- **Validation (shown on Create Task click, cleared as the user types):** "Please enter a task name."; "Task details are too long." (over 5000); "Please select who should do this task." (Assign To is required for viewers who can assign); "This file type is not allowed."; "File is too large. Maximum size is 25 MB."; failure banner "Task could not be created. Please try again."
+- **Assign To:** search icon, "Search and select employee..." placeholder, hint text, keyboard (arrows/Enter), results show name + department; the selected person shows name + department with a Change button.
+- **Attach Files:** dashed upload box (icon, "Choose files or drag and drop here", 25 MB note) with drag-and-drop; file rows show icon, name, size and Remove; duplicates are ignored.
+- **Popup:** max 85vh, body scrolls, header and Cancel/Create Task footer stay visible, the page behind does not scroll; "Creating..." while saving with both buttons disabled.
+- Verified live on temp ports 4011/3011 at 1366×640 (light and dark): errors, focus style, file errors, creation with attachment.
+
+## FMP-TASK-07 — Create Task Popup: Attachment Visibility and Scrolling (Completed 2026-10-06)
+
+Frontend only (`new-task-form.tsx`); no backend/schema/permission changes.
+- Selecting files now scrolls the attachment list (or a file error) into view inside the popup body, above the footer; body has extra bottom padding and `overscroll-contain`; footer is a separate non-shrinking bar with a top shadow, so it can never cover the list.
+- Once files are selected the upload box shrinks from ~116px to ~40px ("Add more files or drag and drop here"); the list shows each file as a card (file icon, name truncated with the full name on hover, size, Remove).
+- Verified live (light + dark, 1366×640, long file name, 2 files): last file row ends above the footer, no horizontal overflow, file-type error visible, create with attachments works.
+
+## FMP-TASK-08 — Dashboard Shows Latest 5 Tasks + View All Tasks (Completed 2026-10-06)
+
+Frontend only (`factory-tasks/executive/page.tsx`); no backend/schema/permission/route changes.
+- Preview size 8 → 5 for every tab. New header row: "Recent Tasks", a "Showing latest 5 of N tasks" note when N > 5, and a "View All Tasks" button (top right) opening that tab on the Task List page (`/factory-tasks?tab=…`). The old text link under the list is removed. N is the real total for the tab (API total; for Urgent, the count among the 100 latest active tasks).
+- Empty states, rows (From/To/View/Assign), tabs and overview counts unchanged.
+- Verified live: max 5 rows on all 6 tabs; at 1920×1080 and 1366×768 the page itself no longer scrolls (only the sidebar menu at 768).
+
+## FMP-TASK-09 — Department Optional in Create Task (Completed 2026-10-06)
+
+No schema change (`factory_tasks.responsible_department_id` was already nullable).
+- **Web:** `createSimpleTaskAction` no longer errors when no department can be found (message removed). Department = the selected person's, if any; with no person selected, the logged-in user's; otherwise the task is created with none. The picker shows "Department: Not set"; rows and the View popup show "Department: Not set" / "Not set".
+- **API (two real blockers found in a live test):** (1) `open()` rejected tasks without a department (`TASK_RESPONSIBLE_DEPT_REQUIRED`), which broke assigning — check removed, test updated; (2) task lists/dashboard counts hid department-less tasks from department-scoped viewers (the created task never appeared) — the department scope is now "own departments OR no department", matching `canAccessDepartment` (null department = visible to everyone). New test added.
+- Verified live: task created for "[UAT] No-Department User" with an attachment → ASSIGNED, From = logged-in manager, To = that user, department none, appears on the dashboard, detail page opens. 1837 API / 1005 web tests pass.
+
+## FMP-TASK-10 — Create Task Assignment and Attachment Upload Flow (Completed 2026-10-06)
+
+- **Root cause (both reported errors):** the API process on port 4000 (`ts-node`, no watch/reload) was started 11:07, BEFORE the FMP-TASK-05 attachment routes (~11:49) and the FMP-TASK-09 "department optional" fix existed. The old process still ran the old `open()` rule and had no `POST /factory-tasks/:id/attachments` route ("Cannot POST …"). Fix = restart the API (the code was already correct; verified on a fresh API: task for a no-department user assigned, PDF/DOCX/XLSX/PNG uploaded).
+- **Friendly messages (`actions.ts`):** no technical text reaches the user any more — technical details are logged server-side only. Assignment failure: "Task was created, but it could not be assigned. Please try again." Upload failure: "Task was created, but one file could not be uploaded. Please open the task and upload it again." (or "N files … them"). Verified by pointing the web app at a proxy that returns 404 "Cannot POST" for attachments.
+- **Add Files on the task page (new):** `task-attachment-upload.tsx` + `uploadTaskFilesAction`, shown to the task creator / `tasks.manage` (needs `tasks.create`), so the "open the task and upload it again" instruction actually works.
+- **Bug found and fixed:** the task detail page read permissions from the login token, which only carries the user id, so it always thought the viewer had no permissions (no upload control, and the existing action panel showed nothing). It now uses `/auth/me` like the other task pages.
+- The create → open → assign chain is kept internally (existing lifecycle: a draft must be opened before assignment); users never see those words.
+
+## FMP-TASK-11 — Task Detail Page Redesign (Completed 2026-10-06)
+
+Frontend only; no schema/backend/permission changes. Same data and same real actions as before.
+- **Layout:** `[id]/page.tsx` rewritten as a two-column page (≈2/3 main, 1/3 side, stacks on small screens, `max-w-screen-2xl`). Main: header card (Task Details / number / large title / Status · Priority · Assigned to · Due date strip with icons), "What needs to be done", "This task is blocked" (when blocked), "What was done" (when completed), Files, Update progress, Comments & history. Side: Actions, Task summary (Assigned to, Created by, Department, Location, Created, Due date, plus Completed / Linked incident when present — missing values show "Not set"), Next step.
+- **Wording:** Description → What needs to be done; Attachments → Files; Add Files → Add file; Comments & activity → Comments & history; Available Actions → Actions; Assignment Details + Dates → Task summary; "Add progress note" → Update progress (Complete (%), Progress note, "Save progress update", "Enter a value from 0 to 100."); "Complete task" → Mark complete; "Cancel Task" → Cancel task; "Close (accept completion)" → Accept and close. Removed from the header: Responsible department, Next Action. History no longer shows raw status transitions (e.g. ASSIGNED → IN PROGRESS); it shows plain events incl. "File uploaded <name>".
+- **Files:** rows with type icon, name, "Uploaded by … · date time", Download button; "Add file" for the creator / tasks.manage.
+- **Bug fixed — page did not update after an action:** after Start Work / Mark complete / progress / comment the page kept showing the old state until reloaded (the actions redirected to the same URL). Task actions now return success and the page refreshes itself (`router.refresh()` in `task-transitions.tsx`, `task-view-modal.tsx`, the progress and comment forms); `revalidatePath` is deliberately NOT called in those actions because it raced with and swallowed the client refresh. Verified live: progress note, comment and completion appear without reload.
+- Action buttons are larger (primary red Mark complete, neutral Mark blocked / Reassign, outlined red Cancel task) and use the real `error` colour tokens. Friendlier messages: "Please write a progress note." / "Please write a comment."
+- Verified live (light, dark, 390px phone, no horizontal scroll). 1837 API / 1005 web tests pass.
+
+## FMP-CONTRACT-01 — Contract Party Master and Basic Contract Details (Completed 2026-10-06)
+
+Scope: Contract Management only; Basic Contract Details and the party master. Scope of Work, Contract Dates, Contract Value, Payment Terms, BOQ and workflow are untouched.
+- **Schema (additive, migration `20261006100000_add_contract_parties`, applied with `migrate deploy`):** enum `ContractPartyType` (FIRST_PARTY / SECOND_PARTY), table `contract_parties` (name, type, contact_no, email, address, is_active; unique name+type), nullable `contracts.first_party_id` / `second_party_id` (FK, RESTRICT). The migration also inserts the default Second Party **RECAFCO** (idempotent).
+- **API:** `GET/POST /contracts/parties`, `PATCH /contracts/parties/:id` (list = `contracts.read`, add = `contracts.create`, edit/deactivate = `contracts.update`; no new permission codes). Duplicate names (case-insensitive, same type) rejected; RECAFCO's name/type locked; a used party's type cannot change; no delete. `POST /contracts` accepts `firstPartyId` / `secondPartyId`; `counterpartyName` is now optional and is filled from the selected customer (name and Contact No also copied into `counterpartyName` / `counterpartyContact`, so every old page keeps working). Missing Second Party defaults to RECAFCO. Contract get/list now also return `firstParty` / `secondParty`.
+- **Web:** new page `/contracts/parties` ("Contract Parties") + sidebar item at the bottom of Contract Management; New Contract Register Basic Contract Details now has Customer (First Party) (with "+ Add new customer" quick-add and "Manage parties"), Second Party (default RECAFCO), Job Order, Quotation No, Project Number, Project Name. **Date and free-text Company Name removed.** Required: Customer, Second Party, Project Name, with plain messages. Contract detail "Register Details" shows Second Party (RECAFCO when none linked).
+- **Old contracts:** nothing migrated; they keep their company text, show Second Party = RECAFCO. Edit Contract is unchanged (it still edits the company text, which does not change the party link — to be handled when Edit Contract is reworked).
+- **Verified:** lint clean; API typecheck, web typecheck; 1855 API / 1014 web tests pass (18 API + 9 web new); web build passes; migrate status clean; live API check on temp port 4011 (create customer, duplicate, create contract with parties, old-style create, deactivate, RECAFCO lock). Test records left in the dev DB: customer "[UAT] Test Customer" and two "[UAT]" contracts.
+
+## FMP-CONTRACT-02 — Contract Parties Page: Customer and Second Party Panels (Completed 2026-10-06)
+
+Frontend only (`parties/_components/party-list.tsx`, `party-form-modal.tsx`, `parties/page.tsx`, `contract-party-helpers.ts`); no schema, API or permission changes.
+- Single mixed table replaced by two side-by-side panels, each with its own count, list rows (Company Name, Contact No, Active/Inactive, Edit, Deactivate/Activate), and an empty state with an Add Party button. Header keeps title/subtitle with "+ Add Party" top right; per-panel quick-add buttons preselect the Type; one search box filters both panels by company name or contact no. Below `lg` the panels stack (customers first) with no horizontal scroll.
+- Verified: web typecheck, API typecheck, lint, 1016 web tests (2 new for `filterParties`), web build, migrate status clean. Not checked in a browser.
+
+## FMP-BOQ-01 — Simplify BOQ in New Contract Register (Completed 2026-10-06)
+
+Frontend only (`contract-boq-register-table.tsx`, `new-contract-form.tsx`, `contract-boq-helpers.ts`); no schema, API or workflow changes. Edit Contract's BOQ table is untouched.
+- **Fields now:** Item Description, Unit (dropdown: Nos, M², M³, LM, Set, …), Qty, Unit Price, calculated Total (Qty × Unit Price). Removed from the create form: Drawing Qty, Invoice Qty, Progress / Invoice %, Amount Remaining, Drawing Ref., Calculation Ref., S/N. Those columns still exist in the database and are left empty for new contracts. Remarks was left out (no matching column; would need a schema change).
+- **Rows:** 1 blank row by default (was 5, Unit pre-set to m²); "+ Add Item" adds rows; Remove appears once there is more than one row. A completely untouched row is ignored on save, so the BOQ stays optional as before; once a row is started it needs description, unit and Qty > 0 (Unit Price optional, ≥ 0). Messages: "Please enter item description." / "Please select unit." / "Please enter quantity." / "Quantity must be more than 0." / "Unit price must be 0 or more." (prefixed "Item N:" with several rows).
+- **Total:** per-row total and a Total Amount (KWD format) at the bottom right; contract value is still derived from the BOQ on the server. Info note: "Piece tracking will be created after the contract is activated."
+- No piece tracking or workflow built. Verified: web/API typecheck, lint, 1021 web tests (5 new), web build, migrate status clean. Not checked in a browser.
+
+## FMP-BOQ-02A — BOQ Columns and Quantity Wording (Completed 2026-10-07)
+
+Frontend only (`contract-boq-register-table.tsx`, `contract-boq-helpers.ts`, `new-contract-form.tsx`); no schema, API or workflow changes.
+- **Columns:** S/N, Item Description, Unit, Contract Qty, Unit Price, Total (Contract Qty × Unit Price, read-only), Remove. 1 blank row by default, "+ Add Item", Remove on extra rows, no horizontal scroll. Remarks not added (no existing column; would need an approved additive column).
+- **Units:** the dropdown shows only Nos, M², M³, LM (`REGISTER_UNIT_OPTIONS`). Ton/Kg/Set/Lot/Lump Sum/Other are hidden here; Edit Contract and stored data still use the full list.
+- **Wording:** "Contract Qty" everywhere (messages: "Please enter Contract Qty.", "Contract Qty must be more than 0."). Note replaced with "Final piece quantity will be confirmed from Technical drawings."
+- **Future logic (not built):** Contract Qty is entered at registration. Drawing Confirmed Qty will be updated later by Technical. Piece tracking should be generated from Drawing Confirmed Qty where available; if it is not available, the system may use Contract Qty only after user confirmation. No Drawing Confirmed Qty field, piece tracking or Technical/Production/Delivery/Erection link exists yet.
+- Verified: web/API typecheck, lint, 1023 web tests, web build, migrate status clean. Not checked in a browser.

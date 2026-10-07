@@ -9,7 +9,7 @@ const PRIORITY_STYLES: Record<TaskPriority, string> = {
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   LOW:      'Low',
-  MEDIUM:   'Medium',
+  MEDIUM:   'Normal',
   HIGH:     'High',
   URGENT: 'Urgent',
 };

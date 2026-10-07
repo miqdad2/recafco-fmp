@@ -165,9 +165,9 @@ function StateBanner({ status, detail, mmsPublicUrl }: { status: MmsLiveStatus; 
   const Icon = isError ? AlertTriangle : Info;
 
   return (
-    <div role={isError ? 'alert' : 'status'} className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border px-3.5 py-2 text-xs ${box}`}>
+    <div role={isError ? 'alert' : 'status'} className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border px-3.5 py-2 text-[13px] ${box}`}>
       <span className="flex min-w-0 items-start gap-2">
-        <Icon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+        <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <span>
           <span className="font-semibold">{headline}</span>
           {reason && <span className="opacity-90"> Reason: {reason}</span>}
@@ -208,7 +208,7 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
   const managerAttention = isOnline ? dashboard.managerAttention : null;
   const attentionTotal = managerAttention?.needsManagerAttention ?? (isOnline ? dashboard.needsAttention.length : 0);
   const recentCount = isOnline ? Math.min(dashboard.recentRequests.length, RECENT_LIMIT) : 0;
-  const smallLink = 'inline-flex items-center gap-0.5 text-[11px] font-semibold text-accent hover:underline';
+  const smallLink = 'inline-flex items-center gap-0.5 text-xs font-semibold text-accent hover:underline';
 
   return (
     <div className="space-y-2.5">
@@ -221,17 +221,19 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <h1 className="text-xl font-bold leading-tight tracking-tight text-text-primary">Maintenance Management</h1>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${pill.pill}`}>
-                <span className={`size-1.5 rounded-full ${pill.dot}`} aria-hidden="true" />
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${pill.pill}`}>
+                <span className={`size-2 rounded-full ${pill.dot}`} aria-hidden="true" />
                 {pill.label}
               </span>
               {isOnline && dashboard.generatedAt && (
-                <span className="text-[11px] text-text-muted">
+                <span className="text-xs text-text-secondary">
                   Last synced {formatSyncTime(dashboard.generatedAt)} · auto-refresh {refreshSeconds} s
                 </span>
               )}
             </div>
-            <p className="text-xs text-text-secondary">Live MMS overview for job cards, materials, inventory, assets, vehicles, and labor.</p>
+            <p className="truncate text-[13px] text-text-secondary" title="Live MMS overview for job cards, materials, inventory, assets, vehicles, and labor.">
+              Live MMS overview for job cards, materials, inventory, assets, vehicles, and labor.
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -260,9 +262,9 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
 
       {/* Exactly one state banner (nothing when online) */}
       {loadError ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error bg-error-light px-3.5 py-2 text-xs font-semibold text-error">
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error bg-error-light px-3.5 py-2 text-[13px] font-semibold text-error">
           <span className="flex items-center gap-2">
-            <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+            <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
             {apiErrorMessage(loadError.status)}
           </span>
           <a href={mmsPublicUrl} target="_blank" rel="noopener noreferrer" className="underline">
@@ -296,7 +298,7 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
             className="flex-1"
             aside={
               isOnline && attentionTotal > 0 ? (
-                <span className="rounded-full bg-warning-light px-2 py-0.5 text-[11px] font-bold text-warning">
+                <span className="rounded-full bg-warning-light px-2.5 py-0.5 text-xs font-bold text-warning">
                   {attentionTotal} need attention · top {ATTENTION_LIMIT}
                 </span>
               ) : undefined
@@ -343,7 +345,7 @@ export async function MaintenanceControlCenter({ showBackLink = true }: Props = 
         </div>
       </div>
 
-      <p className="hidden text-center text-[10px] leading-none text-text-muted [@media(min-height:900px)]:block">
+      <p className="hidden text-center text-xs leading-none text-text-secondary [@media(min-height:900px)]:block">
         Source: MMS Live API · read-only
         {isOnline && dashboard.cacheTtlSeconds !== null ? ` · cache ${dashboard.cacheTtlSeconds}s` : ''} · MMS is the system of record
       </p>

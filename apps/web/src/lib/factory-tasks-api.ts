@@ -23,6 +23,22 @@ export interface UserRef {
   username: string;
 }
 
+/** FMP-TASK-05 - a person for the Assign To picker, with their department when they have one. */
+export interface PersonRef extends UserRef {
+  department: { id: string; name: string } | null;
+}
+
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  uploadedByUserId: string;
+  createdAt: string;
+  uploadedByUser: UserRef | null;
+}
+
 export interface OrgRef {
   id: string;
   code: string;
@@ -287,11 +303,14 @@ export const tasksApi = {
   listComments: (id: string) =>
     apiFetch<FactoryTaskComment[]>(`/factory-tasks/${id}/comments`),
 
+  listAttachments: (id: string) =>
+    apiFetch<TaskAttachment[]>(`/factory-tasks/${id}/attachments`),
+
   listActivities: (id: string) =>
     apiFetch<FactoryTaskActivity[]>(`/factory-tasks/${id}/activities`),
 
   people: (search?: string) =>
-    apiFetch<UserRef[]>(`/factory-tasks/people${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+    apiFetch<PersonRef[]>(`/factory-tasks/people${search ? `?search=${encodeURIComponent(search)}` : ''}`),
 
   // FMP-UI-20D — active departments/plants for the New Task form's own
   // dropdowns, gated by `tasks.read` (the same permission this whole module

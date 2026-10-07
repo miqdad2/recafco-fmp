@@ -109,6 +109,10 @@ const MODULE_BREADCRUMBS: Record<string, BreadcrumbItem[]> = {
     { label: 'Contract Management', href: '/contracts/dashboard' },
     { label: 'Closeout Requests' },
   ],
+  '/contracts/parties': [
+    { label: 'Contract Management', href: '/contracts/dashboard' },
+    { label: 'Contract Parties' },
+  ],
   '/contracts/erection-dashboard': [
     { label: 'Contract Management', href: '/contracts/dashboard' },
     { label: 'Erection Dashboard' },

@@ -66,7 +66,6 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
   const deptsFailed = deptsRes.status === 'rejected';
   const plantsData = plantsRes.status === 'fulfilled' ? plantsRes.value : [];
   const plantsFailed = plantsRes.status === 'rejected';
-  const canLinkIncident = info.permissions.includes('incidents.read');
 
   const boundAction = updateDraftTaskAction.bind(null, id);
 
@@ -91,7 +90,6 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
           deptsFailed={deptsFailed}
           plants={plantsData}
           plantsFailed={plantsFailed}
-          canLinkIncident={canLinkIncident}
           defaultValues={task}
         />
       </div>

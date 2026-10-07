@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   openTaskAction,
   assignTaskAction,
@@ -43,14 +44,14 @@ function Btn({
   const cls: Record<string, string> = {
     primary: 'bg-accent text-white hover:bg-accent/90',
     secondary: 'border border-border bg-surface-secondary text-text-secondary hover:border-border-strong hover:text-text-primary',
-    danger: 'border border-danger bg-danger-light text-danger hover:bg-danger hover:text-white',
+    danger: 'border border-error bg-surface text-error hover:bg-error-light',
   };
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`w-full rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50 disabled:cursor-not-allowed ${cls[variant]}`}
+      className={`w-full rounded-md px-4 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50 disabled:cursor-not-allowed ${cls[variant]}`}
     >
       {children}
     </button>
@@ -58,6 +59,7 @@ function Btn({
 }
 
 export function TaskTransitionsPanel({ task, currentUserId, permissions, people }: Props): React.JSX.Element {
+  const router = useRouter();
   const [activePanel, setActivePanel] = useState<Panel>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -84,6 +86,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     startTransition(async () => {
       const result = await fn();
       if (result.error) setActionError(result.error);
+      else { setActivePanel(null); router.refresh(); }
     });
   }
 
@@ -94,7 +97,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (isCreator || has('tasks.manage')) {
       buttons.push(
         <Link key="edit" href={`/factory-tasks/${id}/edit`}
-          className="block w-full rounded-md border border-border bg-surface-secondary px-4 py-2 text-center text-sm font-medium text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+          className="block w-full rounded-md border border-border bg-surface-secondary px-4 py-3 text-center text-base font-semibold text-text-secondary hover:border-border-strong hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
         >
           Edit Draft
         </Link>,
@@ -106,14 +109,14 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
         // same `openTaskAction`, same permission, only the label changed.
         <div key="open" className="space-y-1">
           <Btn variant="primary" disabled={isPending} onClick={() => run(() => openTaskAction(id))}>
-            Open for Work
+            Start Work
           </Btn>
-          <p className="text-[11px] text-text-muted">Moves this task from Draft to Open.</p>
+          <p className="text-sm text-text-muted">Makes this task active.</p>
         </div>,
       );
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel Task
+          Cancel task
         </Btn>,
       );
     }
@@ -138,7 +141,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (isCreator || has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel Task
+          Cancel task
         </Btn>,
       );
     }
@@ -149,7 +152,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (isAssignee || has('tasks.start')) {
       buttons.push(
         <Btn key="start" variant="primary" disabled={isPending} onClick={() => run(() => startTaskAction(id))}>
-          Start work
+          Start Work
         </Btn>,
       );
     }
@@ -168,7 +171,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel Task
+          Cancel task
         </Btn>,
       );
     }
@@ -179,7 +182,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (isAssignee || has('tasks.complete')) {
       buttons.push(
         <Btn key="complete" variant="primary" onClick={() => openPanel(activePanel === 'complete' ? null : 'complete')}>
-          Complete task
+          Mark complete
         </Btn>,
       );
     }
@@ -200,7 +203,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel Task
+          Cancel task
         </Btn>,
       );
     }
@@ -225,7 +228,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.manage')) {
       buttons.push(
         <Btn key="cancel" variant="danger" onClick={() => openPanel(activePanel === 'cancel' ? null : 'cancel')}>
-          Cancel Task
+          Cancel task
         </Btn>,
       );
     }
@@ -236,7 +239,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
     if (has('tasks.close')) {
       buttons.push(
         <Btn key="close" variant="primary" disabled={isPending} onClick={() => run(() => closeTaskAction(id))}>
-          Close (accept completion)
+          Accept and close
         </Btn>,
       );
     }
@@ -271,7 +274,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
   // "Available Actions" heading (factory-tasks/[id]/page.tsx) still renders
   // around it either way, so this never looks like a missing section.
   if (buttons.length === 0) {
-    return <p className="text-xs text-text-muted">No actions available to you on this task right now.</p>;
+    return <p className="text-base text-text-muted">No actions are available to you on this task right now.</p>;
   }
 
   return (
@@ -279,24 +282,24 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       <div className="space-y-2">{buttons}</div>
 
       {actionError && !activePanel && (
-        <p role="alert" className="text-xs text-danger">{actionError}</p>
+        <p role="alert" className="text-sm text-error">{actionError}</p>
       )}
 
       {/* Assign panel */}
       {activePanel === 'assign' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">
+          <p className="text-base font-semibold text-text-primary">
             {status === 'OPEN' ? 'Assign task' : 'Reassign task'}
           </p>
           <div>
-            <label htmlFor="assign-user" className="block text-xs font-medium text-text-secondary">
+            <label htmlFor="assign-user" className="block text-sm font-medium text-text-secondary">
               Assignee
             </label>
             <select
               id="assign-user"
               value={assigneeId}
               onChange={(e) => setAssigneeId(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             >
               <option value="">Select a person…</option>
               {people.map((u) => (
@@ -304,7 +307,7 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
               ))}
             </select>
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="primary" disabled={isPending || !assigneeId}
               onClick={() => run(() => assignTaskAction(id, assigneeId))}
@@ -321,10 +324,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Block panel */}
       {activePanel === 'block' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Mark task blocked</p>
+          <p className="text-base font-semibold text-text-primary">Mark task blocked</p>
           <div>
-            <label htmlFor="blocked-reason" className="block text-xs font-medium text-text-secondary">
-              Reason <span aria-hidden="true" className="text-danger">*</span>
+            <label htmlFor="blocked-reason" className="block text-sm font-medium text-text-secondary">
+              Reason <span aria-hidden="true" className="text-error">*</span>
             </label>
             <textarea
               id="blocked-reason"
@@ -333,10 +336,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
               onChange={(e) => setBlockedReason(e.target.value)}
               maxLength={2000}
               placeholder="What is blocking progress?"
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="danger" disabled={isPending || !blockedReason.trim()}
               onClick={() => run(() => blockTaskAction(id, blockedReason.trim()))}
@@ -353,10 +356,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Complete panel */}
       {activePanel === 'complete' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Complete task</p>
+          <p className="text-base font-semibold text-text-primary">Mark complete</p>
           <div>
-            <label htmlFor="completion-summary" className="block text-xs font-medium text-text-secondary">
-              Completion summary <span aria-hidden="true" className="text-danger">*</span>
+            <label htmlFor="completion-summary" className="block text-sm font-medium text-text-secondary">
+              Completion summary <span aria-hidden="true" className="text-error">*</span>
             </label>
             <textarea
               id="completion-summary"
@@ -365,10 +368,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
               onChange={(e) => setCompletionSummary(e.target.value)}
               maxLength={4000}
               placeholder="Describe what was done and any relevant outcomes"
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="primary" disabled={isPending || completionSummary.trim().length < 1}
               onClick={() => run(() => completeTaskAction(id, completionSummary.trim()))}
@@ -385,10 +388,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Reopen panel */}
       {activePanel === 'reopen' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Reopen task</p>
+          <p className="text-base font-semibold text-text-primary">Reopen task</p>
           <div>
-            <label htmlFor="reopen-reason" className="block text-xs font-medium text-text-secondary">
-              Reason <span aria-hidden="true" className="text-danger">*</span>
+            <label htmlFor="reopen-reason" className="block text-sm font-medium text-text-secondary">
+              Reason <span aria-hidden="true" className="text-error">*</span>
             </label>
             <textarea
               id="reopen-reason"
@@ -396,10 +399,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
               value={reopenReason}
               onChange={(e) => setReopenReason(e.target.value)}
               maxLength={1000}
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="primary" disabled={isPending || !reopenReason.trim()}
               onClick={() => run(() => reopenTaskAction(id, reopenReason.trim()))}
@@ -416,10 +419,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Cancel panel */}
       {activePanel === 'cancel' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Cancel Task</p>
+          <p className="text-base font-semibold text-text-primary">Cancel task</p>
           <div>
-            <label htmlFor="cancel-reason" className="block text-xs font-medium text-text-secondary">
-              Reason <span aria-hidden="true" className="text-danger">*</span>
+            <label htmlFor="cancel-reason" className="block text-sm font-medium text-text-secondary">
+              Reason <span aria-hidden="true" className="text-error">*</span>
             </label>
             <textarea
               id="cancel-reason"
@@ -427,10 +430,10 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               maxLength={1000}
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             />
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="danger" disabled={isPending || !cancelReason.trim()}
               onClick={() => run(() => cancelTaskAction(id, cancelReason.trim()))}
@@ -447,23 +450,23 @@ export function TaskTransitionsPanel({ task, currentUserId, permissions, people 
       {/* Priority panel */}
       {activePanel === 'priority' && (
         <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
-          <p className="text-sm font-medium text-text-primary">Change priority</p>
+          <p className="text-base font-semibold text-text-primary">Change priority</p>
           <div>
-            <label htmlFor="new-priority" className="block text-xs font-medium text-text-secondary">
+            <label htmlFor="new-priority" className="block text-sm font-medium text-text-secondary">
               Priority
             </label>
             <select
               id="new-priority"
               value={newPriority}
               onChange={(e) => setNewPriority(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className="mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-base text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-accent/25"
             >
               {PRIORITIES.map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
             </select>
           </div>
-          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {actionError && <p role="alert" className="text-sm text-error">{actionError}</p>}
           <div className="flex gap-2">
             <Btn variant="primary" disabled={isPending || newPriority === task.priority}
               onClick={() => run(() => updatePriorityAction(id, newPriority))}
