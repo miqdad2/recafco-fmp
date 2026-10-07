@@ -304,8 +304,8 @@ describe('unitLabel', () => {
 });
 
 describe('REGISTER_UNIT_OPTIONS (FMP-BOQ-02A)', () => {
-  it('offers only Nos, M², M³ and LM on New Contract Register', () => {
-    expect(REGISTER_UNIT_OPTIONS.map(unitLabel)).toEqual(['Nos', 'M²', 'M³', 'LM']);
+  it('offers only M², M³, Nos and LM, in that order on New Contract Register', () => {
+    expect(REGISTER_UNIT_OPTIONS.map(unitLabel)).toEqual(['M²', 'M³', 'Nos', 'LM']);
   });
   it('leaves the wider list used by Edit Contract unchanged', () => {
     expect(UNIT_OF_MEASURE_OPTIONS).toContain('ton');

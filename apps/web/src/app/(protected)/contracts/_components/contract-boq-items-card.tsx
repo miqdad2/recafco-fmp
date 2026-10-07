@@ -16,7 +16,14 @@ function effectiveQty(item: ContractBoqItem): string {
   return qty ?? '—';
 }
 
-const COLUMNS = ['Item/Code', 'Category', 'Description', 'Qty', 'Unit', 'Mix Design', 'Concrete Grade', 'Unit Price', 'Total Price'];
+const COLUMNS = ['Item/Code', 'Category', 'Description', 'Qty', 'Unit', 'Mix Design', 'Concrete Grade', 'Unit Price', 'Total Price', 'Drawing Confirmed Pieces'];
+
+// FMP-BOQ-03 — read-only; Technical confirms these from drawings (Contract Management cannot edit them).
+function confirmedPiecesLabel(item: ContractBoqItem): string {
+  const rows = (item.drawingConfirmations ?? []).filter((r) => r.confirmedPieces !== null);
+  if (rows.length === 0) return 'Not confirmed yet';
+  return `${rows.reduce((sum, r) => sum + (r.confirmedPieces ?? 0), 0)} Nos`;
+}
 
 export function ContractBoqItemsCard({ contract }: Props): React.JSX.Element {
   const items = contract.boqItems ?? [];
@@ -52,6 +59,7 @@ export function ContractBoqItemsCard({ contract }: Props): React.JSX.Element {
                   <td className="px-3 py-2 text-text-secondary whitespace-nowrap">{item.concreteGrade || '—'}</td>
                   <td className="px-3 py-2 text-text-secondary whitespace-nowrap">{formatContractValue(item.unitPrice, contract.currency)}</td>
                   <td className="px-3 py-2 text-text-primary font-medium whitespace-nowrap">{formatContractValue(item.totalPrice, contract.currency)}</td>
+                  <td className="px-3 py-2 text-text-secondary whitespace-nowrap">{confirmedPiecesLabel(item)}</td>
                 </tr>
               ))}
             </tbody>

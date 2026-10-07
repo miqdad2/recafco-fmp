@@ -540,3 +540,90 @@ export const technicalApi = {
   fdIssuance: (contractId: string) =>
     apiFetch<TechnicalFdIssuanceData>(`/technical/jobs/${contractId}/fd-issuance`),
 };
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-03 — BOQ Drawing Confirmation (Technical confirms physical pieces).
+// Contract Qty is commercial (M2/M3/Nos/LM); confirmedPieces is always in Nos.
+// ---------------------------------------------------------------------------
+
+export type BoqConfirmationStatus = 'DRAFT' | 'CONFIRMED' | 'REVISED' | 'CANCELLED';
+
+export interface BoqDrawingConfirmation {
+  id: string;
+  contractId: string;
+  boqItemId: string;
+  drawingNo: string;
+  drawingTitle: string | null;
+  confirmedPieces: number | null;
+  sizeOrSpecification: string | null;
+  revision: string | null;
+  confirmationStatus: BoqConfirmationStatus;
+  remarks: string | null;
+  confirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  confirmedByUser: { id: string; displayName: string } | null;
+}
+
+// FMP-BOQ-04 — pieces generated from CONFIRMED drawing confirmations.
+export type BoqPieceStatus =
+  | 'NOT_STARTED' | 'DRAWING_READY' | 'IN_PRODUCTION' | 'PRODUCED' | 'IN_STORE'
+  | 'DELIVERED' | 'ERECTED' | 'COMPLETED' | 'ON_HOLD' | 'REJECTED' | 'CANCELLED';
+
+export interface BoqPiece {
+  id: string;
+  boqItemId: string;
+  pieceNo: number;
+  pieceCode: string;
+  drawingNo: string;
+  currentStatus: BoqPieceStatus;
+  sizeOrSpecification: string | null;
+  currentLocation: string | null;
+  isCancelled: boolean;
+  updatedAt: string;
+}
+
+export interface BoqConfirmationItem {
+  boqItemId: string;
+  sortOrder: number;
+  description: string;
+  contractQty: string | null;
+  contractUnit: string | null;
+  /** Sum of CONFIRMED rows; null = not confirmed yet. */
+  confirmedPieces: number | null;
+  confirmations: BoqDrawingConfirmation[];
+  piecesGenerated: number;
+  statusCounts: Partial<Record<BoqPieceStatus, number>>;
+  /** Pieces still to be created from Confirmed rows (drives the Generate Pieces button). */
+  pendingPieces: number;
+  /** Pieces exist but their number differs from Drawing Confirmed Pieces. */
+  needsAttention: boolean;
+}
+
+export async function fetchBoqConfirmations(contractId: string): Promise<BoqConfirmationItem[] | null> {
+  const result = await technicalApiFetchResult<BoqConfirmationItem[]>(`/technical/jobs/${contractId}/boq-confirmations`);
+  return result.error ? null : result.data;
+}
+
+// FMP-BOQ-05 — piece status updates and history.
+export type BoqPieceUpdateStatus = Exclude<BoqPieceStatus, 'NOT_STARTED'>;
+
+export interface BoqPieceHistoryEntry {
+  id: string;
+  oldStatus: BoqPieceStatus | null;
+  newStatus: BoqPieceStatus;
+  note: string | null;
+  createdAt: string;
+  updatedByUser: { id: string; displayName: string } | null;
+}
+
+/**
+ * FMP-BOQ-06 — the piece statuses the current user may set from the Technical
+ * page (decided by the API). null = could not be resolved, so the UI must stay read-only.
+ */
+export async function fetchAllowedPieceStatuses(contractId: string): Promise<BoqPieceUpdateStatus[] | null> {
+  const result = await technicalApiFetchResult<{ context: string; statuses: BoqPieceUpdateStatus[] }>(
+    `/technical/jobs/${contractId}/boq-pieces/allowed-statuses`,
+  );
+  return result.error ? null : result.data.statuses;
+}

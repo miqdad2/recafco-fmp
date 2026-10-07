@@ -13894,6 +13894,81 @@ Not changed. The flat rows for Technical, Erection, and the other modules still 
 
 No backend, schema, permission, or route change. Browser checks were not run in this unit, so the chevron rendering and the mobile drawer are verified by typecheck and build only.
 
+## FMP-UI-28 — Reorder Manager Sidebar and Slightly Increase Width (Completed 2026-10-07)
+
+Navigation-only change in `apps/web/src/app/(protected)/_components/sidebar.tsx`. No routes, permissions, module-access logic, BOQ, Technical workflow, piece generation, Production, Storage, or Erection code touched.
+
+### Old sidebar order (11 items, FMP-UI-23)
+
+Contract Management, Estimation, Technical, Erection, Safety & Compliance, Incident Management, Production & Planning, Maintenance Management, Storage Yard & Delivery, Quality Control, Task Management.
+
+### New sidebar order (10 items)
+
+Contract Management, Technical, Production & Planning, Storage Yard & Delivery, Erection, Quality Control, Safety & Compliance, Incident Management, Maintenance Management, Task Management — exactly the sequence this ticket required.
+
+### Estimation handling
+
+Removed from this sidebar list only, per the ticket's stated preference ("do not show Estimation in manager sidebar" — not actively used). It is not deleted anywhere else: `_lib/executive-modules.ts`'s `EXECUTIVE_MODULES` array (a separate, already-existing list) still includes it, so the Platform Dashboard card, the module switcher, and Previous/Next on every Executive Module Landing Page are unchanged — this satisfies the ticket's own "do not change dashboard card order unless it uses the same shared module order and is safe" instruction, because the two lists were already separate, not shared. The now-unused `Calculator` icon import was removed to keep lint clean.
+
+### Sidebar width
+
+`w-64` (256px) → `w-70` (280px) on both the desktop `<aside>` and the mobile drawer. `w-70` is Tailwind v4's own spacing-scale token for 17.5rem (280px) — no arbitrary value needed. The bottom user/manager footer and every other section size themselves from this same parent width via padding and `truncate`, not a fixed width, so nothing else needed adjusting.
+
+### Submenu, chevron, active state
+
+Not touched — the Contract Management submenu (FMP-UI-26), its chevron (FMP-UI-27), and every active-state rule render from the same `EXECUTIVE_SIDEBAR_ITEMS` array and the same helper functions, unaffected by reordering the array's other entries or widening the `<aside>`.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/sidebar.tsx`
+- `context/progress-tracker.md`
+- `context/ui-registry.md`
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 1034/1034 |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ up to date (56 migrations) |
+
+No backend, schema, permission, or route change. Browser checks (visual wrapping at 280px, mobile drawer, light/dark) were not run in this unit — verified by typecheck/build only.
+
+## FMP-UI-29 — Restore Estimation to Manager Sidebar and Increase Font Size (Completed 2026-10-07)
+
+Direct feedback after seeing FMP-UI-28 live (screenshot of the 10-item sidebar): Estimation was missing, and the labels should be larger. Same file: `apps/web/src/app/(protected)/_components/sidebar.tsx`. No routes, permissions, or backend touched.
+
+### Estimation placement
+
+Restored right after Contract Management — cost estimation/quotation is a pre-contract-execution step in the real workflow, the same reasoning FMP-UI-23 originally placed it there for. New order (11 items): Contract Management, Estimation, Technical, Production & Planning, Storage Yard & Delivery, Erection, Quality Control, Safety & Compliance, Incident Management, Maintenance Management, Task Management. Every other FMP-UI-28 position is unchanged. The `Calculator` icon import, removed in FMP-UI-28, is back.
+
+### Font/icon size
+
+Across the Contract Management button, its submenu, and every flat item: `text-base` (16px) → `text-lg` (18px); row icons `size-5`→`size-6`; submenu icon `size-4`→`size-5`; chevrons `size-4`→`size-5`; submenu row `py-2.5`→`py-3` for the taller line-height. Other personas' nav rows (the dropdown, Administration, Contract-Management-only flat section) are untouched — only the executive flat list's own classes changed.
+
+### Sidebar width
+
+`w-70` (280px, FMP-UI-28) → `w-80` (320px) on both the desktop sidebar and the mobile drawer, to keep the longer labels ("Storage Yard & Delivery", "Maintenance Management") from wrapping more tightly now that they render at 18px. `w-80` is a standard Tailwind token (20rem).
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/sidebar.tsx`
+- `context/progress-tracker.md`, `context/ui-registry.md`
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 1036/1036 |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ up to date |
+
+No backend, schema, permission, or route change. Browser checks (actual wrapping at 320px/18px, mobile drawer, light/dark) were not run in this unit — verified by typecheck/build only.
+
 ## Risks
 
 - Incomplete module requirements
@@ -14025,3 +14100,57 @@ Frontend only (`contract-boq-register-table.tsx`, `contract-boq-helpers.ts`, `ne
 - **Wording:** "Contract Qty" everywhere (messages: "Please enter Contract Qty.", "Contract Qty must be more than 0."). Note replaced with "Final piece quantity will be confirmed from Technical drawings."
 - **Future logic (not built):** Contract Qty is entered at registration. Drawing Confirmed Qty will be updated later by Technical. Piece tracking should be generated from Drawing Confirmed Qty where available; if it is not available, the system may use Contract Qty only after user confirmation. No Drawing Confirmed Qty field, piece tracking or Technical/Production/Delivery/Erection link exists yet.
 - Verified: web/API typecheck, lint, 1023 web tests, web build, migrate status clean. Not checked in a browser.
+
+## FMP-BOQ-02B — Contract Unit Order and Piece Quantity Rule (Completed 2026-10-07)
+
+Wording/order only (`contract-boq-helpers.ts`, `new-contract-form.tsx`, one test); no schema, API, workflow or piece tracking changes.
+- BOQ unit dropdown order is now **M², M³, Nos, LM**. Column label stays **Contract Qty**. BOQ note: "Contract Qty is for contract value. Piece quantity will be confirmed later from Technical drawings."
+- **Future quantity rule (recorded, NOT built):**
+  - Contract Qty is the commercial BOQ quantity; Contract Unit can be M², M³, Nos or LM.
+  - Piece tracking quantity must come from Technical's **Drawing Confirmed Pieces**.
+  - If Contract Unit is Nos, the system may offer to generate pieces from Contract Qty after user confirmation.
+  - If Contract Unit is M², M³ or LM, the system must NOT auto-generate pieces from Contract Qty.
+  - Technical will later confirm the physical piece quantity in Nos (with Drawing No and size/specification if needed); Production, Storage & Delivery and Erection then track individual pieces in Nos.
+- Verified: web/API typecheck, lint, 1023 web tests, web build, migrate status clean.
+
+## FMP-BOQ-03 — Technical Drawing Confirmed Pieces Foundation (Completed 2026-10-07)
+
+- **Schema (additive; migrations `20261007000000_add_boq_drawing_confirmations` + `20261007000100_rename_boq_confirmation_index`, applied with `migrate deploy`):** enum `contract_boq_confirmation_status` (DRAFT / CONFIRMED / REVISED / CANCELLED) and table `contract_boq_drawing_confirmations` (contract, BOQ item, drawing no, title, `confirmed_pieces` INT (null for drafts), size/specification, revision, status, remarks, confirmed by/at, created by). A BOQ item may have many rows (one per drawing). FKs to the BOQ item and contract are RESTRICT. No existing table changed; no pieces table exists.
+- **API (Technical module):** `GET/POST /technical/jobs/:contractId/boq-confirmations`, `PATCH …/:id` (drafts only), `POST …/:id/revise`, `POST …/:id/cancel`. Read = `contracts.read`; write = `contracts.update` or `contracts.workflow_update` (the same pair as every other Technical write; no new permissions). Pieces must be a whole number > 0 to confirm (a draft may leave it empty, but a typed value must still be valid). Total confirmed pieces per item = sum of its CONFIRMED rows; none = "Not confirmed yet".
+- **History rule:** confirmed rows are never edited in place. **Revise** keeps the old row as Revised and adds a new Confirmed row; **Cancel** marks Cancelled (nothing is deleted). Cancelling is allowed now because nothing is generated from these rows yet.
+- **UI:** "BOQ Drawing Confirmation" section at the bottom of the Technical job page (`/technical/jobs/[contractId]`): per item Contract Qty + unit, Confirmed Pieces, View Confirmations, Add Drawing Confirmation (BOQ Item, Drawing No, Drawing Title, Confirmed Pieces, Size / Specification, Revision, Remarks; Save Draft / Confirm). Contract detail BOQ card shows a read-only "Drawing Confirmed Pieces" column; Contract Management cannot edit it.
+- **Known limit:** Edit Contract (Draft contracts only) replaces all BOQ items, so once Technical has recorded confirmations for a draft contract, saving Edit Contract is refused with "BOQ items cannot be changed because Technical has already recorded drawing confirmations for them." (protects the confirmations; verified live). New Contract Register is unchanged.
+- **Not built:** no piece generation, no Production / Storage & Delivery / Erection link. Next unit: FMP-BOQ-04 — Generate Piece Tracking from Drawing Confirmed Pieces. A Contract Qty in M²/M³/LM never creates pieces.
+- Verified: lint, API + web typecheck, 1875 API / 1030 web tests (20 API + 7 web new), web build, migrate status clean; live API check on temp port 4011 (decimal/zero rejected, two drawings sum to 50, revise → 55 with history kept, confirmed row locked, Edit Contract guard). Not checked in a browser. Test data left in the dev DB: one contract titled "[UAT] BOQ-03 check".
+
+## FMP-BOQ-04 — Generate Piece Tracking from Drawing Confirmed Pieces (Completed 2026-10-07)
+
+- **Schema (additive, migration `20261007100000_add_boq_pieces`, applied with `migrate deploy`):** enum `contract_boq_piece_status` (Not Started, Drawing Ready, In Production, Produced, In Store, Delivered, Erected, Completed, Hold, Rejected, Cancelled); table `contract_boq_pieces` (contract, BOQ item, drawing confirmation, piece no, piece code, current status default DRAWING_READY, drawing no, size/specification, location, remarks, is_cancelled; unique `(contract, piece_code)` and `(drawing_confirmation, piece_no)`); table `contract_boq_piece_status_history` (piece, old/new status, note, updated by, created at). FKs are RESTRICT, so pieces and history can never be removed by a cascade.
+- **Generation (`POST /technical/jobs/:contractId/boq-pieces/generate`, Technical write permission):** uses ONLY rows with status CONFIRMED and a positive confirmed piece count — never Draft / Revised / Cancelled rows and never Contract Qty (an M²/M³/LM item only produces pieces from what Technical confirmed in Nos). Each piece starts as Drawing Ready with one history row (note "Created from drawing confirmation"). Messages: "Pieces generated successfully." / "Pieces are already generated." / "Please confirm drawing pieces before generating pieces."
+- **Piece code:** `[Drawing No]-[001]`, drawing no upper-cased with unsafe characters turned into `-` (HC-001 → HC-001-001 … HC-001-020). If another confirmation already uses that prefix (same drawing no on another BOQ item, or a revised drawing) the BOQ item number and then a short confirmation id are added (HC-001-2-001, HC-001-2-8254-001). Unique per contract.
+- **Safe to repeat:** only missing piece numbers are created, so a second click creates nothing; two simultaneous clicks are stopped by the unique codes and answered "already generated". Old pieces are never deleted or reduced. A revised drawing keeps its pieces; only the new Confirmed row gets new ones; any mismatch shows as **Needs Attention** (generated ≠ Drawing Confirmed Pieces). A drawing that already has pieces can no longer be cancelled ("Pieces were already generated from this drawing, so it cannot be cancelled.").
+- **UI (Technical job page → BOQ Drawing Confirmation):** Generate Pieces button, per-item Pieces Generated + status chips, View Pieces list with status filters (read-only; `GET …/boq-pieces?boqItemId=&status=`). Contract detail was not changed in this unit.
+- **Not built:** no status updates (bulk or single), no Production / Storage & Delivery / Erection link, no barcode/QR. Next unit: bulk piece status update. New Contract Register unchanged.
+- Verified: lint, API + web typecheck, 1897 API / 1034 web tests (23 API + 4 web new), web build, migrate status clean; live check on temp port 4011 (generate → all Drawing Ready, history rows written, second generate creates nothing, cancel-with-pieces refused, no-confirmed message). My test pieces/history/confirmations on "[UAT] BOQ-0x" contracts were removed afterwards; the "[UAT] BOQ-03 check" and "[UAT] BOQ-04 empty" contracts remain.
+
+## FMP-BOQ-05 — BOQ Piece Status Update Foundation (Completed 2026-10-07)
+
+No schema change (uses the BOQ-04 tables). Technical job page → BOQ Drawing Confirmation → View Pieces.
+- **API (Technical module, `…/boq-pieces`):** `POST bulk-status` (pieceIds + status + optional note), `PATCH :pieceId/status` (one piece), `GET :pieceId/history`. Write = `contracts.update` or `contracts.workflow_update`; read (list + history) = `contracts.read`. No new permissions.
+- **Rules:** targets = Drawing Ready, In Production, Produced, In Store, Delivered, Erected, Completed, Hold, Rejected, Cancelled (Not Started is not offered). A piece is skipped if it is Cancelled ("Cancelled pieces cannot be updated."), already in the target status ("Piece is already in this status."), not in this job, or was changed by someone else meanwhile. Moving to Cancelled sets the piece's cancelled flag; nothing is ever deleted; Rejected pieces stay visible and can be moved on. Max 500 pieces per update.
+- **History:** every moved piece gets a `contract_boq_piece_status_history` row (old status, new status, note, updated by) in the same transaction as the status change. Bulk returns updated count, skipped count and the skipped reasons: "Pieces updated." / "Status updated." / "8 pieces updated. 2 pieces skipped." / the single reason when nothing changed. A single-piece update that cannot happen is an error with the plain reason.
+- **Summary:** status chips now also show a Cancelled chip; cancelled pieces are not counted in Pieces Generated (so the item shows Needs Attention) and are never regenerated.
+- **UI:** tick boxes, Select all shown, "Update selected to", Note, Update Status; History per piece ("Piece History"). Filters and counts refresh after an update. Read-only users cannot update.
+- **Not done / next:** no Production, Storage & Delivery or Erection integration, no records, notifications, inventory, barcode/QR; any Technical writer can currently set any status — department-specific restrictions (Production → In Production/Produced, Storage & Delivery → In Store/Delivered, Erection → Erected/Completed) come in later units. Contract Qty and drawing confirmations are never changed by status updates.
+- Verified: lint, API + web typecheck, 1914 API / 1036 web tests (17 API + 2 web new), web build, migrate status clean; live check on temp port 4011 (bulk 3 → Produced with history, same-status skip, mixed 2 updated/1 skipped, single update, cancel then update refused, history newest first, filter, unauthenticated 401). My test pieces/history were removed afterwards; the "[UAT] BOQ-05 check" contract remains.
+
+## FMP-BOQ-06 — Department-Based Piece Status Controls (Completed 2026-10-07)
+
+No schema change. API: `boq-piece-generation.ts` (rules), `technical-boq-piece.service.ts`, `technical-boq-piece.controller.ts`; web: `boq-drawing-confirmation.tsx`, Technical job page, `boq-confirmation-helpers.ts`, `technical-api.ts`.
+- **Status ownership (one shared piece engine, context chosen by the page):** Technical = Drawing Ready, Hold, Rejected, Cancelled; Production = In Production, Produced, Hold, Rejected; Storage & Delivery = In Store, Delivered, Hold, Rejected; Erection = Erected, Completed, Hold, Rejected. Only the Technical context is wired (the other three are defined and tested for the later units).
+- **Manager/admin override:** `contracts.manage` (Admin, Executive Manager, Super Admin in the current role data — the same permission Technical already uses for manager overrides) may set any status; history is still written. Note: the ordinary Contract Manager role has `contracts.update` but not `contracts.manage`, so it gets the Technical-owned statuses only.
+- **API:** a status the user may not set is blocked before anything is read or written. Bulk returns 0 updated, every selected piece skipped with reason "You cannot update pieces to this status." (no history); a single-piece update returns that message as an error. New `GET /technical/jobs/:contractId/boq-pieces/allowed-statuses` returns the allowed list (empty for read-only users); the UI uses it as the single source of truth.
+- **UI:** the dropdown shows only allowed statuses; empty/unresolved list → no tick boxes or update bar (read-only). Status counts and filters still show all statuses.
+- **Unchanged:** Cancelled pieces still cannot be updated, same-status updates are still skipped, bulk updates and history work as in BOQ-05, no strict status sequence yet.
+- **Not built:** no Production / Storage & Delivery / Erection integration, records, inventory or notifications.
+- Verified: lint, API + web typecheck, 1932 API / 1039 web tests (18 API + 3 web new; BOQ-05 update tests now run as the override user), web build, migrate status clean; live check on temp port 4011 (manager sees all 10 statuses, a viewer none, manager bulk/single/history flow still works). The restricted-writer block itself is covered by unit tests only (no Technical-only writer user exists in the test data). My test pieces/history were removed; the "[UAT] BOQ-05 check" contract remains.

@@ -4,11 +4,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Ruler, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
-import { technicalApi, TECHNICAL_STAGE_LABELS, TECHNICAL_STAGE_ORDER } from '@/lib/technical-api';
+import { technicalApi, fetchBoqConfirmations, fetchAllowedPieceStatuses, TECHNICAL_STAGE_LABELS, TECHNICAL_STAGE_ORDER } from '@/lib/technical-api';
 import { startTechnicalWorkflowFormAction } from '../../actions';
 import { formatDate, priorityLabel, computeStageMode, stageHref, STAGE_OPEN_LABELS } from '../../_lib/technical-format';
 import type { TechnicalStageMode } from '../../_lib/technical-format';
 import { TechnicalStepper } from '../../_components/technical-stepper';
+import { BoqDrawingConfirmation } from './_components/boq-drawing-confirmation';
 
 function stageStatusBadge(mode: TechnicalStageMode): { label: string; className: string } {
   if (mode === 'active') return { label: 'Current', className: 'bg-accent-light text-accent' };
@@ -55,6 +56,11 @@ export default async function TechnicalJobPage({ params }: PageProps): Promise<R
   }
 
   const { contract, workflow, nextStage } = overview;
+  // FMP-BOQ-03 — null when it could not be loaded; the section is then simply left out.
+  const [boqConfirmations, allowedPieceStatuses] = await Promise.all([
+    fetchBoqConfirmations(contractId),
+    fetchAllowedPieceStatuses(contractId),
+  ]);
   const canWrite = permissions.includes('contracts.update') || permissions.includes('contracts.workflow_update');
   // FMP-TECH-04 — `nextStage` is already null as soon as currentStage
   // reaches FD_ISSUANCE (nextStageOf(FD_ISSUANCE) has no later stage),
@@ -238,6 +244,16 @@ export default async function TechnicalJobPage({ params }: PageProps): Promise<R
             <p className="mt-4 text-xs text-text-muted">Contact a Contract Manager to start this job order&apos;s Technical workflow.</p>
           )}
         </div>
+      )}
+
+      {/* FMP-BOQ-03 — Technical records the drawing-confirmed physical pieces per BOQ item. */}
+      {boqConfirmations && (
+        <BoqDrawingConfirmation
+          contractId={contractId}
+          items={boqConfirmations}
+          canWrite={canWrite}
+          allowedPieceStatuses={allowedPieceStatuses}
+        />
       )}
     </div>
   );

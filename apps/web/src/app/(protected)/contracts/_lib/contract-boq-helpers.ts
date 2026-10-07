@@ -214,7 +214,7 @@ export const UNIT_OF_MEASURE_OPTIONS = ['m²', 'm³', 'lm', 'nos', 'ton', 'kg', 
 
 // FMP-BOQ-02A — the only units offered on New Contract Register. Edit Contract and
 // old data keep using the wider UNIT_OF_MEASURE_OPTIONS list above.
-export const REGISTER_UNIT_OPTIONS = ['nos', 'm²', 'm³', 'lm'];
+export const REGISTER_UNIT_OPTIONS = ['m²', 'm³', 'nos', 'lm'];
 
 export const MIX_DESIGN_OPTIONS = [
   { value: 'GRAY', label: 'Gray' },

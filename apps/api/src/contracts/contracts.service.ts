@@ -72,6 +72,12 @@ export function getDerivedLifecycleStatus(contract: {
   return 'ACTIVE';
 }
 
+/** Prisma reports an FK violation as P2003; the pg driver adapter surfaces it as a DriverAdapterError with the Postgres message. */
+function isForeignKeyViolation(err: unknown): boolean {
+  const e = err as { code?: string; message?: string };
+  return e.code === 'P2003' || /foreign key constraint/i.test(e.message ?? '');
+}
+
 // ---------------------------------------------------------------------------
 // Prisma select shape
 // ---------------------------------------------------------------------------
@@ -147,6 +153,8 @@ const CONTRACT_SELECT = {
     select: {
       id: true,
       sortOrder: true,
+      // FMP-BOQ-03 — read-only; Technical owns these.
+      drawingConfirmations: { where: { confirmationStatus: 'CONFIRMED' as const }, select: { confirmedPieces: true } },
       itemCode: true,
       category: true,
       description: true,
@@ -805,7 +813,18 @@ export class ContractsService {
       // Replace-in-place: no BOQ version history yet (CM-23C), so the whole set
       // for this contract is simply deleted and recreated from the submission.
       if (replacingBoq) {
-        await tx.contractBoqItem.deleteMany({ where: { contractId: id } });
+        try {
+          await tx.contractBoqItem.deleteMany({ where: { contractId: id } });
+        } catch (err) {
+          // FMP-BOQ-03 — BOQ items with Technical drawing confirmations are protected (FK Restrict).
+          if (isForeignKeyViolation(err)) {
+            throw new ConflictException({
+              code: 'CONTRACT_BOQ_HAS_DRAWING_CONFIRMATIONS',
+              message: 'BOQ items cannot be changed because Technical has already recorded drawing confirmations for them.',
+            });
+          }
+          throw err;
+        }
         if (boqItems.length > 0) {
           await tx.contractBoqItem.createMany({
             data: boqItems.map((item, index) => ({

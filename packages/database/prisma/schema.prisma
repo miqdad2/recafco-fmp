@@ -297,9 +297,14 @@ model User {
   technicalApprovalAttachmentsUploaded TechnicalApprovalAttachment[] @relation("TechnicalApprovalAttachmentUploadedBy")
 
   // FMP-TECH-04
-  technicalFdIssuancesIssuedBy           TechnicalFdIssuance[]           @relation("TechnicalFdIssuanceIssuedBy")
-  technicalFdIssuancesCreated            TechnicalFdIssuance[]           @relation("TechnicalFdIssuanceCreatedBy")
-  technicalFdIssuanceAttachmentsUploaded TechnicalFdIssuanceAttachment[] @relation("TechnicalFdIssuanceAttachmentUploadedBy")
+  technicalFdIssuancesIssuedBy           TechnicalFdIssuance[]            @relation("TechnicalFdIssuanceIssuedBy")
+  technicalFdIssuancesCreated            TechnicalFdIssuance[]            @relation("TechnicalFdIssuanceCreatedBy")
+  // FMP-BOQ-03
+  boqDrawingConfirmationsConfirmed       ContractBoqDrawingConfirmation[] @relation("BoqDrawingConfirmationConfirmedBy")
+  boqDrawingConfirmationsCreated         ContractBoqDrawingConfirmation[] @relation("BoqDrawingConfirmationCreatedBy")
+  // FMP-BOQ-04
+  boqPieceStatusUpdates                  ContractBoqPieceStatusHistory[]  @relation("BoqPieceStatusUpdatedBy")
+  technicalFdIssuanceAttachmentsUploaded TechnicalFdIssuanceAttachment[]  @relation("TechnicalFdIssuanceAttachmentUploadedBy")
 
   productionOrdersCreated    ProductionOrder[]   @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[]   @relation("ProdOrderSupervisor")
@@ -1206,15 +1211,15 @@ model Contract {
   createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  ownerUser        User        @relation("ContractOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  createdByUser    User        @relation("ContractCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  activatedByUser  User?       @relation("ContractActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
-  terminatedByUser User?       @relation("ContractTerminatedBy", fields: [terminatedByUserId], references: [id], onDelete: SetNull)
-  closedByUser     User?       @relation("ContractClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
-  cancelledByUser  User?       @relation("ContractCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
-  department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  plant            Plant?      @relation(fields: [plantId], references: [id], onDelete: SetNull)
-  location         Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  ownerUser        User           @relation("ContractOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdByUser    User           @relation("ContractCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  activatedByUser  User?          @relation("ContractActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
+  terminatedByUser User?          @relation("ContractTerminatedBy", fields: [terminatedByUserId], references: [id], onDelete: SetNull)
+  closedByUser     User?          @relation("ContractClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser  User?          @relation("ContractCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  department       Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  plant            Plant?         @relation(fields: [plantId], references: [id], onDelete: SetNull)
+  location         Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
   firstParty       ContractParty? @relation("ContractFirstParty", fields: [firstPartyId], references: [id], onDelete: Restrict)
   secondParty      ContractParty? @relation("ContractSecondParty", fields: [secondPartyId], references: [id], onDelete: Restrict)
 
@@ -1249,6 +1254,8 @@ model Contract {
   technicalSdCalculationSubmissions TechnicalSdCalculationSubmission[]
   technicalApprovals                TechnicalApproval[]
   technicalFdIssuances              TechnicalFdIssuance[]
+  boqDrawingConfirmations           ContractBoqDrawingConfirmation[]
+  boqPieces                         ContractBoqPiece[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1320,12 +1327,124 @@ model ContractBoqItem {
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  contract         Contract                         @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  productionStatus ContractBoqItemProductionStatus?
+  contract             Contract                         @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  productionStatus     ContractBoqItemProductionStatus?
+  drawingConfirmations ContractBoqDrawingConfirmation[]
+  pieces               ContractBoqPiece[]
 
   @@unique([contractId, itemCode])
   @@index([contractId, sortOrder])
   @@map("contract_boq_items")
+}
+
+// FMP-BOQ-03 — Technical's drawing-confirmed PHYSICAL piece quantity for a BOQ
+// item (Contract Qty is the commercial quantity, often in M2/M3/LM). A BOQ item
+// can have several rows (one per drawing); an item's confirmed pieces are the
+// sum of its CONFIRMED rows. Confirmed rows are never edited in place: a change
+// is a new row and the old one becomes REVISED. onDelete: Restrict on the BOQ
+// item so Edit Contract's replace-all BOQ save can never silently erase them.
+// No pieces are generated from these rows yet.
+enum ContractBoqConfirmationStatus {
+  DRAFT
+  CONFIRMED
+  REVISED
+  CANCELLED
+
+  @@map("contract_boq_confirmation_status")
+}
+
+model ContractBoqDrawingConfirmation {
+  id                  String                        @id @default(uuid()) @db.Uuid
+  contractId          String                        @map("contract_id") @db.Uuid
+  boqItemId           String                        @map("boq_item_id") @db.Uuid
+  drawingNo           String                        @map("drawing_no") @db.VarChar(100)
+  drawingTitle        String?                       @map("drawing_title") @db.VarChar(200)
+  confirmedPieces     Int?                          @map("confirmed_pieces")
+  sizeOrSpecification String?                       @map("size_or_specification") @db.VarChar(300)
+  revision            String?                       @db.VarChar(50)
+  confirmationStatus  ContractBoqConfirmationStatus @default(DRAFT) @map("confirmation_status")
+  remarks             String?                       @db.VarChar(2000)
+  confirmedById       String?                       @map("confirmed_by_id") @db.Uuid
+  confirmedAt         DateTime?                     @map("confirmed_at") @db.Timestamptz(3)
+  createdByUserId     String                        @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime                      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract        Contract        @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem         ContractBoqItem @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  confirmedByUser User?           @relation("BoqDrawingConfirmationConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  createdByUser   User            @relation("BoqDrawingConfirmationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  pieces ContractBoqPiece[]
+
+  @@index([contractId])
+  @@index([boqItemId, confirmationStatus], map: "contract_boq_drawing_conf_item_status_idx")
+  @@map("contract_boq_drawing_confirmations")
+}
+
+// FMP-BOQ-04 — one trackable physical piece, generated from a CONFIRMED
+// drawing confirmation (never from Contract Qty). Production / Storage &
+// Delivery / Erection will update currentStatus in later units; nothing writes
+// those statuses yet. Pieces are never deleted automatically.
+enum ContractBoqPieceStatus {
+  NOT_STARTED
+  DRAWING_READY
+  IN_PRODUCTION
+  PRODUCED
+  IN_STORE
+  DELIVERED
+  ERECTED
+  COMPLETED
+  ON_HOLD
+  REJECTED
+  CANCELLED
+
+  @@map("contract_boq_piece_status")
+}
+
+model ContractBoqPiece {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  contractId            String                 @map("contract_id") @db.Uuid
+  boqItemId             String                 @map("boq_item_id") @db.Uuid
+  drawingConfirmationId String                 @map("drawing_confirmation_id") @db.Uuid
+  pieceNo               Int                    @map("piece_no")
+  pieceCode             String                 @map("piece_code") @db.VarChar(150)
+  currentStatus         ContractBoqPieceStatus @default(DRAWING_READY) @map("current_status")
+  drawingNo             String                 @map("drawing_no") @db.VarChar(100)
+  sizeOrSpecification   String?                @map("size_or_specification") @db.VarChar(300)
+  currentLocation       String?                @map("current_location") @db.VarChar(200)
+  remarks               String?                @db.VarChar(2000)
+  isCancelled           Boolean                @default(false) @map("is_cancelled")
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract            Contract                       @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem             ContractBoqItem                @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  drawingConfirmation ContractBoqDrawingConfirmation @relation(fields: [drawingConfirmationId], references: [id], onDelete: Restrict)
+
+  statusHistory ContractBoqPieceStatusHistory[]
+
+  @@unique([contractId, pieceCode])
+  @@unique([drawingConfirmationId, pieceNo])
+  @@index([boqItemId, currentStatus])
+  @@index([contractId])
+  @@map("contract_boq_pieces")
+}
+
+model ContractBoqPieceStatusHistory {
+  id          String                  @id @default(uuid()) @db.Uuid
+  pieceId     String                  @map("piece_id") @db.Uuid
+  oldStatus   ContractBoqPieceStatus? @map("old_status")
+  newStatus   ContractBoqPieceStatus  @map("new_status")
+  note        String?                 @db.VarChar(1000)
+  updatedById String?                 @map("updated_by_id") @db.Uuid
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  piece         ContractBoqPiece @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  updatedByUser User?            @relation("BoqPieceStatusUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([pieceId, createdAt])
+  @@map("contract_boq_piece_status_history")
 }
 
 // CM-59 — Contract Production Status. Production quantities are manually

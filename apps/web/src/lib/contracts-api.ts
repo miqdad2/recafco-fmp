@@ -38,6 +38,8 @@ export interface ContractBoqItem {
   // deliberately NOT part of this shape — both are always derived from
   // invoiceQty/totalPrice (see contract-boq-helpers.ts).
   invoiceQty?: string;
+  // FMP-BOQ-03 — read-only: CONFIRMED drawing rows Technical recorded for this item.
+  drawingConfirmations?: { confirmedPieces: number | null }[];
   createdAt: string;
   updatedAt: string;
 }

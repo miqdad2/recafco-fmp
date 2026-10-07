@@ -218,7 +218,7 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
           <ContractBoqRegisterTable rows={boqRows} onRowsChange={setBoqRows} formatTotal={formatKwd} />
 
           <div className="mt-3">
-            <InfoBox variant="subtle">Final piece quantity will be confirmed from Technical drawings.</InfoBox>
+            <InfoBox variant="subtle">Contract Qty is for contract value. Piece quantity will be confirmed later from Technical drawings.</InfoBox>
           </div>
 
           <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(3) : ''} />

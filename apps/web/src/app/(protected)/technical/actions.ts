@@ -25,6 +25,10 @@ import type {
   TechnicalFdDistribution,
   TechnicalFdIssueMethod,
   TechnicalFdStatus,
+  BoqPieceStatus,
+  BoqPiece,
+  BoqPieceUpdateStatus,
+  BoqPieceHistoryEntry,
 } from '@/lib/technical-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
@@ -691,4 +695,124 @@ export async function deleteFdAttachmentAction(contractId: string, attachmentId:
   if (result.error) return { error: result.error.message };
   revalidatePath(`/technical/jobs/${contractId}/workflow/fd-issuance`);
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-03 — BOQ Drawing Confirmation (Technical confirms physical pieces)
+// ---------------------------------------------------------------------------
+
+export interface SaveBoqConfirmationInput {
+  /** create = new row; update = edit a draft; revise = replace a confirmed row (old one is kept as Revised). */
+  mode: 'create' | 'update' | 'revise';
+  id?: string;
+  action: 'DRAFT' | 'CONFIRM';
+  boqItemId: string;
+  drawingNo: string;
+  drawingTitle: string;
+  /** Whole number as typed; empty for a draft. */
+  confirmedPieces: string;
+  sizeOrSpecification: string;
+  revision: string;
+  remarks: string;
+}
+
+export async function saveBoqConfirmationAction(contractId: string, input: SaveBoqConfirmationInput): Promise<ActionResult> {
+  const pieces = input.confirmedPieces.trim();
+  const body = {
+    action: input.action,
+    drawingNo: input.drawingNo.trim(),
+    drawingTitle: input.drawingTitle.trim(),
+    sizeOrSpecification: input.sizeOrSpecification.trim(),
+    revision: input.revision.trim(),
+    remarks: input.remarks.trim(),
+    ...(input.mode === 'create' ? { boqItemId: input.boqItemId } : {}),
+    ...(pieces !== '' ? { confirmedPieces: Number(pieces) } : {}),
+  };
+  const base = `/technical/jobs/${contractId}/boq-confirmations`;
+  const path = input.mode === 'create' ? base : input.mode === 'update' ? `${base}/${input.id}` : `${base}/${input.id}/revise`;
+  const result = await technicalApiFetchResult(path, {
+    method: input.mode === 'update' ? 'PATCH' : 'POST',
+    body: JSON.stringify(body),
+  });
+  if (result.error) return { error: result.error.message };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null };
+}
+
+export async function cancelBoqConfirmationAction(contractId: string, id: string): Promise<ActionResult> {
+  const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/boq-confirmations/${id}/cancel`, { method: 'POST' });
+  if (result.error) return { error: result.error.message };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-04 — piece generation + read-only piece list
+// ---------------------------------------------------------------------------
+
+export interface GeneratePiecesResult {
+  error: string | null;
+  /** Plain-language outcome, e.g. "Pieces generated successfully." / "Pieces are already generated." */
+  message?: string;
+}
+
+export async function generateBoqPiecesAction(contractId: string): Promise<GeneratePiecesResult> {
+  const result = await technicalApiFetchResult<{ generatedCount: number; alreadyGenerated: boolean; message: string }>(
+    `/technical/jobs/${contractId}/boq-pieces/generate`,
+    { method: 'POST' },
+  );
+  if (result.error) return { error: result.error.message };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null, message: result.data.message };
+}
+
+export async function listBoqPiecesAction(
+  contractId: string,
+  boqItemId: string,
+  status?: BoqPieceStatus,
+): Promise<{ error: string | null; pieces: BoqPiece[] }> {
+  const qs = new URLSearchParams({ boqItemId });
+  if (status) qs.set('status', status);
+  const result = await technicalApiFetchResult<BoqPiece[]>(`/technical/jobs/${contractId}/boq-pieces?${qs.toString()}`);
+  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  return { error: null, pieces: result.data };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-05 — piece status update (one or many) and history
+// ---------------------------------------------------------------------------
+
+export interface UpdatePieceStatusResult {
+  error: string | null;
+  /** e.g. "Pieces updated." / "8 pieces updated. 2 pieces skipped." */
+  message?: string;
+  updatedCount: number;
+  skippedCount: number;
+}
+
+/** One piece or many: the same endpoint handles both, so every change writes history the same way. */
+export async function updateBoqPieceStatusAction(
+  contractId: string,
+  pieceIds: string[],
+  status: BoqPieceUpdateStatus,
+  note: string,
+): Promise<UpdatePieceStatusResult> {
+  const result = await technicalApiFetchResult<{ updatedCount: number; skippedCount: number; message: string }>(
+    `/technical/jobs/${contractId}/boq-pieces/bulk-status`,
+    { method: 'POST', body: JSON.stringify({ pieceIds, status, ...(note.trim() ? { note: note.trim() } : {}) }) },
+  );
+  if (result.error) return { error: result.error.message, updatedCount: 0, skippedCount: 0 };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null, message: result.data.message, updatedCount: result.data.updatedCount, skippedCount: result.data.skippedCount };
+}
+
+export async function getBoqPieceHistoryAction(
+  contractId: string,
+  pieceId: string,
+): Promise<{ error: string | null; entries: BoqPieceHistoryEntry[] }> {
+  const result = await technicalApiFetchResult<{ pieceCode: string; history: BoqPieceHistoryEntry[] }>(
+    `/technical/jobs/${contractId}/boq-pieces/${pieceId}/history`,
+  );
+  if (result.error) return { error: 'History could not be loaded. Please try again.', entries: [] };
+  return { error: null, entries: result.data.history };
 }

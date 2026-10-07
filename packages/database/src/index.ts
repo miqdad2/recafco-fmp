@@ -129,4 +129,6 @@ export {
   TechnicalFdDistribution,
   TechnicalFdIssueMethod,
   TechnicalFdStatus,
+  ContractBoqConfirmationStatus,
+  ContractBoqPieceStatus,
 } from './generated/prisma/client';
