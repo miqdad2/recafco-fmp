@@ -91,6 +91,8 @@ const MAIN_GROUPS: NavGroup[] = [
       { label: 'Incident Management', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
       // FMP-UI-23 — renamed from "Production Planning"; module code/href unchanged.
       { label: 'Production & Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
+      // FMP-BOQ-08 — Storage Yard & Delivery has its own permission (no module code); first screen = Piece Delivery.
+      { label: 'Storage Yard & Delivery', href: '/storage-delivery/pieces', icon: Warehouse, permission: 'storage_delivery.read' },
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
     ],
@@ -206,18 +208,31 @@ const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideI
 // "Production Planning" → "Production & Planning", "Quality Assurance &
 // Control" → "Quality Control". Every href is unchanged — this unit's own
 // "do not rename routes" instruction.
+// FMP-UI-28 — reordered to match the real factory workflow (was Contract
+// Management, Estimation, Technical, Erection, Safety & Compliance, Incident
+// Management, Production & Planning, Maintenance Management, Storage Yard &
+// Delivery, Quality Control, Task Management, per FMP-UI-23) and removed
+// Estimation ("not actively used"). This array is this sidebar's OWN copy,
+// separate from `_lib/executive-modules.ts`'s `EXECUTIVE_MODULES` (which
+// still drives the Platform Dashboard cards, Previous/Next, and the module
+// switcher) — so reordering this array never touches those.
+// FMP-UI-29 — direct feedback after seeing FMP-UI-28 live: Estimation was
+// missing from the sidebar entirely. Restored right after Contract
+// Management — its real workflow position (cost estimation/quotation is a
+// pre-contract-execution step, the same reasoning FMP-UI-23 originally
+// placed it there for). Every other FMP-UI-28 href/order is unchanged.
 const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
   { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
   // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
   { label: 'Technical', href: '/technical', icon: Ruler },
+  { label: 'Production & Planning', href: '/production/executive', icon: Factory },
+  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
   { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
+  { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck },
   { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
   { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
-  { label: 'Production & Planning', href: '/production/executive', icon: Factory },
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
-  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
-  { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
 ];
 
@@ -445,18 +460,20 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                       aria-controls="executive-contracts-nav-items"
                       aria-current={cmActive ? 'page' : undefined}
                       className={[
-                        'flex w-full items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-left text-base leading-snug transition-colors duration-150',
+                        // FMP-UI-29 — text-base→text-lg, icon size-5→size-6, per
+                        // direct "increase the font size more" feedback.
+                        'flex w-full items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-left text-lg leading-snug transition-colors duration-150',
                         cmActive
                           ? 'border-accent bg-nav-active font-semibold text-text-inverse'
                           : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
                       ].join(' ')}
                     >
-                      <item.icon className="size-5 shrink-0" aria-hidden="true" />
+                      <item.icon className="size-6 shrink-0" aria-hidden="true" />
                       <span className="flex-1">{item.label}</span>
                       {cmOpen ? (
-                        <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
+                        <ChevronDown className="size-5 shrink-0" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                        <ChevronRight className="size-5 shrink-0" aria-hidden="true" />
                       )}
                     </button>
                     {cmOpen && (
@@ -471,13 +488,14 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                               onClick={onClose}
                               aria-current={subActive ? 'page' : undefined}
                               className={[
-                                'flex items-center gap-2.5 rounded-r-md border-l-4 py-2.5 pl-3 pr-3 text-base leading-snug transition-colors duration-150',
+                                // FMP-UI-29 — text-base→text-lg, icon size-4→size-5, py-2.5→py-3 for the extra line-height.
+                                'flex items-center gap-2.5 rounded-r-md border-l-4 py-3 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
                                 subActive
                                   ? 'border-accent bg-nav-active font-semibold text-text-inverse'
                                   : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
                               ].join(' ')}
                             >
-                              <sub.icon className="size-4 shrink-0" aria-hidden="true" />
+                              <sub.icon className="size-5 shrink-0" aria-hidden="true" />
                               {sub.label}
                             </Link>
                           );
@@ -511,13 +529,15 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                     // wrapped label from reading as cramped against its
                     // neighbors, and leading-snug (1.375) sits inside this
                     // unit's own requested 1.25–1.35 range.
-                    'flex items-start gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-base leading-snug transition-colors duration-150',
+                    // FMP-UI-29 — text-base→text-lg, icon size-5→size-6, per
+                    // direct "increase the font size more" feedback.
+                    'flex items-start gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
                     active
                       ? 'border-accent bg-nav-active font-semibold text-text-inverse'
                       : 'border-transparent text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse font-medium',
                   ].join(' ')}
                 >
-                  <item.icon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                  <item.icon className="mt-0.5 size-6 shrink-0" aria-hidden="true" />
                   {item.label}
                 </Link>
               );
@@ -740,17 +760,24 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   return (
     <>
       {/* Desktop sidebar */}
+      {/* FMP-UI-28 — widened w-64 (256px) → w-70 (280px). FMP-UI-29 — widened
+          again, w-70 → w-80 (320px, a standard Tailwind token), to give the
+          executive list's larger text-lg labels room ("Storage Yard &
+          Delivery"/"Maintenance Management" wrap less tightly at text-lg
+          than they would have at the old 280px); the bottom user area and
+          every other section already size themselves from this same width,
+          so nothing else needed to change. */}
       <aside
-        className="hidden md:flex w-64 shrink-0 flex-col bg-nav h-screen"
+        className="hidden md:flex w-80 shrink-0 flex-col bg-nav h-screen"
         aria-label="Application navigation"
       >
         {sidebarContent}
       </aside>
 
-      {/* Mobile sidebar drawer */}
+      {/* Mobile sidebar drawer — FMP-UI-28/29: widened to match (w-64 → w-70 → w-80). */}
       <aside
         className={[
-          'fixed inset-y-0 left-0 z-40 w-64 flex flex-col bg-nav h-screen transform transition-transform duration-200 md:hidden',
+          'fixed inset-y-0 left-0 z-40 w-80 flex flex-col bg-nav h-screen transform transition-transform duration-200 md:hidden',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         ].join(' ')}
         aria-label="Application navigation"

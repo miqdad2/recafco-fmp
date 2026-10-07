@@ -279,3 +279,12 @@ export function productionAllowedPieceStatuses(permissions: string[]): ContractB
   const canWrite = permissions.includes('production.update') || permissions.includes('production.manage');
   return canWrite ? [...PIECE_STATUS_OWNERSHIP.PRODUCTION] : [];
 }
+
+/**
+ * FMP-BOQ-08 — what the Storage Yard & Delivery screen may set: In Store,
+ * Delivered, Hold, Rejected. No manager/admin override (keeps the screen
+ * focused). Needs storage_delivery.update; read-only users get none.
+ */
+export function storageDeliveryAllowedPieceStatuses(permissions: string[]): ContractBoqPieceStatus[] {
+  return permissions.includes('storage_delivery.update') ? [...PIECE_STATUS_OWNERSHIP.STORAGE_DELIVERY] : [];
+}

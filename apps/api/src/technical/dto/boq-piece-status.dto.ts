@@ -36,6 +36,13 @@ export class UpdatePieceStatusDto {
 }
 
 export class BulkUpdatePieceStatusDto extends UpdatePieceStatusDto {
+  // FMP-BOQ-08 — optional place (Yard A, Bay 3, Site …); only applied when moving to In Store or Delivered.
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @Transform(trimOrUndefined)
+  location?: string;
+
   @IsArray()
   @ArrayMinSize(1, { message: 'Please select at least one piece.' })
   @ArrayMaxSize(MAX_BULK_PIECES)

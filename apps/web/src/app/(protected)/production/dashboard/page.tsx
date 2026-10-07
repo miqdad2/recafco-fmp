@@ -53,7 +53,16 @@ export default async function ProductionDashboardPage(): Promise<React.JSX.Eleme
             Production orders and lines: Output, Downtime, and Adjustment entries with live KPI metrics
           </p>
         </div>
-        <DashboardScopeBadge scope={data?.scope} />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* FMP-BOQ-07 — entry to the Piece Production screen */}
+          <Link
+            href="/production/pieces"
+            className="inline-flex h-9 items-center rounded-md border border-accent/40 bg-accent/5 px-4 text-sm font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Piece Production
+          </Link>
+          <DashboardScopeBadge scope={data?.scope} />
+        </div>
       </div>
 
       {!data && (

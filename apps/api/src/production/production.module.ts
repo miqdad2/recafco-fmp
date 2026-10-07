@@ -6,11 +6,13 @@ import { ProductionRefService } from './production-ref.service';
 import { ProductionLinesService } from './production-lines.service';
 import { ProductionOrdersService } from './production-orders.service';
 import { ProductionController } from './production.controller';
+import { ProductionPiecesController } from './production-pieces.controller';
+import { ProductionPiecesService } from './production-pieces.service';
 
 @Module({
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
-  providers: [ProductionRefService, ProductionLinesService, ProductionOrdersService],
-  controllers: [ProductionController],
+  providers: [ProductionRefService, ProductionLinesService, ProductionOrdersService, ProductionPiecesService],
+  controllers: [ProductionPiecesController, ProductionController],
   exports: [ProductionOrdersService],
 })
 export class ProductionModule {}

@@ -48,6 +48,18 @@ export default async function StorageDeliveryExecutivePage(): Promise<React.JSX.
 
       <ExecutiveComingSoon message="Storage Yard & Delivery module will be configured in a future unit." />
 
+      {/* FMP-BOQ-08 — the first real screen of this module */}
+      {permissions.includes('storage_delivery.read') && (
+        <div>
+          <Link
+            href="/storage-delivery/pieces"
+            className="inline-flex h-11 items-center rounded-lg border border-accent/40 bg-accent/5 px-5 text-base font-semibold text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Piece Delivery
+          </Link>
+        </div>
+      )}
+
       <div className="pt-2">
         <Link
           href="/dashboard"

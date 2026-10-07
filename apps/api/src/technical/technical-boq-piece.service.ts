@@ -7,7 +7,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import { planPieceGeneration, allowedPieceStatuses } from './boq-piece-generation';
 import { applyPieceStatusUpdate } from './boq-piece-status-update';
 import type { PieceStatusUpdateResult } from './boq-piece-status-update';
-import type { PieceSkipReason, PieceUpdateContext } from './boq-piece-generation';
+import type { PieceUpdateContext } from './boq-piece-generation';
 import type { PieceUpdateTargetStatus } from './dto/boq-piece-status.dto';
 
 export const PIECES_CREATED_NOTE = 'Created from drawing confirmation';
