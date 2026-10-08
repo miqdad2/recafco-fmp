@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { TopHeader } from './top-header';
+import { FULL_PLATFORM_READ_ONLY_MESSAGE, shouldShowReadOnlyBanner } from '../_lib/access-mode';
 
 export interface ShellUser {
   displayName: string;
@@ -11,6 +12,8 @@ export interface ShellUser {
   roleCode: string;
   roleName: string;
   permissions: string[];
+  /** FMP-ACCESS-01 — explicit Full Platform Access (main sidebar + Control Center landing). */
+  fullPlatformAccess?: boolean;
 }
 
 interface AppShellProps {
@@ -75,6 +78,11 @@ export function AppShell({ user, children }: AppShellProps): React.JSX.Element {
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
         <TopHeader user={user} onMenuOpen={openMenu} />
         <main id="main-content" className="flex-1 overflow-auto bg-background" tabIndex={-1}>
+          {shouldShowReadOnlyBanner(pathname, user.permissions, user.fullPlatformAccess === true) && (
+            <p role="status" className="mx-6 mt-4 rounded-md border border-info/20 bg-info-light px-3 py-2 text-xs text-info">
+              {FULL_PLATFORM_READ_ONLY_MESSAGE}
+            </p>
+          )}
           {children}
         </main>
       </div>

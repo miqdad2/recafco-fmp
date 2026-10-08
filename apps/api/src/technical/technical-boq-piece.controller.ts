@@ -5,7 +5,6 @@ import { TechnicalBoqPieceService } from './technical-boq-piece.service';
 import { BulkUpdatePieceStatusDto, UpdatePieceStatusDto } from './dto/boq-piece-status.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { Permissions } from '../common/decorators/permissions.decorator';
 import { AnyPermission } from '../common/decorators/any-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
@@ -36,7 +35,7 @@ export class TechnicalBoqPieceController {
   constructor(private readonly service: TechnicalBoqPieceService) {}
 
   @Get()
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async list(
     @Param('contractId', uuid) contractId: string,
     @Query() query: BoqPieceListQueryDto,
@@ -47,14 +46,14 @@ export class TechnicalBoqPieceController {
 
   // FMP-BOQ-06 — literal segment, declared before ':pieceId' routes.
   @Get('allowed-statuses')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   allowedStatuses(@CurrentUser() actor: AuthUser): ApiSuccessResponse<unknown> {
     return { data: this.service.allowedStatuses(actor), meta: meta(), error: null };
   }
 
   @Post('generate')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async generate(@Param('contractId', uuid) contractId: string, @CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
     return { data: await this.service.generate(contractId, actor), meta: meta(), error: null };
   }
@@ -62,7 +61,7 @@ export class TechnicalBoqPieceController {
   // FMP-BOQ-05 — 'bulk-status' is a literal segment, declared before the ':pieceId' routes.
   @Post('bulk-status')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async bulkStatus(
     @Param('contractId', uuid) contractId: string,
     @Body() dto: BulkUpdatePieceStatusDto,
@@ -72,7 +71,7 @@ export class TechnicalBoqPieceController {
   }
 
   @Patch(':pieceId/status')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async updateStatus(
     @Param('contractId', uuid) contractId: string,
     @Param('pieceId', uuid) pieceId: string,
@@ -83,7 +82,7 @@ export class TechnicalBoqPieceController {
   }
 
   @Get(':pieceId/history')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async history(
     @Param('contractId', uuid) contractId: string,
     @Param('pieceId', uuid) pieceId: string,

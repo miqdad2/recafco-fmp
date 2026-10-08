@@ -98,6 +98,15 @@ export async function createUserWithAccessAction(
     }
   }
 
+  // FMP-ACCESS-01 — explicit Full Platform Access. Only set when the wizard sent it (never implied
+  // by a role/template), and the API requires the same permission as granting All Departments.
+  if (formData.get('fullPlatformAccess')?.toString() === 'true') {
+    const platformResult = await usersApi.setPlatformAccess(accessToken, userId, true);
+    if (!platformResult.ok) {
+      accessFailures.push({ module: 'Full Platform Access', error: platformResult.message });
+    }
+  }
+
   return {
     created: {
       id: userId,
@@ -294,6 +303,20 @@ export async function deleteTestUserAction(
 // ---------------------------------------------------------------------------
 
 export type ModuleAccessActionState = { error?: string; success?: boolean } | null;
+
+// FMP-ACCESS-01 — Edit User → Module Access: turn explicit Full Platform Access on/off.
+export async function setPlatformAccessAction(
+  userId: string,
+  _prev: ModuleAccessActionState,
+  formData: FormData,
+): Promise<ModuleAccessActionState> {
+  const accessToken = await getToken();
+  const enabled = formData.get('fullPlatformAccess')?.toString() === 'true';
+  const result = await usersApi.setPlatformAccess(accessToken, userId, enabled);
+  if (!result.ok) return { error: result.message };
+  revalidatePath(`/administration/users/${userId}/edit`);
+  return { success: true };
+}
 
 export async function setModuleAccessAction(
   userId: string,

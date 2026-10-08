@@ -15,6 +15,8 @@ import {
 import { InfoBox } from '../../_components/contract-form-fields';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
+import { ContractEditDetailsAction } from '../../_components/contract-edit-details-action';
+import { canEditBasicDetails } from '../../_lib/contract-basic-details-helpers';
 import { getVisibleContractTransitions, getClosureAction, formatDaysRemainingDisplay } from '../../_lib/contract-ui-helpers';
 import {
   computeTeamProgress,
@@ -132,6 +134,8 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
             >
               Open Technical Workflow
             </Link>
+            {/* FMP-CONTRACT-03 — safe basic-details edit; secondary style, kept out of the destructive actions. */}
+            {canEditBasicDetails(contract.status, permissions) && <ContractEditDetailsAction contract={contract} />}
             {hasActions && (
               <>
                 <ContractTransitions

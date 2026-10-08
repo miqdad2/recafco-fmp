@@ -93,6 +93,7 @@ import {
 import { ContractErectionWorkflowAssignmentService } from './contract-erection-workflow-assignment.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 import { UpdateContractDto } from './dto/update-contract.dto';
+import { UpdateContractBasicDetailsDto } from './dto/update-contract-basic-details.dto';
 import { ContractListQueryDto } from './dto/contract-list-query.dto';
 import { ActivateContractDto } from './dto/activate-contract.dto';
 import { TerminateContractDto } from './dto/terminate-contract.dto';
@@ -240,7 +241,7 @@ export class ContractsController {
   }
 
   @Get('people')
-  @Permissions('contracts.read')
+  @AnyPermission('contracts.read', 'technical.read')
   async people(
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
@@ -417,6 +418,18 @@ export class ContractsController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
     const contract = await this.contractsService.findOne(id, actor);
+    return { data: contract, meta: meta(), error: null };
+  }
+
+  /** FMP-CONTRACT-03 — safe basic-details edit from Contract Overview (contracts.update). */
+  @Patch(':id/basic-details')
+  @Permissions('contracts.update')
+  async updateBasicDetails(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: UpdateContractBasicDetailsDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    const contract = await this.contractsService.updateBasicDetails(id, dto, actor);
     return { data: contract, meta: meta(), error: null };
   }
 

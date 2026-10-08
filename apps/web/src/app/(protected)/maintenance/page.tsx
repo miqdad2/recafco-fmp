@@ -79,7 +79,7 @@ export default async function MaintenancePage({ searchParams }: PageProps): Prom
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Maintenance Requests' }]} />
+        <Breadcrumbs items={[{ label: 'Maintenance Management' }]} />
 
         <div className="mb-6">
           <PageHeader

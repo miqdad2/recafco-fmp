@@ -50,6 +50,8 @@ interface Props {
     prev: ModuleAccessActionState,
     fd: FormData,
   ) => Promise<ModuleAccessActionState>;
+  /** FMP-ACCESS-01 — already bound to this user's id. */
+  setPlatformAccessAction: (prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
 }
 
 const inputCls = 'w-full h-10 px-3 rounded-md border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus';
@@ -427,6 +429,7 @@ export function EditUserTabs({
   activateAction,
   unlockAction,
   setModuleAccessAction,
+  setPlatformAccessAction,
 }: Props): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>('profile');
 
@@ -482,6 +485,10 @@ export function EditUserTabs({
             {moduleAccess !== null ? (
               <ModuleAccessPanel
                 userId={user.id}
+                permissions={(roles.find((r) => r.id === user.roleId)?.permissions ?? []).map((p) => p.code)}
+                fullPlatformAccess={user.fullPlatformAccess === true}
+                userDepartment={departments.find((d) => d.id === user.departmentId) ?? null}
+                platformAccessAction={setPlatformAccessAction}
                 moduleAccess={moduleAccess}
                 allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
                 deptApiError={deptApiError}

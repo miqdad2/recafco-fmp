@@ -10,6 +10,7 @@ import {
 import { DrawingAttachmentsPanel } from './drawing-attachments-panel';
 import { stageHref, STAGE_OPEN_LABELS } from '../../../../../_lib/technical-format';
 import type { TechnicalStageMode } from '../../../../../_lib/technical-format';
+import { friendlyMissingLabels } from '../../../../../_lib/attachment-helpers';
 import type { TechnicalDrawing, TechnicalAttachment, TechnicalStage } from '@/lib/technical-api';
 
 interface Props {
@@ -78,10 +79,13 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }): React.JSX.Element {
+function Field({ label, htmlFor, required, children }: { label: string; htmlFor: string; required?: boolean; children: React.ReactNode }): React.JSX.Element {
   return (
     <div>
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-text-primary">{label}</label>
+      <label htmlFor={htmlFor} className="block text-sm font-medium text-text-primary">
+        {label}
+        {required && <span className="ml-0.5 text-danger" aria-hidden="true">*</span>}
+      </label>
       {children}
     </div>
   );
@@ -112,6 +116,7 @@ export function DrawingReceivedForm({ contractId, drawing, attachments, people, 
   const [missing, setMissing] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const friendlyMissing = friendlyMissingLabels(missing);
   const isActive = mode === 'active';
   const disabled = !canWrite || !isActive || isPending;
 
@@ -162,14 +167,14 @@ export function DrawingReceivedForm({ contractId, drawing, attachments, people, 
       <form ref={formRef} className="space-y-4" onSubmit={(e) => e.preventDefault()}>
         <SectionCard title="Drawing Receipt Details">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Received Date" htmlFor="receivedDate">
+            <Field label="Received Date" htmlFor="receivedDate" required>
               <input
                 id="receivedDate" name="receivedDate" type="date" disabled={disabled}
                 defaultValue={toDateInputValue(drawing?.receivedDate)} max={new Date().toISOString().slice(0, 10)}
                 className={INPUT_CLS}
               />
             </Field>
-            <Field label="Received From" htmlFor="receivedFrom">
+            <Field label="Received From" htmlFor="receivedFrom" required>
               <select id="receivedFrom" name="receivedFrom" disabled={disabled} defaultValue={drawing?.receivedFrom ?? ''} className={INPUT_CLS}>
                 <option value="">Select…</option>
                 {RECEIVED_FROM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -178,19 +183,19 @@ export function DrawingReceivedForm({ contractId, drawing, attachments, people, 
             <Field label="Sender Name" htmlFor="senderName">
               <input id="senderName" name="senderName" type="text" disabled={disabled} defaultValue={drawing?.senderName ?? ''} className={INPUT_CLS} />
             </Field>
-            <Field label="Drawing Type" htmlFor="drawingType">
+            <Field label="Drawing Type" htmlFor="drawingType" required>
               <select id="drawingType" name="drawingType" disabled={disabled} defaultValue={drawing?.drawingType ?? ''} className={INPUT_CLS}>
                 <option value="">Select…</option>
                 {DRAWING_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
-            <Field label="Drawing Reference No" htmlFor="drawingReferenceNo">
+            <Field label="Drawing Reference No" htmlFor="drawingReferenceNo" required>
               <input id="drawingReferenceNo" name="drawingReferenceNo" type="text" disabled={disabled} defaultValue={drawing?.drawingReferenceNo ?? ''} className={INPUT_CLS} />
             </Field>
-            <Field label="Revision No" htmlFor="revisionNo">
+            <Field label="Revision No" htmlFor="revisionNo" required>
               <input id="revisionNo" name="revisionNo" type="text" disabled={disabled} defaultValue={drawing?.revisionNo ?? ''} className={INPUT_CLS} />
             </Field>
-            <Field label="Number of Sheets" htmlFor="numberOfSheets">
+            <Field label="Number of Sheets" htmlFor="numberOfSheets" required>
               <input id="numberOfSheets" name="numberOfSheets" type="number" min={1} disabled={disabled} defaultValue={drawing?.numberOfSheets ?? ''} className={INPUT_CLS} />
             </Field>
             <Field label="Priority" htmlFor="priority">
@@ -276,8 +281,16 @@ export function DrawingReceivedForm({ contractId, drawing, attachments, people, 
 
         {error && (
           <div role="alert" className="rounded-md border border-danger bg-danger-light px-4 py-3 text-sm text-danger">
-            <p>{error}</p>
-            {missing.length > 0 && <p className="mt-1 text-xs">Missing: {missing.join(', ')}</p>}
+            {friendlyMissing.length > 0 ? (
+              <>
+                <p>Missing required fields:</p>
+                <ul className="mt-1 list-disc pl-5 text-xs">
+                  {friendlyMissing.map((l) => <li key={l}>{l}</li>)}
+                </ul>
+              </>
+            ) : (
+              <p>{error}</p>
+            )}
           </div>
         )}
         {successMessage && (

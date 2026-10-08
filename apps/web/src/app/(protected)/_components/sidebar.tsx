@@ -34,7 +34,8 @@ import {
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
-import { canSeeModule, isContractManagementOnlyAccess, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly, isExecutiveManagerAccess } from '../_lib/module-visibility';
+import { canSeeModule, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from '../_lib/module-visibility';
+import { contractRelatedLinks, deriveAccessMode, getSidebarLayout, MODULE_DISPLAY_NAMES } from '../_lib/access-mode';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -73,28 +74,39 @@ interface NavGroup {
 // Contract Management dropdown itself. They render first in this array so
 // they appear immediately after that dropdown (see the group-rendering loop
 // below, which renders the dropdown before this array's items).
+// FMP-ACCESS-01 — permission-gated workflow links, shared by the Operations group (multi-module /
+// full-platform users) and the Contract Management "Related Workflows" block (Single Module).
+const STORAGE_DELIVERY_ITEM: NavItem = {
+  // FMP-BOQ-08 — Storage Yard & Delivery has its own permission (no module code); first screen = Piece Delivery.
+  label: 'Storage Yard & Delivery', href: '/storage-delivery/pieces', icon: Warehouse, permission: 'storage_delivery.read',
+};
+const PIECE_ERECTION_ITEM: NavItem = {
+  // FMP-BOQ-09 — Erection piece screen; needs erection.read (the existing Erection dashboard link is unchanged).
+  label: 'Piece Erection', href: '/erection/pieces', icon: HardHat, permission: 'erection.read',
+};
+
 const MAIN_GROUPS: NavGroup[] = [
   {
     label: null,
     items: [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      // FMP-ACCESS-01 — this link IS the Factory Operations Control Center (same route); hidden for Single Module users.
+      { label: 'Factory Operations Control Center', href: '/dashboard', icon: LayoutDashboard },
     ],
   },
   {
     label: 'Operations',
     items: [
       // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
-      { label: 'Technical', href: '/technical', icon: Ruler, module: 'CONTRACTS_MANAGEMENT' },
+      // FMP-ACCESS-02 — technical.read OR the older contracts.read (Contract Managers keep this link).
+      { label: 'Technical', href: '/technical', icon: Ruler, anyPermission: ['technical.read', 'contracts.read'] },
       { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
       { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
       // FMP-UI-23 — renamed from "Incident Report"; module code/href unchanged.
       { label: 'Incident Management', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
       // FMP-UI-23 — renamed from "Production Planning"; module code/href unchanged.
       { label: 'Production & Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
-      // FMP-BOQ-08 — Storage Yard & Delivery has its own permission (no module code); first screen = Piece Delivery.
-      { label: 'Storage Yard & Delivery', href: '/storage-delivery/pieces', icon: Warehouse, permission: 'storage_delivery.read' },
-      // FMP-BOQ-09 — Erection piece screen; needs erection.read (the existing Erection dashboard link above is unchanged).
-      { label: 'Piece Erection', href: '/erection/pieces', icon: HardHat, permission: 'erection.read' },
+      STORAGE_DELIVERY_ITEM,
+      PIECE_ERECTION_ITEM,
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
       // FMP-UI-30 — Schedule Planning promoted to its own main-sidebar item
@@ -173,25 +185,18 @@ const CONTRACT_STAFF_ITEMS: NavItem[] = [
 ];
 
 /**
- * FMP-UI-01 — Technical/Erection links reused verbatim inside the flat
- * Contract-Management-only section (see the group-filter above for why they
- * are excluded from the generic Operations rendering in that case). Gating
- * is already guaranteed by the caller only rendering this list when
- * contractManagementOnly is true (which itself requires contracts.read).
- * FMP-UI-30 — Schedule Planning added, same reasoning: it's now its own
- * main-sidebar item (gated on the same CONTRACTS_MANAGEMENT module), so a
- * Contract-Management-only user needs it here too, not just inside the
- * generic "Operations" group this persona never sees.
+ * FMP-ACCESS-01 — icons for the "Related Workflows" links of a Single Module Contract Management
+ * user. Which links appear (and their gates) comes from contractRelatedLinks() in access-mode.ts.
  */
-const CONTRACTS_MANAGEMENT_EXTRA_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
-  // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
-  { label: 'Technical', href: '/technical', icon: Ruler },
-  { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat },
-  // FMP-UI-30 — same route Contract Management's own (now-removed) "Schedule"
-  // submenu item used; kept as-is per that unit's own "do not create a new
-  // route unless required" instruction.
-  { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar },
-];
+const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
+  Technical: Ruler,
+  'Production & Planning': Factory,
+  'Task Management': ClipboardList,
+  Erection: HardHat,
+  'Schedule Planning': Calendar,
+  'Storage Yard & Delivery': Warehouse,
+  'Piece Erection': HardHat,
+};
 
 /**
  * FMP-UI-03 — the flat, larger-type nav shown only when isExecutiveManagerAccess()
@@ -419,12 +424,25 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:
   // no duplicate top-level Dashboard link, and Contract Management becomes its own
   // top-level section instead of a nested group under Operations.
-  const contractManagementOnly = isContractManagementOnlyAccess(user.permissions);
+  // FMP-ACCESS-01 — Single Module Access (derived from permissions, unless Full Platform Access
+  // was explicitly granted). Same result as the old isContractManagementOnlyAccess() for Contract
+  // Management, now also covering every other single-module user.
+  const accessInfo = deriveAccessMode(user.permissions, user.fullPlatformAccess === true);
+  const sidebarLayout = getSidebarLayout(user.permissions, user.fullPlatformAccess === true);
+  const singleModule = sidebarLayout === 'SINGLE_MODULE' || sidebarLayout === 'CONTRACT_SINGLE_MODULE';
+  const contractManagementOnly = sidebarLayout === 'CONTRACT_SINGLE_MODULE';
+  const singleModuleLabel = singleModule && accessInfo.primaryModule ? MODULE_DISPLAY_NAMES[accessInfo.primaryModule] : null;
+  // Contract Management → Related Workflows: Technical, Erection, Schedule Planning plus any permission-gated workflow links this user holds.
+  const relatedWorkflowItems = contractRelatedLinks(user.permissions).map((l) => ({
+    label: l.label,
+    href: l.href,
+    icon: RELATED_WORKFLOW_ICONS[l.label] ?? Ruler,
+  }));
 
   // FMP-UI-03 — Executive Manager gets a dedicated flat, larger-type nav
   // (see isExecutiveManagerAccess's own doc comment and EXECUTIVE_SIDEBAR_ITEMS
   // above). Every other persona's rendering below is completely untouched.
-  const executiveMode = isExecutiveManagerAccess(user.permissions);
+  const executiveMode = sidebarLayout === 'EXECUTIVE';
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -578,13 +596,15 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           const visibleItems = group.items.filter((item) => {
             // The top-level Dashboard link duplicates Contract Management's own Dashboard
             // for a Contract-Management-only user — hide it there instead of showing two.
-            if (contractManagementOnly && group.label === null && item.href === '/dashboard') return false;
+            if (singleModule && group.label === null && item.href === '/dashboard') return false;
             // Technical/Erection are gated on the same CONTRACTS_MANAGEMENT module as every
             // other item here — so for a Contract-Management-only user they'd otherwise
             // still pass isNavItemVisible and render under a floating "Operations" heading
             // above the flat Contract Management section below. Render them there instead,
             // right after that section, so the required top-level order still holds.
-            if (contractManagementOnly && group.label === 'Operations' && (item.label === 'Technical' || item.label === 'Erection' || item.label === 'Schedule Planning')) return false;
+            // FMP-ACCESS-01 — for Contract Management Single Module users the whole Operations group moves into
+            // the "Related Workflows" block below (nothing is removed, only regrouped).
+            if (contractManagementOnly && group.label === 'Operations') return false;
             return isNavItemVisible(item, user.permissions, hasAnyAdminPermission);
           });
           const showContractsHere = group.label === 'Operations' && hasAnyContractPermission && !contractManagementOnly;
@@ -594,7 +614,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
             <div key={group.label ?? 'main'} className="mb-1">
               {group.label && (
                 <p className="px-4 mb-1 mt-3 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
-                  {group.label}
+                  {group.label === 'Operations' && singleModuleLabel ? singleModuleLabel : group.label}
                 </p>
               )}
 
@@ -649,7 +669,11 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </div>
               )}
 
-              {visibleItems.map((item) => {
+              {/* FMP-ACCESS-02 — a Single Module user's module is already the section heading, so its one link reads "Dashboard". */}
+              {(singleModule && group.label === 'Operations'
+                ? visibleItems.map((i) => (i.label === singleModuleLabel ? { ...i, label: 'Dashboard' } : i))
+                : visibleItems
+              ).map((item) => {
                 if (item.comingSoon || !item.href) {
                   return (
                     <span
@@ -717,8 +741,11 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </Link>
               );
             })}
-            {/* Technical/Erection/Schedule Planning — same CONTRACTS_MANAGEMENT gate as the items above, rendered here (not under a separate "Operations" heading) so a Contract-Management-only user still sees the required top-level order. */}
-            {CONTRACTS_MANAGEMENT_EXTRA_ITEMS.map((item) => {
+            {/* FMP-ACCESS-01 — Technical/Erection/Schedule Planning (and any permission-gated workflow links) are the Contract Management workflow: shown under their own "Related Workflows" heading so they no longer read as extra modules. Every link and gate is unchanged. */}
+            <p className="px-4 mb-1 mt-4 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
+              Related Workflows
+            </p>
+            {relatedWorkflowItems.map((item) => {
               const active = isActive(item.href, pathname);
               return (
                 <Link

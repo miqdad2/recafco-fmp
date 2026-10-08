@@ -215,8 +215,10 @@ export class PlatformDashboardService {
       cards.push(contractCard);
       if (showPlaceholders) cards.push(buildEstimationCard());
       cards.push(technicalCard, erectionCard);
-    } else if (showPlaceholders) {
-      cards.push(buildEstimationCard());
+    } else {
+      if (showPlaceholders) cards.push(buildEstimationCard());
+      // FMP-ACCESS-02 — a Technical-only user (technical.read, no contracts.read) gets just the Technical card.
+      if (actor.permissions.includes('technical.read')) cards.push(await this.buildTechnicalCard(actor));
     }
     if (actor.permissions.includes('safety.read')) {
       cards.push(await this.buildSafetyCard(actor));

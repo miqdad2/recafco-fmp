@@ -5,6 +5,7 @@ import {
   ConflictException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { hasTechnicalRead, hasTechnicalWrite } from './technical-permissions';
 import { ModuleIdentifier, TechnicalDrawingGroupStatus as S } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
@@ -61,14 +62,14 @@ export class TechnicalDrawingGroupService {
   ) {}
 
   private requireRead(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.read')) {
+    if (!hasTechnicalRead(actor.permissions)) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
   }
 
   // Same write rule as every other Technical write.
   private requireWrite(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.update') && !actor.permissions.includes('contracts.workflow_update')) {
+    if (!hasTechnicalWrite(actor.permissions)) {
       throw new ForbiddenException({
         code: 'CONTRACTS_PERMISSION_DENIED',
         message: 'Missing contracts.update or contracts.workflow_update',

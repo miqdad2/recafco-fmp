@@ -15,7 +15,7 @@ import { Breadcrumbs } from '../../_components/breadcrumbs';
 import { DashboardScopeBadge } from '../../_components/dashboard-scope-badge';
 import { DashboardRecentTable } from '../../_components/dashboard-recent-table';
 
-export const metadata: Metadata = { title: 'Production Dashboard — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Production & Planning — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 export default async function ProductionDashboardPage(): Promise<React.JSX.Element> {
@@ -48,7 +48,7 @@ export default async function ProductionDashboardPage(): Promise<React.JSX.Eleme
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Production Dashboard</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">Production & Planning</h1>
           <p className="mt-1 text-sm text-text-secondary">
             Production orders and lines: Output, Downtime, and Adjustment entries with live KPI metrics
           </p>

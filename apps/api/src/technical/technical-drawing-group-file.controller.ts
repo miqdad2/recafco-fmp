@@ -21,7 +21,6 @@ import { TechnicalDrawingGroupFileService } from './technical-drawing-group-file
 import { TechnicalDrawingGroupFileStorageService } from './technical-drawing-group-file-storage.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { Permissions } from '../common/decorators/permissions.decorator';
 import { AnyPermission } from '../common/decorators/any-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
@@ -68,7 +67,7 @@ export class TechnicalDrawingGroupFileController {
   ) {}
 
   @Get()
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async list(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -79,7 +78,7 @@ export class TechnicalDrawingGroupFileController {
 
   @Post()
   @HttpCode(201)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   // The 25 MB rule and the allowed types are checked in the service (plain messages); this larger cap only bounds memory.
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 60 * 1024 * 1024 } }))
   async upload(
@@ -97,7 +96,7 @@ export class TechnicalDrawingGroupFileController {
   }
 
   @Get(':attachmentId/download')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async download(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -115,7 +114,7 @@ export class TechnicalDrawingGroupFileController {
 
   @Delete(':attachmentId')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async remove(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,

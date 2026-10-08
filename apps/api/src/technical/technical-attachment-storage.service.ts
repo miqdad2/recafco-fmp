@@ -34,7 +34,29 @@ export const TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES = [
   'application/x-dwg', // .dwg (no single registered MIME type; browsers report any of these depending on OS/config)
   'application/dxf',
   'image/vnd.dxf', // .dxf
+  'image/tiff', // .tif/.tiff (FMP-TECH-05 — scanned drawings)
+  'image/tif',
+  'application/tiff',
+  'application/x-tiff',
 ] as const;
+
+const TIFF_EXTENSION = /\.tiff?$/i;
+const TIFF_MIME_TYPES: readonly string[] = ['image/tiff', 'image/tif', 'application/tiff', 'application/x-tiff'];
+
+/**
+ * FMP-TECH-05 — Windows/browsers report TIFF uploads under varying (or empty /
+ * application/octet-stream) MIME types, so a .tif/.tiff extension is also
+ * accepted. Returns the MIME type to validate/store (TIFF is normalised to
+ * image/tiff), or null when the file is not allowed.
+ */
+export function resolveTechnicalAttachmentMimeType(file: { originalname: string; mimetype: string }): string | null {
+  const mime = (file.mimetype ?? '').toLowerCase();
+  if (TIFF_EXTENSION.test(file.originalname ?? '')) {
+    if (TIFF_MIME_TYPES.includes(mime) || mime === '' || mime === 'application/octet-stream') return 'image/tiff';
+    return null;
+  }
+  return (TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype) ? file.mimetype : null;
+}
 
 @Injectable()
 export class TechnicalAttachmentStorageService {

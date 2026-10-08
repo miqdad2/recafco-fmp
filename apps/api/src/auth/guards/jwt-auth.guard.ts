@@ -1,3 +1,4 @@
+import { applyFullPlatformAccess } from '../../common/full-platform-access';
 import {
   Injectable,
   CanActivate,
@@ -85,6 +86,7 @@ export class JwtAuthGuard implements CanActivate {
               },
               isActive: true,
               mustChangePassword: true,
+              fullPlatformAccess: true,
               departmentId: true,
             },
           },
@@ -102,7 +104,11 @@ export class JwtAuthGuard implements CanActivate {
       roleId: dbUser.roleId,
       roleCode: dbUser.role.code,
       roleName: dbUser.role.name,
-      permissions: dbUser.role.permissions.map((rp) => rp.permission.code),
+      // FMP-ACCESS-01C — explicit Full Platform Access adds read-only module codes (see full-platform-access.ts).
+      permissions: applyFullPlatformAccess(
+        dbUser.role.permissions.map((rp) => rp.permission.code),
+        dbUser.fullPlatformAccess,
+      ),
       isActive: dbUser.isActive,
       mustChangePassword: dbUser.mustChangePassword,
       sessionId: session.id,

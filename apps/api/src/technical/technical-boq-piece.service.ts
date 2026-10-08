@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hasTechnicalRead, hasTechnicalWrite } from './technical-permissions';
 import { Injectable, ConflictException, ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { ContractBoqConfirmationStatus, ContractBoqPieceStatus, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
@@ -31,14 +32,14 @@ export class TechnicalBoqPieceService {
   ) {}
 
   private requireRead(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.read')) {
+    if (!hasTechnicalRead(actor.permissions)) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
   }
 
   // Same write rule as every other Technical write.
   private requireWrite(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.update') && !actor.permissions.includes('contracts.workflow_update')) {
+    if (!hasTechnicalWrite(actor.permissions)) {
       throw new ForbiddenException({
         code: 'CONTRACTS_PERMISSION_DENIED',
         message: 'Missing contracts.update or contracts.workflow_update',
@@ -253,7 +254,7 @@ export class TechnicalBoqPieceService {
   /** The statuses this user may set from this page. The UI shows exactly this list (and nothing to update if it is empty). */
   allowedStatuses(actor: AuthUser, context: PieceUpdateContext = 'TECHNICAL'): { context: PieceUpdateContext; statuses: ContractBoqPieceStatus[] } {
     this.requireRead(actor);
-    const canWrite = actor.permissions.includes('contracts.update') || actor.permissions.includes('contracts.workflow_update');
+    const canWrite = hasTechnicalWrite(actor.permissions);
     return { context, statuses: canWrite ? allowedPieceStatuses(context, actor.permissions) : [] };
   }
 }

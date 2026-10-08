@@ -73,7 +73,7 @@ export default async function PieceProductionPage({ searchParams }: PageProps): 
           href="/production/dashboard"
           className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-secondary"
         >
-          Back to Production Dashboard
+          Back to Production & Planning
         </Link>
       </div>
 

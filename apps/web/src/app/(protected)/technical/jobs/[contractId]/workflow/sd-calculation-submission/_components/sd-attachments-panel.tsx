@@ -76,7 +76,7 @@ export function SdAttachmentsPanel({ contractId, attachments, currentUserId, can
   // FMP-TECH-05H — accepted file types shown as small muted text near the
   // upload control (the backend's own real allow-list, same wording used on
   // Drawing Received's attachments panel).
-  const acceptedTypes = 'Accepted: PDF, DOC/DOCX, XLS/XLSX, DWG/DXF, JPG/PNG/WEBP';
+  const acceptedTypes = 'Accepted: PDF, DOC/DOCX, XLS/XLSX, DWG/DXF, TIF/TIFF, JPG/PNG/WEBP';
 
   // FMP-TECH-05H — compact single-strip empty state (matches
   // DrawingAttachmentsPanel's own FMP-TECH-05B pattern): one dashed strip

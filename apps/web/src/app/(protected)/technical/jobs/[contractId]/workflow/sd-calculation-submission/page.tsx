@@ -9,6 +9,7 @@ import { SdCalculationSubmissionForm } from './_components/sd-calculation-submis
 import { TechnicalActivityTimeline } from '../drawing-received/_components/technical-activity-timeline';
 import { TechnicalStepper } from '../../../../_components/technical-stepper';
 import { computeStageMode } from '../../../../_lib/technical-format';
+import { canReadTechnical, canWriteTechnical, canManageTechnical } from '@/app/(protected)/technical/_lib/technical-permissions';
 
 export const metadata: Metadata = { title: 'SD & Calculation Submission — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -40,9 +41,9 @@ export default async function SdCalculationSubmissionPage({ params }: PageProps)
 
   const meResult = await authApi.me(accessToken);
   const permissions: string[] = meResult.ok ? meResult.data.permissions : [];
-  if (!permissions.includes('contracts.read')) notFound();
-  const canWrite = permissions.includes('contracts.update') || permissions.includes('contracts.workflow_update');
-  const canManageAttachments = permissions.includes('contracts.manage');
+  if (!canReadTechnical(permissions)) notFound();
+  const canWrite = canWriteTechnical(permissions);
+  const canManageAttachments = canManageTechnical(permissions);
   const currentUserId = meResult.ok ? meResult.data.id : '';
 
   let data: Awaited<ReturnType<typeof technicalApi.sdCalculationSubmission>>;

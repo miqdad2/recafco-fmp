@@ -34,6 +34,7 @@ export default async function ProtectedLayout({
     roleCode: profile.roleCode,
     roleName: profile.roleName,
     permissions: profile.permissions,
+    fullPlatformAccess: profile.fullPlatformAccess === true,
   };
 
   return <AppShell user={shellUser}>{children}</AppShell>;

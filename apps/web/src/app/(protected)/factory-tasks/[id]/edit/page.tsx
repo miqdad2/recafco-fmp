@@ -73,7 +73,7 @@ export default async function EditTaskPage({ params }: PageProps): Promise<React
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Factory Tasks Management', href: '/factory-tasks' },
+          { label: 'Task Management', href: '/factory-tasks' },
           { label: task.referenceNumber, href: `/factory-tasks/${id}` },
           { label: 'Edit' },
         ]} />

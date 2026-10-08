@@ -1907,3 +1907,26 @@ export async function searchContractsForDashboardAction(search: string): Promise
 export async function getContractBoqProgressForDashboardAction(contractId: string): Promise<BoqConfirmationItem[] | null> {
   return fetchBoqConfirmations(contractId);
 }
+
+// ---------------------------------------------------------------------------
+// FMP-CONTRACT-03 — safe basic-details edit from Contract Overview
+// (PATCH /contracts/:id/basic-details, contracts.manage). Never touches BOQ,
+// workflow, payments, value or status.
+// ---------------------------------------------------------------------------
+
+export async function updateContractBasicDetailsAction(contractId: string, payload: Record<string, unknown>): Promise<ActionResult> {
+  const result = await actionFetch(`/contracts/${contractId}/basic-details`, 'PATCH', payload);
+  if (!result.ok) {
+    return {
+      error:
+        result.message?.includes('Schedule Status is invalid')
+          ? 'Schedule Status is invalid.'
+          : result.code === 'CONTRACT_VERSION_CONFLICT'
+          ? 'This contract was changed by someone else. Please close this window, refresh the page and try again.'
+          : 'Could not update contract details. Please check the fields and try again.',
+    };
+  }
+  revalidatePath('/contracts');
+  revalidatePath(`/contracts/${contractId}`);
+  return { error: null };
+}

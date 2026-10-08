@@ -19,7 +19,7 @@ import type { Response } from 'express';
 import { TechnicalService } from './technical.service';
 import {
   TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES,
-  TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES,
+  resolveTechnicalAttachmentMimeType,
 } from './technical-attachment-storage.service';
 import { TechnicalAttachmentStorageService } from './technical-attachment-storage.service';
 import { SaveDrawingReceivedDto } from './dto/save-drawing-received.dto';
@@ -29,7 +29,6 @@ import { SaveFdIssuanceDto } from './dto/save-fd-issuance.dto';
 import { RequestClarificationDto } from './dto/request-clarification.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { Permissions } from '../common/decorators/permissions.decorator';
 import { AnyPermission } from '../common/decorators/any-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
@@ -57,14 +56,14 @@ export class TechnicalController {
   ) {}
 
   @Get('dashboard')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async dashboard(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
     const data = await this.technicalService.getDashboard(actor);
     return { data, meta: meta(), error: null };
   }
 
   @Get('jobs/:contractId')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async workflowOverview(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -74,7 +73,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/start')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async start(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -84,7 +83,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/drawing-received')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async drawingReceived(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -94,7 +93,7 @@ export class TechnicalController {
   }
 
   @Patch('jobs/:contractId/drawing-received')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async saveDraft(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveDrawingReceivedDto,
@@ -105,7 +104,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/drawing-received/clarification')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async requestClarification(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: RequestClarificationDto,
@@ -116,7 +115,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/drawing-received/complete')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async complete(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveDrawingReceivedDto,
@@ -130,7 +129,7 @@ export class TechnicalController {
   // same reasoning as every other attachment controller in this app.)
 
   @Get('jobs/:contractId/drawing-received/attachments')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async listAttachments(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -140,12 +139,12 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/drawing-received/attachments')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES },
       fileFilter: (_req, file, callback) => {
-        if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+        if (resolveTechnicalAttachmentMimeType(file) === null) {
           callback(
             new UnprocessableEntityException({
               code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
@@ -169,7 +168,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/drawing-received/attachments/:attachmentId/download')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async downloadAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -188,8 +187,34 @@ export class TechnicalController {
     return new StreamableFile(this.technicalAttachmentStorage.createReadStream(storagePath));
   }
 
+  /**
+   * FMP-TECH-06 — inline view of a Drawing Received attachment (same
+   * permission/ownership checks as download; only the disposition differs).
+   * TIFF is always served as image/tiff.
+   */
+  @Get('jobs/:contractId/drawing-received/attachments/:attachmentId/view')
+  @AnyPermission('technical.read', 'contracts.read')
+  async viewAttachment(
+    @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalFileName, mimeType } = await this.technicalService.getAttachmentForDownload(
+      contractId,
+      attachmentId,
+      actor,
+    );
+    const isTiff = /\.tiff?$/i.test(originalFileName);
+    res.set({
+      'Content-Type': isTiff ? 'image/tiff' : mimeType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(originalFileName)}"`,
+    });
+    return new StreamableFile(this.technicalAttachmentStorage.createReadStream(storagePath));
+  }
+
   @Delete('jobs/:contractId/drawing-received/attachments/:attachmentId')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async deleteAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -205,7 +230,7 @@ export class TechnicalController {
   // ---------------------------------------------------------------------------
 
   @Get('jobs/:contractId/sd-calculation-submission')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async sdCalculationSubmission(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -215,7 +240,7 @@ export class TechnicalController {
   }
 
   @Patch('jobs/:contractId/sd-calculation-submission')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async saveSdDraft(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveSdCalculationSubmissionDto,
@@ -226,7 +251,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/sd-calculation-submission/submit')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async submitSd(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveSdCalculationSubmissionDto,
@@ -237,7 +262,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/sd-calculation-submission/clarification')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async requestSdClarification(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: RequestClarificationDto,
@@ -248,7 +273,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/sd-calculation-submission/complete')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async completeSd(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveSdCalculationSubmissionDto,
@@ -259,7 +284,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/sd-calculation-submission/attachments')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async listSdAttachments(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -269,12 +294,12 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/sd-calculation-submission/attachments')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES },
       fileFilter: (_req, file, callback) => {
-        if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+        if (resolveTechnicalAttachmentMimeType(file) === null) {
           callback(
             new UnprocessableEntityException({
               code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
@@ -298,7 +323,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/sd-calculation-submission/attachments/:attachmentId/download')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async downloadSdAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -318,7 +343,7 @@ export class TechnicalController {
   }
 
   @Delete('jobs/:contractId/sd-calculation-submission/attachments/:attachmentId')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async deleteSdAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -336,7 +361,7 @@ export class TechnicalController {
   // ---------------------------------------------------------------------------
 
   @Get('jobs/:contractId/getting-approval')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async gettingApproval(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -346,7 +371,7 @@ export class TechnicalController {
   }
 
   @Patch('jobs/:contractId/getting-approval')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async saveApprovalDraft(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveGettingApprovalDto,
@@ -357,7 +382,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/getting-approval/clarification')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async requestApprovalClarification(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: RequestClarificationDto,
@@ -368,7 +393,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/getting-approval/send-back')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async sendApprovalBackForChanges(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveGettingApprovalDto,
@@ -379,7 +404,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/getting-approval/reject')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async rejectApproval(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveGettingApprovalDto,
@@ -390,7 +415,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/getting-approval/approve')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async approveAndMoveToFdIssuance(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveGettingApprovalDto,
@@ -401,7 +426,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/getting-approval/attachments')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async listApprovalAttachments(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -411,12 +436,12 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/getting-approval/attachments')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES },
       fileFilter: (_req, file, callback) => {
-        if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+        if (resolveTechnicalAttachmentMimeType(file) === null) {
           callback(
             new UnprocessableEntityException({
               code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
@@ -440,7 +465,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/getting-approval/attachments/:attachmentId/download')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async downloadApprovalAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -460,7 +485,7 @@ export class TechnicalController {
   }
 
   @Delete('jobs/:contractId/getting-approval/attachments/:attachmentId')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async deleteApprovalAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -477,7 +502,7 @@ export class TechnicalController {
   // ---------------------------------------------------------------------------
 
   @Get('jobs/:contractId/fd-issuance')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async fdIssuance(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -487,7 +512,7 @@ export class TechnicalController {
   }
 
   @Patch('jobs/:contractId/fd-issuance')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async saveFdDraft(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveFdIssuanceDto,
@@ -498,7 +523,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/fd-issuance/submit')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async submitFd(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveFdIssuanceDto,
@@ -509,7 +534,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/fd-issuance/return')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async returnOrReopenFd(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: RequestClarificationDto,
@@ -520,7 +545,7 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/fd-issuance/complete')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async issueFdAndCompleteWorkflow(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Body() dto: SaveFdIssuanceDto,
@@ -531,7 +556,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/fd-issuance/attachments')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async listFdAttachments(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @CurrentUser() actor: AuthUser,
@@ -541,12 +566,12 @@ export class TechnicalController {
   }
 
   @Post('jobs/:contractId/fd-issuance/attachments')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES },
       fileFilter: (_req, file, callback) => {
-        if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+        if (resolveTechnicalAttachmentMimeType(file) === null) {
           callback(
             new UnprocessableEntityException({
               code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
@@ -570,7 +595,7 @@ export class TechnicalController {
   }
 
   @Get('jobs/:contractId/fd-issuance/attachments/:attachmentId/download')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async downloadFdAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
@@ -590,7 +615,7 @@ export class TechnicalController {
   }
 
   @Delete('jobs/:contractId/fd-issuance/attachments/:attachmentId')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async deleteFdAttachment(
     @Param('contractId', new ParseUUIDPipe({ version: '4' })) contractId: string,
     @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,

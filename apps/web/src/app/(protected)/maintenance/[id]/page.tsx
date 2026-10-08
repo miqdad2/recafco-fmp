@@ -117,7 +117,7 @@ export default async function MrDetailPage({ params }: PageProps): Promise<React
     <div className="min-h-full p-8">
       <div className="max-w-5xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Maintenance Requests', href: '/maintenance' },
+          { label: 'Maintenance Management', href: '/maintenance' },
           { label: mr.referenceNumber },
         ]} />
 

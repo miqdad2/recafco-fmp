@@ -1,5 +1,6 @@
 import { Check, Circle } from 'lucide-react';
 import type { TechnicalDrawing, TechnicalAttachment } from '@/lib/technical-api';
+import { isDrawingReceivedReady } from '../../../../../_lib/attachment-helpers';
 
 interface Props {
   drawing: TechnicalDrawing | null;
@@ -17,7 +18,7 @@ export function TechnicalChecklist({ drawing, attachments }: Props): React.JSX.E
     { label: 'Received date recorded', done: Boolean(drawing?.receivedDate) },
     { label: 'Drawing files uploaded', done: attachments.length > 0 },
     { label: 'Reference and revision captured', done: Boolean(drawing?.drawingReferenceNo && drawing?.revisionNo) },
-    { label: 'Ready for next stage', done: drawing?.status === 'COMPLETED' },
+    { label: 'Ready for next stage', done: isDrawingReceivedReady(drawing as unknown as Record<string, unknown> | null) },
   ];
 
   return (

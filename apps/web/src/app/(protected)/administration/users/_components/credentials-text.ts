@@ -5,6 +5,8 @@ export function buildCredentialsText(input: {
   tempPassword: string;
   roleLabel: string;
   moduleAccessLines: string[];
+  /** FMP-ACCESS-01 — e.g. "Single Module Access — Contract Management". Line omitted when not given. */
+  accessModeLabel?: string;
 }): string {
   const modules =
     input.moduleAccessLines.length > 0
@@ -14,6 +16,7 @@ export function buildCredentialsText(input: {
     `Login Email: ${input.email}`,
     `Temporary Password: ${input.tempPassword}`,
     `Role: ${input.roleLabel}`,
+    ...(input.accessModeLabel ? [`Access Mode: ${input.accessModeLabel}`] : []),
     `Module Access: ${modules}`,
   ].join('\n');
 }

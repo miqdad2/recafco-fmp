@@ -11,6 +11,7 @@ import { TechnicalActivityTimeline } from './_components/technical-activity-time
 import { TechnicalChecklist } from './_components/technical-checklist';
 import { TechnicalStepper } from '../../../../_components/technical-stepper';
 import { computeStageMode } from '../../../../_lib/technical-format';
+import { canReadTechnical, canWriteTechnical, canManageTechnical } from '@/app/(protected)/technical/_lib/technical-permissions';
 
 export const metadata: Metadata = { title: 'Drawing Received — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -41,9 +42,9 @@ export default async function DrawingReceivedPage({ params }: PageProps): Promis
 
   const meResult = await authApi.me(accessToken);
   const permissions: string[] = meResult.ok ? meResult.data.permissions : [];
-  if (!permissions.includes('contracts.read')) notFound();
-  const canWrite = permissions.includes('contracts.update') || permissions.includes('contracts.workflow_update');
-  const canManageAttachments = permissions.includes('contracts.manage');
+  if (!canReadTechnical(permissions)) notFound();
+  const canWrite = canWriteTechnical(permissions);
+  const canManageAttachments = canManageTechnical(permissions);
   const currentUserId = meResult.ok ? meResult.data.id : '';
 
   let data: Awaited<ReturnType<typeof technicalApi.drawingReceived>>;

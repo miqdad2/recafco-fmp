@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { canReadTechnical } from '@/app/(protected)/technical/_lib/technical-permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET(
   { params }: { params: Promise<{ contractId: string; attachmentId: string }> },
 ): Promise<Response> {
   const permissions = await getPermissions();
-  if (!permissions.includes('contracts.read')) {
+  if (!canReadTechnical(permissions)) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 

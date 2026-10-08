@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException, NotFoundException, ConflictException, UnprocessableEntityException } from '@nestjs/common';
+import { hasTechnicalRead, hasTechnicalWrite, canDeleteOthersTechnicalFiles } from './technical-permissions';
 import {
   ModuleIdentifier,
   ContractStatus,
@@ -17,7 +18,7 @@ import { buildJobReleaseSummary } from './drawing-group-rules';
 import type { JobReleaseSummary } from './drawing-group-rules';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
-import { TechnicalAttachmentStorageService, TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES, TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES } from './technical-attachment-storage.service';
+import { TechnicalAttachmentStorageService, resolveTechnicalAttachmentMimeType, TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES } from './technical-attachment-storage.service';
 import type { SaveDrawingReceivedDto } from './dto/save-drawing-received.dto';
 import type { SaveSdCalculationSubmissionDto } from './dto/save-sd-calculation-submission.dto';
 import type { SaveGettingApprovalDto } from './dto/save-getting-approval.dto';
@@ -172,13 +173,17 @@ const REQUIRED_COMPLETE_FIELDS: (keyof SaveDrawingReceivedDto)[] = [
   'drawingReferenceNo',
   'revisionNo',
   'numberOfSheets',
-  'drawingDescription',
-  'relatedAreaPackage',
-  'linkedWorkflowStage',
-  'internalReferenceNo',
-  'assignedToUserId',
-  'plannedReviewStart',
 ];
+
+// FMP-TECH-06 — user-facing labels for the missing-fields message; the raw keys stay in details.missing.
+export const DRAWING_RECEIVED_FIELD_LABELS: Partial<Record<keyof SaveDrawingReceivedDto, string>> = {
+  receivedDate: 'Received Date',
+  receivedFrom: 'Received From',
+  drawingType: 'Drawing Type',
+  drawingReferenceNo: 'Drawing Reference No',
+  revisionNo: 'Revision No',
+  numberOfSheets: 'Number of Sheets',
+};
 
 // FMP-TECH-02 — the ticket's own two SD & Calculation actions ask for
 // different validation depths: "Submit SD & Calculation" checks the "core
@@ -260,14 +265,14 @@ export class TechnicalService {
   ) {}
 
   private requireRead(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.read')) {
+    if (!hasTechnicalRead(actor.permissions)) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
   }
 
   /** Manager (contracts.update) or staff (contracts.workflow_update) — the same pair contract-workflow.service.ts already uses for team-task writes. */
   private requireWrite(actor: AuthUser): void {
-    if (!actor.permissions.includes('contracts.update') && !actor.permissions.includes('contracts.workflow_update')) {
+    if (!hasTechnicalWrite(actor.permissions)) {
       throw new ForbiddenException({
         code: 'CONTRACTS_PERMISSION_DENIED',
         message: 'Missing contracts.update or contracts.workflow_update',
@@ -820,7 +825,7 @@ export class TechnicalService {
     if (missing.length > 0) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_DRAWING_RECEIVED_INCOMPLETE',
-        message: `Missing required fields: ${missing.join(', ')}`,
+        message: `Missing required fields: ${missing.map((f) => DRAWING_RECEIVED_FIELD_LABELS[f] ?? f).join(', ')}`,
         details: { missing },
       });
     }
@@ -835,10 +840,10 @@ export class TechnicalService {
       });
     }
 
-    const plannedReviewStart = new Date(dto.plannedReviewStart!);
+    // Planned Review Start is optional; only validated when provided.
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
-    if (plannedReviewStart.getTime() < todayStart.getTime()) {
+    if (dto.plannedReviewStart && new Date(dto.plannedReviewStart).getTime() < todayStart.getTime()) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_PLANNED_REVIEW_START_IN_PAST',
         message: 'Planned Review Start must be today or a future date',
@@ -902,10 +907,11 @@ export class TechnicalService {
     await this.loadContractOrThrow(contractId, actor);
     const workflow = await this.requireWorkflow(contractId);
 
-    if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+    const resolvedMimeType = resolveTechnicalAttachmentMimeType(file);
+    if (resolvedMimeType === null) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
-        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings.',
+        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings, TIF/TIFF scans.',
       });
     }
     if (file.size > TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES) {
@@ -923,7 +929,7 @@ export class TechnicalService {
         technicalDrawingId: drawing.id,
         fileName,
         originalFileName: file.originalname,
-        mimeType: file.mimetype,
+        mimeType: resolvedMimeType,
         fileSize: file.size,
         storagePath,
         uploadedByUserId: actor.id,
@@ -975,7 +981,7 @@ export class TechnicalService {
     if (!attachment) {
       throw new NotFoundException({ code: 'TECHNICAL_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
     }
-    if (attachment.uploadedByUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
+    if (attachment.uploadedByUserId !== actor.id && !canDeleteOthersTechnicalFiles(actor.permissions)) {
       throw new ForbiddenException({
         code: 'TECHNICAL_ATTACHMENT_NOT_OWNER',
         message: 'You can only delete a file you uploaded, unless you have contracts.manage',
@@ -1308,10 +1314,11 @@ export class TechnicalService {
     await this.loadContractOrThrow(contractId, actor);
     const workflow = await this.requireWorkflow(contractId);
 
-    if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+    const resolvedMimeType = resolveTechnicalAttachmentMimeType(file);
+    if (resolvedMimeType === null) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
-        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings.',
+        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings, TIF/TIFF scans.',
       });
     }
     if (file.size > TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES) {
@@ -1329,7 +1336,7 @@ export class TechnicalService {
         technicalSdSubmissionId: submission.id,
         fileName,
         originalFileName: file.originalname,
-        mimeType: file.mimetype,
+        mimeType: resolvedMimeType,
         fileSize: file.size,
         storagePath,
         uploadedByUserId: actor.id,
@@ -1381,7 +1388,7 @@ export class TechnicalService {
     if (!attachment) {
       throw new NotFoundException({ code: 'TECHNICAL_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
     }
-    if (attachment.uploadedByUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
+    if (attachment.uploadedByUserId !== actor.id && !canDeleteOthersTechnicalFiles(actor.permissions)) {
       throw new ForbiddenException({
         code: 'TECHNICAL_ATTACHMENT_NOT_OWNER',
         message: 'You can only delete a file you uploaded, unless you have contracts.manage',
@@ -1733,10 +1740,11 @@ export class TechnicalService {
     await this.loadContractOrThrow(contractId, actor);
     const workflow = await this.requireWorkflow(contractId);
 
-    if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+    const resolvedMimeType = resolveTechnicalAttachmentMimeType(file);
+    if (resolvedMimeType === null) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
-        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings.',
+        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings, TIF/TIFF scans.',
       });
     }
     if (file.size > TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES) {
@@ -1754,7 +1762,7 @@ export class TechnicalService {
         technicalApprovalId: approval.id,
         fileName,
         originalFileName: file.originalname,
-        mimeType: file.mimetype,
+        mimeType: resolvedMimeType,
         fileSize: file.size,
         storagePath,
         uploadedByUserId: actor.id,
@@ -1806,7 +1814,7 @@ export class TechnicalService {
     if (!attachment) {
       throw new NotFoundException({ code: 'TECHNICAL_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
     }
-    if (attachment.uploadedByUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
+    if (attachment.uploadedByUserId !== actor.id && !canDeleteOthersTechnicalFiles(actor.permissions)) {
       throw new ForbiddenException({
         code: 'TECHNICAL_ATTACHMENT_NOT_OWNER',
         message: 'You can only delete a file you uploaded, unless you have contracts.manage',
@@ -2139,10 +2147,11 @@ export class TechnicalService {
     await this.loadContractOrThrow(contractId, actor);
     const workflow = await this.requireWorkflow(contractId);
 
-    if (!(TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype)) {
+    const resolvedMimeType = resolveTechnicalAttachmentMimeType(file);
+    if (resolvedMimeType === null) {
       throw new UnprocessableEntityException({
         code: 'TECHNICAL_ATTACHMENT_INVALID_TYPE',
-        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings.',
+        message: 'Unsupported file type. Allowed: JPG/PNG/WEBP images, PDF/DOC/DOCX/XLS/XLSX documents, DWG/DXF drawings, TIF/TIFF scans.',
       });
     }
     if (file.size > TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES) {
@@ -2160,7 +2169,7 @@ export class TechnicalService {
         technicalFdIssuanceId: fdIssuance.id,
         fileName,
         originalFileName: file.originalname,
-        mimeType: file.mimetype,
+        mimeType: resolvedMimeType,
         fileSize: file.size,
         storagePath,
         uploadedByUserId: actor.id,
@@ -2212,7 +2221,7 @@ export class TechnicalService {
     if (!attachment) {
       throw new NotFoundException({ code: 'TECHNICAL_ATTACHMENT_NOT_FOUND', message: 'Attachment not found' });
     }
-    if (attachment.uploadedByUserId !== actor.id && !actor.permissions.includes('contracts.manage')) {
+    if (attachment.uploadedByUserId !== actor.id && !canDeleteOthersTechnicalFiles(actor.permissions)) {
       throw new ForbiddenException({
         code: 'TECHNICAL_ATTACHMENT_NOT_OWNER',
         message: 'You can only delete a file you uploaded, unless you have contracts.manage',

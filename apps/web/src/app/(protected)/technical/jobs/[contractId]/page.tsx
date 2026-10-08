@@ -11,6 +11,7 @@ import type { TechnicalStageMode } from '../../_lib/technical-format';
 import { TechnicalStepper } from '../../_components/technical-stepper';
 import { BoqDrawingConfirmation } from './_components/boq-drawing-confirmation';
 import { DrawingGroupsSection } from './_components/drawing-groups-section';
+import { canReadTechnical, canWriteTechnical } from '@/app/(protected)/technical/_lib/technical-permissions';
 
 function stageStatusBadge(mode: TechnicalStageMode): { label: string; className: string } {
   if (mode === 'active') return { label: 'Current', className: 'bg-accent-light text-accent' };
@@ -47,7 +48,7 @@ export default async function TechnicalJobPage({ params }: PageProps): Promise<R
 
   const meResult = await authApi.me(accessToken);
   const permissions: string[] = meResult.ok ? meResult.data.permissions : [];
-  if (!permissions.includes('contracts.read')) notFound();
+  if (!canReadTechnical(permissions)) notFound();
 
   let overview: Awaited<ReturnType<typeof technicalApi.workflowOverview>> | null = null;
   try {
@@ -63,7 +64,7 @@ export default async function TechnicalJobPage({ params }: PageProps): Promise<R
     fetchAllowedPieceStatuses(contractId),
     fetchDrawingGroups(contractId),
   ]);
-  const canWrite = permissions.includes('contracts.update') || permissions.includes('contracts.workflow_update');
+  const canWrite = canWriteTechnical(permissions);
   // FMP-TECH-04 — `nextStage` is already null as soon as currentStage
   // reaches FD_ISSUANCE (nextStageOf(FD_ISSUANCE) has no later stage),
   // regardless of whether FD Issuance has actually been completed yet — so

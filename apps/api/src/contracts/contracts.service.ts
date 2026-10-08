@@ -14,6 +14,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractDto } from './dto/create-contract.dto';
 import type { CreateContractBoqItemDto } from './dto/create-contract-boq-item.dto';
 import type { UpdateContractDto } from './dto/update-contract.dto';
+import type { UpdateContractBasicDetailsDto } from './dto/update-contract-basic-details.dto';
 import type { ContractListQueryDto, PaginatedResult } from './dto/contract-list-query.dto';
 import type { ActivateContractDto } from './dto/activate-contract.dto';
 import type { TerminateContractDto } from './dto/terminate-contract.dto';
@@ -508,8 +509,8 @@ export class ContractsService {
 
     // No departmentId was submitted: for OWN_DEPARTMENT-scoped actors, default to their own
     // department so the contract they just created remains visible to them in the Contract
-    // List (which is filtered to that same department). Privileged scopes (SELECTED/ALL
-    // departments) are left untouched — their existing null-department behavior is unaffected.
+    // List (which is filtered to that same department). SELECTED_DEPARTMENTS actors get a
+    // granted department (FMP-CONTRACT-05); ALL_DEPARTMENTS actors are unaffected (no filter).
     let departmentId = dto.departmentId;
     if (departmentId === undefined) {
       const scope = await this.deptAccess.getScope(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT);
@@ -521,6 +522,19 @@ export class ContractsService {
           });
         }
         departmentId = actor.departmentId;
+      } else if (scope === DepartmentAccessScope.SELECTED_DEPARTMENTS) {
+        // FMP-CONTRACT-05 — the Contract List filters `departmentId IN (granted departments)`,
+        // which never matches a NULL department. A SELECTED_DEPARTMENTS creator (the New
+        // Contract form has no department field) therefore lost their own new contract from
+        // the list. Default to the actor's primary department when it is one of their grants,
+        // otherwise their first granted department — always one they are authorized for.
+        const filter = await this.deptAccess.buildDeptFilter(actor, ModuleIdentifier.CONTRACTS_MANAGEMENT, scope);
+        const granted = filter?.in ?? [];
+        if (actor.departmentId && granted.includes(actor.departmentId)) {
+          departmentId = actor.departmentId;
+        } else if (granted.length > 0) {
+          departmentId = granted[0];
+        }
       }
     }
 
@@ -686,6 +700,81 @@ export class ContractsService {
   // ---------------------------------------------------------------------------
   // Update DRAFT
   // ---------------------------------------------------------------------------
+
+  /**
+   * FMP-CONTRACT-03 — safe basic-details edit from the Overview page. Unlike
+   * update() (DRAFT-only, can replace BOQ), this works on any non-final
+   * contract but only ever writes the narrow field set below: never BOQ,
+   * scope-of-work flags, value/currency, owner/department or status, and it
+   * touches no workflow/payment/piece rows. Version-checked like update().
+   */
+  async updateBasicDetails(id: string, dto: UpdateContractBasicDetailsDto, actor: AuthUser): Promise<ContractWithLifecycle> {
+    if (!actor.permissions.includes('contracts.update')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.update' });
+    }
+
+    const contract = await this.findOneOrThrow(id, actor);
+
+    const status = contract.status as string;
+    if (status === ContractStatus.CLOSED || status === ContractStatus.TERMINATED || status === ContractStatus.CANCELLED) {
+      throw new UnprocessableEntityException({
+        code: 'CONTRACT_INVALID_TRANSITION',
+        message: 'Details of a closed, terminated or cancelled contract cannot be edited.',
+      });
+    }
+
+    const existing = contract as unknown as Record<string, unknown>;
+    const data: Record<string, unknown> = {
+      jobOrder: dto.jobOrder,
+      title: dto.title,
+      counterpartyName: dto.counterpartyName,
+    };
+    for (const f of ['quotationNumber', 'projectNumber', 'scopeDescription', 'notes'] as const) {
+      if (dto[f] !== undefined) data[f] = dto[f] === null || dto[f] === '' ? null : dto[f];
+    }
+    for (const f of ['contractDate', 'startDate', 'endDate'] as const) {
+      if (dto[f] !== undefined) data[f] = dto[f] === null || dto[f] === '' ? null : new Date(dto[f] as string);
+    }
+    if (dto.paymentTerms !== undefined) data['paymentTerms'] = dto.paymentTerms;
+    // FMP-CONTRACT-04 — Schedule Status (manager-facing), distinct from lifecycle `status`.
+    if (dto.scheduleStatus !== undefined) data['scheduleStatus'] = dto.scheduleStatus;
+
+    const changedFields = Object.keys(data).filter(
+      (k) => JSON.stringify(auditSerialize(existing[k])) !== JSON.stringify(auditSerialize(data[k])),
+    );
+
+    return this.db.getClient().$transaction(async (tx) => {
+      const result = await tx.contract.updateMany({
+        where: { id, version: dto.version, status: { in: [ContractStatus.DRAFT, ContractStatus.ACTIVE] } },
+        data: { ...data, version: { increment: 1 } },
+      });
+
+      if (result.count === 0) {
+        const exists = await tx.contract.findUnique({ where: { id }, select: { id: true } });
+        if (!exists) {
+          throw new NotFoundException({ code: 'CONTRACT_NOT_FOUND', message: 'Contract not found' });
+        }
+        throw new ConflictException({
+          code: 'CONTRACT_VERSION_CONFLICT',
+          message: 'Contract was changed by another user; please refresh and retry',
+        });
+      }
+
+      const refreshed = await tx.contract.findUniqueOrThrow({ where: { id }, select: CONTRACT_SELECT });
+
+      await tx.contractActivity.create({
+        data: {
+          contractId: id,
+          actorUserId: actor.id,
+          actorName: actor.displayName,
+          event: 'updated',
+          metadata: { source: 'overview_edit', changedFields },
+        },
+      });
+
+      return refreshed;
+    }) as unknown as Promise<ContractWithLifecycle>;
+  }
 
   async update(id: string, dto: UpdateContractDto, actor: AuthUser): Promise<ContractWithLifecycle> {
     if (!actor.permissions.includes('contracts.update')) {
@@ -1530,7 +1619,8 @@ export class ContractsService {
   // ---------------------------------------------------------------------------
 
   async listPeople(actor: AuthUser): Promise<{ id: string; displayName: string; departmentId: string | null }[]> {
-    if (!actor.permissions.includes('contracts.read')) {
+    // FMP-ACCESS-02 — Technical users pick the received-from person on Drawing Received.
+    if (!actor.permissions.includes('contracts.read') && !actor.permissions.includes('technical.read')) {
       throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Missing contracts.read' });
     }
 

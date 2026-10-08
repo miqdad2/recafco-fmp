@@ -31,6 +31,7 @@ interface ModuleRowProps {
   onScopeChange: (module: ModuleIdentifier, scope: DepartmentAccessScope) => void;
   onDeptIdsChange: (module: ModuleIdentifier, deptIds: string[]) => void;
   emphasis?: 'highlighted' | 'dimmed' | undefined;
+  label: string;
 }
 
 function ModuleRow({
@@ -43,6 +44,7 @@ function ModuleRow({
   onScopeChange,
   onDeptIdsChange,
   emphasis,
+  label,
 }: ModuleRowProps): React.JSX.Element {
   function toggleDept(deptId: string, checked: boolean): void {
     const next = checked ? [...deptIds, deptId] : deptIds.filter((id) => id !== deptId);
@@ -61,7 +63,7 @@ function ModuleRow({
           editor reads as a dense checklist rather than 7 stacked full-height blocks. */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-medium text-text-primary flex items-center gap-2 min-w-0 flex-1">
-          <span className="truncate">{MODULE_LABELS[module]}</span>
+          <span className="truncate">{label}</span>
           {emphasis === 'highlighted' && (
             <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide bg-accent text-accent-foreground rounded-full px-1.5 py-0.5">
               Selected
@@ -135,6 +137,10 @@ interface Props {
   onDeptIdsChange: (module: ModuleIdentifier, deptIds: string[]) => void;
   /** When set, visually highlights this module and dims the rest. Purely cosmetic — every module row still submits a real scope value, since "no access" is not yet a supported scope. */
   emphasizeModule?: ModuleIdentifier | undefined;
+  /** FMP-ACCESS-01 — only these modules get a row (and are therefore submitted). Defaults to every module. */
+  visibleModules?: ModuleIdentifier[] | undefined;
+  /** FMP-ACCESS-02 — show a row under another name (the Contract Management scope row is named Technical for Technical users). */
+  labelOverrides?: Partial<Record<ModuleIdentifier, string>> | undefined;
 }
 
 export function ModuleAccessEditor({
@@ -146,10 +152,12 @@ export function ModuleAccessEditor({
   onScopeChange,
   onDeptIdsChange,
   emphasizeModule,
+  visibleModules,
+  labelOverrides,
 }: Props): React.JSX.Element {
   return (
     <div className="space-y-2">
-      {ALL_MODULES.map((mod) => (
+      {(visibleModules ?? ALL_MODULES).map((mod) => (
         <ModuleRow
           key={mod}
           module={mod}
@@ -160,6 +168,7 @@ export function ModuleAccessEditor({
           deptIds={deptIdsByModule[mod] ?? []}
           onScopeChange={onScopeChange}
           onDeptIdsChange={onDeptIdsChange}
+          label={labelOverrides?.[mod] ?? MODULE_LABELS[mod] ?? mod}
           emphasis={emphasizeModule ? (mod === emphasizeModule ? 'highlighted' : 'dimmed') : undefined}
         />
       ))}

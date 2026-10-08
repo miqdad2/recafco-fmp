@@ -597,6 +597,34 @@ describe('ContractsService.create', () => {
     expect(mockTxContractCreate).not.toHaveBeenCalled();
   });
 
+  describe('SELECTED_DEPARTMENTS default department (FMP-CONTRACT-05)', () => {
+    const ACTOR_SELECTED: AuthUser = { ...ACTOR_OWN_DEPT, departmentId: 'dept-primary' };
+
+    async function createAs(actor: AuthUser, granted: string[]): Promise<Record<string, unknown>> {
+      mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.SELECTED_DEPARTMENTS);
+      (mockDeptAccess.buildDeptFilter as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ in: granted });
+      mockTxContractCreate.mockResolvedValue(makeContract());
+      mockTxActivityCreate.mockResolvedValue({});
+      await service.create({ title: 'T', counterpartyName: 'V' }, actor);
+      return (mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    }
+
+    it('uses the actor primary department when it is one of the granted departments', async () => {
+      const data = await createAs(ACTOR_SELECTED, ['dept-other', 'dept-primary']);
+      expect(data['departmentId']).toBe('dept-primary');
+    });
+
+    it('falls back to the first granted department when the primary one is not granted', async () => {
+      const data = await createAs(ACTOR_SELECTED, ['dept-granted-1', 'dept-granted-2']);
+      expect(data['departmentId']).toBe('dept-granted-1');
+    });
+
+    it('leaves the department unset when nothing is granted (cannot see any department anyway)', async () => {
+      const data = await createAs(ACTOR_SELECTED, []);
+      expect(data['departmentId']).toBeUndefined();
+    });
+  });
+
   it('does not auto-assign department when scope is ALL_DEPARTMENTS', async () => {
     mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
     const contract = makeContract();
@@ -1447,6 +1475,88 @@ describe('ContractsService.update', () => {
 // ---------------------------------------------------------------------------
 // CM-55 — updateScheduleStatus (manager-facing schedule/progress status)
 // ---------------------------------------------------------------------------
+
+describe('ContractsService.updateBasicDetails (FMP-CONTRACT-03)', () => {
+  const DTO = { version: 2, jobOrder: 'JO-9', title: 'New Name', counterpartyName: 'New Client' };
+
+  it('rejects an actor without contracts.update (viewer)', async () => {
+    await expect(service.updateBasicDetails('id-1', DTO, ACTOR_VIEWER)).rejects.toThrow(ForbiddenException);
+    expect(mockTxContractUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows a Contract Manager (contracts.update, no contracts.manage)', async () => {
+    const manager: AuthUser = {
+      ...ACTOR_VIEWER,
+      roleCode: 'CONTRACT_MANAGER',
+      permissions: ['contracts.read', 'contracts.create', 'contracts.update', 'contracts.activate', 'contracts.terminate', 'contracts.close', 'contracts.comment', 'contracts.workflow_update'],
+    };
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 2 }));
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ title: 'New Name', version: 3 }));
+    mockTxActivityCreate.mockResolvedValue({});
+    await expect(service.updateBasicDetails('id-1', DTO, manager)).resolves.toBeDefined();
+  });
+
+  it.each([ContractStatus.CLOSED, ContractStatus.TERMINATED, ContractStatus.CANCELLED])('rejects editing a %s contract', async (status) => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status, version: 2 }));
+    await expect(service.updateBasicDetails('id-1', DTO, ACTOR_ADMIN)).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('updates only the safe fields (no BOQ/value/status/scope flags) on an ACTIVE contract and logs activity', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 2, title: 'Old' }));
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ title: 'New Name', version: 3 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    const result = await service.updateBasicDetails(
+      'id-1',
+      { ...DTO, quotationNumber: 'Q-1', contractDate: '2026-09-01', endDate: null, paymentTerms: { advance: true } },
+      ACTOR_ADMIN,
+    );
+
+    expect(result.title).toBe('New Name');
+    const call = mockTxContractUpdateMany.mock.calls[0]![0] as { where: Record<string, unknown>; data: Record<string, unknown> };
+    expect(call.where['version']).toBe(2);
+    expect(Object.keys(call.data).sort()).toEqual(
+      ['contractDate', 'counterpartyName', 'endDate', 'jobOrder', 'paymentTerms', 'quotationNumber', 'title', 'version'],
+    );
+    for (const forbidden of ['status', 'contractValue', 'currency', 'scopeOfWork', 'ownerUserId', 'departmentId', 'scheduleStatus']) {
+      expect(call.data).not.toHaveProperty(forbidden);
+    }
+    // No BOQ / workflow / payment / piece writes (those delegates are not even mocked on the tx).
+    expect(mockTxBoqItemDeleteMany).not.toHaveBeenCalled();
+    expect(mockTxBoqItemCreateMany).not.toHaveBeenCalled();
+    expect(mockTxActivityCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event: 'updated',
+        actorUserId: ACTOR_ADMIN.id,
+        metadata: expect.objectContaining({ source: 'overview_edit', changedFields: expect.arrayContaining(['title', 'jobOrder']) }),
+      }),
+    });
+  });
+
+  it('saves Schedule Status without touching contract status, and lists it in the activity changed fields', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 2, scheduleStatus: null }));
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, scheduleStatus: 'DELAYED', version: 3 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.updateBasicDetails('id-1', { ...DTO, scheduleStatus: 'DELAYED' }, ACTOR_ADMIN);
+
+    const call = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(call.data['scheduleStatus']).toBe('DELAYED');
+    expect(call.data).not.toHaveProperty('status');
+    const activity = mockTxActivityCreate.mock.calls[0]![0] as { data: { metadata: { changedFields: string[] } } };
+    expect(activity.data.metadata.changedFields).toContain('scheduleStatus');
+  });
+
+  it('throws ConflictException on a stale version', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 5 }));
+    mockTxContractUpdateMany.mockResolvedValue({ count: 0 });
+    mockTxContractFindUnique.mockResolvedValue({ id: 'contract-1' });
+    await expect(service.updateBasicDetails('id-1', DTO, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+  });
+});
 
 describe('ContractsService.updateScheduleStatus', () => {
   it('throws ForbiddenException without contracts.update', async () => {

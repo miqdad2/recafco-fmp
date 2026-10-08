@@ -84,6 +84,7 @@ const BASE_USER = {
   role: { code: 'VIEWER', name: 'Viewer' },
   isActive: true,
   mustChangePassword: false,
+  fullPlatformAccess: false,
   failedLoginAttempts: 0,
   lockedUntil: null,
   lastLoginAt: null,
@@ -488,6 +489,57 @@ describe('UsersService', () => {
       mockUserFindUnique.mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent-id')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // FMP-ACCESS-01 — explicit Full Platform Access flag (presentation only)
+  // ---------------------------------------------------------------------------
+
+  describe('setFullPlatformAccess', () => {
+    it('turns the flag on, touching nothing but the flag, and writes an audit event', async () => {
+      mockUserFindUnique.mockResolvedValue(BASE_USER);
+      mockUserUpdate.mockResolvedValue({ ...BASE_USER, fullPlatformAccess: true });
+
+      const result = await service.setFullPlatformAccess(BASE_USER.id, true, ADMIN_ACTOR);
+
+      expect(result.fullPlatformAccess).toBe(true);
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { fullPlatformAccess: true } }),
+      );
+      expect(mockAuditCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          event: 'user_full_platform_access_changed',
+          userId: BASE_USER.id,
+          actorId: ADMIN_ACTOR.id,
+          metadata: { from: false, to: true },
+        }),
+      });
+    });
+
+    it('never changes the role or permissions', async () => {
+      mockUserFindUnique.mockResolvedValue(BASE_USER);
+      mockUserUpdate.mockResolvedValue({ ...BASE_USER, fullPlatformAccess: true });
+
+      await service.setFullPlatformAccess(BASE_USER.id, true, ADMIN_ACTOR);
+
+      const data = mockUserUpdate.mock.calls[0]![0].data as Record<string, unknown>;
+      expect(Object.keys(data)).toEqual(['fullPlatformAccess']);
+    });
+
+    it('is a no-op when the value is already set', async () => {
+      mockUserFindUnique.mockResolvedValue(BASE_USER);
+
+      const result = await service.setFullPlatformAccess(BASE_USER.id, false, ADMIN_ACTOR);
+
+      expect(result.fullPlatformAccess).toBe(false);
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 for an unknown user', async () => {
+      mockUserFindUnique.mockResolvedValue(null);
+      await expect(service.setFullPlatformAccess('missing', true, ADMIN_ACTOR)).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -92,6 +92,25 @@ describe('JwtAuthGuard', () => {
     });
   });
 
+  it('FMP-ACCESS-01C: fullPlatformAccess adds read-only module codes and nothing else', async () => {
+    mockSessionFindFirst.mockResolvedValue({ ...SESSION, user: { ...SESSION.user, fullPlatformAccess: true } });
+    const req = { headers: { authorization: 'Bearer valid.jwt.token' }, user: undefined };
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => req }),
+      getHandler: vi.fn(),
+      getClass: vi.fn(),
+    } as unknown as ExecutionContext;
+
+    await guard.canActivate(ctx);
+
+    const perms = (req as unknown as { user: { permissions: string[] } }).user.permissions;
+    expect(perms).toEqual(expect.arrayContaining(['users.read', 'roles.read', 'production.read', 'storage_delivery.read', 'tasks.read']));
+    expect(perms).not.toContain('production.update');
+    expect(perms).not.toContain('storage_delivery.update');
+    expect(perms).not.toContain('tasks.manage');
+    expect(perms).not.toContain('contracts.manage');
+  });
+
   it('throws 401 when no Authorization header', async () => {
     const ctx = makeContext(undefined);
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);

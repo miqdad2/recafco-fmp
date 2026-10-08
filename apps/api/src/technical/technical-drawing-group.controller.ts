@@ -4,7 +4,6 @@ import { TechnicalDrawingGroupService } from './technical-drawing-group.service'
 import { SaveDrawingGroupDto } from './dto/drawing-group.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { Permissions } from '../common/decorators/permissions.decorator';
 import { AnyPermission } from '../common/decorators/any-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
@@ -32,14 +31,14 @@ export class TechnicalDrawingGroupController {
   constructor(private readonly service: TechnicalDrawingGroupService) {}
 
   @Get()
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async list(@Param('contractId', uuid) contractId: string, @CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
     return { data: await this.service.list(contractId, actor), meta: meta(), error: null };
   }
 
   // Literal segment, declared before ':groupId'.
   @Get('pieces')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async pieces(
     @Param('contractId', uuid) contractId: string,
     @Query() query: DrawingGroupPiecesQueryDto,
@@ -49,7 +48,7 @@ export class TechnicalDrawingGroupController {
   }
 
   @Get(':groupId')
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async get(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -60,7 +59,7 @@ export class TechnicalDrawingGroupController {
 
   @Post()
   @HttpCode(201)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async create(
     @Param('contractId', uuid) contractId: string,
     @Body() dto: SaveDrawingGroupDto,
@@ -70,7 +69,7 @@ export class TechnicalDrawingGroupController {
   }
 
   @Patch(':groupId')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async update(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -82,7 +81,7 @@ export class TechnicalDrawingGroupController {
 
   @Post(':groupId/submit')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async submit(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -93,7 +92,7 @@ export class TechnicalDrawingGroupController {
 
   @Post(':groupId/approve')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async approve(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -104,7 +103,7 @@ export class TechnicalDrawingGroupController {
 
   @Post(':groupId/release')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async release(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,
@@ -115,7 +114,7 @@ export class TechnicalDrawingGroupController {
 
   @Post(':groupId/cancel')
   @HttpCode(200)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async cancel(
     @Param('contractId', uuid) contractId: string,
     @Param('groupId', uuid) groupId: string,

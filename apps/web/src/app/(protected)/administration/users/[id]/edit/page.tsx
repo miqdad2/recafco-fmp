@@ -14,6 +14,7 @@ import {
   activateUserAction,
   unlockUserAction,
   setModuleAccessAction,
+  setPlatformAccessAction,
   updateProfileAction,
   updateOrgAction,
   assignRoleAction,
@@ -120,6 +121,7 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
           activateAction={activateBound}
           unlockAction={unlockBound}
           setModuleAccessAction={setModuleAccessAction}
+          setPlatformAccessAction={setPlatformAccessAction.bind(null, id)}
         />
       </div>
     </div>

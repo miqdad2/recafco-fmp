@@ -9,6 +9,7 @@ export type ModuleCode =
   | 'MAINTENANCE_REQUESTS'
   | 'SAFETY_COMPLIANCE'
   | 'CONTRACTS_MANAGEMENT'
+  | 'TECHNICAL'
   | 'PRODUCTION_DASHBOARD'
   | 'ADMINISTRATION';
 
@@ -21,6 +22,8 @@ export const MODULE_READ_PERMISSION: Record<Exclude<ModuleCode, 'ADMINISTRATION'
   MAINTENANCE_REQUESTS: 'maintenance.read',
   SAFETY_COMPLIANCE: 'safety.read',
   CONTRACTS_MANAGEMENT: 'contracts.read',
+  // FMP-ACCESS-02 — Technical has its own read permission (contracts.read still opens Technical pages, see canReadTechnical).
+  TECHNICAL: 'technical.read',
   PRODUCTION_DASHBOARD: 'production.read',
 };
 
@@ -49,6 +52,7 @@ const ALL_MODULES: ModuleCode[] = [
   'MAINTENANCE_REQUESTS',
   'SAFETY_COMPLIANCE',
   'CONTRACTS_MANAGEMENT',
+  'TECHNICAL',
   'PRODUCTION_DASHBOARD',
   'ADMINISTRATION',
 ];

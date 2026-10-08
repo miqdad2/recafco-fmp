@@ -12,6 +12,8 @@ export interface UserSummary {
   role: { code: string; name: string };
   isActive: boolean;
   mustChangePassword: boolean;
+  /** FMP-ACCESS-01 — explicit Full Platform Access display mode (presentation only; grants no permissions). */
+  fullPlatformAccess?: boolean;
   isLocked: boolean;
   lastLoginAt: string | null;
   departmentId: string | null;
@@ -199,6 +201,12 @@ export const usersApi = {
     apiFetch<null>(`/administration/users/${id}/module-access/${module}`, accessToken, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    }),
+
+  setPlatformAccess: (accessToken: string, id: string, fullPlatformAccess: boolean) =>
+    apiFetch<UserSummary>(`/administration/users/${id}/platform-access`, accessToken, {
+      method: 'PUT',
+      body: JSON.stringify({ fullPlatformAccess }),
     }),
 
   dashboard: (accessToken: string) =>

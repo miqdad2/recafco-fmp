@@ -43,7 +43,8 @@ export const MODULE_CATALOG: ModuleCatalogEntry[] = [
     showManagerStaffSplit: true,
   },
   {
-    code: 'CONTRACTS_MANAGEMENT',
+    // FMP-ACCESS-02 — Technical is its own module (technical.read), no longer a Contract Management entry point.
+    code: 'TECHNICAL',
     slug: 'technical',
     name: 'Technical',
     shortDescription: 'Create users who handle drawings, submissions, calculations, and technical approvals.',

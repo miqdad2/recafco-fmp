@@ -3121,3 +3121,32 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 - New User wizard step 1 asks for **Full Name \***, **Email \*** (`name@recafco.com`, required, validated) and **Employee Number** (`EMP-001`). No Username field or username validation text; the API generates the internal username from the email.
 - Created-user screen shows **Login Email** and **Temporary Password** (no username). "Copy Credentials" copies Login Email, Temporary Password, Role and Module Access via `buildCredentialsText` (`_components/credentials-text.ts`).
 - Users list columns: Full Name, Email, Role, Status, Last login, Actions. Search matches name, email, username and employee number.
+
+## Attachment View link + required-field markers (FMP-TECH-06)
+- Path: `apps/web/src/app/(protected)/technical/_lib/attachment-helpers.ts`; route handler `.../drawing-received/attachments/[attachmentId]/open/route.ts`
+- Purpose: "View" opens the inline file-serving route in a new tab (no frontend page — replaces the FMP-TECH-05 viewer page); TIFF rows show a small preview-may-not-work hint next to Download. `Field` in `drawing-received-form.tsx` takes `required` to render a `*`; missing-field errors render friendly labels via `friendlyMissingLabels()`.
+
+## Edit Contract Details modal (FMP-CONTRACT-03)
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-edit-details-action.tsx` (+ `_lib/contract-basic-details-helpers.ts`)
+- Purpose: secondary-style button + modal on Contract Overview (same overlay shape as `ContractCancelAction`) for safe basic fields only; helper text states BOQ/workflow/payments/progress are unchanged. Required `*`: Job Order No, Project / Contract Name, Client / Employer.
+- FMP-CONTRACT-04: the Edit Contract Details modal also has an optional Schedule Status select (`SCHEDULE_STATUS_OPTIONS`, placeholder "Select schedule status").
+
+## Access Mode, sidebar grouping and Module Access (FMP-ACCESS-01)
+- Paths: `apps/web/src/app/(protected)/_lib/access-mode.ts` (derivation, landing path, sidebar layout, shared module names, Related Workflows links); `administration/users/_components/access-mode-config.ts` (template suggestions, wizard visible modules, step validation, Edit User grouping).
+- Access Mode (Single Module / Multi-Module / Full Platform) is **presentation only**, derived from permission codes plus the one stored flag `User.fullPlatformAccess`. It never grants a permission and is not Super Admin.
+- New User wizard step 3: template cards show Suggested Access Mode / Module Access / Role; an **Access Mode** selector (locked for Executive Manager, Viewer, Platform Admin, Erection Manager); Single → one **Primary Module**; Multi → **Modules** checkboxes (nothing pre-ticked); Full Platform → explicit, needs `access_scope.manage_all_departments`. Step 4 shows scope rows only for the modules the mode covers. Review and Copy Credentials show the Access Mode.
+- Edit User → Module Access: **Access Mode** card (+ Grant/Remove Full Platform Access button for admins who may grant All Departments), then **Primary Module**, **Related Workflow Access**, **Modules**, **Other Module Access**, **Administration Access** (only if admin permission or a non-default stored row), and a collapsed "Modules this role does not grant". Every stored row is still shown somewhere.
+- Sidebar: Contract Management Single Module users get a **Contract Management** group and a **Related Workflows** group (in execution order: Technical → Production & Planning → Storage Yard & Delivery → Erection → Schedule Planning; Production, Storage and Piece Erection show only with production.read, storage_delivery.read, erection.read). Other single-module users get only their module. Full Platform / Multi-Module / Admin users get the main sidebar whose first link is **Factory Operations Control Center**. Executive sidebar unchanged.
+- `/dashboard` redirects a Single Module user to their module dashboard (`MODULE_LANDING_PATH`); everyone else stays on the Control Center.
+- Module names used everywhere: Task Management, Incident Management, Maintenance Management, Safety & Compliance, Contract Management, Production & Planning, Administration (breadcrumb/page titles in factory-tasks, maintenance, production updated).
+
+## Full Platform Access = view all modules (FMP-ACCESS-01C)
+- A Full Platform Access user gets the executive-style full sidebar (Control Center landing, Contract Management, Estimation, Technical, Production & Planning, Storage Yard & Delivery, Erection, Quality Control, Safety & Compliance, Incident Management, Maintenance Management, Task Management, Schedule Planning). Administration appears only with real admin permissions.
+- Single Module Contract Manager Related Workflows now also include **Task Management** (`tasks.read`) before Schedule Planning; every gated link still needs its own read permission.
+- Read-only banner (`shouldShowReadOnlyBanner`, shown in `app-shell.tsx`): "You have full platform view access. Some actions are hidden because your role does not include update permission for this module." Only for Full Platform users, on a module page, when the role has no write-type permission in that module.
+
+## Technical as its own module (FMP-ACCESS-02)
+- Technical has its own permissions (technical.read / update / manage) and roles (Technical Staff, Technical Manager). Contract Management codes still open the same screens, so Contract Managers and Full Platform Access users are unaffected (`technical/_lib/technical-permissions.ts` on the web, `technical/technical-permissions.ts` on the API - keep in sync).
+- A Technical-only user is Single Module Access with primary module **Technical**: /dashboard sends them to /technical, the sidebar shows a **Technical** section with one **Dashboard** link (no Contract Management workspace, no Schedule Planning).
+- User creation: **Technical** is a Primary Module / Modules choice (Module Staff suggests Technical Staff, Module Manager suggests Technical Manager). Its department scope is stored on the Contract Management scope row, shown under the name **Technical**; the Edit User tab shows the same.
+- Technical write buttons need technical.update (or the older contracts.update / contracts.workflow_update); deleting others files needs technical.manage / contracts.manage.

@@ -3,7 +3,6 @@ import { TechnicalBoqConfirmationService } from './technical-boq-confirmation.se
 import { SaveBoqDrawingConfirmationDto } from './dto/boq-drawing-confirmation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../common/guards/permission.guard';
-import { Permissions } from '../common/decorators/permissions.decorator';
 import { AnyPermission } from '../common/decorators/any-permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { getRequestId } from '@recafco/observability';
@@ -26,14 +25,14 @@ export class TechnicalBoqConfirmationController {
   constructor(private readonly service: TechnicalBoqConfirmationService) {}
 
   @Get()
-  @Permissions('contracts.read')
+  @AnyPermission('technical.read', 'contracts.read')
   async list(@Param('contractId', uuid) contractId: string, @CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
     return { data: await this.service.list(contractId, actor), meta: meta(), error: null };
   }
 
   @Post()
   @HttpCode(201)
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async create(
     @Param('contractId', uuid) contractId: string,
     @Body() dto: SaveBoqDrawingConfirmationDto,
@@ -43,7 +42,7 @@ export class TechnicalBoqConfirmationController {
   }
 
   @Patch(':id')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async updateDraft(
     @Param('contractId', uuid) contractId: string,
     @Param('id', uuid) id: string,
@@ -54,7 +53,7 @@ export class TechnicalBoqConfirmationController {
   }
 
   @Post(':id/revise')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async revise(
     @Param('contractId', uuid) contractId: string,
     @Param('id', uuid) id: string,
@@ -65,7 +64,7 @@ export class TechnicalBoqConfirmationController {
   }
 
   @Post(':id/cancel')
-  @AnyPermission('contracts.update', 'contracts.workflow_update')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async cancel(
     @Param('contractId', uuid) contractId: string,
     @Param('id', uuid) id: string,

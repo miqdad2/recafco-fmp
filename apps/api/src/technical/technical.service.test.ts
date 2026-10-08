@@ -659,6 +659,51 @@ describe('TechnicalService — completeDrawingReceived', () => {
     });
   });
 
+  const MINIMAL_DTO: SaveDrawingReceivedDto = {
+    receivedDate: '2026-09-01',
+    receivedFrom: 'CLIENT' as never,
+    drawingType: 'SHOP_DRAWING' as never,
+    drawingReferenceNo: 'DR-100',
+    revisionNo: 'R0',
+    numberOfSheets: 5,
+  };
+
+  it('succeeds with only the 6 required fields (no description/area/internal ref/assignee/review start, no attachments)', async () => {
+    const service = buildService();
+
+    const result = await service.completeDrawingReceived('contract-1', MINIMAL_DTO, ACTOR_MANAGER);
+
+    expect(mockWorkflowUpdate).toHaveBeenCalledWith({
+      where: { id: 'wf-1' },
+      data: { currentStage: TechnicalStage.SD_CALCULATION_SUBMISSION },
+    });
+    expect(result.nextStage).toBe(TechnicalStage.GETTING_APPROVAL);
+  });
+
+  it.each(['drawingDescription', 'relatedAreaPackage', 'internalReferenceNo', 'assignedToUserId', 'plannedReviewStart'] as const)(
+    'succeeds without optional %s',
+    async (field) => {
+      const service = buildService();
+      const dto = { ...FULL_DTO };
+      delete dto[field];
+
+      await expect(service.completeDrawingReceived('contract-1', dto, ACTOR_MANAGER)).resolves.toBeDefined();
+    },
+  );
+
+  it.each(['receivedDate', 'receivedFrom', 'drawingType', 'drawingReferenceNo', 'revisionNo', 'numberOfSheets'] as const)(
+    'fails when required %s is missing, with a friendly-label message',
+    async (field) => {
+      const service = buildService();
+      const dto = { ...MINIMAL_DTO };
+      delete dto[field];
+
+      await expect(service.completeDrawingReceived('contract-1', dto, ACTOR_MANAGER)).rejects.toMatchObject({
+        response: expect.objectContaining({ details: { missing: [field] }, message: expect.not.stringContaining(field) }),
+      });
+    },
+  );
+
   it('rejects a received date in the future', async () => {
     const service = buildService();
     await expect(
@@ -729,6 +774,17 @@ describe('TechnicalService — attachments', () => {
     await expect(
       service.createAttachment('contract-1', { buffer: Buffer.from(''), originalname: 'x.exe', mimetype: 'application/x-msdownload', size: 10 }, ACTOR_MANAGER),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('createAttachment does not reject a .tif upload as an unsupported type', async () => {
+    const service = buildService();
+    mockWorkflowFindUnique.mockResolvedValue(WORKFLOW_ROW);
+
+    // Passes the type check; any later failure comes from unmocked storage/DB, never the type gate.
+    const result = await service
+      .createAttachment('contract-1', { buffer: Buffer.from('II* '), originalname: 'scan.tif', mimetype: 'image/tiff', size: 10 }, ACTOR_MANAGER)
+      .catch((e: unknown) => e);
+    expect((result as { response?: { code?: string } })?.response?.code).not.toBe('TECHNICAL_ATTACHMENT_INVALID_TYPE');
   });
 
   it('createAttachment rejects an oversized file', async () => {

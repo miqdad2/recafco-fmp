@@ -57,7 +57,7 @@ export default async function EditMrPage({ params }: PageProps): Promise<React.J
     <div className="min-h-full p-8">
       <div className="max-w-3xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Maintenance Requests', href: '/maintenance' },
+          { label: 'Maintenance Management', href: '/maintenance' },
           { label: mr.referenceNumber, href: `/maintenance/${mr.id}` },
           { label: 'Edit' },
         ]} />

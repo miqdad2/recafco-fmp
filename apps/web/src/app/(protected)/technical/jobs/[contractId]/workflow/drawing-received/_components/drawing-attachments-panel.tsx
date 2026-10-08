@@ -2,10 +2,11 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Download, Loader2, Paperclip, Upload, X } from 'lucide-react';
+import { Download, Eye, Loader2, Paperclip, Upload, X } from 'lucide-react';
 import { uploadDrawingAttachmentAction, deleteDrawingAttachmentAction } from '../../../../../actions';
 import { formatDateTime, formatFileSize } from '../../../../../_lib/technical-format';
 import type { TechnicalAttachment } from '@/lib/technical-api';
+import { drawingAttachmentViewHref, isTiffAttachment, TIFF_PREVIEW_HELPER_TEXT, TECHNICAL_ACCEPTED_FILE_TYPES_TEXT } from '../../../../../_lib/attachment-helpers';
 
 interface Props {
   contractId: string;
@@ -79,7 +80,7 @@ export function DrawingAttachmentsPanel({ contractId, attachments, currentUserId
   // adding another card/section (the ticket's own exact wording for the
   // backend's real allow-list — see TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_
   // MIME_TYPES's own error-message text, kept identical here).
-  const acceptedTypes = 'Accepted: PDF, DOC/DOCX, XLS/XLSX, DWG/DXF, JPG/PNG/WEBP';
+  const acceptedTypes = TECHNICAL_ACCEPTED_FILE_TYPES_TEXT;
 
   // FMP-TECH-05B — when empty, a single compact dashed strip carries both
   // the "no files" text and the upload control side by side, instead of a
@@ -122,9 +123,22 @@ export function DrawingAttachmentsPanel({ contractId, attachments, currentUserId
                   <p className="text-xs text-text-muted">
                     {formatFileSize(a.fileSize)} · Uploaded · {a.uploadedByUser.displayName} · {formatDateTime(a.createdAt)}
                   </p>
+                  {isTiffAttachment(a) && <p className="text-[11px] text-text-muted">{TIFF_PREVIEW_HELPER_TEXT}</p>}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3">
+                {isTiffAttachment(a) && (
+                  <a
+                    href={drawingAttachmentViewHref(contractId, a.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
+                    title="View"
+                  >
+                    <Eye className="size-4" aria-hidden="true" />
+                    View
+                  </a>
+                )}
                 <a
                   href={`/technical/jobs/${contractId}/workflow/drawing-received/attachments/${a.id}/download`}
                   className="inline-flex items-center gap-1 text-sm text-accent hover:underline"

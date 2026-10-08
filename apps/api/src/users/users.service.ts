@@ -40,6 +40,7 @@ const USER_SELECT = {
   },
   isActive: true,
   mustChangePassword: true,
+  fullPlatformAccess: true,
   failedLoginAttempts: true,
   lockedUntil: true,
   lastLoginAt: true,
@@ -62,6 +63,7 @@ type UserRecord = {
   role: { code: string; name: string };
   isActive: boolean;
   mustChangePassword: boolean;
+  fullPlatformAccess: boolean;
   failedLoginAttempts: number;
   lockedUntil: Date | null;
   lastLoginAt: Date | null;
@@ -275,6 +277,29 @@ export class UsersService {
   async findOne(id: string, actor?: AuthUser): Promise<UserSummary> {
     const user = await this.findOneOrThrow(id, actor);
     return toSummary(user);
+  }
+
+  /**
+   * FMP-ACCESS-01 — turns the explicit "Full Platform Access" display mode on/off. It only
+   * decides the landing page and sidebar shape; it never changes the role, its permissions
+   * or any department scope, so it cannot grant Super Admin or any action permission.
+   */
+  async setFullPlatformAccess(id: string, value: boolean, actor: AuthUser): Promise<UserSummary> {
+    const existing = await this.findOneOrThrow(id, actor);
+    if (existing.fullPlatformAccess === value) return toSummary(existing);
+    const updated = await this.db.getClient().$transaction(async (tx) => {
+      const u = await tx.user.update({ where: { id }, data: { fullPlatformAccess: value }, select: USER_SELECT });
+      await tx.securityAuditEvent.create({
+        data: {
+          event: 'user_full_platform_access_changed',
+          userId: id,
+          actorId: actor.id,
+          metadata: { from: existing.fullPlatformAccess, to: value },
+        },
+      });
+      return u;
+    });
+    return toSummary(updated);
   }
 
   async update(id: string, dto: UpdateUserDto, actor: AuthUser): Promise<UserSummary> {

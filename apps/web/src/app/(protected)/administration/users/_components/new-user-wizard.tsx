@@ -10,6 +10,25 @@ import { ModuleAccessEditor, ALL_MODULES } from './module-access-editor';
 import { MODULE_LABELS, SCOPE_LABELS } from './scope-utils';
 import type { AccessTemplate } from './access-template';
 import { buildCredentialsText } from './credentials-text';
+import {
+  ACCESS_MODE_HELPERS,
+  ACCESS_MODE_LABELS,
+  deriveAccessMode,
+  relatedWorkflowsFor,
+  type AccessMode,
+} from '../../../_lib/access-mode';
+import {
+  WIZARD_MODULE_CHOICES,
+  scopeModuleFor,
+  scopeRowLabelOverrides,
+  suggestedRoleCode,
+  wizardModuleLabel,
+  type WizardModule,
+  TEMPLATE_SUGGESTIONS,
+  isAccessStepComplete,
+  shouldSendFullPlatformFlag,
+  wizardVisibleModules,
+} from './access-mode-config';
 import type { CreateWithAccessState } from '../actions';
 
 export type { AccessTemplate } from './access-template';
@@ -29,7 +48,7 @@ interface Props {
   plantApiError?: boolean;
   locApiError?: boolean;
   /** CM-42 — carried in from /administration/users/new?module=<slug> (Users page module cards). Only affects initial state — the Module dropdown and Access Template stay fully editable, exactly as if picked by hand. */
-  preselectedModule?: ModuleIdentifier;
+  preselectedModule?: WizardModule;
   /** FMP-UI-02 — display name for the banner shown alongside preselectedModule, so a card whose slug differs from the underlying module's own name (e.g. "Technical"/"Erection", both really Contract Management) shows the label the admin actually clicked, not the generic module name. Falls back to MODULE_LABELS[preselectedModule] when omitted. */
   preselectedModuleLabel?: string;
   /** FMP-UI-02 — carried in from ?template=<value> (module-catalog.ts's presetTemplate, or the standalone Executive / Management card link). Applied once on mount via the same handleTemplateChange() path a manual radio click would use. */
@@ -78,16 +97,16 @@ const TEMPLATE_OPTIONS: { value: AccessTemplate; label: string; helper: string }
   // existing roles first); EXECUTIVE_MANAGER is a new additive role (all 6 operational modules'
   // own read/write permissions, withholding users.*/roles.*/org.*/audit.*/access_scope.* — see
   // that role's own migration) so it is deliberately NOT the same as Platform Admin below.
-  { value: 'EXECUTIVE_MANAGER', label: 'Executive Manager', helper: 'Higher management — full operational access across every module (not system administration).' },
-  { value: 'MODULE_MANAGER', label: 'Module Manager', helper: 'For managers responsible for a module or department.' },
-  { value: 'MODULE_STAFF', label: 'Module Staff', helper: 'For normal users working in one module.' },
+  { value: 'EXECUTIVE_MANAGER', label: 'Executive Manager', helper: 'Full platform access. View and manage operations across modules based on the assigned role (not system administration).' },
+  { value: 'MODULE_MANAGER', label: 'Module Manager', helper: 'Manage one selected module.' },
+  { value: 'MODULE_STAFF', label: 'Module Staff', helper: 'Work inside one selected module.' },
   // CM-71H.1 — no dedicated "Erection Manager" role exists (see TEMPLATE_ROLE_CODE below); this is a
   // clearly-labelled access template, not a new role/permission, per that unit's own "if the existing
   // role model does not support a separate role, create a safe access template" instruction.
   { value: 'ERECTION_MANAGER', label: 'Erection Manager / Workflow Owner', helper: 'Contract Management — assigned to own and update a specific contract’s Erection Workflow.' },
-  { value: 'MULTI_MODULE', label: 'Multi-Module User', helper: 'For managers or staff who need more than one module.' },
-  { value: 'VIEWER', label: 'Viewer / Read-only', helper: 'Monitor dashboards and records without create, update, or delete access.' },
-  { value: 'PLATFORM_ADMIN', label: 'Platform Admin', helper: 'For IT/admin users who manage users, roles or configuration.' },
+  { value: 'MULTI_MODULE', label: 'Multi-Module User', helper: 'Work across selected modules.' },
+  { value: 'VIEWER', label: 'Viewer / Read-only', helper: 'View dashboards and records without create, update or delete.' },
+  { value: 'PLATFORM_ADMIN', label: 'Platform Admin', helper: 'Manage users, roles and configuration.' },
   { value: 'CUSTOM', label: 'Custom', helper: 'Manually configure role, modules and scopes.' },
 ];
 
@@ -130,9 +149,10 @@ const EXECUTIVE_MANAGER_MODULES: ModuleIdentifier[] = [
  * mapping for Contract Manager). Every other module has no auto-mapped
  * role — this correctly resolves to '' for them, same as picking it by hand.
  */
-function preselectedRoleId(mod: ModuleIdentifier | undefined, roles: RoleWithPerms[]): string {
-  if (!mod || mod !== 'CONTRACTS_MANAGEMENT') return '';
-  const roleCode = TEMPLATE_ROLE_CODE['MODULE_STAFF'];
+function preselectedRoleId(mod: WizardModule | undefined, roles: RoleWithPerms[]): string {
+  if (!mod) return '';
+  // FMP-ACCESS-02 — Contract Management and Technical each have their own Staff role.
+  const roleCode = suggestedRoleCode('MODULE_STAFF', mod);
   if (!roleCode) return '';
   return roles.find((r) => r.isActive && r.code === roleCode)?.id ?? '';
 }
@@ -202,8 +222,9 @@ interface ModuleAccessSummaryEntry {
 function buildModuleAccessSummary(
   scopes: Partial<Record<ModuleIdentifier, DepartmentAccessScope>>,
   deptIdsByModule: Partial<Record<ModuleIdentifier, string[]>>,
+  visibleModules: ModuleIdentifier[],
 ): ModuleAccessSummaryEntry[] {
-  return ALL_MODULES.filter((m) => scopes[m] !== undefined).map((m) => ({
+  return ALL_MODULES.filter((m) => visibleModules.includes(m) && scopes[m] !== undefined).map((m) => ({
     module: m,
     scope: scopes[m]!,
     deptCount: deptIdsByModule[m]?.length ?? 0,
@@ -271,12 +292,16 @@ export function NewUserWizard({
 
   // Step 3 — Access Template
   const [template, setTemplate] = useState<AccessTemplate>('MODULE_STAFF');
-  const [targetModule, setTargetModule] = useState<ModuleIdentifier | ''>(preselectedModule ?? '');
+  const [targetModule, setTargetModule] = useState<WizardModule | ''>(preselectedModule ?? '');
+  // FMP-ACCESS-01 — Access Mode is chosen explicitly. The default template (Module Staff) suggests
+  // Single Module Access; Full Platform Access is never selected unless a template/admin picks it.
+  const [accessMode, setAccessMode] = useState<AccessMode>(TEMPLATE_SUGGESTIONS['MODULE_STAFF'].mode);
+  const [multiModules, setMultiModules] = useState<WizardModule[]>(() => (preselectedModule ? [preselectedModule] : []));
   const [selectedRoleId, setSelectedRoleId] = useState(() => preselectedRoleId(preselectedModule, roles));
 
   // Step 4 — Module Access (lifted out of ModuleAccessEditor so Review can summarize it)
   const [moduleScopes, setModuleScopes] = useState<Partial<Record<ModuleIdentifier, DepartmentAccessScope>>>(
-    () => (preselectedModule ? { [preselectedModule]: 'OWN_DEPARTMENT' } : {}),
+    () => (preselectedModule ? { [scopeModuleFor(preselectedModule)]: 'OWN_DEPARTMENT' } : {}),
   );
   const [moduleDeptIds, setModuleDeptIds] = useState<Partial<Record<ModuleIdentifier, string[]>>>({});
 
@@ -296,8 +321,21 @@ export function NewUserWizard({
   const contractLegacyRole = activeRoles.find((r) => r.code === 'CONTRACT_MANAGEMENT_USER');
   const viewerRole = activeRoles.find((r) => r.code === 'VIEWER');
 
+  function handleMultiModuleToggle(mod: WizardModule, checked: boolean): void {
+    setMultiModules((prev) => (checked ? (prev.includes(mod) ? prev : [...prev, mod]) : prev.filter((m) => m !== mod)));
+    const row = scopeModuleFor(mod);
+    if (checked) setModuleScopes((prev) => (prev[row] !== undefined ? prev : { ...prev, [row]: 'OWN_DEPARTMENT' }));
+  }
+
+  function handleAccessModeChange(next: AccessMode): void {
+    setAccessMode(next);
+    // Switching to Multi-Module starts from the module already picked (if any) — nothing else is pre-selected.
+    if (next === 'MULTI_MODULE' && multiModules.length === 0 && targetModule) handleMultiModuleToggle(targetModule, true);
+  }
+
   function handleTemplateChange(next: AccessTemplate): void {
     setTemplate(next);
+    setAccessMode(TEMPLATE_SUGGESTIONS[next].mode);
     if (next === 'PLATFORM_ADMIN') {
       setTargetModule('');
       const admin = activeRoles.find((r) => r.code === 'ADMIN');
@@ -362,34 +400,42 @@ export function NewUserWizard({
     if (preselectedTemplate) handleTemplateChange(preselectedTemplate);
   }, []);
 
-  function handleTargetModuleChange(mod: ModuleIdentifier | ''): void {
+  function handleTargetModuleChange(mod: WizardModule | ''): void {
     setTargetModule(mod);
-    const roleCode = mod ? TEMPLATE_ROLE_CODE[template] : undefined;
-    const match = mod === 'CONTRACTS_MANAGEMENT' && roleCode ? activeRoles.find((r) => r.code === roleCode) : undefined;
+    const roleCode = mod ? suggestedRoleCode(template, mod) : undefined;
+    const match = roleCode ? activeRoles.find((r) => r.code === roleCode) : undefined;
     setSelectedRoleId(match?.id ?? '');
     if (mod) {
+      const row = scopeModuleFor(mod);
       // Pre-seed the working module's scope so it shows up in the Review summary
       // and so the "role selected but module access never configured" warning
       // doesn't fire for the module the template itself just picked.
-      setModuleScopes((prev) => (prev[mod] !== undefined ? prev : { ...prev, [mod]: 'OWN_DEPARTMENT' }));
+      setModuleScopes((prev) => (prev[row] !== undefined ? prev : { ...prev, [row]: 'OWN_DEPARTMENT' }));
     }
   }
 
-  const emphasizedModule =
-    template === 'ERECTION_MANAGER'
-      ? 'CONTRACTS_MANAGEMENT'
-      : (template === 'MODULE_STAFF' || template === 'MODULE_MANAGER') && targetModule ? targetModule : undefined;
-
   const selectedRole = roles.find((r) => r.id === selectedRoleId);
+  const suggestion = TEMPLATE_SUGGESTIONS[template];
+  const roleAlreadyFullPlatform =
+    deriveAccessMode((selectedRole?.permissions ?? []).map((p) => p.code), false).fullPlatformSource === 'role';
+  const visibleModules = wizardVisibleModules({ mode: accessMode, template, targetModule, multiModules });
+  const sendFullPlatformFlag = shouldSendFullPlatformFlag(accessMode, roleAlreadyFullPlatform);
+  const primaryModuleForRelated = template === 'ERECTION_MANAGER' ? 'CONTRACTS_MANAGEMENT' : targetModule || null;
+  const relatedWorkflows = accessMode === 'MULTI_MODULE' ? [] : relatedWorkflowsFor(primaryModuleForRelated);
+  const accessModeSummaryText =
+    accessMode === 'SINGLE_MODULE' && targetModule
+      ? `${ACCESS_MODE_LABELS[accessMode]} — ${wizardModuleLabel(targetModule)}`
+      : accessMode === 'MULTI_MODULE'
+        ? `${ACCESS_MODE_LABELS[accessMode]} — ${multiModules.map((m) => wizardModuleLabel(m)).join(', ') || 'no modules selected'}`
+        : ACCESS_MODE_LABELS[accessMode];
   const selectedDepartment = departments.find((d) => d.id === departmentId);
   const selectedPlant = plants.find((p) => p.id === selectedPlantId);
   const filteredLocations = selectedPlantId ? locations.filter((l) => !l.plantId || l.plantId === selectedPlantId) : locations;
   const selectedLocation = locations.find((l) => l.id === locationId);
 
-  const moduleAccessSummary = useMemo(
-    () => buildModuleAccessSummary(moduleScopes, moduleDeptIds),
-    [moduleScopes, moduleDeptIds],
-  );
+  const moduleAccessSummary = buildModuleAccessSummary(moduleScopes, moduleDeptIds, visibleModules);
+  const rowLabelOverrides = scopeRowLabelOverrides({ mode: accessMode, template, targetModule, multiModules });
+  const rowLabel = (m: ModuleIdentifier): string => rowLabelOverrides[m] ?? MODULE_LABELS[m] ?? m;
   const warnings = useMemo(
     () => computeAccessWarnings({ template, selectedRole, moduleScopes }),
     [template, selectedRole, moduleScopes],
@@ -397,7 +443,15 @@ export function NewUserWizard({
 
   const emailValid = EMAIL_PATTERN.test(email.trim());
   const canProceedFromAccount = emailValid && displayName.trim().length > 0;
-  const canProceedFromTemplate = selectedRoleId !== '';
+  const canProceedFromTemplate = isAccessStepComplete({
+    mode: accessMode,
+    template,
+    targetModule,
+    multiModules,
+    selectedRoleId,
+    canGrantFullPlatform: canManageAll,
+    roleAlreadyFullPlatform,
+  });
   const stepCanProceed = [canProceedFromAccount, true, canProceedFromTemplate, true, true];
 
   function goNext(): void {
@@ -463,6 +517,10 @@ export function NewUserWizard({
             <p className="text-sm text-text-primary">{selectedRole ? roleOptionLabel(selectedRole) : 'Viewer (default)'}</p>
           </div>
           <div>
+            <p className="text-xs text-text-secondary mb-1">Access Mode</p>
+            <p className="text-sm text-text-primary">{accessModeSummaryText}</p>
+          </div>
+          <div>
             <p className="text-xs text-text-secondary mb-1">Module access</p>
             {moduleAccessSummary.length === 0 ? (
               <p className="text-sm text-text-muted">All modules default to My Department.</p>
@@ -470,7 +528,7 @@ export function NewUserWizard({
               <ul className="text-sm text-text-primary space-y-0.5">
                 {moduleAccessSummary.map((entry) => (
                   <li key={entry.module}>
-                    {MODULE_LABELS[entry.module]}: {SCOPE_LABELS[entry.scope]}
+                    {rowLabel(entry.module)}: {SCOPE_LABELS[entry.scope]}
                     {entry.scope === 'SELECTED_DEPARTMENTS' ? ` (${entry.deptCount})` : ''}
                   </li>
                 ))}
@@ -482,9 +540,10 @@ export function NewUserWizard({
               email: state.created.email,
               tempPassword: state.created.tempPassword,
               roleLabel: selectedRole ? roleOptionLabel(selectedRole) : 'Viewer (default)',
+              accessModeLabel: accessModeSummaryText,
               moduleAccessLines: moduleAccessSummary.map(
                 (e) =>
-                  `${MODULE_LABELS[e.module]}: ${SCOPE_LABELS[e.scope]}${e.scope === 'SELECTED_DEPARTMENTS' ? ` (${e.deptCount})` : ''}`,
+                  `${rowLabel(e.module)}: ${SCOPE_LABELS[e.scope]}${e.scope === 'SELECTED_DEPARTMENTS' ? ` (${e.deptCount})` : ''}`,
               ),
             })}
             label="Copy Credentials"
@@ -521,7 +580,7 @@ export function NewUserWizard({
 
       {preselectedModule && (
         <p className="mb-5 rounded-md bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
-          Creating a user for {preselectedModuleLabel ?? MODULE_LABELS[preselectedModule]}. The module is already
+          Creating a user for {preselectedModuleLabel ?? wizardModuleLabel(preselectedModule)}. The module is already
           selected in Access Template below — change it there if needed.
         </p>
       )}
@@ -726,20 +785,97 @@ export function NewUserWizard({
               ))}
             </div>
 
-            {(template === 'MODULE_STAFF' || template === 'MODULE_MANAGER') && (
+            {/* FMP-ACCESS-01 — what the chosen template suggests, in plain words. */}
+            <dl className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-md border border-border bg-surface-secondary/40 px-3 py-2.5 text-xs">
+              <div>
+                <dt className="text-text-muted">Suggested Access Mode</dt>
+                <dd className="mt-0.5 font-medium text-text-primary">{ACCESS_MODE_LABELS[suggestion.mode]}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Suggested Module Access</dt>
+                <dd className="mt-0.5 font-medium text-text-primary">{suggestion.moduleText}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Suggested Role</dt>
+                <dd className="mt-0.5 font-medium text-text-primary">{suggestion.roleText}</dd>
+              </div>
+            </dl>
+
+            {/* FMP-ACCESS-01 — Access Mode. Templates whose role already decides it show it as fixed. */}
+            <fieldset className="mt-5">
+              <legend className="text-sm font-semibold text-text-primary mb-2">Access Mode</legend>
+              {suggestion.modeLocked ? (
+                <p className="rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-text-primary">
+                  <span className="font-medium">{ACCESS_MODE_LABELS[accessMode]}</span>
+                  <span className="block text-xs text-text-muted mt-0.5">
+                    Set by the {TEMPLATE_OPTIONS.find((o) => o.value === template)?.label} template. {ACCESS_MODE_HELPERS[accessMode]}
+                  </span>
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {(['SINGLE_MODULE', 'MULTI_MODULE', 'FULL_PLATFORM'] as AccessMode[]).map((m) => {
+                    const disabled = m === 'FULL_PLATFORM' && !canManageAll && !roleAlreadyFullPlatform;
+                    return (
+                      <label
+                        key={m}
+                        className={[
+                          'flex items-start gap-2 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                          disabled ? 'cursor-not-allowed opacity-50 border-border' : 'cursor-pointer',
+                          !disabled && accessMode === m
+                            ? 'border-accent bg-accent/5 text-text-primary font-medium'
+                            : !disabled
+                              ? 'border-border text-text-secondary hover:border-border-strong'
+                              : '',
+                        ].join(' ')}
+                      >
+                        <input
+                          type="radio"
+                          name="accessMode"
+                          value={m}
+                          checked={accessMode === m}
+                          disabled={disabled}
+                          onChange={() => handleAccessModeChange(m)}
+                          className="mt-0.5 text-accent focus:ring-accent"
+                        />
+                        <span>
+                          <span className="block">{ACCESS_MODE_LABELS[m]}</span>
+                          <span className="block text-xs text-text-muted font-normal mt-0.5">{ACCESS_MODE_HELPERS[m]}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {!suggestion.modeLocked && !canManageAll && !roleAlreadyFullPlatform && (
+                <p className="mt-2 text-xs text-text-muted">
+                  Full Platform Access can only be granted by an administrator who may also grant All Departments access.
+                </p>
+              )}
+              {accessMode === 'FULL_PLATFORM' && (
+                <p className="mt-2 text-xs text-info bg-info-light border border-info/20 rounded-md px-3 py-2">
+                  {roleAlreadyFullPlatform
+                    ? 'This role already covers every module, so no extra setting is needed.'
+                    : 'This user will land on the Factory Operations Control Center with the main platform sidebar. Actions still follow the role — this does not make them an administrator, and modules the role does not grant stay hidden.'}
+                </p>
+              )}
+            </fieldset>
+
+            {(template === 'MODULE_STAFF' || template === 'MODULE_MANAGER' || (template === 'CUSTOM' && accessMode === 'SINGLE_MODULE')) &&
+              accessMode !== 'MULTI_MODULE' && (
               <div className="mt-4">
                 <label htmlFor="targetModule" className="block text-sm font-medium text-text-primary mb-1">
-                  Module <span aria-hidden="true" className="text-error">*</span>
+                  Primary Module{' '}
+                  {accessMode === 'SINGLE_MODULE' && <span aria-hidden="true" className="text-error">*</span>}
                 </label>
                 <select
                   id="targetModule"
                   className={selectCls}
                   value={targetModule}
-                  onChange={(e) => handleTargetModuleChange(e.target.value as ModuleIdentifier | '')}
+                  onChange={(e) => handleTargetModuleChange(e.target.value as WizardModule | '')}
                 >
                   <option value="">— Select a module —</option>
-                  {ALL_MODULES.map((m) => (
-                    <option key={m} value={m}>{MODULE_LABELS[m]}</option>
+                  {(template === 'CUSTOM' ? [...WIZARD_MODULE_CHOICES, 'ADMINISTRATION' as const] : WIZARD_MODULE_CHOICES).map((m) => (
+                    <option key={m} value={m}>{wizardModuleLabel(m)}</option>
                   ))}
                 </select>
 
@@ -755,12 +891,67 @@ export function NewUserWizard({
                   </div>
                 )}
 
-                {targetModule && targetModule !== 'CONTRACTS_MANAGEMENT' && (
+                {targetModule === 'TECHNICAL' && (
+                  <div className="mt-3 text-xs text-info bg-info-light border border-info/20 rounded-md px-3 py-2">
+                    <p className="font-medium mb-1">Recommended roles for Technical</p>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      <li>Technical Staff — view and update Technical workflow steps</li>
+                      <li>Technical Manager — Technical Staff plus manager-level Technical actions</li>
+                    </ul>
+                    <p className="mt-1.5">
+                      This user lands on the Technical dashboard and does not get the Contract Management workspace.
+                      Department scope is set in Module Access (stored with the contract records Technical works on).
+                    </p>
+                  </div>
+                )}
+
+                {targetModule && targetModule !== 'CONTRACTS_MANAGEMENT' && targetModule !== 'TECHNICAL' && (
                   <p className="mt-3 text-xs text-warning bg-warning-light border border-warning/30 rounded-md px-3 py-2">
-                    No dedicated staff/manager role exists yet for {MODULE_LABELS[targetModule]}. Select a role
+                    No dedicated staff/manager role exists yet for {wizardModuleLabel(targetModule)}. Select a role
                     manually below.
                   </p>
                 )}
+              </div>
+            )}
+
+            {accessMode === 'MULTI_MODULE' && !suggestion.modeLocked && (
+              <fieldset className="mt-4">
+                <legend className="text-sm font-medium text-text-primary mb-1">
+                  Modules <span aria-hidden="true" className="text-error">*</span>
+                </legend>
+                <p className="text-xs text-text-muted mb-2">
+                  Only the modules ticked here appear in Module Access. Nothing else is selected for you.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(template === 'CUSTOM' ? [...WIZARD_MODULE_CHOICES, 'ADMINISTRATION' as const] : WIZARD_MODULE_CHOICES).map((m) => (
+                    <label key={m} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:border-border-strong">
+                      <input
+                        type="checkbox"
+                        checked={multiModules.includes(m)}
+                        onChange={(e) => handleMultiModuleToggle(m, e.target.checked)}
+                        className="rounded border-border text-accent focus:ring-accent"
+                      />
+                      <span className="text-text-primary">{wizardModuleLabel(m)}</span>
+                    </label>
+                  ))}
+                </div>
+                {multiModules.includes('CONTRACTS_MANAGEMENT') && (
+                  <p className="mt-2 text-xs text-text-muted">
+                    Contract Management includes its related workflows: {relatedWorkflowsFor('CONTRACTS_MANAGEMENT').join(', ')}.
+                  </p>
+                )}
+              </fieldset>
+            )}
+
+            {relatedWorkflows.length > 0 && (
+              <div className="mt-4 rounded-md border border-border bg-surface-secondary/40 px-3 py-2.5 text-xs">
+                <p className="font-medium text-text-primary mb-1">Related Workflow Access</p>
+                <ul className="list-disc list-inside text-text-secondary space-y-0.5">
+                  {relatedWorkflows.map((w) => <li key={w}>{w}</li>)}
+                </ul>
+                <p className="mt-1.5 text-text-muted">
+                  These are part of the Contract Management workflow, not separate modules.
+                </p>
               </div>
             )}
 
@@ -855,29 +1046,26 @@ export function NewUserWizard({
           <p className="text-xs text-text-muted bg-info-light border border-info/20 rounded-md px-3 py-2">
             Module Access controls data visibility, not action permissions.
           </p>
-          {template === 'EXECUTIVE_MANAGER' && (
-            <p className="text-xs font-medium text-accent bg-accent/10 rounded-md px-3 py-2">
-              Executive Manager gets access to all operational modules.
-            </p>
+          <p className="text-xs font-medium text-accent bg-accent/10 rounded-md px-3 py-2">
+            {accessModeSummaryText}
+            {accessMode === 'FULL_PLATFORM' ? ' — all modules visible according to the role and scope.' : ''}
+          </p>
+          {visibleModules.length === 0 ? (
+            <p className="text-xs text-text-muted">Go back and choose a module in the Access Template step.</p>
+          ) : (
+            <ModuleAccessEditor
+              allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
+              deptApiError={deptApiError}
+              canManageAll={canManageAll}
+              scopes={moduleScopes}
+              deptIdsByModule={moduleDeptIds}
+              onScopeChange={handleModuleScopeChange}
+              onDeptIdsChange={handleModuleDeptIdsChange}
+              visibleModules={visibleModules}
+              labelOverrides={rowLabelOverrides}
+            />
           )}
-          {emphasizedModule && (
-            <p className="text-xs text-text-muted">
-              {MODULE_LABELS[emphasizedModule]} is highlighted below and defaults to My Department. The other
-              modules are dimmed for reference only — since the selected role only grants{' '}
-              {MODULE_LABELS[emphasizedModule]} permissions, this user will not see those modules regardless of
-              the scope set here.
-            </p>
-          )}
-          <ModuleAccessEditor
-            allDepartments={departments.map((d) => ({ id: d.id, code: d.code, name: d.name }))}
-            deptApiError={deptApiError}
-            canManageAll={canManageAll}
-            scopes={moduleScopes}
-            deptIdsByModule={moduleDeptIds}
-            onScopeChange={handleModuleScopeChange}
-            onDeptIdsChange={handleModuleDeptIdsChange}
-            emphasizeModule={emphasizedModule}
-          />
+          {sendFullPlatformFlag && <input type="hidden" name="fullPlatformAccess" value="true" />}
         </div>
 
         {/* Step 5 — Review & Create */}
@@ -913,8 +1101,12 @@ export function NewUserWizard({
                 <dt className="text-xs text-text-muted">Access Template</dt>
                 <dd className="text-text-primary mt-0.5">
                   {TEMPLATE_OPTIONS.find((o) => o.value === template)?.label}
-                  {targetModule ? ` — ${MODULE_LABELS[targetModule]}` : ''}
+                  {targetModule ? ` — ${wizardModuleLabel(targetModule)}` : ''}
                 </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-text-muted">Access Mode</dt>
+                <dd className="text-text-primary mt-0.5">{accessModeSummaryText}</dd>
               </div>
               <div>
                 <dt className="text-xs text-text-muted">Role</dt>
@@ -922,6 +1114,12 @@ export function NewUserWizard({
                   {selectedRole ? roleOptionLabel(selectedRole) : '— Default (Viewer) —'}
                 </dd>
               </div>
+              {relatedWorkflows.length > 0 && (
+                <div>
+                  <dt className="text-xs text-text-muted">Related Workflow Access</dt>
+                  <dd className="text-text-primary mt-0.5">{relatedWorkflows.join(', ')}</dd>
+                </div>
+              )}
             </dl>
             <div className="p-4">
               <dt className="text-xs text-text-muted mb-1.5">Module Access</dt>
@@ -931,7 +1129,7 @@ export function NewUserWizard({
                 <ul className="text-sm text-text-primary space-y-0.5">
                   {moduleAccessSummary.map((entry) => (
                     <li key={entry.module}>
-                      {MODULE_LABELS[entry.module]}: {SCOPE_LABELS[entry.scope]}
+                      {rowLabel(entry.module)}: {SCOPE_LABELS[entry.scope]}
                       {entry.scope === 'SELECTED_DEPARTMENTS' ? ` (${entry.deptCount} department${entry.deptCount !== 1 ? 's' : ''})` : ''}
                     </li>
                   ))}

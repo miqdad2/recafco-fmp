@@ -161,6 +161,8 @@ model User {
   roleId              String    @map("role_id") @db.Uuid
   isActive            Boolean   @default(true) @map("is_active")
   mustChangePassword  Boolean   @default(true) @map("must_change_password")
+  /// FMP-ACCESS-01 — explicit "Full Platform Access" display mode (Factory Operations Control Center + main sidebar). Presentation only: never grants permissions.
+  fullPlatformAccess  Boolean   @default(false) @map("full_platform_access")
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(3)
   lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz(3)

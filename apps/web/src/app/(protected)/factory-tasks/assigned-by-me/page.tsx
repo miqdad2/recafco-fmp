@@ -46,7 +46,7 @@ export default async function AssignedByMeTasksPage(): Promise<React.JSX.Element
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
         <Breadcrumbs items={[
-          { label: 'Factory Tasks Management', href: '/factory-tasks' },
+          { label: 'Task Management', href: '/factory-tasks' },
           { label: 'Assigned by Me' },
         ]} />
 

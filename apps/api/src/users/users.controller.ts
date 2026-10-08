@@ -37,6 +37,11 @@ class DeleteTestUserDto {
   confirmationText!: string;
 }
 
+class SetPlatformAccessDto {
+  @IsBoolean()
+  fullPlatformAccess!: boolean;
+}
+
 class SetModuleAccessDto {
   @IsEnum(DepartmentAccessScope)
   scope!: DepartmentAccessScope;
@@ -234,6 +239,18 @@ export class UsersController {
     await this.usersService.findOne(id);
     const config = await this.departmentAccess.getUserModuleAccessConfig(id);
     return { data: config, meta: meta(), error: null };
+  }
+
+  /** FMP-ACCESS-01 — explicit Full Platform Access display mode; company-wide visibility, so it needs the same permission as granting All Departments. */
+  @Put(':id/platform-access')
+  @Permissions('access_scope.manage_all_departments')
+  async setPlatformAccess(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: SetPlatformAccessDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<UserSummary>> {
+    const user = await this.usersService.setFullPlatformAccess(id, dto.fullPlatformAccess, actor);
+    return { data: user, meta: meta(), error: null };
   }
 
   @Put(':id/module-access/:module')

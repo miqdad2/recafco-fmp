@@ -18,7 +18,7 @@ import type { LucideIcon } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
 import { platformApi } from '@/lib/platform-api';
 import type { PlatformModuleCode } from '@/lib/platform-api';
-import { isContractManagementOnlyAccess } from '../_lib/module-visibility';
+import { getLandingPath } from '../_lib/access-mode';
 import { ExecutiveModuleCard, type ModuleAccent } from './_components/executive-module-card';
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
@@ -60,11 +60,12 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
   const meResult = await authApi.me(accessToken);
   const permissions: string[] = meResult.ok ? meResult.data.permissions : [];
 
-  // A user who can only see Contract Management lands directly on its own
-  // dashboard, not this platform-wide overview — same rule the previous root
-  // dashboard applied (see module-visibility.ts).
-  if (isContractManagementOnlyAccess(permissions)) {
-    redirect('/contracts/dashboard');
+  // FMP-ACCESS-01 — a Single Module user lands on their own module dashboard, not this
+  // platform-wide Control Center. Full Platform, Multi-Module, Executive and Admin users
+  // stay here (see access-mode.ts).
+  const landing = getLandingPath(permissions, meResult.ok && meResult.data.fullPlatformAccess === true);
+  if (landing !== '/dashboard') {
+    redirect(landing);
   }
 
   let dashboard: Awaited<ReturnType<typeof platformApi.dashboard>> | null = null;

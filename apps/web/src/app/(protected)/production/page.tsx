@@ -7,7 +7,7 @@ import { productionApi } from '../../../lib/production-api';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
-export const metadata: Metadata = { title: 'Production Dashboard — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Production & Planning — RECAFCO FMP' };
 
 async function getUserPermissions(): Promise<string[]> {
   try {
@@ -101,11 +101,11 @@ export default async function ProductionPage({ searchParams }: PageProps): Promi
   return (
     <div className="min-h-full p-8">
       <div className="max-w-6xl mx-auto">
-        <Breadcrumbs items={[{ label: 'Production Dashboard' }]} />
+        <Breadcrumbs items={[{ label: 'Production & Planning' }]} />
 
         <div className="mb-6">
           <PageHeader
-            title="Production Dashboard"
+            title="Production & Planning"
             description="Production orders and manufacturing runs. Ref format: PROD-YYYY-NNNNNN"
             action={
               <div className="flex gap-2">

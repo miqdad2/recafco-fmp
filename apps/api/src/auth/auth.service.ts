@@ -55,6 +55,7 @@ export interface UserProfile {
   departmentId: string | null;
   plantId: string | null;
   locationId: string | null;
+  fullPlatformAccess: boolean;
 }
 
 @Injectable()
@@ -245,6 +246,7 @@ export class AuthService implements OnModuleInit {
         departmentId: true,
         plantId: true,
         locationId: true,
+        fullPlatformAccess: true,
       },
     });
 
@@ -265,6 +267,7 @@ export class AuthService implements OnModuleInit {
       departmentId: dbUser.departmentId,
       plantId: dbUser.plantId,
       locationId: dbUser.locationId,
+      fullPlatformAccess: dbUser.fullPlatformAccess,
     };
   }
 

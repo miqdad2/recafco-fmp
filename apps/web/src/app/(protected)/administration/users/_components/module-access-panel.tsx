@@ -3,16 +3,10 @@
 import { useActionState, useState } from 'react';
 import type { UserModuleAccessConfig, ModuleIdentifier, DepartmentAccessScope } from '@/lib/users-api';
 import type { ModuleAccessActionState } from '../actions';
+import { MODULE_LABELS } from './scope-utils';
+import { ACCESS_MODE_HELPERS, ACCESS_MODE_LABELS, MODULE_DISPLAY_NAMES } from '../../../_lib/access-mode';
+import { groupModuleAccess } from './access-mode-config';
 
-const MODULE_LABELS: Record<ModuleIdentifier, string> = {
-  FACTORY_TASKS: 'Factory Tasks Management',
-  INCIDENT_REPORT: 'Incident Management',
-  MAINTENANCE_REQUESTS: 'Maintenance Requests',
-  SAFETY_COMPLIANCE: 'Safety & Compliance',
-  CONTRACTS_MANAGEMENT: 'Contract Management',
-  PRODUCTION_DASHBOARD: 'Production Dashboard',
-  ADMINISTRATION: 'Administration',
-};
 
 const SCOPE_LABELS: Record<DepartmentAccessScope, string> = {
   OWN_DEPARTMENT: 'My Department',
@@ -34,9 +28,28 @@ interface ModuleRowProps {
   action: (userId: string, module: ModuleIdentifier, prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
   canManage: boolean;
   canManageAll: boolean;
+  /** The user's primary department — what "My Department" actually means for them. */
+  userDepartment?: DeptRef | null | undefined;
+  labelOverrides?: Partial<Record<ModuleIdentifier, string>>;
 }
 
-function ModuleRow({ config, userId, allDepartments, deptApiError, action, canManage, canManageAll }: ModuleRowProps) {
+interface DeptRef {
+  code: string;
+  name: string;
+}
+
+/** Plain-words scope: the department code(s), or All Departments. */
+function scopeText(config: UserModuleAccessConfig, userDepartment: DeptRef | null | undefined): string {
+  if (config.scope === 'ALL_DEPARTMENTS') return 'All Departments';
+  if (config.scope === 'SELECTED_DEPARTMENTS') {
+    return config.grantedDepartments.length > 0
+      ? config.grantedDepartments.map((d) => d.code).join(', ')
+      : 'No departments selected';
+  }
+  return userDepartment ? userDepartment.code : 'My Department';
+}
+
+function ModuleRow({ config, userId, allDepartments, deptApiError, action, canManage, canManageAll, userDepartment, labelOverrides }: ModuleRowProps) {
   const [editing, setEditing] = useState(false);
   const [selectedScope, setSelectedScope] = useState<DepartmentAccessScope>(config.scope);
   const [checkedDeptIds, setCheckedDeptIds] = useState<Set<string>>(
@@ -69,12 +82,15 @@ function ModuleRow({ config, userId, allDepartments, deptApiError, action, canMa
     <div className="py-3 border-b border-border last:border-0">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-text-primary">{MODULE_LABELS[config.module]}</p>
+          <p className="text-sm font-medium text-text-primary">{labelOverrides?.[config.module] ?? MODULE_LABELS[config.module]}</p>
           {!editing && (
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${SCOPE_COLORS[config.scope]}`}>
                 {SCOPE_LABELS[config.scope]}
               </span>
+              {config.scope === 'OWN_DEPARTMENT' && userDepartment && (
+                <span className="text-xs text-text-muted">{userDepartment.code} — {userDepartment.name}</span>
+              )}
               {config.scope === 'SELECTED_DEPARTMENTS' && config.grantedDepartments.length > 0 && (
                 <span className="text-xs text-text-muted">
                   {config.grantedDepartments.map((d) => d.code).join(', ')}
@@ -190,32 +206,169 @@ interface Props {
   action: (userId: string, module: ModuleIdentifier, prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
   canManage: boolean;
   canManageAll: boolean;
+  /** FMP-ACCESS-01 — permission codes of the user's role; drives which modules count as granted. */
+  permissions: string[];
+  fullPlatformAccess: boolean;
+  userDepartment?: DeptRef | null | undefined;
+  platformAccessAction: (prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
 }
 
-export function ModuleAccessPanel({ userId, moduleAccess, allDepartments, deptApiError = false, action, canManage, canManageAll }: Props) {
+/** Explicit Full Platform Access switch. Only shown to administrators who may also grant All Departments. */
+function PlatformAccessToggle({
+  enabled,
+  action,
+}: {
+  enabled: boolean;
+  action: (prev: ModuleAccessActionState, fd: FormData) => Promise<ModuleAccessActionState>;
+}) {
+  const [state, formAction, pending] = useActionState(action, null);
   return (
-    <div className="mt-8 pt-6 border-t border-border">
-      <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-4">
-        Module Access Scopes
-      </h3>
-      <div className="rounded-lg border border-border bg-surface px-4">
-        {moduleAccess.map((config) => (
-          <ModuleRow
-            key={config.module}
-            config={config}
-            userId={userId}
-            allDepartments={allDepartments}
-            deptApiError={deptApiError}
-            action={action}
-            canManage={canManage}
-            canManageAll={canManageAll}
-          />
-        ))}
-      </div>
+    <form action={formAction} className="mt-3 flex flex-wrap items-center gap-3">
+      <input type="hidden" name="fullPlatformAccess" value={enabled ? 'false' : 'true'} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="px-3 py-1.5 rounded-md border border-border bg-surface text-text-primary text-xs font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-50"
+      >
+        {pending ? 'Saving…' : enabled ? 'Remove Full Platform Access' : 'Grant Full Platform Access'}
+      </button>
+      <span className="text-xs text-text-muted">
+        {enabled
+          ? 'Returns this user to their normal module workspace. Role permissions are unchanged.'
+          : 'Shows the Factory Operations Control Center and main sidebar. Role permissions are unchanged.'}
+      </span>
+      {state?.error && <span className="text-xs text-danger">{state.error}</span>}
+    </form>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-2">{children}</h3>;
+}
+
+export function ModuleAccessPanel({
+  userId,
+  moduleAccess,
+  allDepartments,
+  deptApiError = false,
+  action,
+  canManage,
+  canManageAll,
+  permissions,
+  fullPlatformAccess,
+  userDepartment,
+  platformAccessAction,
+}: Props) {
+  const groups = groupModuleAccess(moduleAccess, permissions, fullPlatformAccess);
+  const { info } = groups;
+  const rowProps = { userId, allDepartments, deptApiError, action, canManage, canManageAll, userDepartment, labelOverrides: groups.labelOverrides };
+
+  return (
+    <div className="space-y-6">
+      <section aria-label="Access Mode" className="rounded-lg border border-border bg-surface px-4 py-3">
+        <SectionTitle>Access Mode</SectionTitle>
+        <p className="text-base font-semibold text-text-primary">{ACCESS_MODE_LABELS[info.mode]}</p>
+        <p className="text-xs text-text-muted">{ACCESS_MODE_HELPERS[info.mode]}</p>
+        {info.fullPlatformSource === 'explicit' && (
+          <p className="mt-1 text-xs text-text-muted">Granted explicitly by an administrator.</p>
+        )}
+        {info.fullPlatformSource === 'role' && (
+          <p className="mt-1 text-xs text-text-muted">
+            Comes from this user&apos;s role, which already covers every module — no extra setting is needed.
+          </p>
+        )}
+        {info.mode === 'SINGLE_MODULE' && info.primaryModule && (
+          <dl className="mt-3 text-sm">
+            <dt className="text-xs text-text-muted">Primary Module</dt>
+            <dd className="font-medium text-text-primary">{MODULE_DISPLAY_NAMES[info.primaryModule]}</dd>
+          </dl>
+        )}
+        {info.mode === 'FULL_PLATFORM' && (
+          <dl className="mt-3 text-sm">
+            <dt className="text-xs text-text-muted">Modules</dt>
+            <dd className="font-medium text-text-primary">All platform modules</dd>
+          </dl>
+        )}
+        {canManageAll && info.fullPlatformSource !== 'role' && (
+          <PlatformAccessToggle enabled={fullPlatformAccess} action={platformAccessAction} />
+        )}
+      </section>
+
+      {groups.primary && (
+        <section aria-label="Primary Module">
+          <SectionTitle>Primary Module</SectionTitle>
+          <div className="rounded-lg border border-border bg-surface px-4">
+            <ModuleRow config={groups.primary} {...rowProps} />
+          </div>
+        </section>
+      )}
+
+      {groups.primary && groups.relatedWorkflows.length > 0 && (
+        <section aria-label="Related Workflow Access">
+          <SectionTitle>Related Workflow Access</SectionTitle>
+          <ul className="rounded-lg border border-border bg-surface px-4 divide-y divide-border">
+            {groups.relatedWorkflows.map((name) => (
+              <li key={name} className="py-2.5 text-sm text-text-primary">
+                {name} <span className="text-text-muted">— {scopeText(groups.primary!, userDepartment)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs text-text-muted">
+            Part of the {groups.labelOverrides[groups.primary.module] ?? MODULE_LABELS[groups.primary.module]} workflow. They follow the scope set above.
+          </p>
+        </section>
+      )}
+
+      {groups.modules.length > 0 && (
+        <section aria-label="Modules">
+          <SectionTitle>{info.mode === 'FULL_PLATFORM' ? 'Module Scopes' : 'Modules'}</SectionTitle>
+          <div className="rounded-lg border border-border bg-surface px-4">
+            {groups.modules.map((config) => (
+              <ModuleRow key={config.module} config={config} {...rowProps} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {groups.other.length > 0 && (
+        <section aria-label="Other Module Access">
+          <SectionTitle>Other Module Access</SectionTitle>
+          <p className="mb-2 text-xs text-text-muted">
+            Stored scopes for modules this role does not grant. They have no effect until the role includes the module.
+          </p>
+          <div className="rounded-lg border border-border bg-surface px-4">
+            {groups.other.map((config) => (
+              <ModuleRow key={config.module} config={config} {...rowProps} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {groups.administration && (
+        <section aria-label="Administration Access">
+          <SectionTitle>Administration Access</SectionTitle>
+          <div className="rounded-lg border border-border bg-surface px-4">
+            <ModuleRow config={groups.administration} {...rowProps} />
+          </div>
+        </section>
+      )}
+
+      {groups.notGranted.length > 0 && (
+        <details className="rounded-lg border border-border bg-surface px-4 py-3">
+          <summary className="cursor-pointer text-xs font-medium text-text-secondary">
+            Modules this role does not grant ({groups.notGranted.length})
+          </summary>
+          <p className="mt-2 text-xs text-text-muted">Default scope only — the user cannot open these modules.</p>
+          <div className="mt-1">
+            {groups.notGranted.map((config) => (
+              <ModuleRow key={config.module} config={config} {...rowProps} />
+            ))}
+          </div>
+        </details>
+      )}
+
       {!canManage && (
-        <p className="mt-2 text-xs text-text-muted">
-          You do not have permission to change module access scopes.
-        </p>
+        <p className="text-xs text-text-muted">You do not have permission to change module access scopes.</p>
       )}
     </div>
   );

@@ -25,6 +25,8 @@ export interface UserProfile {
   departmentId: string | null;
   plantId: string | null;
   locationId: string | null;
+  /** FMP-ACCESS-01 — explicit Full Platform Access display mode (presentation only). */
+  fullPlatformAccess?: boolean;
 }
 
 type ApiOk<T> = { data: T; meta: { requestId?: string }; error: null };

@@ -25,6 +25,7 @@ export const MODULE_LABELS: Record<string, string> = {
   MAINTENANCE_REQUESTS: 'Maintenance Management',
   SAFETY_COMPLIANCE: 'Safety & Compliance',
   CONTRACTS_MANAGEMENT: 'Contract Management',
+  TECHNICAL: 'Technical',
   PRODUCTION_DASHBOARD: 'Production & Planning',
   ADMINISTRATION: 'Administration',
 };
