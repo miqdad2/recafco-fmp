@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Body, Param, Query, HttpCode, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Res, HttpCode, UseGuards, StreamableFile, ParseUUIDPipe } from '@nestjs/common';
+import type { Response } from 'express';
 import { ProductionPiecesService } from './production-pieces.service';
+import { TechnicalDrawingGroupFileStorageService } from '../technical/technical-drawing-group-file-storage.service';
 import { ProductionPieceListQueryDto } from './dto/production-piece.dto';
 import { BulkUpdatePieceStatusDto } from '../technical/dto/boq-piece-status.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -22,7 +24,10 @@ function meta(): { requestId?: string } {
 @Controller('production/pieces')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class ProductionPiecesController {
-  constructor(private readonly service: ProductionPiecesService) {}
+  constructor(
+    private readonly service: ProductionPiecesService,
+    private readonly fileStorage: TechnicalDrawingGroupFileStorageService,
+  ) {}
 
   @Get()
   @Permissions('production.read')
@@ -42,6 +47,23 @@ export class ProductionPiecesController {
     return { data: await this.service.contractOptions(actor), meta: meta(), error: null };
   }
 
+  // FMP-UI-32 — read-only, per-contract piece-status breakdown for the
+  // redesigned Production & Planning dashboard. See
+  // ProductionPiecesService.contractProgress()'s own doc comment.
+  @Get('contract-progress')
+  @Permissions('production.read')
+  async contractProgress(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.contractProgress(actor), meta: meta(), error: null };
+  }
+
+  // FMP-UI-32 — latest piece status updates across every contract. See
+  // ProductionPiecesService.recentUpdates()'s own doc comment.
+  @Get('recent-updates')
+  @Permissions('production.read')
+  async recentUpdates(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.recentUpdates(actor), meta: meta(), error: null };
+  }
+
   @Get('allowed-statuses')
   @Permissions('production.read')
   allowedStatuses(@CurrentUser() actor: AuthUser): ApiSuccessResponse<unknown> {
@@ -53,6 +75,32 @@ export class ProductionPiecesController {
   @Permissions('production.read')
   async bulkStatus(@Body() dto: BulkUpdatePieceStatusDto, @CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
     return { data: await this.service.bulkUpdateStatus(dto.pieceIds, dto.status, dto.note, actor), meta: meta(), error: null };
+  }
+
+  // FMP-BOQ-13 — read-only released drawing / calculation files (production.read).
+  @Get(':pieceId/drawing-files')
+  @Permissions('production.read')
+  async drawingFiles(
+    @Param('pieceId', new ParseUUIDPipe({ version: '4' })) pieceId: string,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.drawingFiles(pieceId, actor), meta: meta(), error: null };
+  }
+
+  @Get(':pieceId/drawing-files/:attachmentId/download')
+  @Permissions('production.read')
+  async downloadDrawingFile(
+    @Param('pieceId', new ParseUUIDPipe({ version: '4' })) pieceId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalName, mimeType } = await this.service.drawingFileForDownload(pieceId, attachmentId, actor);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(originalName)}"`,
+    });
+    return new StreamableFile(this.fileStorage.createReadStream(storagePath));
   }
 
   @Get(':pieceId/history')

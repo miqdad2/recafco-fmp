@@ -9,8 +9,12 @@ import {
   TechnicalApprovalStatus,
   TechnicalApprovalRecordStatus,
   TechnicalFdStatus,
+  ContractBoqConfirmationStatus,
+  ContractBoqPieceStatus,
 } from '@recafco/database';
 import type { TechnicalDrawing, TechnicalWorkflow, TechnicalSdCalculationSubmission, TechnicalApproval, TechnicalFdIssuance } from '@recafco/database';
+import { buildJobReleaseSummary } from './drawing-group-rules';
+import type { JobReleaseSummary } from './drawing-group-rules';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { TechnicalAttachmentStorageService, TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES, TECHNICAL_DRAWING_ATTACHMENT_MAX_BYTES } from './technical-attachment-storage.service';
@@ -67,6 +71,29 @@ export interface TechnicalDashboardResult {
   recentActivities: TechnicalActivityFeedItem[];
   /** Same 4 counts as `metrics.drawingReceived`/`sdCalculationPending`/`waitingApproval`/`fdIssued`, keyed by stage for a compact stage-progress display — no extra query, just the same numbers restructured. */
   stageBreakdown: Record<TechnicalStage, number>;
+  boqAttention: TechnicalBoqAttentionSummary;
+  /** FMP-BOQ-16 — per-job drawing group / release numbers for the started jobs (keyed by contract id). */
+  releaseByContract: Record<string, JobReleaseSummary>;
+}
+
+// FMP-UI-31 — read-only BOQ drawing/piece counts for the redesigned Technical
+// Dashboard's "Needs Attention" panel. Scoped to the SAME contracts already
+// fetched for `jobs` above (same department scope, same 50-row cap) and
+// further narrowed to only those with a STARTED Technical workflow — a job
+// that hasn't started Technical yet trivially has no BOQ confirmation
+// either, so counting it would inflate this number with jobs nobody is
+// actually working on yet. No file under technical-boq-confirmation.service.ts
+// or boq-piece-generation.ts is touched; this mirrors their exact per-item
+// rules at the aggregate level, the same approach
+// contract-dashboard.service.ts's own `buildBoqPieceOverview()` already uses
+// for the Contract Management dashboard (FMP-UI-29).
+export interface TechnicalBoqAttentionSummary {
+  /** Of the jobs with a started workflow, how many have zero CONFIRMED drawing confirmations yet. */
+  missingBoqConfirmation: number;
+  /** Jobs where real confirmed pieces exist but generated pieces haven't caught up (confirmed > generated). */
+  confirmedPiecesNotGenerated: number;
+  /** Real piece count currently ON_HOLD or REJECTED, across those same jobs. */
+  rejectedOrHoldPieces: number;
 }
 
 export interface TechnicalJobRow {
@@ -506,6 +533,10 @@ export class TechnicalService {
       createdAt: a.createdAt.toISOString(),
     }));
 
+    const startedContractIds = jobs.filter((j) => j.workflowStarted).map((j) => j.contractId);
+    const boqAttention = await this.buildBoqAttentionSummary(startedContractIds);
+    const releaseByContract = await this.buildReleaseByContract(startedContractIds);
+
     return {
       metrics: {
         pendingTechnicalReview,
@@ -525,7 +556,87 @@ export class TechnicalService {
         GETTING_APPROVAL: waitingApproval,
         FD_ISSUANCE: fdIssued,
       },
+      boqAttention,
+      releaseByContract,
     };
+  }
+
+  /** FMP-BOQ-16 — read-only: confirmed / generated / grouped / files / released numbers per started job. */
+  private async buildReleaseByContract(contractIds: string[]): Promise<Record<string, JobReleaseSummary>> {
+    if (contractIds.length === 0) return {};
+    const client = this.db.getClient();
+    const [confirmedRows, generatedRows, groups] = await Promise.all([
+      client.contractBoqDrawingConfirmation.groupBy({
+        by: ['contractId'],
+        where: { contractId: { in: contractIds }, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, confirmedPieces: { not: null } },
+        _sum: { confirmedPieces: true },
+      }),
+      client.contractBoqPiece.groupBy({
+        by: ['contractId'],
+        where: { contractId: { in: contractIds }, isCancelled: false },
+        _count: { _all: true },
+      }),
+      client.technicalDrawingGroup.findMany({
+        where: { contractId: { in: contractIds } },
+        select: { contractId: true, status: true, _count: { select: { pieces: true, attachments: true } } },
+      }),
+    ]);
+    const confirmed = new Map(confirmedRows.map((r) => [r.contractId, r._sum.confirmedPieces ?? 0]));
+    const generated = new Map(generatedRows.map((r) => [r.contractId, r._count._all]));
+    const result: Record<string, JobReleaseSummary> = {};
+    for (const id of contractIds) {
+      result[id] = buildJobReleaseSummary(
+        confirmed.get(id) ?? 0,
+        generated.get(id) ?? 0,
+        groups.filter((g) => g.contractId === id).map((g) => ({ status: g.status, pieceCount: g._count.pieces, fileCount: g._count.attachments })),
+      );
+    }
+    return result;
+  }
+
+  // FMP-UI-31 — see TechnicalBoqAttentionSummary's own doc comment above for
+  // scope/rationale. Three read-only queries, no write, no file under
+  // technical-boq-confirmation.service.ts/boq-piece-generation.ts touched.
+  private async buildBoqAttentionSummary(contractIds: string[]): Promise<TechnicalBoqAttentionSummary> {
+    if (contractIds.length === 0) {
+      return { missingBoqConfirmation: 0, confirmedPiecesNotGenerated: 0, rejectedOrHoldPieces: 0 };
+    }
+    const client = this.db.getClient();
+    const [confirmedContracts, confirmedByContract, generatedByContract, holdOrRejected] = await Promise.all([
+      client.contractBoqDrawingConfirmation.findMany({
+        where: { contractId: { in: contractIds }, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED },
+        select: { contractId: true },
+        distinct: ['contractId'],
+      }),
+      client.contractBoqDrawingConfirmation.groupBy({
+        by: ['contractId'],
+        where: { contractId: { in: contractIds }, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, confirmedPieces: { not: null } },
+        _sum: { confirmedPieces: true },
+      }),
+      client.contractBoqPiece.groupBy({
+        by: ['contractId'],
+        where: { contractId: { in: contractIds }, isCancelled: false },
+        _count: { _all: true },
+      }),
+      client.contractBoqPiece.groupBy({
+        by: ['currentStatus'],
+        where: { contractId: { in: contractIds }, currentStatus: { in: [ContractBoqPieceStatus.ON_HOLD, ContractBoqPieceStatus.REJECTED] } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const missingBoqConfirmation = contractIds.length - confirmedContracts.length;
+
+    const confirmedMap = new Map(confirmedByContract.map((r) => [r.contractId, r._sum.confirmedPieces ?? 0]));
+    const generatedMap = new Map(generatedByContract.map((r) => [r.contractId, r._count._all]));
+    let confirmedPiecesNotGenerated = 0;
+    for (const [contractId, confirmed] of confirmedMap) {
+      if (confirmed > (generatedMap.get(contractId) ?? 0)) confirmedPiecesNotGenerated++;
+    }
+
+    const rejectedOrHoldPieces = holdOrRejected.reduce((sum, g) => sum + g._count._all, 0);
+
+    return { missingBoqConfirmation, confirmedPiecesNotGenerated, rejectedOrHoldPieces };
   }
 
   // ---------------------------------------------------------------------------

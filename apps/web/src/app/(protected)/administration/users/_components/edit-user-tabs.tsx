@@ -86,8 +86,8 @@ function ProfileTab({
       {state?.error && <FormError message={state.error} />}
 
       <div>
-        <label className="block text-sm font-medium text-text-primary mb-1">Username</label>
-        <input readOnly value={user.username} className={readOnlyCls} aria-label="Username (read-only)" />
+        <label className="block text-sm font-medium text-text-primary mb-1">Internal username</label>
+        <input readOnly value={user.username} className={readOnlyCls} aria-label="Internal username (read-only)" />
       </div>
       <div>
         <label htmlFor="displayName" className="block text-sm font-medium text-text-primary mb-1">

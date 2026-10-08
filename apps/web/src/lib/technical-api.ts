@@ -210,6 +210,35 @@ export interface TechnicalDashboardData {
   needsAttention: TechnicalAttentionItem[];
   recentActivities: TechnicalActivityFeedItem[];
   stageBreakdown: Record<TechnicalStage, number>;
+  boqAttention: TechnicalBoqAttentionSummary;
+  /** FMP-BOQ-16 — drawing group / release numbers per started job, keyed by contract id. */
+  releaseByContract: Record<string, JobReleaseSummary>;
+}
+
+// FMP-BOQ-16 — mirrors JobReleaseSummary in apps/api/src/technical/drawing-group-rules.ts exactly.
+export interface JobReleaseSummary {
+  confirmed: number;
+  generated: number;
+  assigned: number;
+  notAssigned: number;
+  filesAttachedPieces: number;
+  released: number;
+  notReleased: number;
+  groupsTotal: number;
+  groupsWithFiles: number;
+  groupsNoFiles: number;
+  groupsSubmitted: number;
+  groupsApproved: number;
+  groupsNotReleased: number;
+  confirmedNotGenerated: number;
+}
+
+// FMP-UI-31 — mirrors TechnicalBoqAttentionSummary in
+// apps/api/src/technical/technical.service.ts exactly.
+export interface TechnicalBoqAttentionSummary {
+  missingBoqConfirmation: number;
+  confirmedPiecesNotGenerated: number;
+  rejectedOrHoldPieces: number;
 }
 
 export interface TechnicalWorkflowOverview {
@@ -581,6 +610,8 @@ export interface BoqPiece {
   currentLocation: string | null;
   isCancelled: boolean;
   updatedAt: string;
+  // FMP-BOQ-11 — the drawing / calculation group the piece is in right now (empty = not assigned).
+  drawingGroupLinks?: { group: { id: string; drawingNo: string; calculationRef: string | null; groupTitle: string | null; status: DrawingGroupStatus; _count?: { attachments: number } } }[];
 }
 
 export interface BoqConfirmationItem {
@@ -626,4 +657,69 @@ export async function fetchAllowedPieceStatuses(contractId: string): Promise<Boq
     `/technical/jobs/${contractId}/boq-pieces/allowed-statuses`,
   );
   return result.error ? null : result.data.statuses;
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-11 — Technical Drawing / Calculation Groups.
+// ---------------------------------------------------------------------------
+
+export type DrawingGroupStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'RELEASED_TO_PRODUCTION' | 'REVISED' | 'CANCELLED';
+export type DrawingGroupAction = 'EDIT' | 'SUBMIT' | 'APPROVE' | 'RELEASE' | 'CANCEL';
+
+export interface DrawingGroup {
+  id: string;
+  boqItemId: string;
+  drawingNo: string;
+  calculationRef: string | null;
+  groupTitle: string | null;
+  status: DrawingGroupStatus;
+  remarks: string | null;
+  approvedAt: string | null;
+  releasedAt: string | null;
+  createdAt: string;
+  pieceCount: number;
+  /** FMP-BOQ-12 — number of drawing / calculation files attached to the group. */
+  fileCount: number;
+  /** Only the actions allowed for the current status. */
+  actions: DrawingGroupAction[];
+}
+
+export interface DrawingGroupItem {
+  boqItemId: string;
+  sortOrder: number;
+  description: string;
+  piecesGenerated: number;
+  assignedToGroups: number;
+  notAssigned: number;
+  approvedPieces: number;
+  releasedToProduction: number;
+  groups: DrawingGroup[];
+}
+
+/** A generated piece as offered in the Add Drawing Group picker. */
+export interface GroupablePiece {
+  id: string;
+  pieceNo: number;
+  pieceCode: string;
+  currentStatus: BoqPieceStatus;
+  drawingGroupLinks: { group: { id: string; drawingNo: string; calculationRef: string | null; status: DrawingGroupStatus } }[];
+}
+
+export async function fetchDrawingGroups(contractId: string): Promise<DrawingGroupItem[] | null> {
+  const result = await technicalApiFetchResult<DrawingGroupItem[]>(`/technical/jobs/${contractId}/drawing-groups`);
+  return result.error ? null : result.data;
+}
+
+// FMP-BOQ-12 — files attached to a Drawing / Calculation Group.
+export type DrawingGroupFileCategory = 'DRAWING' | 'CALCULATION' | 'APPROVAL_DOCUMENT' | 'OTHER';
+
+export interface DrawingGroupFile {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  category: DrawingGroupFileCategory;
+  remarks: string | null;
+  createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
 }

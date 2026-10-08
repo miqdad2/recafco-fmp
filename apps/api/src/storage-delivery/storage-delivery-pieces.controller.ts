@@ -39,6 +39,23 @@ export class StorageDeliveryPiecesController {
     return { data: await this.service.contractOptions(actor), meta: meta(), error: null };
   }
 
+  // FMP-UI-33 — read-only, per-contract piece-status breakdown for the
+  // redesigned Storage Yard & Delivery dashboard. See
+  // StorageDeliveryPiecesService.contractProgress()'s own doc comment.
+  @Get('contract-progress')
+  @Permissions('storage_delivery.read')
+  async contractProgress(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.contractProgress(actor), meta: meta(), error: null };
+  }
+
+  // FMP-UI-33 — latest piece status updates across every contract. See
+  // StorageDeliveryPiecesService.recentUpdates()'s own doc comment.
+  @Get('recent-updates')
+  @Permissions('storage_delivery.read')
+  async recentUpdates(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.recentUpdates(actor), meta: meta(), error: null };
+  }
+
   @Get('allowed-statuses')
   @Permissions('storage_delivery.read')
   allowedStatuses(@CurrentUser() actor: AuthUser): ApiSuccessResponse<unknown> {

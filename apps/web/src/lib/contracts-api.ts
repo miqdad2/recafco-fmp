@@ -265,6 +265,21 @@ export interface ManagerDashboardData {
   workflowOverview: TeamWorkflowOverview[];
   upcomingSchedule: ScheduleItem[];
   insights: ManagerDashboardInsights;
+  boqOverview: ContractBoqPieceOverview;
+}
+
+// FMP-UI-29 — mirrors ContractBoqPieceOverview in
+// apps/api/src/contracts/contract-dashboard.service.ts exactly. Read-only
+// piece-progress totals across every contract the actor can see.
+export interface ContractBoqPieceOverview {
+  confirmedPieces: number;
+  piecesGenerated: number;
+  produced: number;
+  delivered: number;
+  erected: number;
+  completed: number;
+  itemsNeedingReview: number;
+  hasAnyData: boolean;
 }
 
 export interface StaffTaskRow {

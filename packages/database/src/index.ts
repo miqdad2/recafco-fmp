@@ -131,4 +131,6 @@ export {
   TechnicalFdStatus,
   ContractBoqConfirmationStatus,
   ContractBoqPieceStatus,
+  TechnicalDrawingGroupStatus,
+  TechnicalDrawingGroupFileCategory,
 } from './generated/prisma/client';

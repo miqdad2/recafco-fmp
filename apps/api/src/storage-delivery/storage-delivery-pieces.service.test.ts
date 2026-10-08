@@ -126,6 +126,110 @@ describe('summary', () => {
   });
 });
 
+describe('contractProgress (FMP-UI-33)', () => {
+  const contractRef: { referenceNumber: string; jobOrder: string | null; title: string } = { referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A' };
+  const row = (contractId: string, status: P, updatedAt: string, contract = contractRef) => ({
+    contractId, currentStatus: status, updatedAt: new Date(updatedAt), contract,
+  });
+
+  it('needs storage_delivery.read', async () => {
+    await expect(service.contractProgress(NO_ACCESS)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('groups pieces by contract, counting each status into its own field (Hold and Rejected kept separate)', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c1', P.IN_STORE, '2026-01-02T00:00:00Z'),
+      row('c1', P.DELIVERED, '2026-01-01T00:00:00Z'),
+      row('c1', P.ON_HOLD, '2026-01-01T00:00:00Z'),
+      row('c1', P.REJECTED, '2026-01-01T00:00:00Z'),
+    ]);
+
+    const [result] = await service.contractProgress(VIEWER);
+
+    expect(result).toMatchObject({
+      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A',
+      readyForStore: 2, inStore: 1, delivered: 1, onHold: 1, rejected: 1,
+    });
+  });
+
+  it('never queries cancelled pieces', async () => {
+    mockPieceFindMany.mockResolvedValue([]);
+    await service.contractProgress(VIEWER);
+    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+  });
+
+  it('keeps separate contracts as separate entries', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c2', P.DELIVERED, '2026-01-01T00:00:00Z', { referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse' }),
+    ]);
+
+    const result = await service.contractProgress(VIEWER);
+
+    expect(result).toHaveLength(2);
+    expect(result.find((r) => r.contractId === 'c2')).toMatchObject({ referenceNumber: 'CT-2', jobOrder: null, delivered: 1 });
+  });
+
+  it('lastUpdatedAt is the latest updatedAt among that contract\'s own pieces', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c1', P.IN_STORE, '2026-03-15T00:00:00Z'),
+      row('c1', P.DELIVERED, '2026-02-01T00:00:00Z'),
+    ]);
+
+    const [result] = await service.contractProgress(VIEWER);
+
+    expect(result!.lastUpdatedAt).toBe('2026-03-15T00:00:00.000Z');
+  });
+});
+
+describe('recentUpdates (FMP-UI-33)', () => {
+  it('needs storage_delivery.read', async () => {
+    await expect(service.recentUpdates(NO_ACCESS)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('maps real history rows into a flat, dashboard-ready shape, including the piece\'s current location', async () => {
+    mockHistoryFindMany.mockResolvedValue([
+      {
+        id: 'h1', newStatus: P.DELIVERED, createdAt: new Date('2026-03-01T00:00:00Z'),
+        updatedByUser: { displayName: 'Store User' },
+        piece: { pieceCode: 'HC-001-1', currentLocation: 'Yard B3', contract: { id: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A' } },
+      },
+    ]);
+
+    const [result] = await service.recentUpdates(VIEWER);
+
+    expect(result).toEqual({
+      id: 'h1', pieceCode: 'HC-001-1', newStatus: P.DELIVERED,
+      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A',
+      currentLocation: 'Yard B3', createdAt: '2026-03-01T00:00:00.000Z', updatedByName: 'Store User',
+    });
+  });
+
+  it('is null, not a crash, when there is no real actor or location on record', async () => {
+    mockHistoryFindMany.mockResolvedValue([
+      {
+        id: 'h1', newStatus: P.ON_HOLD, createdAt: new Date('2026-03-01T00:00:00Z'),
+        updatedByUser: null,
+        piece: { pieceCode: 'HC-002-1', currentLocation: null, contract: { id: 'c2', referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse' } },
+      },
+    ]);
+
+    const [result] = await service.recentUpdates(VIEWER);
+
+    expect(result!.updatedByName).toBeNull();
+    expect(result!.currentLocation).toBeNull();
+  });
+
+  it('caps at the requested limit, newest first', async () => {
+    mockHistoryFindMany.mockResolvedValue([]);
+    await service.recentUpdates(VIEWER, 5);
+    expect(mockHistoryFindMany.mock.calls[0]?.[0]).toMatchObject({ orderBy: { createdAt: 'desc' }, take: 5 });
+  });
+});
+
 describe('StorageDeliveryPiecesService status updates', () => {
   it('bulk update to In Store works and writes a history row for every piece', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.PRODUCED), piece('b', P.PRODUCED)]);

@@ -29,6 +29,8 @@ import type {
   BoqPiece,
   BoqPieceUpdateStatus,
   BoqPieceHistoryEntry,
+  GroupablePiece,
+  DrawingGroupFile,
 } from '@/lib/technical-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
@@ -815,4 +817,121 @@ export async function getBoqPieceHistoryAction(
   );
   if (result.error) return { error: 'History could not be loaded. Please try again.', entries: [] };
   return { error: null, entries: result.data.history };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-11 — Drawing / Calculation Groups
+// ---------------------------------------------------------------------------
+
+export interface SaveDrawingGroupInput {
+  mode: 'create' | 'update';
+  id?: string;
+  action: 'DRAFT' | 'SUBMIT';
+  boqItemId: string;
+  drawingNo: string;
+  calculationRef: string;
+  groupTitle: string;
+  remarks: string;
+  pieceIds: string[];
+}
+
+export async function saveDrawingGroupAction(contractId: string, input: SaveDrawingGroupInput): Promise<ActionResult> {
+  const base = `/technical/jobs/${contractId}/drawing-groups`;
+  const result = await technicalApiFetchResult(input.mode === 'create' ? base : `${base}/${input.id}`, {
+    method: input.mode === 'create' ? 'POST' : 'PATCH',
+    body: JSON.stringify({
+      action: input.action,
+      drawingNo: input.drawingNo.trim(),
+      calculationRef: input.calculationRef.trim(),
+      groupTitle: input.groupTitle.trim(),
+      remarks: input.remarks.trim(),
+      pieceIds: input.pieceIds,
+      ...(input.mode === 'create' ? { boqItemId: input.boqItemId } : {}),
+    }),
+  });
+  if (result.error) return { error: result.error.message };
+  return { error: null };
+}
+
+/** Submit, approve, release to Production or cancel a group. Only records the group status. */
+export async function drawingGroupTransitionAction(
+  contractId: string,
+  groupId: string,
+  transition: 'submit' | 'approve' | 'release' | 'cancel',
+): Promise<ActionResult> {
+  const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/drawing-groups/${groupId}/${transition}`, { method: 'POST' });
+  if (result.error) return { error: result.error.message };
+  return { error: null };
+}
+
+/** Generated pieces of one BOQ item with the group each is in (for the picker). */
+export async function listGroupablePiecesAction(
+  contractId: string,
+  boqItemId: string,
+): Promise<{ error: string | null; pieces: GroupablePiece[] }> {
+  const result = await technicalApiFetchResult<GroupablePiece[]>(`/technical/jobs/${contractId}/drawing-groups/pieces?boqItemId=${boqItemId}`);
+  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  return { error: null, pieces: result.data };
+}
+
+/** The pieces one group covers (View Pieces on a group). */
+export async function getDrawingGroupPiecesAction(
+  contractId: string,
+  groupId: string,
+): Promise<{ error: string | null; pieces: { id: string; pieceCode: string; currentStatus: BoqPieceStatus }[] }> {
+  const result = await technicalApiFetchResult<{ pieces: { id: string; pieceCode: string; currentStatus: BoqPieceStatus }[] }>(
+    `/technical/jobs/${contractId}/drawing-groups/${groupId}`,
+  );
+  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  return { error: null, pieces: result.data.pieces };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-12 — files on Drawing / Calculation Groups
+// ---------------------------------------------------------------------------
+
+export async function listDrawingGroupFilesAction(
+  contractId: string,
+  groupId: string,
+): Promise<{ error: string | null; files: DrawingGroupFile[] }> {
+  const result = await technicalApiFetchResult<DrawingGroupFile[]>(`/technical/jobs/${contractId}/drawing-groups/${groupId}/attachments`);
+  if (result.error) return { error: 'Files could not be loaded. Please try again.', files: [] };
+  return { error: null, files: result.data };
+}
+
+/** Uploads one file (category + optional remarks) to a group. Uploading never changes the group's status. */
+export async function uploadDrawingGroupFileAction(contractId: string, groupId: string, formData: FormData): Promise<ActionResult> {
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get('recafco_access')?.value;
+  } catch {
+    token = undefined;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/technical/jobs/${contractId}/drawing-groups/${groupId}/attachments`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+      cache: 'no-store',
+    });
+    if (res.ok) return { error: null };
+    let message = 'File could not be uploaded. Please try again.';
+    try {
+      const json = (await res.json()) as { error?: { message?: string } };
+      if (json.error?.message) message = json.error.message;
+    } catch {
+      // keep the friendly default
+    }
+    return { error: message };
+  } catch {
+    return { error: 'File could not be uploaded. Please try again.' };
+  }
+}
+
+export async function deleteDrawingGroupFileAction(contractId: string, groupId: string, attachmentId: string): Promise<ActionResult> {
+  const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/drawing-groups/${groupId}/attachments/${attachmentId}`, {
+    method: 'DELETE',
+  });
+  if (result.error) return { error: result.error.message };
+  return { error: null };
 }

@@ -19,6 +19,7 @@ const mockPieceFindUnique = vi.fn();
 const mockHistoryCreateMany = vi.fn();
 const mockHistoryFindMany = vi.fn();
 const mockContractFindMany = vi.fn();
+const mockLinkFindMany = vi.fn();
 const mockOther = vi.fn(); // nothing but pieces/history may be written
 
 const client = {
@@ -30,6 +31,7 @@ const client = {
     findUnique: mockPieceFindUnique,
   },
   contractBoqPieceStatusHistory: { createMany: mockHistoryCreateMany, findMany: mockHistoryFindMany },
+  technicalDrawingGroupPiece: { findMany: mockLinkFindMany },
   contract: { findMany: mockContractFindMany, update: mockOther },
   contractBoqDrawingConfirmation: { update: mockOther, updateMany: mockOther },
   contractBoqItem: { update: mockOther, updateMany: mockOther },
@@ -49,6 +51,9 @@ let service: ProductionPiecesService;
 beforeEach(() => {
   vi.clearAllMocks();
   mockPieceUpdateMany.mockImplementation(async (args: { where: { id: { in: string[] } } }) => ({ count: args.where.id.in.length }));
+  mockLinkFindMany.mockImplementation(async (args: { where: { pieceId: { in: string[] } } }) =>
+    args.where.pieceId.in.map((pieceId) => ({ pieceId, activeSlot: 1, group: { status: 'RELEASED_TO_PRODUCTION' } })),
+  );
   service = new ProductionPiecesService(db);
 });
 
@@ -142,6 +147,109 @@ describe('summary', () => {
   });
 });
 
+describe('contractProgress (FMP-UI-32)', () => {
+  const contractRef: { referenceNumber: string; jobOrder: string | null; title: string } = { referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A' };
+  const row = (contractId: string, status: P, updatedAt: string, contract = contractRef) => ({
+    contractId, currentStatus: status, updatedAt: new Date(updatedAt), contract,
+  });
+
+  it('needs production access', async () => {
+    await expect(service.contractProgress(NO_ACCESS)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('groups pieces by contract, counting each status into its own field (Hold and Rejected kept separate)', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.DRAWING_READY, '2026-01-01T00:00:00Z'),
+      row('c1', P.DRAWING_READY, '2026-01-01T00:00:00Z'),
+      row('c1', P.IN_PRODUCTION, '2026-01-02T00:00:00Z'),
+      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c1', P.ON_HOLD, '2026-01-01T00:00:00Z'),
+      row('c1', P.REJECTED, '2026-01-01T00:00:00Z'),
+    ]);
+
+    const [result] = await service.contractProgress(VIEWER);
+
+    expect(result).toMatchObject({
+      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A',
+      readyForProduction: 2, inProduction: 1, produced: 1, onHold: 1, rejected: 1,
+    });
+  });
+
+  it('never queries cancelled pieces', async () => {
+    mockPieceFindMany.mockResolvedValue([]);
+    await service.contractProgress(VIEWER);
+    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+  });
+
+  it('keeps separate contracts as separate entries', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.DRAWING_READY, '2026-01-01T00:00:00Z'),
+      row('c2', P.PRODUCED, '2026-01-01T00:00:00Z', { referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse' }),
+    ]);
+
+    const result = await service.contractProgress(VIEWER);
+
+    expect(result).toHaveLength(2);
+    expect(result.find((r) => r.contractId === 'c2')).toMatchObject({ referenceNumber: 'CT-2', jobOrder: null, produced: 1 });
+  });
+
+  it('lastUpdatedAt is the latest updatedAt among that contract\'s own pieces', async () => {
+    mockPieceFindMany.mockResolvedValue([
+      row('c1', P.DRAWING_READY, '2026-01-01T00:00:00Z'),
+      row('c1', P.IN_PRODUCTION, '2026-03-15T00:00:00Z'),
+      row('c1', P.PRODUCED, '2026-02-01T00:00:00Z'),
+    ]);
+
+    const [result] = await service.contractProgress(VIEWER);
+
+    expect(result!.lastUpdatedAt).toBe('2026-03-15T00:00:00.000Z');
+  });
+});
+
+describe('recentUpdates (FMP-UI-32)', () => {
+  it('needs production access', async () => {
+    await expect(service.recentUpdates(NO_ACCESS)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('maps real history rows into a flat, dashboard-ready shape', async () => {
+    mockHistoryFindMany.mockResolvedValue([
+      {
+        id: 'h1', newStatus: P.PRODUCED, createdAt: new Date('2026-03-01T00:00:00Z'),
+        updatedByUser: { displayName: 'Prod User' },
+        piece: { pieceCode: 'HC-001-1', contract: { id: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A' } },
+      },
+    ]);
+
+    const [result] = await service.recentUpdates(VIEWER);
+
+    expect(result).toEqual({
+      id: 'h1', pieceCode: 'HC-001-1', newStatus: P.PRODUCED,
+      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A',
+      createdAt: '2026-03-01T00:00:00.000Z', updatedByName: 'Prod User',
+    });
+  });
+
+  it('is null, not a crash, when the update has no real actor on record', async () => {
+    mockHistoryFindMany.mockResolvedValue([
+      {
+        id: 'h1', newStatus: P.ON_HOLD, createdAt: new Date('2026-03-01T00:00:00Z'),
+        updatedByUser: null,
+        piece: { pieceCode: 'HC-002-1', contract: { id: 'c2', referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse' } },
+      },
+    ]);
+
+    const [result] = await service.recentUpdates(VIEWER);
+
+    expect(result!.updatedByName).toBeNull();
+  });
+
+  it('caps at the requested limit, newest first', async () => {
+    mockHistoryFindMany.mockResolvedValue([]);
+    await service.recentUpdates(VIEWER, 5);
+    expect(mockHistoryFindMany.mock.calls[0]?.[0]).toMatchObject({ orderBy: { createdAt: 'desc' }, take: 5 });
+  });
+});
+
 describe('ProductionPiecesService status updates', () => {
   it('bulk update to Produced works and writes a history row for every piece, across jobs', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.IN_PRODUCTION), piece('b', P.IN_PRODUCTION)]);
@@ -213,5 +321,90 @@ describe('history', () => {
   it('404s for an unknown piece', async () => {
     mockPieceFindUnique.mockResolvedValue(null);
     await expect(service.history('x', VIEWER)).rejects.toThrow(NotFoundException);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-14 — Production needs the Technical release
+// ---------------------------------------------------------------------------
+
+type LinkSpec = { status: string; active?: boolean };
+function groups(map: Record<string, LinkSpec[]>): void {
+  mockLinkFindMany.mockImplementation(async () =>
+    Object.entries(map).flatMap(([pieceId, specs]) =>
+      specs.map((l) => ({ pieceId, activeSlot: l.active === false ? null : 1, group: { status: l.status } })),
+    ),
+  );
+}
+
+describe('release is required for In Production / Produced', () => {
+  it.each(['IN_PRODUCTION', 'PRODUCED'] as const)('a released piece can move to %s', async (status) => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'RELEASED_TO_PRODUCTION' }] });
+    const r = await service.bulkUpdateStatus(['a'], status, undefined, PRODUCER);
+    expect(r).toMatchObject({ updatedCount: 1, skippedCount: 0 });
+    expect(mockHistoryCreateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['IN_PRODUCTION', 'PRODUCED'] as const)('a piece with no group cannot move to %s', async (status) => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY)]);
+    groups({});
+    const r = await service.bulkUpdateStatus(['a'], status, undefined, PRODUCER);
+    expect(r).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'No drawing group assigned.' });
+    expect(r.skipped[0]?.reason).toBe('NO_GROUP');
+    expect(mockPieceUpdateMany).not.toHaveBeenCalled();
+    expect(mockHistoryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['DRAFT', 'IN_PRODUCTION'],
+    ['SUBMITTED', 'PRODUCED'],
+    ['APPROVED', 'PRODUCED'],
+    ['APPROVED', 'IN_PRODUCTION'],
+  ] as const)('a piece in a %s group cannot move to %s', async (groupStatus, target) => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY)]);
+    groups({ a: [{ status: groupStatus }] });
+    const r = await service.bulkUpdateStatus(['a'], target, undefined, PRODUCER);
+    expect(r).toMatchObject({ updatedCount: 0, message: 'Drawing group is not released to Production.' });
+    expect(mockHistoryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('a piece whose group was cancelled cannot move to In Production', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'CANCELLED', active: false }] });
+    const r = await service.bulkUpdateStatus(['a'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.message).toBe('Drawing group is not released to Production.');
+  });
+
+  it('a piece re-grouped after a cancel uses its current (active) group', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'CANCELLED', active: false }, { status: 'RELEASED_TO_PRODUCTION' }] });
+    expect((await service.bulkUpdateStatus(['a'], 'PRODUCED', undefined, PRODUCER)).updatedCount).toBe(1);
+  });
+
+  it.each(['ON_HOLD', 'REJECTED'] as const)('an unreleased piece (or one with no group) can still be set to %s', async (status) => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY), piece('b', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'DRAFT' }] });
+    const r = await service.bulkUpdateStatus(['a', 'b'], status, undefined, PRODUCER);
+    expect(r).toMatchObject({ updatedCount: 2, skippedCount: 0 });
+    // Hold / Rejected never even look at the groups
+    expect(mockLinkFindMany).not.toHaveBeenCalled();
+  });
+
+  it('bulk: updates released pieces, skips the rest with simple reasons, history only for updated', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY), piece('b', P.DRAWING_READY), piece('c', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'RELEASED_TO_PRODUCTION' }], b: [{ status: 'SUBMITTED' }] });
+    const r = await service.bulkUpdateStatus(['a', 'b', 'c'], 'IN_PRODUCTION', 'Start', PRODUCER);
+    expect(r).toMatchObject({ updatedCount: 1, skippedCount: 2, message: '1 piece updated. 2 pieces skipped.' });
+    expect(r.skipped.map((s) => s.message).sort()).toEqual(['Drawing group is not released to Production.', 'No drawing group assigned.']);
+    const history = mockHistoryCreateMany.mock.calls.flatMap((c) => c[0].data as { pieceId: string }[]);
+    expect(history.map((h) => h.pieceId)).toEqual(['a']);
+  });
+
+  it('cancelled and same-status skips still apply first', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.CANCELLED), piece('b', P.IN_PRODUCTION)]);
+    groups({});
+    const r = await service.bulkUpdateStatus(['a', 'b'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.skipped.map((s) => s.reason).sort()).toEqual(['CANCELLED', 'SAME_STATUS']);
   });
 });

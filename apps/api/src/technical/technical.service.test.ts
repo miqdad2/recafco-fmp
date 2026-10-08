@@ -59,6 +59,10 @@ const mockFdAttachmentFindMany = vi.fn();
 const mockFdAttachmentFindFirst = vi.fn();
 const mockFdAttachmentCreate = vi.fn();
 const mockFdAttachmentDelete = vi.fn();
+// FMP-UI-31 — TechnicalBoqAttentionSummary's own read-only queries.
+const mockBoqConfirmationFindMany = vi.fn();
+const mockBoqConfirmationGroupBy = vi.fn();
+const mockBoqPieceGroupBy = vi.fn();
 
 const mockClient = {
   contract: {
@@ -127,6 +131,9 @@ const mockClient = {
     delete: mockFdAttachmentDelete,
     count: mockFdCount,
   },
+  contractBoqDrawingConfirmation: { findMany: mockBoqConfirmationFindMany, groupBy: mockBoqConfirmationGroupBy },
+  contractBoqPiece: { groupBy: mockBoqPieceGroupBy },
+  technicalDrawingGroup: { findMany: vi.fn().mockResolvedValue([]) },
 };
 
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
@@ -249,6 +256,9 @@ beforeEach(() => {
   // by default, and a completed-count fallback matches the SD/Approval ones.
   mockFdFindMany.mockResolvedValue([]);
   mockFdCount.mockResolvedValue(1);
+  mockBoqConfirmationFindMany.mockResolvedValue([]);
+  mockBoqConfirmationGroupBy.mockResolvedValue([]);
+  mockBoqPieceGroupBy.mockResolvedValue([]);
 });
 
 describe('nextStageOf', () => {
@@ -430,6 +440,99 @@ describe('TechnicalService — getDashboard', () => {
     expect(mockContractFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ departmentId: 'dept-a' }) }),
     );
+  });
+
+  describe('boqAttention', () => {
+    it('is all zero, and queries nothing, when no job has a started workflow', async () => {
+      const service = buildService();
+      mockContractCount.mockResolvedValue(0);
+      mockWorkflowCount.mockResolvedValue(0);
+      mockContractFindMany.mockResolvedValue([{ ...CONTRACT_ROW, technicalWorkflow: null }]);
+
+      const result = await service.getDashboard(ACTOR_MANAGER);
+
+      expect(result.boqAttention).toEqual({ missingBoqConfirmation: 0, confirmedPiecesNotGenerated: 0, rejectedOrHoldPieces: 0 });
+      expect(mockBoqConfirmationFindMany).not.toHaveBeenCalled();
+    });
+
+    it('scopes every BOQ query to only the jobs with a started workflow', async () => {
+      const service = buildService();
+      mockContractCount.mockResolvedValue(0);
+      mockWorkflowCount.mockResolvedValue(0);
+      mockContractFindMany.mockResolvedValue([
+        { ...CONTRACT_ROW, id: 'c-not-started', technicalWorkflow: null },
+        {
+          ...CONTRACT_ROW,
+          id: 'c-started',
+          technicalWorkflow: {
+            currentStage: TechnicalStage.DRAWING_RECEIVED, status: TechnicalWorkflowStatus.IN_PROGRESS,
+            priority: 'MEDIUM', updatedAt: CONTRACT_ROW.updatedAt, drawings: [],
+          },
+        },
+      ]);
+
+      await service.getDashboard(ACTOR_MANAGER);
+
+      expect(mockBoqConfirmationFindMany.mock.calls[0]![0].where.contractId).toEqual({ in: ['c-started'] });
+      expect(mockBoqConfirmationGroupBy.mock.calls[0]![0].where.contractId).toEqual({ in: ['c-started'] });
+      expect(mockBoqPieceGroupBy.mock.calls[0]![0].where.contractId).toEqual({ in: ['c-started'] });
+    });
+
+    it('counts missingBoqConfirmation as jobs with no CONFIRMED confirmation at all', async () => {
+      const service = buildService();
+      mockContractCount.mockResolvedValue(0);
+      mockWorkflowCount.mockResolvedValue(0);
+      mockContractFindMany.mockResolvedValue([
+        { ...CONTRACT_ROW, id: 'c-1', technicalWorkflow: { currentStage: TechnicalStage.DRAWING_RECEIVED, status: TechnicalWorkflowStatus.IN_PROGRESS, priority: null, updatedAt: CONTRACT_ROW.updatedAt, drawings: [] } },
+        { ...CONTRACT_ROW, id: 'c-2', technicalWorkflow: { currentStage: TechnicalStage.DRAWING_RECEIVED, status: TechnicalWorkflowStatus.IN_PROGRESS, priority: null, updatedAt: CONTRACT_ROW.updatedAt, drawings: [] } },
+      ]);
+      mockBoqConfirmationFindMany.mockResolvedValue([{ contractId: 'c-1' }]);
+
+      const result = await service.getDashboard(ACTOR_MANAGER);
+
+      // c-1 has a confirmation, c-2 doesn't -> 1 of 2 missing.
+      expect(result.boqAttention.missingBoqConfirmation).toBe(1);
+    });
+
+    it('counts confirmedPiecesNotGenerated when confirmed exceeds generated for a job', async () => {
+      const service = buildService();
+      mockContractCount.mockResolvedValue(0);
+      mockWorkflowCount.mockResolvedValue(0);
+      mockContractFindMany.mockResolvedValue([
+        { ...CONTRACT_ROW, id: 'c-1', technicalWorkflow: { currentStage: TechnicalStage.DRAWING_RECEIVED, status: TechnicalWorkflowStatus.IN_PROGRESS, priority: null, updatedAt: CONTRACT_ROW.updatedAt, drawings: [] } },
+      ]);
+      mockBoqConfirmationGroupBy.mockResolvedValue([{ contractId: 'c-1', _sum: { confirmedPieces: 10 } }]);
+      mockBoqPieceGroupBy.mockImplementation((args: { by: string[] }) =>
+        args.by[0] === 'contractId'
+          ? Promise.resolve([{ contractId: 'c-1', _count: { _all: 4 } }])
+          : Promise.resolve([]),
+      );
+
+      const result = await service.getDashboard(ACTOR_MANAGER);
+
+      expect(result.boqAttention.confirmedPiecesNotGenerated).toBe(1);
+    });
+
+    it('sums rejectedOrHoldPieces across ON_HOLD and REJECTED statuses', async () => {
+      const service = buildService();
+      mockContractCount.mockResolvedValue(0);
+      mockWorkflowCount.mockResolvedValue(0);
+      mockContractFindMany.mockResolvedValue([
+        { ...CONTRACT_ROW, id: 'c-1', technicalWorkflow: { currentStage: TechnicalStage.DRAWING_RECEIVED, status: TechnicalWorkflowStatus.IN_PROGRESS, priority: null, updatedAt: CONTRACT_ROW.updatedAt, drawings: [] } },
+      ]);
+      mockBoqPieceGroupBy.mockImplementation((args: { by: string[] }) =>
+        args.by[0] === 'currentStatus'
+          ? Promise.resolve([
+              { currentStatus: 'ON_HOLD', _count: { _all: 2 } },
+              { currentStatus: 'REJECTED', _count: { _all: 3 } },
+            ])
+          : Promise.resolve([]),
+      );
+
+      const result = await service.getDashboard(ACTOR_MANAGER);
+
+      expect(result.boqAttention.rejectedOrHoldPieces).toBe(5);
+    });
   });
 });
 

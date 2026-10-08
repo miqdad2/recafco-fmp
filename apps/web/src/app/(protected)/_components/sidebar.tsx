@@ -93,8 +93,16 @@ const MAIN_GROUPS: NavGroup[] = [
       { label: 'Production & Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
       // FMP-BOQ-08 — Storage Yard & Delivery has its own permission (no module code); first screen = Piece Delivery.
       { label: 'Storage Yard & Delivery', href: '/storage-delivery/pieces', icon: Warehouse, permission: 'storage_delivery.read' },
+      // FMP-BOQ-09 — Erection piece screen; needs erection.read (the existing Erection dashboard link above is unchanged).
+      { label: 'Piece Erection', href: '/erection/pieces', icon: HardHat, permission: 'erection.read' },
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
+      // FMP-UI-30 — Schedule Planning promoted to its own main-sidebar item
+      // (was Contract Management's "Schedule" submenu item, which overlapped
+      // in spirit with the separate Task Management module). Same route,
+      // same CONTRACTS_MANAGEMENT gate as Technical/Erection above — no new
+      // permission, no new route.
+      { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
     ],
   },
   {
@@ -105,18 +113,19 @@ const MAIN_GROUPS: NavGroup[] = [
   },
 ];
 
+// FMP-UI-30 — cleaned per a direct "this overlaps with other modules"
+// report: "Schedule" (now its own main sidebar item, "Schedule Planning" —
+// see EXECUTIVE_SIDEBAR_ITEMS/MAIN_GROUPS below), "Workflow & Team Tasks"
+// (overlapped with the separate Task Management module), and "Erection
+// Dashboard" (overlapped with the separate Erection module) are all removed
+// from this list. None of their routes/pages/permissions were touched —
+// `/contracts/schedule`, `/contracts/workflow`, `/contracts/erection-
+// dashboard` all still work by direct URL, and Erection/Workflow still have
+// their own dedicated top-level sidebar entries exactly as before. Only
+// this submenu's OWN item list shrank, from 10 items to 7.
 const CONTRACT_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/contracts/dashboard', icon: LayoutDashboard, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Contract List', href: '/contracts', icon: FileText, module: 'CONTRACTS_MANAGEMENT' },
-  { label: 'Schedule', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
-  { label: 'Workflow & Team Tasks', href: '/contracts/workflow', icon: Workflow, module: 'CONTRACTS_MANAGEMENT' },
-  // CM-71B — visible to the same audience as every other CONTRACT_ITEMS
-  // entry (contracts.read via the shared CONTRACTS_MANAGEMENT module gate);
-  // no new role/permission was added for this dashboard, per that unit's
-  // own "do not add a new role immediately" instruction. Also present in
-  // CONTRACT_STAFF_ITEMS below as of CM-71H.1 — see that array's own doc
-  // comment for why.
-  { label: 'Erection Dashboard', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Payments', href: '/contracts/payments', icon: Wallet, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Issue Log', href: '/contracts/issues', icon: AlertCircle, module: 'CONTRACTS_MANAGEMENT' },
   { label: 'Claim Log', href: '/contracts/claims', icon: Receipt, module: 'CONTRACTS_MANAGEMENT' },
@@ -169,11 +178,19 @@ const CONTRACT_STAFF_ITEMS: NavItem[] = [
  * are excluded from the generic Operations rendering in that case). Gating
  * is already guaranteed by the caller only rendering this list when
  * contractManagementOnly is true (which itself requires contracts.read).
+ * FMP-UI-30 — Schedule Planning added, same reasoning: it's now its own
+ * main-sidebar item (gated on the same CONTRACTS_MANAGEMENT module), so a
+ * Contract-Management-only user needs it here too, not just inside the
+ * generic "Operations" group this persona never sees.
  */
-const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
+const CONTRACTS_MANAGEMENT_EXTRA_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
   // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
   { label: 'Technical', href: '/technical', icon: Ruler },
   { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat },
+  // FMP-UI-30 — same route Contract Management's own (now-removed) "Schedule"
+  // submenu item used; kept as-is per that unit's own "do not create a new
+  // route unless required" instruction.
+  { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar },
 ];
 
 /**
@@ -221,6 +238,17 @@ const TECHNICAL_AND_ERECTION_ITEMS: { label: string; href: string; icon: LucideI
 // Management — its real workflow position (cost estimation/quotation is a
 // pre-contract-execution step, the same reasoning FMP-UI-23 originally
 // placed it there for). Every other FMP-UI-28 href/order is unchanged.
+// FMP-UI-30 — Schedule Planning added after Task Management (12th item).
+// It was Contract Management's own "Schedule" submenu item
+// (`/contracts/schedule`, unchanged) — promoted to a main module because it
+// overlapped in spirit with the separate Task Management module. Its own
+// active state needs no special case: `isExecutiveItemActive()` already
+// falls through to the generic exact/prefix match for any href that isn't
+// `/contracts/executive` itself, so visiting `/contracts/schedule` lights up
+// THIS item, not "Contract Management" — and since "Schedule" no longer
+// exists in CONTRACT_ITEMS (see that array's own FMP-UI-30 note), it can no
+// longer make the Contract Management row's own `executiveContractSubActive`
+// check true either.
 const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
   { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
@@ -234,6 +262,7 @@ const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }
   { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
+  { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
@@ -555,7 +584,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
             // still pass isNavItemVisible and render under a floating "Operations" heading
             // above the flat Contract Management section below. Render them there instead,
             // right after that section, so the required top-level order still holds.
-            if (contractManagementOnly && group.label === 'Operations' && (item.label === 'Technical' || item.label === 'Erection')) return false;
+            if (contractManagementOnly && group.label === 'Operations' && (item.label === 'Technical' || item.label === 'Erection' || item.label === 'Schedule Planning')) return false;
             return isNavItemVisible(item, user.permissions, hasAnyAdminPermission);
           });
           const showContractsHere = group.label === 'Operations' && hasAnyContractPermission && !contractManagementOnly;
@@ -688,8 +717,8 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </Link>
               );
             })}
-            {/* Technical/Erection — same CONTRACTS_MANAGEMENT gate as the items above, rendered here (not under a separate "Operations" heading) so a Contract-Management-only user still sees the required top-level order. */}
-            {TECHNICAL_AND_ERECTION_ITEMS.map((item) => {
+            {/* Technical/Erection/Schedule Planning — same CONTRACTS_MANAGEMENT gate as the items above, rendered here (not under a separate "Operations" heading) so a Contract-Management-only user still sees the required top-level order. */}
+            {CONTRACTS_MANAGEMENT_EXTRA_ITEMS.map((item) => {
               const active = isActive(item.href, pathname);
               return (
                 <Link

@@ -166,6 +166,12 @@ export class TechnicalBoqPieceService {
         currentLocation: true,
         isCancelled: true,
         updatedAt: true,
+        // FMP-BOQ-11 — the drawing / calculation group the piece currently belongs to (none = Not assigned).
+        drawingGroupLinks: {
+          where: { activeSlot: 1 },
+          take: 1,
+          select: { group: { select: { id: true, drawingNo: true, calculationRef: true, groupTitle: true, status: true, _count: { select: { attachments: true } } } } },
+        },
       },
     });
   }

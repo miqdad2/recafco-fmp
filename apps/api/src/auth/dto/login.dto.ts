@@ -3,7 +3,7 @@ import { IsString, MinLength, MaxLength } from 'class-validator';
 export class LoginDto {
   @IsString()
   @MinLength(1)
-  @MaxLength(50)
+  @MaxLength(254)
   username!: string;
 
   @IsString()

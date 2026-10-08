@@ -591,6 +591,10 @@ const mockPaymentFindMany = vi.fn();
 const mockCloseoutRequestFindMany = vi.fn();
 const mockCommentFindMany = vi.fn();
 const mockAttachmentFindMany = vi.fn();
+// FMP-UI-29 — ContractBoqPieceOverview's own read-only queries.
+const mockBoqConfirmationAggregate = vi.fn();
+const mockBoqConfirmationGroupBy = vi.fn();
+const mockBoqPieceGroupBy = vi.fn();
 
 const mockClient = {
   contract: { findMany: mockContractFindMany },
@@ -601,6 +605,8 @@ const mockClient = {
   contractCloseoutRequest: { findMany: mockCloseoutRequestFindMany },
   contractWorkflowTaskComment: { findMany: mockCommentFindMany },
   contractWorkflowTaskAttachment: { findMany: mockAttachmentFindMany },
+  contractBoqDrawingConfirmation: { aggregate: mockBoqConfirmationAggregate, groupBy: mockBoqConfirmationGroupBy },
+  contractBoqPiece: { groupBy: mockBoqPieceGroupBy },
 };
 
 const mockDb = { getClient: vi.fn(() => mockClient) } as unknown as DatabaseService;
@@ -649,6 +655,9 @@ beforeEach(() => {
   mockCloseoutRequestFindMany.mockResolvedValue([]);
   mockCommentFindMany.mockResolvedValue([]);
   mockAttachmentFindMany.mockResolvedValue([]);
+  mockBoqConfirmationAggregate.mockResolvedValue({ _sum: { confirmedPieces: null } });
+  mockBoqConfirmationGroupBy.mockResolvedValue([]);
+  mockBoqPieceGroupBy.mockResolvedValue([]);
   mockScheduleFindAll.mockResolvedValue({
     items: [], total: 0, page: 1, pageSize: 15,
     totalPages: 0,
@@ -697,6 +706,86 @@ describe('ContractDashboardService.getDashboard', () => {
     expect(result.manager!.insights.financials.submittedTotal).toBe(2000);
     expect(result.manager!.insights.financials.paidTotal).toBe(500);
     expect(result.manager!.insights.topValueContracts).toHaveLength(1);
+  });
+
+  it('empty-contracts branch (contractIds.length === 0) still returns a zeroed boqOverview, not undefined', async () => {
+    mockContractFindMany.mockResolvedValue([]);
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    expect(result.manager!.boqOverview).toEqual({
+      confirmedPieces: 0, piecesGenerated: 0, produced: 0, delivered: 0, erected: 0, completed: 0,
+      itemsNeedingReview: 0, hasAnyData: false,
+    });
+    // Confirms the empty-contracts short-circuit never even queries BOQ tables.
+    expect(mockBoqConfirmationAggregate).not.toHaveBeenCalled();
+  });
+
+  it('boqOverview.confirmedPieces sums only CONFIRMED rows\' confirmedPieces', async () => {
+    mockContractFindMany.mockResolvedValue([makeContract()]);
+    mockBoqConfirmationAggregate.mockResolvedValue({ _sum: { confirmedPieces: 42 } });
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    const callArgs = mockBoqConfirmationAggregate.mock.calls[0]![0];
+    expect(callArgs.where.confirmationStatus).toBe('CONFIRMED');
+    expect(result.manager!.boqOverview.confirmedPieces).toBe(42);
+    expect(result.manager!.boqOverview.hasAnyData).toBe(true);
+  });
+
+  it('boqOverview.piecesGenerated excludes cancelled pieces; status counts are current-status snapshots', async () => {
+    mockContractFindMany.mockResolvedValue([makeContract()]);
+    mockBoqPieceGroupBy.mockResolvedValue([
+      { currentStatus: 'PRODUCED', isCancelled: false, _count: { _all: 5 } },
+      { currentStatus: 'DELIVERED', isCancelled: false, _count: { _all: 3 } },
+      { currentStatus: 'COMPLETED', isCancelled: false, _count: { _all: 2 } },
+      { currentStatus: 'CANCELLED', isCancelled: true, _count: { _all: 7 } },
+    ]);
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    const { boqOverview } = result.manager!;
+    // 5 + 3 + 2 generated; the 7 cancelled pieces are excluded entirely.
+    expect(boqOverview.piecesGenerated).toBe(10);
+    expect(boqOverview.produced).toBe(5);
+    expect(boqOverview.delivered).toBe(3);
+    expect(boqOverview.completed).toBe(2);
+    expect(boqOverview.erected).toBe(0);
+  });
+
+  it('boqOverview.itemsNeedingReview counts BOQ items whose generated pieces differ from confirmed pieces', async () => {
+    mockContractFindMany.mockResolvedValue([makeContract()]);
+    // item-a: confirmed 10, generated 10 -> matches, not counted.
+    // item-b: confirmed 10, generated 4 -> mismatch, counted.
+    // item-c: confirmed null (never confirmed) but has generated pieces -> not counted (needsAttention requires confirmed !== null).
+    mockBoqConfirmationGroupBy.mockResolvedValue([
+      { boqItemId: 'item-a', _sum: { confirmedPieces: 10 } },
+      { boqItemId: 'item-b', _sum: { confirmedPieces: 10 } },
+    ]);
+    mockBoqPieceGroupBy.mockImplementation((args: { by: string[] }) =>
+      args.by[0] === 'boqItemId'
+        ? Promise.resolve([
+            { boqItemId: 'item-a', _count: { _all: 10 } },
+            { boqItemId: 'item-b', _count: { _all: 4 } },
+            { boqItemId: 'item-c', _count: { _all: 6 } },
+          ])
+        : Promise.resolve([]),
+    );
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    expect(result.manager!.boqOverview.itemsNeedingReview).toBe(1);
+  });
+
+  it('boqOverview queries use the same contract-scope where the contract list query uses', async () => {
+    mockBuildDeptFilter.mockResolvedValue({ in: ['dept-1'] });
+    mockContractFindMany.mockResolvedValue([makeContract()]);
+
+    await service.getDashboard(ACTOR_MANAGER);
+
+    const expectedWhere = { status: { not: 'CANCELLED' }, departmentId: { in: ['dept-1'] } };
+    expect(mockBoqConfirmationAggregate.mock.calls[0]![0].where.contract).toEqual(expectedWhere);
+    expect(mockBoqPieceGroupBy.mock.calls[0]![0].where.contract).toEqual(expectedWhere);
   });
 
   it('returns dashboardType STAFF with a staff payload for a staff actor', async () => {

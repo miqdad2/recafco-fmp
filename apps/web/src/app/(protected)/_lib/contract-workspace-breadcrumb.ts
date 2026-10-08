@@ -44,6 +44,7 @@ const WORKSPACE_TAB_SEGMENTS = new Set([
   'schedule',
   'payments',
   'production',
+  'boq-progress',
   'variations',
   'claims',
   'risks',

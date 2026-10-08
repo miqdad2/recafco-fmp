@@ -10,6 +10,14 @@ import type { PieceSkipReason } from './boq-piece-generation';
 // for skipping, history and concurrency live here once.
 // ---------------------------------------------------------------------------
 
+/** Statuses where an optional place (yard, bay, site area ...) is recorded. */
+const LOCATION_STATUSES: ContractBoqPieceStatus[] = [
+  ContractBoqPieceStatus.IN_STORE,
+  ContractBoqPieceStatus.DELIVERED,
+  ContractBoqPieceStatus.ERECTED,
+  ContractBoqPieceStatus.COMPLETED,
+];
+
 export interface SkippedPiece {
   pieceId: string;
   pieceCode: string | null;
@@ -30,9 +38,11 @@ export interface PieceStatusUpdateParams {
   pieceIds: string[];
   target: ContractBoqPieceStatus;
   note: string | undefined;
-  /** Optional place; only stored when the target is In Store or Delivered. */
+  /** Optional place; only stored when the target is In Store, Delivered, Erected or Completed. */
   location?: string | undefined;
   actorId: string;
+  /** FMP-BOQ-14 — Production: In Production / Produced need the piece's drawing group to be Released to Production. */
+  requireRelease?: boolean;
   /** Statuses the calling screen/user may set. A target outside this list is blocked before anything is read or written. */
   allowedStatuses: ContractBoqPieceStatus[];
 }
@@ -43,7 +53,7 @@ export async function applyPieceStatusUpdate(
 ): Promise<PieceStatusUpdateResult> {
   const { contractId, pieceIds, target, actorId, allowedStatuses } = params;
   const location =
-    params.location && (target === ContractBoqPieceStatus.IN_STORE || target === ContractBoqPieceStatus.DELIVERED)
+    params.location && LOCATION_STATUSES.includes(target)
       ? params.location
       : undefined;
   // The place is also written into the history note so the movement can be traced.
@@ -67,6 +77,12 @@ export async function applyPieceStatusUpdate(
   });
   const byId = new Map(found.map((p) => [p.id, p]));
 
+  // FMP-BOQ-14 — Hold / Rejected are never gated; only starting or finishing production needs a release.
+  const releaseGate =
+    params.requireRelease && (target === ContractBoqPieceStatus.IN_PRODUCTION || target === ContractBoqPieceStatus.PRODUCED)
+      ? await releaseSkipReasons(client, found.map((p) => p.id))
+      : null;
+
   const skipped: SkippedPiece[] = [];
   const toUpdate: typeof found = [];
   for (const id of pieceIds) {
@@ -75,7 +91,7 @@ export async function applyPieceStatusUpdate(
       skipped.push({ pieceId: id, pieceCode: null, reason: 'NOT_FOUND', message: PIECE_SKIP_MESSAGES.NOT_FOUND });
       continue;
     }
-    const reason = pieceSkipReason(piece, target);
+    const reason = pieceSkipReason(piece, target) ?? (releaseGate ? releaseGate.get(id) ?? null : null);
     if (reason) skipped.push({ pieceId: id, pieceCode: piece.pieceCode, reason, message: PIECE_SKIP_MESSAGES[reason] });
     else toUpdate.push(piece);
   }
@@ -133,4 +149,30 @@ export async function applyPieceStatusUpdate(
     skipped,
     message: buildBulkUpdateMessage(updatedCount, skipped.map((s) => s.reason)),
   };
+}
+
+/**
+ * For each piece: null-free map of why it is not released (NO_GROUP / NOT_RELEASED);
+ * pieces in a Released-to-Production active group are absent (= allowed). A piece
+ * whose only groups were cancelled counts as "not released".
+ */
+async function releaseSkipReasons(
+  client: ReturnType<DatabaseService['getClient']>,
+  pieceIds: string[],
+): Promise<Map<string, PieceSkipReason>> {
+  const links = await client.technicalDrawingGroupPiece.findMany({
+    where: { pieceId: { in: pieceIds } },
+    select: { pieceId: true, activeSlot: true, group: { select: { status: true } } },
+  });
+  const result = new Map<string, PieceSkipReason>();
+  for (const id of pieceIds) {
+    const own = links.filter((l) => l.pieceId === id);
+    const active = own.find((l) => l.activeSlot === 1);
+    if (active) {
+      if (active.group.status !== 'RELEASED_TO_PRODUCTION') result.set(id, 'NOT_RELEASED');
+    } else {
+      result.set(id, own.length > 0 ? 'NOT_RELEASED' : 'NO_GROUP');
+    }
+  }
+  return result;
 }

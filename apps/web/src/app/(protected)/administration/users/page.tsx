@@ -140,7 +140,7 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
                   name="search"
                   type="text"
                   defaultValue={params.search ?? ''}
-                  placeholder="Username or display name…"
+                  placeholder="Name, email or employee number…"
                   className="w-full h-9 px-3 rounded-md border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-focus"
                 />
               </div>
@@ -229,8 +229,8 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
                 <table className="w-full text-sm min-w-[700px]">
                   <thead>
                     <tr className="border-b border-border bg-surface-secondary">
-                      <th className="px-4 py-3 text-left font-medium text-text-secondary">Username</th>
-                      <th className="px-4 py-3 text-left font-medium text-text-secondary">Display name</th>
+                      <th className="px-4 py-3 text-left font-medium text-text-secondary">Full Name</th>
+                      <th className="px-4 py-3 text-left font-medium text-text-secondary">Email</th>
                       <th className="px-4 py-3 text-left font-medium text-text-secondary">Role</th>
                       <th className="px-4 py-3 text-left font-medium text-text-secondary">Status</th>
                       <th className="px-4 py-3 text-left font-medium text-text-secondary">Last login</th>
@@ -240,10 +240,10 @@ export default async function UsersPage({ searchParams }: PageProps): Promise<Re
                   <tbody className="divide-y divide-border">
                     {moduleFilteredUsers.map((user) => (
                       <tr key={user.id} className="hover:bg-surface-hover">
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs text-text-secondary">{user.username}</span>
-                        </td>
                         <td className="px-4 py-3 text-text-primary">{user.displayName}</td>
+                        <td className="px-4 py-3 text-xs text-text-secondary">
+                          {user.email ?? <span className="text-text-muted italic">No email</span>}
+                        </td>
                         <td className="px-4 py-3">
                           <RoleBadge code={user.role.code} name={user.role.name} />
                         </td>

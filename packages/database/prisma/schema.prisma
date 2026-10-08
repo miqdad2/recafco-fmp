@@ -297,14 +297,19 @@ model User {
   technicalApprovalAttachmentsUploaded TechnicalApprovalAttachment[] @relation("TechnicalApprovalAttachmentUploadedBy")
 
   // FMP-TECH-04
-  technicalFdIssuancesIssuedBy           TechnicalFdIssuance[]            @relation("TechnicalFdIssuanceIssuedBy")
-  technicalFdIssuancesCreated            TechnicalFdIssuance[]            @relation("TechnicalFdIssuanceCreatedBy")
+  technicalFdIssuancesIssuedBy             TechnicalFdIssuance[]             @relation("TechnicalFdIssuanceIssuedBy")
+  technicalFdIssuancesCreated              TechnicalFdIssuance[]             @relation("TechnicalFdIssuanceCreatedBy")
   // FMP-BOQ-03
-  boqDrawingConfirmationsConfirmed       ContractBoqDrawingConfirmation[] @relation("BoqDrawingConfirmationConfirmedBy")
-  boqDrawingConfirmationsCreated         ContractBoqDrawingConfirmation[] @relation("BoqDrawingConfirmationCreatedBy")
+  boqDrawingConfirmationsConfirmed         ContractBoqDrawingConfirmation[]  @relation("BoqDrawingConfirmationConfirmedBy")
+  boqDrawingConfirmationsCreated           ContractBoqDrawingConfirmation[]  @relation("BoqDrawingConfirmationCreatedBy")
   // FMP-BOQ-04
-  boqPieceStatusUpdates                  ContractBoqPieceStatusHistory[]  @relation("BoqPieceStatusUpdatedBy")
-  technicalFdIssuanceAttachmentsUploaded TechnicalFdIssuanceAttachment[]  @relation("TechnicalFdIssuanceAttachmentUploadedBy")
+  boqPieceStatusUpdates                    ContractBoqPieceStatusHistory[]   @relation("BoqPieceStatusUpdatedBy")
+  // FMP-BOQ-11
+  technicalDrawingGroupsCreated            TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupCreatedBy")
+  technicalDrawingGroupsApproved           TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupApprovedBy")
+  technicalDrawingGroupAttachmentsUploaded TechnicalDrawingGroupAttachment[] @relation("TechnicalDrawingGroupAttachmentUploadedBy")
+  technicalDrawingGroupsReleased           TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupReleasedBy")
+  technicalFdIssuanceAttachmentsUploaded   TechnicalFdIssuanceAttachment[]   @relation("TechnicalFdIssuanceAttachmentUploadedBy")
 
   productionOrdersCreated    ProductionOrder[]   @relation("ProdOrderCreatedBy")
   productionOrdersSupervised ProductionOrder[]   @relation("ProdOrderSupervisor")
@@ -1256,6 +1261,8 @@ model Contract {
   technicalFdIssuances              TechnicalFdIssuance[]
   boqDrawingConfirmations           ContractBoqDrawingConfirmation[]
   boqPieces                         ContractBoqPiece[]
+  technicalDrawingGroups            TechnicalDrawingGroup[]
+  technicalDrawingGroupAttachments  TechnicalDrawingGroupAttachment[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1327,10 +1334,12 @@ model ContractBoqItem {
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  contract             Contract                         @relation(fields: [contractId], references: [id], onDelete: Restrict)
-  productionStatus     ContractBoqItemProductionStatus?
-  drawingConfirmations ContractBoqDrawingConfirmation[]
-  pieces               ContractBoqPiece[]
+  contract                         Contract                          @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  productionStatus                 ContractBoqItemProductionStatus?
+  drawingConfirmations             ContractBoqDrawingConfirmation[]
+  pieces                           ContractBoqPiece[]
+  technicalDrawingGroups           TechnicalDrawingGroup[]
+  technicalDrawingGroupAttachments TechnicalDrawingGroupAttachment[]
 
   @@unique([contractId, itemCode])
   @@index([contractId, sortOrder])
@@ -1375,7 +1384,8 @@ model ContractBoqDrawingConfirmation {
   confirmedByUser User?           @relation("BoqDrawingConfirmationConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
   createdByUser   User            @relation("BoqDrawingConfirmationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
-  pieces ContractBoqPiece[]
+  pieces                 ContractBoqPiece[]
+  technicalDrawingGroups TechnicalDrawingGroup[]
 
   @@index([contractId])
   @@index([boqItemId, confirmationStatus], map: "contract_boq_drawing_conf_item_status_idx")
@@ -1422,7 +1432,8 @@ model ContractBoqPiece {
   boqItem             ContractBoqItem                @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
   drawingConfirmation ContractBoqDrawingConfirmation @relation(fields: [drawingConfirmationId], references: [id], onDelete: Restrict)
 
-  statusHistory ContractBoqPieceStatusHistory[]
+  statusHistory     ContractBoqPieceStatusHistory[]
+  drawingGroupLinks TechnicalDrawingGroupPiece[]
 
   @@unique([contractId, pieceCode])
   @@unique([drawingConfirmationId, pieceNo])
@@ -1445,6 +1456,114 @@ model ContractBoqPieceStatusHistory {
 
   @@index([pieceId, createdAt])
   @@map("contract_boq_piece_status_history")
+}
+
+// FMP-BOQ-11 — Technical Drawing / Calculation Group: one drawing + calculation
+// scope covering one, many or all generated pieces of a BOQ item (a BOQ item can
+// have many groups). Pieces are released to Production group by group, but this
+// unit only RECORDS the group status — it never changes a piece's status and
+// does not block Production. Groups and pieces are never deleted.
+enum TechnicalDrawingGroupStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  RELEASED_TO_PRODUCTION
+  REVISED
+  CANCELLED
+
+  @@map("technical_drawing_group_status")
+}
+
+model TechnicalDrawingGroup {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  contractId            String                      @map("contract_id") @db.Uuid
+  boqItemId             String                      @map("boq_item_id") @db.Uuid
+  drawingConfirmationId String?                     @map("drawing_confirmation_id") @db.Uuid
+  drawingNo             String                      @map("drawing_no") @db.VarChar(100)
+  calculationRef        String?                     @map("calculation_ref") @db.VarChar(100)
+  groupTitle            String?                     @map("group_title") @db.VarChar(200)
+  status                TechnicalDrawingGroupStatus @default(DRAFT)
+  remarks               String?                     @db.VarChar(2000)
+  createdById           String?                     @map("created_by_id") @db.Uuid
+  approvedById          String?                     @map("approved_by_id") @db.Uuid
+  approvedAt            DateTime?                   @map("approved_at") @db.Timestamptz(3)
+  releasedById          String?                     @map("released_by_id") @db.Uuid
+  releasedAt            DateTime?                   @map("released_at") @db.Timestamptz(3)
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract            Contract                        @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem             ContractBoqItem                 @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  drawingConfirmation ContractBoqDrawingConfirmation? @relation(fields: [drawingConfirmationId], references: [id], onDelete: SetNull)
+  createdByUser       User?                           @relation("TechnicalDrawingGroupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedByUser      User?                           @relation("TechnicalDrawingGroupApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  releasedByUser      User?                           @relation("TechnicalDrawingGroupReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+
+  pieces      TechnicalDrawingGroupPiece[]
+  attachments TechnicalDrawingGroupAttachment[]
+
+  @@index([contractId])
+  @@index([boqItemId, status])
+  @@map("technical_drawing_groups")
+}
+
+// A piece belongs to at most ONE active group. `activeSlot` is 1 while the link
+// is active and NULL once the group is cancelled/revised, so the unique
+// (pieceId, activeSlot) lets a piece be re-assigned later but never sit in two
+// active groups (PostgreSQL treats NULLs as distinct).
+model TechnicalDrawingGroupPiece {
+  id         String   @id @default(uuid()) @db.Uuid
+  groupId    String   @map("group_id") @db.Uuid
+  pieceId    String   @map("piece_id") @db.Uuid
+  activeSlot Int?     @map("active_slot")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  group TechnicalDrawingGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  piece ContractBoqPiece      @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, pieceId])
+  @@unique([pieceId, activeSlot])
+  @@index([pieceId])
+  @@map("technical_drawing_group_pieces")
+}
+
+// FMP-BOQ-12 — drawing / calculation files attached to a Drawing / Calculation
+// Group. Only metadata lives in the database; the file itself is on disk
+// (storage/technical-drawing-groups/{groupId}/<random name>). Files can be added
+// and removed until the group is released to Production.
+enum TechnicalDrawingGroupFileCategory {
+  DRAWING
+  CALCULATION
+  APPROVAL_DOCUMENT
+  OTHER
+
+  @@map("technical_drawing_group_file_category")
+}
+
+model TechnicalDrawingGroupAttachment {
+  id           String                            @id @default(uuid()) @db.Uuid
+  groupId      String                            @map("group_id") @db.Uuid
+  contractId   String                            @map("contract_id") @db.Uuid
+  boqItemId    String                            @map("boq_item_id") @db.Uuid
+  fileName     String                            @map("file_name") @db.VarChar(255)
+  originalName String                            @map("original_name") @db.VarChar(255)
+  mimeType     String                            @map("mime_type") @db.VarChar(150)
+  fileSize     Int                               @map("file_size")
+  storagePath  String                            @map("storage_path") @db.VarChar(500)
+  category     TechnicalDrawingGroupFileCategory
+  remarks      String?                           @db.VarChar(1000)
+  uploadedById String?                           @map("uploaded_by_id") @db.Uuid
+  createdAt    DateTime                          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime                          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  group          TechnicalDrawingGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  contract       Contract              @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem        ContractBoqItem       @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  uploadedByUser User?                 @relation("TechnicalDrawingGroupAttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([groupId, createdAt])
+  @@index([contractId])
+  @@map("technical_drawing_group_attachments")
 }
 
 // CM-59 — Contract Production Status. Production quantities are manually

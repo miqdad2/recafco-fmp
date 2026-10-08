@@ -72,9 +72,17 @@ export class AuthService implements OnModuleInit {
   }
 
   async login(dto: LoginDto): Promise<LoginResult> {
-    const username = dto.username.toLowerCase().trim();
+    // The identifier may be a username or an email address; both are matched case-insensitively.
+    const identifier = dto.username.trim();
 
-    const user = await this.db.getClient().user.findUnique({ where: { username } });
+    const user = await this.db.getClient().user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: identifier, mode: 'insensitive' } },
+          { email: { equals: identifier, mode: 'insensitive' } },
+        ],
+      },
+    });
 
     if (!user) {
       // Constant-time defense: run verify against dummy hash.

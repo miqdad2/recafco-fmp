@@ -1,108 +1,62 @@
 import Link from 'next/link';
-import { Target, CheckCircle2 } from 'lucide-react';
+import { Target, CheckCircle2, ArrowUpRight } from 'lucide-react';
 import type { TechnicalDashboardData } from '@/lib/technical-api';
+import { TECHNICAL_STAGE_LABELS } from '@/lib/technical-api';
+import { stageHref, STAGE_ACTION_LABELS } from '../_lib/technical-format';
+import { buildNextActionItems, RELEASE_MESSAGES } from '../_lib/technical-dashboard-selector-helpers';
 
 interface Props {
   dashboard: TechnicalDashboardData;
 }
 
 /**
- * FMP-TECH-05, reworded FMP-TECH-05P — "Next Action Focus": a single
- * manager-friendly sentence telling the viewer what to look at first,
- * derived purely from data the dashboard already fetched — no new query,
- * no invented recommendation. Priority order (the ticket's own explicit
- * list): Needs Attention, then Waiting Approval pending, then SD &
- * Calculation pending, then Drawing Received pending, then a calm empty
- * state — later stages are checked first because a job order stuck closer
- * to completion is usually the more urgent thing for a manager to look at
- * than one just starting. FD Issuance is deliberately not part of this
- * chain (it's the last stage — "N jobs are in FD Issuance" isn't an
- * actionable focus item the way the earlier stages are).
+ * Next Action Focus — at most 5 rows. FMP-BOQ-16: Technical release work comes
+ * first (confirmed pieces not generated, pieces not assigned to groups, groups
+ * with no files, submitted groups waiting approval, approved groups waiting
+ * release); the existing workflow actions (FMP-UI-31) follow. Read-only: every
+ * row is just an "Open" link.
  */
 export function NextActionPanel({ dashboard }: Props): React.JSX.Element {
-  const { needsAttention, stageBreakdown } = dashboard;
+  const items = buildNextActionItems(dashboard.jobs, dashboard.releaseByContract ?? {}, dashboard.needsAttention);
 
-  if (needsAttention.length > 0) {
-    const top = needsAttention[0]!;
-    const count = needsAttention.length;
+  if (items.length === 0) {
     return (
-      <div className="flex h-full flex-col justify-between rounded-lg border border-warning/40 bg-warning-light p-4">
-        <div className="flex items-start gap-2.5">
-          <Target className="mt-0.5 size-4.5 shrink-0 text-warning" aria-hidden="true" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-warning">Next Action Focus</p>
-            <p className="mt-1 text-sm font-medium text-text-primary">
-              {count} job{count === 1 ? '' : 's'} need{count === 1 ? 's' : ''} attention. Most urgent: {top.jobOrderNo ?? top.referenceNumber} — {top.detail}
-            </p>
-          </div>
-        </div>
-        <Link href={`/technical/jobs/${top.contractId}`} className="mt-3 self-start text-xs font-semibold text-warning hover:underline">
-          Open this workflow →
-        </Link>
-      </div>
-    );
-  }
-
-  if (stageBreakdown.GETTING_APPROVAL > 0) {
-    const count = stageBreakdown.GETTING_APPROVAL;
-    return (
-      <div className="flex h-full flex-col justify-between rounded-lg border border-info/40 bg-info-light p-4">
-        <div className="flex items-start gap-2.5">
-          <Target className="mt-0.5 size-4.5 shrink-0 text-info" aria-hidden="true" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-info">Next Action Focus</p>
-            <p className="mt-1 text-sm font-medium text-text-primary">
-              {count} job order{count === 1 ? ' is' : 's are'} waiting for an approval decision.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (stageBreakdown.SD_CALCULATION_SUBMISSION > 0) {
-    const count = stageBreakdown.SD_CALCULATION_SUBMISSION;
-    return (
-      <div className="flex h-full flex-col justify-between rounded-lg border border-info/40 bg-info-light p-4">
-        <div className="flex items-start gap-2.5">
-          <Target className="mt-0.5 size-4.5 shrink-0 text-info" aria-hidden="true" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-info">Next Action Focus</p>
-            <p className="mt-1 text-sm font-medium text-text-primary">
-              {count} job order{count === 1 ? ' is' : 's are'} waiting for SD & Calculation submission.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (stageBreakdown.DRAWING_RECEIVED > 0) {
-    const count = stageBreakdown.DRAWING_RECEIVED;
-    return (
-      <div className="flex h-full flex-col justify-between rounded-lg border border-info/40 bg-info-light p-4">
-        <div className="flex items-start gap-2.5">
-          <Target className="mt-0.5 size-4.5 shrink-0 text-info" aria-hidden="true" />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-info">Next Action Focus</p>
-            <p className="mt-1 text-sm font-medium text-text-primary">
-              {count} job order{count === 1 ? ' is' : 's are'} waiting for Drawing Received completion.
-            </p>
-          </div>
-        </div>
+      <div className="flex h-full items-center gap-2.5 rounded-lg border border-success/40 bg-success-light p-4 text-sm text-success">
+        <CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />
+        {RELEASE_MESSAGES.upToDate}
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col justify-between rounded-lg border border-success/40 bg-success-light p-4">
-      <div className="flex items-start gap-2.5">
-        <CheckCircle2 className="mt-0.5 size-4.5 shrink-0 text-success" aria-hidden="true" />
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-success">Next Action Focus</p>
-          <p className="mt-1 text-sm font-medium text-text-primary">No urgent Technical action currently.</p>
-        </div>
+    <div className="h-full rounded-lg border border-border bg-surface p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+        <Target className="size-3.5" aria-hidden="true" />
+        Next Action Focus
       </div>
+      <ul className="space-y-1.5">
+        {items.map((item) => (
+          <li
+            key={item.key}
+            className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-secondary/50 px-2.5 py-2"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-text-primary">{item.jobLabel}</p>
+              <p className="truncate text-xs text-text-secondary">{item.project}</p>
+              <p className="mt-0.5 truncate text-xs text-text-muted">
+                {item.stage ? `${STAGE_ACTION_LABELS[item.stage]} · ${TECHNICAL_STAGE_LABELS[item.stage]}` : item.text}
+              </p>
+            </div>
+            <Link
+              href={item.stage ? stageHref(item.contractId, item.stage) : `/technical/jobs/${item.contractId}`}
+              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-semibold text-accent hover:underline"
+            >
+              Open
+              <ArrowUpRight className="size-3" aria-hidden="true" />
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

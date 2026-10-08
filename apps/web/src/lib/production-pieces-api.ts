@@ -15,6 +15,15 @@ export interface ProductionPiece {
   updatedAt: string;
   contract: { id: string; referenceNumber: string; jobOrder: string | null; title: string };
   boqItem: { description: string };
+  /**
+   * FMP-BOQ-13 — Technical's drawing / calculation group for the piece. null = no group;
+   * `{ released: false }` = not released to Production (nothing else is shown);
+   * released groups carry drawing no, calculation ref, title and file count.
+   */
+  drawingGroup:
+    | null
+    | { released: false }
+    | { released: true; drawingNo: string; calculationRef: string | null; groupTitle: string | null; fileCount: number };
 }
 
 export interface ProductionPieceList {
@@ -36,6 +45,35 @@ export interface ProductionContractOption {
   referenceNumber: string;
   jobOrder: string | null;
   title: string;
+}
+
+// FMP-UI-32 — mirrors ProductionContractProgress in
+// apps/api/src/production/production-pieces.service.ts exactly.
+export interface ProductionContractProgress {
+  contractId: string;
+  referenceNumber: string;
+  jobOrder: string | null;
+  projectName: string;
+  readyForProduction: number;
+  inProduction: number;
+  produced: number;
+  onHold: number;
+  rejected: number;
+  lastUpdatedAt: string;
+}
+
+// FMP-UI-32 — mirrors RecentPieceUpdate in
+// apps/api/src/production/production-pieces.service.ts exactly.
+export interface RecentPieceUpdate {
+  id: string;
+  pieceCode: string;
+  newStatus: BoqPieceStatus;
+  contractId: string;
+  referenceNumber: string;
+  jobOrder: string | null;
+  projectName: string;
+  createdAt: string;
+  updatedByName: string | null;
 }
 
 export interface ProductionPieceQuery {
@@ -81,6 +119,10 @@ export const productionPiecesApi = {
   },
   summary: () => get<ProductionPieceSummary>('/production/pieces/summary'),
   contracts: () => get<ProductionContractOption[]>('/production/pieces/contracts'),
+  /** FMP-UI-32 — per-contract piece-status breakdown for the Production & Planning dashboard. */
+  contractProgress: () => get<ProductionContractProgress[]>('/production/pieces/contract-progress'),
+  /** FMP-UI-32 — latest piece status updates across every contract. */
+  recentUpdates: () => get<RecentPieceUpdate[]>('/production/pieces/recent-updates'),
   /** The statuses this user may set here; null = could not be resolved (page stays read-only). */
   allowedStatuses: async (): Promise<BoqPieceUpdateStatus[] | null> => {
     const data = await get<{ statuses: BoqPieceUpdateStatus[] }>('/production/pieces/allowed-statuses');

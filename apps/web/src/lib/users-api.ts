@@ -34,9 +34,9 @@ export interface UserListResult {
 }
 
 export interface CreateUserPayload {
-  username: string;
+  username?: string;
   displayName: string;
-  email?: string;
+  email: string;
   employeeNumber?: string;
   roleId?: string;
   departmentId?: string;

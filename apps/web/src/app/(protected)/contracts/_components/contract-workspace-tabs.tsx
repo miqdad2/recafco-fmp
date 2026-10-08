@@ -16,6 +16,7 @@ import {
   GitBranch,
   HandCoins,
   ShieldAlert,
+  Boxes,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -36,6 +37,8 @@ const WORKSPACE_TABS: WorkspaceTab[] = [
   { key: 'schedule', label: 'Schedule', segment: 'schedule', icon: CalendarDays },
   { key: 'payments', label: 'Payments', segment: 'payments', icon: Wallet },
   { key: 'production', label: 'Production Status', segment: 'production', icon: Factory },
+  // FMP-BOQ-10 — read-only piece progress across Technical, Production, Storage & Delivery and Erection.
+  { key: 'boq-progress', label: 'BOQ Progress', segment: 'boq-progress', icon: Boxes },
   { key: 'variations', label: 'Variations / Change Orders', segment: 'variations', icon: GitBranch },
   { key: 'claims', label: 'Claims', segment: 'claims', icon: HandCoins },
   { key: 'risks', label: 'Risk Assessment', segment: 'risks', icon: ShieldAlert },

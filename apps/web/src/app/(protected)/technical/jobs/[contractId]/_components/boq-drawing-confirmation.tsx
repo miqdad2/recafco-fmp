@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, X } from 'lucide-react';
+import { pieceGroupLabel, pieceGroupFileCount } from '../../../_lib/drawing-group-helpers';
 import type { BoqConfirmationItem, BoqDrawingConfirmation as Confirmation, BoqPiece, BoqPieceStatus, BoqPieceUpdateStatus, BoqPieceHistoryEntry } from '@/lib/technical-api';
 import { saveBoqConfirmationAction, cancelBoqConfirmationAction, generateBoqPiecesAction, listBoqPiecesAction, updateBoqPieceStatusAction, getBoqPieceHistoryAction } from '../../../actions';
 import {
@@ -670,6 +671,10 @@ function PiecesModal({
                         <p className="text-xs text-text-secondary">
                           Drawing {p.drawingNo}
                           {p.sizeOrSpecification ? ` · ${p.sizeOrSpecification}` : ''}
+                        </p>
+                        <p className="text-xs text-text-secondary">
+                          Group: {pieceGroupLabel(p)}
+                          {p.drawingGroupLinks?.[0] ? ` · Files: ${pieceGroupFileCount(p)}` : ''}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">

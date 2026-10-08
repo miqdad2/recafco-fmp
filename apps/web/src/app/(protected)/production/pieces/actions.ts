@@ -1,7 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import type { BoqPieceHistoryEntry, BoqPieceUpdateStatus } from '@/lib/technical-api';
+import type { BoqPieceHistoryEntry, BoqPieceUpdateStatus, DrawingGroupFileCategory } from '@/lib/technical-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
@@ -60,4 +60,22 @@ export async function getProductionPieceHistoryAction(pieceId: string): Promise<
   const result = await call<{ pieceCode: string; history: BoqPieceHistoryEntry[] }>(`/production/pieces/${pieceId}/history`);
   if (result.error || !result.data) return { error: 'History could not be loaded. Please try again.', entries: [] };
   return { error: null, entries: result.data.history };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-13 — released drawing / calculation files (read-only)
+// ---------------------------------------------------------------------------
+
+export interface ProductionDrawingFiles {
+  pieceCode: string;
+  contract: { referenceNumber: string; jobOrder: string | null; title: string };
+  group: { drawingNo: string; calculationRef: string | null; groupTitle: string | null };
+  files: { id: string; originalName: string; mimeType: string; fileSize: number; category: DrawingGroupFileCategory; createdAt: string }[];
+}
+
+/** Files exist here only for a piece whose group is Released to Production; otherwise the API says so in plain words. */
+export async function getProductionDrawingFilesAction(pieceId: string): Promise<{ error: string | null; data: ProductionDrawingFiles | null }> {
+  const result = await call<ProductionDrawingFiles>(`/production/pieces/${pieceId}/drawing-files`);
+  if (result.error || !result.data) return { error: result.error ?? 'You cannot view this file.', data: null };
+  return { error: null, data: result.data };
 }

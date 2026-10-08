@@ -23,6 +23,7 @@ const mockUserCreate = vi.fn();
 const mockUserFindMany = vi.fn();
 const mockUserCount = vi.fn();
 const mockUserFindUnique = vi.fn();
+const mockUserFindFirst = vi.fn();
 const mockUserUpdate = vi.fn();
 const mockSessionDeleteMany = vi.fn();
 const mockLocationFindUnique = vi.fn();
@@ -37,6 +38,7 @@ const mockClient = {
     findMany: mockUserFindMany,
     count: mockUserCount,
     findUnique: mockUserFindUnique,
+    findFirst: mockUserFindFirst,
     update: mockUserUpdate,
   },
   userSession: { deleteMany: mockSessionDeleteMany },
@@ -104,6 +106,7 @@ describe('UsersService', () => {
     );
     // Default: resolve VIEWER role when creating users without an explicit roleId
     mockRoleFindUnique.mockResolvedValue(VIEWER_ROLE);
+    mockUserFindFirst.mockResolvedValue(null);
     service = new UsersService(mockDb, mockAuthService, mockDeptAccess);
   });
 
@@ -116,7 +119,7 @@ describe('UsersService', () => {
       mockUserCreate.mockResolvedValue(BASE_USER);
 
       const result = await service.create(
-        { username: 'alice', displayName: 'Alice' },
+        { username: 'alice', email: 'alice@example.com', displayName: 'Alice' },
         ADMIN_ACTOR,
       );
 
@@ -128,11 +131,46 @@ describe('UsersService', () => {
     it('normalizes username to lowercase', async () => {
       mockUserCreate.mockResolvedValue(BASE_USER);
 
-      await service.create({ username: 'ALICE', displayName: 'Alice' }, ADMIN_ACTOR);
+      await service.create({ username: 'ALICE', email: 'alice@example.com', displayName: 'Alice' }, ADMIN_ACTOR);
 
       expect(mockUserCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ username: 'alice' }) }),
       );
+    });
+
+    it('generates a unique internal username from the email when none is given', async () => {
+      mockUserCreate.mockResolvedValue(BASE_USER);
+      mockUserFindUnique
+        .mockResolvedValueOnce({ id: 'taken-1' }) // miqdad
+        .mockResolvedValueOnce(null); // miqdad2
+
+      await service.create({ displayName: 'Miqdad', email: 'Miqdad@Recafco.com' }, ADMIN_ACTOR);
+
+      expect(mockUserCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ username: 'miqdad2', email: 'miqdad@recafco.com' }),
+        }),
+      );
+    });
+
+    it('sanitizes unsafe characters when generating the username', async () => {
+      mockUserCreate.mockResolvedValue(BASE_USER);
+      mockUserFindUnique.mockResolvedValue(null);
+
+      await service.create({ displayName: 'J', email: 'J+Doe!@recafco.com' }, ADMIN_ACTOR);
+
+      expect(mockUserCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ username: 'jdoe' }) }),
+      );
+    });
+
+    it('rejects a duplicate email case-insensitively', async () => {
+      mockUserFindFirst.mockResolvedValue({ id: 'existing' });
+
+      await expect(
+        service.create({ displayName: 'Alice', email: 'ALICE@recafco.com' }, ADMIN_ACTOR),
+      ).rejects.toThrow(ConflictException);
+      expect(mockUserCreate).not.toHaveBeenCalled();
     });
 
     it('normalizes email to lowercase', async () => {
@@ -152,7 +190,7 @@ describe('UsersService', () => {
       mockUserCreate.mockResolvedValue({ ...BASE_USER, employeeNumber: 'EMP-001' });
 
       await service.create(
-        { username: 'alice', displayName: 'Alice', employeeNumber: 'emp-001' },
+        { username: 'alice', email: 'alice@example.com', displayName: 'Alice', employeeNumber: 'emp-001' },
         ADMIN_ACTOR,
       );
 
@@ -163,13 +201,13 @@ describe('UsersService', () => {
 
     it('throws 400 when displayName is blank after trimming', async () => {
       await expect(
-        service.create({ username: 'alice', displayName: '   ' }, ADMIN_ACTOR),
+        service.create({ username: 'alice', email: 'alice@example.com', displayName: '   ' }, ADMIN_ACTOR),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('always sets mustChangePassword to true on create', async () => {
       mockUserCreate.mockResolvedValue(BASE_USER);
-      await service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR);
+      await service.create({ username: 'alice', email: 'alice@example.com', displayName: 'Alice' }, ADMIN_ACTOR);
 
       expect(mockUserCreate).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ mustChangePassword: true }) }),
@@ -178,7 +216,7 @@ describe('UsersService', () => {
 
     it('creates audit event with actor in same transaction', async () => {
       mockUserCreate.mockResolvedValue(BASE_USER);
-      await service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR);
+      await service.create({ username: 'alice', email: 'alice@example.com', displayName: 'Alice' }, ADMIN_ACTOR);
 
       expect(mockAuditCreate).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -191,7 +229,7 @@ describe('UsersService', () => {
       mockUserCreate.mockRejectedValue({ code: 'P2002', meta: { target: ['username'] } });
 
       await expect(
-        service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR),
+        service.create({ username: 'alice', email: 'alice@example.com', displayName: 'Alice' }, ADMIN_ACTOR),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -205,7 +243,7 @@ describe('UsersService', () => {
       mockUserCreate.mockRejectedValue({ code: 'P2002', meta: { target: 'users_username_key' } });
 
       await expect(
-        service.create({ username: 'alice', displayName: 'Alice' }, ADMIN_ACTOR),
+        service.create({ username: 'alice', email: 'alice@example.com', displayName: 'Alice' }, ADMIN_ACTOR),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -214,7 +252,7 @@ describe('UsersService', () => {
       mockRoleFindUnique.mockResolvedValue({ id: 'role-uuid-super-admin', code: 'SUPER_ADMIN', isActive: true });
 
       await expect(
-        service.create({ username: 'alice', displayName: 'Alice', roleId: 'role-uuid-super-admin' }, adminActor),
+        service.create({ username: 'alice', email: 'alice@example.com', displayName: 'Alice', roleId: 'role-uuid-super-admin' }, adminActor),
       ).rejects.toThrow(ForbiddenException);
     });
   });
@@ -231,7 +269,7 @@ describe('UsersService', () => {
         service.create(
           {
             username: 'alice',
-            displayName: 'Alice',
+            email: 'alice@example.com', displayName: 'Alice',
             plantId: 'plant-uuid-0001',
             locationId: 'location-uuid-0001',
           },
@@ -248,7 +286,7 @@ describe('UsersService', () => {
         service.create(
           {
             username: 'alice',
-            displayName: 'Alice',
+            email: 'alice@example.com', displayName: 'Alice',
             plantId: 'plant-uuid-0001',
             locationId: 'location-uuid-0001',
           },
@@ -262,7 +300,7 @@ describe('UsersService', () => {
 
       await expect(
         service.create(
-          { username: 'alice', displayName: 'Alice', locationId: 'location-uuid-0001' },
+          { username: 'alice', email: 'alice@example.com', displayName: 'Alice', locationId: 'location-uuid-0001' },
           ADMIN_ACTOR,
         ),
       ).resolves.toBeDefined();

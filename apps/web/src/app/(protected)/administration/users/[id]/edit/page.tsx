@@ -94,11 +94,11 @@ export default async function EditUserPage({ params }: Props): Promise<React.JSX
           items={[
             { label: 'Administration', href: '/administration' },
             { label: 'Users', href: '/administration/users' },
-            { label: user.username },
+            { label: user.displayName },
           ]}
         />
 
-        <PageHeader title={`Edit User: ${user.username}`} />
+        <PageHeader title={`Edit User: ${user.displayName}`} />
 
         <EditUserTabs
           user={user}

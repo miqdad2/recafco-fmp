@@ -1,5 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { ModuleIdentifier, ContractStatus } from '@recafco/database';
+import { ModuleIdentifier, ContractStatus, ContractBoqConfirmationStatus } from '@recafco/database';
+import type { ContractBoqPieceStatus } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import { ContractsService } from './contracts.service';
@@ -676,12 +677,47 @@ const EMPTY_MANAGER_INSIGHTS: ManagerDashboardInsights = {
   topValueContracts: [],
 };
 
+const EMPTY_BOQ_OVERVIEW: ContractBoqPieceOverview = {
+  confirmedPieces: 0, piecesGenerated: 0, produced: 0, delivered: 0, erected: 0, completed: 0,
+  itemsNeedingReview: 0, hasAnyData: false,
+};
+
 export interface ManagerDashboardData {
   summary: ManagerDashboardSummary;
   attentionItems: ManagerAttentionItem[];
   workflowOverview: TeamWorkflowOverview[];
   upcomingSchedule: ScheduleItem[];
   insights: ManagerDashboardInsights;
+  boqOverview: ContractBoqPieceOverview;
+}
+
+// FMP-UI-29 — read-only piece-progress totals across every contract the
+// actor can see (same `where` the dashboard's own `contracts.findMany`
+// already uses — non-cancelled, department-scoped), for the Contract
+// Management dashboard's new "Overall BOQ Piece Progress" card. No piece or
+// confirmation row is ever written here; this mirrors (at the aggregate
+// level) the exact same rules `summarizeItemPieces()`/`sumConfirmedPieces()`
+// in `technical/boq-piece-generation.ts` and
+// `technical-boq-confirmation.service.ts` already use per contract — see
+// `buildBoqPieceOverview()`'s own doc comment below for the one-to-one
+// mapping. The Technical/BOQ module's own files are not touched.
+export interface ContractBoqPieceOverview {
+  confirmedPieces: number;
+  piecesGenerated: number;
+  produced: number;
+  delivered: number;
+  erected: number;
+  completed: number;
+  /** BOQ items where generated pieces don't match confirmed pieces (same condition as `summarizeItemPieces().needsAttention`, counted across items instead of summed into one contract's flag). */
+  itemsNeedingReview: number;
+  /** false only when there is truly nothing yet (no confirmation, no piece) — distinct from every count legitimately being 0. */
+  hasAnyData: boolean;
+}
+
+/** The exact shape of `getDashboard()`'s own `where` (non-cancelled, department-scoped) — reused as the contract-relation filter for the BOQ piece/confirmation aggregate queries below. */
+interface ContractScopeWhere {
+  status: { not: ContractStatus };
+  departmentId?: { in: string[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -939,7 +975,7 @@ export class ContractDashboardService {
     // never has to re-check status individually. Cancelled contracts remain
     // fully visible elsewhere for audit (Contract List's Lifecycle Status
     // filter, the "Cancelled" KPI note below, Activity History).
-    const where = {
+    const where: ContractScopeWhere = {
       status: { not: ContractStatus.CANCELLED },
       ...(deptFilter !== null ? { departmentId: deptFilter } : {}),
     };
@@ -953,7 +989,7 @@ export class ContractDashboardService {
     const contractIds = contracts.map((c) => c.id);
 
     if (dashboardType === 'MANAGER') {
-      return { ...base, dashboardType, manager: await this.buildManagerData(actor, contracts, contractIds, today) };
+      return { ...base, dashboardType, manager: await this.buildManagerData(actor, contracts, contractIds, today, where) };
     }
     return { ...base, dashboardType, staff: await this.buildStaffData(actor, contracts, contractIds, today) };
   }
@@ -963,6 +999,7 @@ export class ContractDashboardService {
     contracts: DashboardContractRow[],
     contractIds: string[],
     today: Date,
+    contractWhere: ContractScopeWhere,
   ): Promise<ManagerDashboardData> {
     const scheduleQuery = { upcomingOnly: true, pageSize: UPCOMING_SCHEDULE_CAP } as ContractScheduleListQueryDto;
 
@@ -977,16 +1014,18 @@ export class ContractDashboardService {
         workflowOverview: buildWorkflowOverview([], today),
         upcomingSchedule: scheduleResult.items,
         insights: EMPTY_MANAGER_INSIGHTS,
+        boqOverview: EMPTY_BOQ_OVERVIEW,
       };
     }
 
-    const [tasks, issues, claims, payments, closeoutRequests, scheduleResult] = await Promise.all([
+    const [tasks, issues, claims, payments, closeoutRequests, scheduleResult, boqOverview] = await Promise.all([
       this.db.getClient().contractWorkflowTask.findMany({ where: { contractId: { in: contractIds } }, select: TASK_DASHBOARD_SELECT }),
       this.db.getClient().contractIssue.findMany({ where: { contractId: { in: contractIds } }, select: ISSUE_DASHBOARD_SELECT }),
       this.db.getClient().contractClaim.findMany({ where: { contractId: { in: contractIds } }, select: CLAIM_DASHBOARD_SELECT }),
       this.db.getClient().contractPayment.findMany({ where: { contractId: { in: contractIds } }, select: PAYMENT_DASHBOARD_SELECT }),
       this.db.getClient().contractCloseoutRequest.findMany({ where: { contractId: { in: contractIds } }, select: CLOSEOUT_DASHBOARD_SELECT }),
       this.scheduleService.findAll(scheduleQuery, actor),
+      this.buildBoqPieceOverview(contractWhere),
     ]);
 
     const summary = computeManagerSummary({
@@ -999,7 +1038,75 @@ export class ContractDashboardService {
     const workflowOverview = buildWorkflowOverview(tasks, today);
     const insights = computeManagerInsights({ contracts, tasks, claims, payments, sortedAttentionItems, today });
 
-    return { summary, attentionItems, workflowOverview, upcomingSchedule: scheduleResult.items, insights };
+    return { summary, attentionItems, workflowOverview, upcomingSchedule: scheduleResult.items, insights, boqOverview };
+  }
+
+  // FMP-UI-29 — read-only aggregate across every BOQ confirmation/piece row
+  // belonging to a contract matching `contractWhere` (the dashboard's own
+  // non-cancelled, department-scoped filter — never widened or narrowed
+  // here). Mirrors, at the aggregate level, the exact per-item rules
+  // `technical/boq-piece-generation.ts`'s `summarizeItemPieces()` and
+  // `technical-boq-confirmation.service.ts`'s `sumConfirmedPieces()` already
+  // use for one contract: confirmedPieces = sum of CONFIRMED confirmations'
+  // confirmedPieces; piecesGenerated = count of non-cancelled pieces;
+  // produced/delivered/erected/completed = pieces CURRENTLY in that exact
+  // status (a snapshot, not a cumulative funnel — same meaning the
+  // per-contract BOQ Progress page already gives those words); an item
+  // "needs review" when it has generated pieces and a confirmed count that
+  // doesn't match. Four read-only groupBy/aggregate queries, no write, and
+  // no file under `apps/api/src/technical/` is touched.
+  private async buildBoqPieceOverview(contractWhere: ContractScopeWhere): Promise<ContractBoqPieceOverview> {
+    const client = this.db.getClient();
+    const [confirmedAgg, pieceGroups, confirmedByItem, generatedByItem] = await Promise.all([
+      client.contractBoqDrawingConfirmation.aggregate({
+        where: { confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, contract: contractWhere },
+        _sum: { confirmedPieces: true },
+      }),
+      client.contractBoqPiece.groupBy({
+        by: ['currentStatus', 'isCancelled'],
+        where: { contract: contractWhere },
+        _count: { _all: true },
+      }),
+      client.contractBoqDrawingConfirmation.groupBy({
+        by: ['boqItemId'],
+        where: { confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, confirmedPieces: { not: null }, contract: contractWhere },
+        _sum: { confirmedPieces: true },
+      }),
+      client.contractBoqPiece.groupBy({
+        by: ['boqItemId'],
+        where: { isCancelled: false, contract: contractWhere },
+        _count: { _all: true },
+      }),
+    ]);
+
+    let piecesGenerated = 0;
+    const statusCounts: Partial<Record<ContractBoqPieceStatus, number>> = {};
+    for (const g of pieceGroups) {
+      statusCounts[g.currentStatus] = (statusCounts[g.currentStatus] ?? 0) + g._count._all;
+      if (!g.isCancelled) piecesGenerated += g._count._all;
+    }
+
+    const confirmedByItemMap = new Map(confirmedByItem.map((r) => [r.boqItemId, r._sum.confirmedPieces ?? 0]));
+    const generatedByItemMap = new Map(generatedByItem.map((r) => [r.boqItemId, r._count._all]));
+    const itemIds = new Set([...confirmedByItemMap.keys(), ...generatedByItemMap.keys()]);
+    let itemsNeedingReview = 0;
+    for (const id of itemIds) {
+      const confirmed = confirmedByItemMap.has(id) ? confirmedByItemMap.get(id)! : null;
+      const generated = generatedByItemMap.get(id) ?? 0;
+      if (generated > 0 && confirmed !== null && generated !== confirmed) itemsNeedingReview++;
+    }
+
+    const confirmedPieces = confirmedAgg._sum.confirmedPieces ?? 0;
+    return {
+      confirmedPieces,
+      piecesGenerated,
+      produced: statusCounts.PRODUCED ?? 0,
+      delivered: statusCounts.DELIVERED ?? 0,
+      erected: statusCounts.ERECTED ?? 0,
+      completed: statusCounts.COMPLETED ?? 0,
+      itemsNeedingReview,
+      hasAnyData: confirmedPieces > 0 || piecesGenerated > 0,
+    };
   }
 
   private async buildStaffData(

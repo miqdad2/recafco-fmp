@@ -9,6 +9,7 @@ import { RolePermissionSummary } from './role-permission-summary';
 import { ModuleAccessEditor, ALL_MODULES } from './module-access-editor';
 import { MODULE_LABELS, SCOPE_LABELS } from './scope-utils';
 import type { AccessTemplate } from './access-template';
+import { buildCredentialsText } from './credentials-text';
 import type { CreateWithAccessState } from '../actions';
 
 export type { AccessTemplate } from './access-template';
@@ -152,7 +153,7 @@ function roleOptionLabel(role: RoleWithPerms): string {
   return hint ? `${role.name} (${hint})` : role.name;
 }
 
-const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,49}$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const WIZARD_STEPS = ['Account', 'Organization', 'Access Template', 'Module Access', 'Review & Create'] as const;
 
@@ -259,7 +260,6 @@ export function NewUserWizard({
   const [step, setStep] = useState(0);
 
   // Step 1 — Account
-  const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [employeeNumber, setEmployeeNumber] = useState('');
@@ -395,8 +395,8 @@ export function NewUserWizard({
     [template, selectedRole, moduleScopes],
   );
 
-  const usernameValid = USERNAME_PATTERN.test(username);
-  const canProceedFromAccount = usernameValid && displayName.trim().length > 0;
+  const emailValid = EMAIL_PATTERN.test(email.trim());
+  const canProceedFromAccount = emailValid && displayName.trim().length > 0;
   const canProceedFromTemplate = selectedRoleId !== '';
   const stepCanProceed = [canProceedFromAccount, true, canProceedFromTemplate, true, true];
 
@@ -437,20 +437,20 @@ export function NewUserWizard({
               : 'bg-success-light border border-success text-success-foreground'
           }`}
         >
-          <p className="font-medium">User &ldquo;{state.created.username}&rdquo; created successfully.</p>
+          <p className="font-medium">User &ldquo;{state.created.displayName}&rdquo; created successfully.</p>
           <p className="mt-1 text-xs text-text-secondary">
-            Share the temporary password with <strong>{state.created.displayName}</strong>. It will not
-            be shown again. The user must change their password after first login.
+            Share the login email and temporary password with the user. The user must change their
+            password after first login.
           </p>
         </div>
 
         <div className="rounded-md bg-surface border border-border px-4 py-3 space-y-3">
           <div>
-            <p className="text-xs text-text-secondary mb-1">Username</p>
-            <p className="font-mono text-sm text-text-primary">{state.created.username}</p>
+            <p className="text-xs text-text-secondary mb-1">Login Email</p>
+            <p className="font-mono text-sm text-text-primary break-all">{state.created.email}</p>
           </div>
           <div>
-            <p className="text-xs text-text-secondary mb-1">Temporary password</p>
+            <p className="text-xs text-text-secondary mb-1">Temporary Password</p>
             <div className="flex items-center gap-3">
               <p className="font-mono text-sm text-text-primary break-all flex-1">
                 {state.created.tempPassword}
@@ -478,7 +478,15 @@ export function NewUserWizard({
             )}
           </div>
           <CopyButton
-            text={`Username: ${state.created.username}\nTemporary password: ${state.created.tempPassword}`}
+            text={buildCredentialsText({
+              email: state.created.email,
+              tempPassword: state.created.tempPassword,
+              roleLabel: selectedRole ? roleOptionLabel(selectedRole) : 'Viewer (default)',
+              moduleAccessLines: moduleAccessSummary.map(
+                (e) =>
+                  `${MODULE_LABELS[e.module]}: ${SCOPE_LABELS[e.scope]}${e.scope === 'SELECTED_DEPARTMENTS' ? ` (${e.deptCount})` : ''}`,
+              ),
+            })}
             label="Copy Credentials"
           />
         </div>
@@ -538,43 +546,14 @@ export function NewUserWizard({
         {/* Step 1 — Account */}
         <div className={step === 0 ? 'space-y-4' : 'hidden'}>
           <div>
-            <label htmlFor="username" className="block text-sm font-medium text-text-primary mb-1">
-              Username <span aria-hidden="true" className="text-error">*</span>
-            </label>
-            <input
-              id="username"
-              name="username"
-              type="text"
-              required
-              autoComplete="off"
-              placeholder="e.g. john.doe"
-              value={username}
-              onChange={(e) => setUsername(e.target.value.toLowerCase())}
-              className={inputCls(!!state?.fieldErrors?.['username'] || (username.length > 0 && !usernameValid))}
-            />
-            <FieldError errors={state?.fieldErrors?.['username']} />
-            {username.length > 0 && !usernameValid ? (
-              <p role="alert" className="mt-1 text-xs text-error">
-                Must be 3–50 characters, start with a letter or digit, and use only lowercase letters,
-                digits, dots, hyphens or underscores. Uppercase letters are converted automatically.
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-text-muted">
-                3–50 characters; lowercase letters, digits, dots, hyphens, underscores. Automatically
-                lowercased as you type.
-              </p>
-            )}
-          </div>
-          <div>
             <label htmlFor="displayName" className="block text-sm font-medium text-text-primary mb-1">
-              Display name <span aria-hidden="true" className="text-error">*</span>
+              Full Name <span aria-hidden="true" className="text-error">*</span>
             </label>
             <input
               id="displayName"
               name="displayName"
               type="text"
               required
-              placeholder="Full name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className={inputCls(!!state?.fieldErrors?.['displayName'])}
@@ -583,13 +562,15 @@ export function NewUserWizard({
           </div>
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-text-primary mb-1">
-              Email
+              Email <span aria-hidden="true" className="text-error">*</span>
             </label>
             <input
               id="email"
               name="email"
               type="email"
-              placeholder="optional@example.com"
+              required
+              autoComplete="off"
+              placeholder="name@recafco.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className={inputCls(!!state?.fieldErrors?.['email'])}
@@ -598,13 +579,13 @@ export function NewUserWizard({
           </div>
           <div>
             <label htmlFor="employeeNumber" className="block text-sm font-medium text-text-primary mb-1">
-              Employee number
+              Employee Number
             </label>
             <input
               id="employeeNumber"
               name="employeeNumber"
               type="text"
-              placeholder="e.g. EMP-001"
+              placeholder="EMP-001"
               value={employeeNumber}
               onChange={(e) => setEmployeeNumber(e.target.value)}
               className={inputCls(!!state?.fieldErrors?.['employeeNumber'])}
@@ -904,19 +885,15 @@ export function NewUserWizard({
           <div className="rounded-md border border-border bg-surface-secondary/40 divide-y divide-border">
             <dl className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div>
-                <dt className="text-xs text-text-muted">Username</dt>
-                <dd className="font-mono text-text-primary mt-0.5">{username || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">Display name</dt>
+                <dt className="text-xs text-text-muted">Full Name</dt>
                 <dd className="text-text-primary mt-0.5">{displayName || '—'}</dd>
               </div>
               <div>
-                <dt className="text-xs text-text-muted">Email</dt>
+                <dt className="text-xs text-text-muted">Login Email</dt>
                 <dd className="text-text-primary mt-0.5">{email || '—'}</dd>
               </div>
               <div>
-                <dt className="text-xs text-text-muted">Employee number</dt>
+                <dt className="text-xs text-text-muted">Employee Number</dt>
                 <dd className="text-text-primary mt-0.5">{employeeNumber || '—'}</dd>
               </div>
               <div>

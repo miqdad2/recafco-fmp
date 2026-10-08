@@ -50,6 +50,10 @@ interface Props {
 // username" / "Enter password") — purely visual hint text, native HTML
 // `placeholder`, never a `value`, so it can't interfere with the existing
 // uncontrolled-input/autofill/autocomplete behavior.
+//
+// FMP-AUTH-01 — email is the visible login identity: label "Email",
+// placeholder "Enter company email". The field keeps name="username" and
+// type="text" so the API can still accept an old internal username silently.
 export function LoginForm({ action }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
   const [showPassword, setShowPassword] = useState(false);
@@ -68,7 +72,7 @@ export function LoginForm({ action }: Props): React.JSX.Element {
 
       <div>
         <label htmlFor="username" className="mb-1.5 block text-sm font-semibold text-text-primary">
-          Email / Username
+          Email
         </label>
         <div className="relative">
           <User className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-text-muted" aria-hidden="true" />
@@ -79,7 +83,7 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             required
             autoComplete="username"
             autoFocus
-            placeholder="Enter email ID or username"
+            placeholder="Enter company email"
             className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-3 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
           />
         </div>

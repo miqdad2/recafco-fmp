@@ -15,54 +15,6 @@ async function getToken(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Create user (basic, used by legacy UserForm)
-// ---------------------------------------------------------------------------
-
-export async function createUserAction(
-  _prev: UserFormState | null,
-  formData: FormData,
-): Promise<UserFormState | null> {
-  const accessToken = await getToken();
-
-  const username = formData.get('username')?.toString().trim() ?? '';
-  const displayName = formData.get('displayName')?.toString().trim() ?? '';
-  const emailRaw = formData.get('email')?.toString().trim();
-  const employeeNumberRaw = formData.get('employeeNumber')?.toString().trim();
-  const roleIdRaw = formData.get('roleId')?.toString().trim();
-  const departmentIdRaw = formData.get('departmentId')?.toString().trim();
-  const plantIdRaw = formData.get('plantId')?.toString().trim();
-  const locationIdRaw = formData.get('locationId')?.toString().trim();
-
-  const payload = {
-    username,
-    displayName,
-    ...(roleIdRaw ? { roleId: roleIdRaw } : {}),
-    ...(emailRaw ? { email: emailRaw } : {}),
-    ...(employeeNumberRaw ? { employeeNumber: employeeNumberRaw } : {}),
-    ...(departmentIdRaw ? { departmentId: departmentIdRaw } : {}),
-    ...(plantIdRaw ? { plantId: plantIdRaw } : {}),
-    ...(locationIdRaw ? { locationId: locationIdRaw } : {}),
-  };
-
-  const result = await usersApi.create(accessToken, payload);
-  if (!result.ok) {
-    if (result.code === 'VALIDATION_ERROR' && result.fieldErrors) {
-      return { fieldErrors: result.fieldErrors };
-    }
-    return { error: result.message };
-  }
-
-  return {
-    created: {
-      id: result.data.user.id,
-      username: result.data.user.username,
-      displayName: result.data.user.displayName,
-      tempPassword: result.data.tempPassword,
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Create user with module access (used by NewUserForm)
 // ---------------------------------------------------------------------------
 
@@ -71,7 +23,7 @@ export type CreateWithAccessState = {
   fieldErrors?: Record<string, string[]>;
   created?: {
     id: string;
-    username: string;
+    email: string;
     displayName: string;
     tempPassword: string;
     accessFailures?: { module: string; error: string }[];
@@ -94,20 +46,21 @@ export async function createUserWithAccessAction(
 ): Promise<CreateWithAccessState> {
   const accessToken = await getToken();
 
-  const username = formData.get('username')?.toString().trim() ?? '';
   const displayName = formData.get('displayName')?.toString().trim() ?? '';
-  const emailRaw = formData.get('email')?.toString().trim();
+  const email = formData.get('email')?.toString().trim() ?? '';
   const employeeNumberRaw = formData.get('employeeNumber')?.toString().trim();
   const roleIdRaw = formData.get('roleId')?.toString().trim();
   const departmentIdRaw = formData.get('departmentId')?.toString().trim();
   const plantIdRaw = formData.get('plantId')?.toString().trim();
   const locationIdRaw = formData.get('locationId')?.toString().trim();
 
+  if (!displayName) return { fieldErrors: { displayName: ['Full name is required'] } };
+  if (!email) return { fieldErrors: { email: ['Email is required'] } };
+
   const payload = {
-    username,
     displayName,
+    email,
     ...(roleIdRaw ? { roleId: roleIdRaw } : {}),
-    ...(emailRaw ? { email: emailRaw } : {}),
     ...(employeeNumberRaw ? { employeeNumber: employeeNumberRaw } : {}),
     ...(departmentIdRaw ? { departmentId: departmentIdRaw } : {}),
     ...(plantIdRaw ? { plantId: plantIdRaw } : {}),
@@ -148,7 +101,7 @@ export async function createUserWithAccessAction(
   return {
     created: {
       id: userId,
-      username: result.data.user.username,
+      email: result.data.user.email ?? email,
       displayName: result.data.user.displayName,
       tempPassword: result.data.tempPassword,
       ...(accessFailures.length > 0 ? { accessFailures } : {}),

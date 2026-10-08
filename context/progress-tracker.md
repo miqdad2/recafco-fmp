@@ -13969,6 +13969,412 @@ Across the Contract Management button, its submenu, and every flat item: `text-b
 
 No backend, schema, permission, or route change. Browser checks (actual wrapping at 320px/18px, mobile drawer, light/dark) were not run in this unit — verified by typecheck/build only.
 
+## FMP-UI-29 — Redesign Contract Management Main Dashboard with Contract / Project Selector (Completed 2026-10-07)
+
+Full redesign of the Contract Management Executive Module Landing Page (`/contracts/executive` — reached from the sidebar's "Contract Management" row and its submenu's "Dashboard" item; NOT the separate operational `/contracts/dashboard`). One small additive backend read-only aggregate; everything else is frontend. No contract/BOQ workflow logic, schema, permission, or route changed.
+
+### Root identification
+
+The ticket's complaints ("too narrow," "unused space left/right," "Quick Actions take too much space," "Needs Attention useful but not visually strong," "Recent Contract Updates is basic") matched `/contracts/executive`'s existing `max-w-6xl` centered layout, its FMP-UI-16D "Quick Actions" card, and its FMP-UI-16B bespoke Needs Attention panel / Recent Contract Updates table exactly — confirmed by reading that file before changing anything. The separate operational `/contracts/dashboard` (ContractDashboardService's own 1000+ line manager/staff view) was not touched.
+
+### Backend change (additive, read-only)
+
+- `apps/api/src/contracts/contract-dashboard.service.ts` — new `ContractBoqPieceOverview` interface and `buildBoqPieceOverview(contractWhere)` private method, attached to `ManagerDashboardData.boqOverview`. Four read-only Prisma `aggregate`/`groupBy` queries against `ContractBoqDrawingConfirmation`/`ContractBoqPiece` (tables `technical-boq-confirmation.service.ts` already owns), scoped by the exact same `contractWhere` (non-cancelled, department-scoped) `getDashboard()` already builds for the contract list itself — never a wider or narrower scope. Mirrors, at the aggregate level, the exact rules `technical/boq-piece-generation.ts`'s `summarizeItemPieces()`/`sumConfirmedPieces()` already use per contract (confirmed pieces = sum of CONFIRMED rows; generated = non-cancelled piece count; produced/delivered/erected/completed = pieces currently in that exact status, a snapshot not a cumulative funnel; an item "needs review" when generated pieces exist and don't match confirmed pieces). No file under `apps/api/src/technical/` was opened or changed.
+- `apps/api/src/contracts/contract-dashboard.service.test.ts` — mock Prisma client extended with the 2 new model delegates (`contractBoqDrawingConfirmation.aggregate`/`.groupBy`, `contractBoqPiece.groupBy`), default-empty in `beforeEach`; 5 new focused tests (empty-contracts short-circuit, confirmed-sum correctness, cancelled-exclusion, items-needing-review cross-item comparison, scope-reuse).
+- `apps/web/src/lib/contracts-api.ts` — mirrored `ContractBoqPieceOverview` type, added to `ManagerDashboardData`.
+
+### Frontend — new files
+
+- `apps/web/src/app/(protected)/contracts/executive/_lib/dashboard-selector-helpers.ts` (+ test) — pure helpers: `pickDefaultContractId` (most recently updated ACTIVE contract, falling back to most recently updated of any status — `data.recent` is already sorted `updatedAt desc` by `contracts.service.ts`), `formatBoqProgressForRow`, `selectedContractProgressState` (the 3 required exact messages — "Technical has not confirmed drawing pieces yet." / "Pieces have not been generated yet." reused verbatim from the existing per-contract BOQ Progress tab's own `MESSAGES`; "No BOQ progress found for this contract." is this page's own wording for the "no BOQ items at all" case), `buildTodaysFocus`, `buildNeedsAttentionRows`, `buildSelectedContractIssues`.
+- `apps/web/src/app/(protected)/contracts/executive/_components/contract-dashboard-left-column.tsx` — the ONE client component on this page. Owns the single shared selection state: a search box (debounced, calls the new server action below), a Selected Contract Progress card, and the Recent Contracts table all read/write it. Selecting never navigates by itself; only the explicit "View Contract" / "View BOQ Progress" / per-row "View" links do.
+- `apps/web/src/app/(protected)/contracts/actions.ts` — two new read-only server actions: `searchContractsForDashboardAction` (thin wrapper around `contractsApi.list()`'s own existing `search` filter — already matches title/referenceNumber/jobOrder/counterpartyName, see `contracts.service.ts`; same endpoint and department scope the Contract List page already uses, zero new backend route) and `getContractBoqProgressForDashboardAction` (wraps the existing `fetchBoqConfirmations()`, already used by the per-contract BOQ Progress tab, FMP-BOQ-10). Both exist only because their underlying `contracts-api.ts`/`technical-api.ts` functions read the access token via `next/headers`, which only works server-side — the dashboard's client-side selector needs a server action to call them.
+- `apps/web/src/app/(protected)/contracts/executive/page.tsx` — rewritten per the required layout (full-width header with 2 compact actions; 6-card KPI row; left ~65% = selector/progress/overall-BOQ/recent-contracts, right ~35% = Needs Attention (6 rows)/Today's Focus).
+
+### Contract/Project selector behavior
+
+Search matches contract no., job order, or project name (existing backend `search` filter, verified before building anything new). Selecting a result or clicking a Recent Contracts row updates the Selected Contract Progress card in place — no navigation. The default selection is the most recently updated ACTIVE contract from the already-fetched Recent Contracts list; its BOQ data is reused from that same fetch (no duplicate request on first paint).
+
+### Selected Contract Progress
+
+Shows Contract No., Project Name, Job Order (when known — see "What was left out" below), Status, and the real Confirmed → Generated → Produced → Delivered → Erected → Completed flow plus "Completed: N of M" — all from `fetchBoqConfirmations()`'s existing per-contract data via the existing `contractTotals()` helper, zero new computation. A "Selected Contract Issues" sub-panel appears only when real issues exist (items needing review, pieces on hold, rejected pieces — each from real `statusCounts` sums, never fabricated).
+
+### KPI cards (6)
+
+Total Contracts, Active Contracts, Pending Approvals (same formula as `PlatformDashboardService`'s own card — kept intentionally identical rather than diverging), Outstanding Payments, Open Claims (new), Needs Attention (new — `manager.attentionItems.length`, the same per-record list the old page already had, now counted instead of rendered as a chip row).
+
+### Overall BOQ Piece Progress
+
+The new `boqOverview` aggregate, summed across every contract the actor can see (department-scoped). Honest empty state ("No BOQ piece progress yet." / helper line) when `hasAnyData` is false.
+
+### Needs Attention (6 rows, was 4)
+
+Pending Approvals (new), Overdue Workflow Tasks, Open Claims, Outstanding Payments (new), BOQ Items Needing Review (new, from `boqOverview`), Critical Contracts — all 6 always rendered, including 0, styled neutral when 0 per this unit's own instruction.
+
+### Recent Contracts
+
+Max 5 rows (was 3, FMP-UI-16B), each with a real BOQ Progress column ("Not started" / "N / M completed" / "Needs Attention"), a row-click-to-select button, a separate "View" link to the contract detail page, and a "View all contracts" link. BOQ data for all 5 rows is fetched once, in parallel, server-side.
+
+### What was left out (per this unit's own "do not invent / do not add a broken button" instructions)
+
+- **"View All BOQ Progress" header button** — no global, cross-contract BOQ Progress page exists, only the per-contract `/contracts/{id}/boq-progress` tab. Omitted rather than linking somewhere broken or approximate.
+- **Job Order for a contract reached via Recent Contracts or the default selection** — the dashboard's own `recent` field is a shape shared verbatim across 6 modules' dashboards (contracts/factory-tasks/maintenance/production/safety/users all return the identical `{id, referenceNumber, title, status, updatedAt}` shape); widening that shared cross-module type for one display field here was judged disproportionate. Shows "—" on those two paths; shows the real value once the manager searches (the search action's richer `Contract` type does carry it).
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 2028/2028 (5 new) |
+| `pnpm --filter @recafco/web test` | ✓ 1108/1108 (22 new) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0, `/contracts/executive` compiled |
+| `pnpm db:migrate:status` | ✓ 58 migrations, up to date (no schema change — confirms the new BOQ queries only read existing tables) |
+
+### Key Implementation Notes
+
+- No live browser verification was performed in this unit (no credentials available to this session, per this project's established precedent) — the selector's search/select interaction, the search debounce, and the live layout at 1366px/1920px widths are verified by typecheck/lint/tests/build only, not by clicking through the page. Flagged for a visual check once the user has the dev server running.
+- The new BOQ piece aggregate was deliberately placed in `contracts/contract-dashboard.service.ts` (the Contract Management domain), not inside any file under `apps/api/src/technical/`, even though it queries tables that module's own service also queries — keeping every file the ticket named as off-limits (BOQ logic, Technical workflow, piece generation) completely untouched, while still reading the same underlying rows read-only.
+- `itemsNeedingReview` (one BOQ item across the whole scope, not one piece) required 2 extra `groupBy` queries beyond the 2 obvious ones (confirmed-sum, piece-status-snapshot) — a per-item confirmed-vs-generated comparison can't be derived from either aggregate alone, since both collapse away the `boqItemId` grouping. Worth remembering for any future cross-contract BOQ aggregate: "which items disagree" needs item-level groupBys even when the headline totals don't.
+
+## FMP-UI-30 — Clean Contract Management Submenu and Add Schedule Planning Main Module (Completed 2026-10-07)
+
+Sidebar/menu UI change only, in `apps/web/src/app/(protected)/_components/sidebar.tsx`. No routes/files deleted, no backend code removed, no permission/workflow/BOQ/Task-Management/Erection-module change.
+
+### Part A — Contract Management submenu
+
+- Old order (10 items): Dashboard, Contract List, Schedule, Workflow & Team Tasks, Erection Dashboard ("Erection Status" when relabelled for a monitor-only viewer), Payments, Issue Log, Claim Log, Closeout Requests, Contract Parties.
+- New order (7 items): Dashboard, Contract List, Payments, Issue Log, Claim Log, Closeout Requests, Contract Parties.
+- Removed: Schedule, Workflow & Team Tasks, Erection Dashboard/Status. All 3 routes (`/contracts/schedule`, `/contracts/workflow`, `/contracts/erection-dashboard`) are untouched and still open by direct URL or their own dedicated top-level sidebar entry (Erection's own main-module item already existed; Workflow's "Workflow & Team Tasks" page is unaffected, just no longer duplicated in this submenu).
+- `CONTRACT_ITEMS` is read by BOTH the non-executive dropdown and (via `visibleContractItems`/`executiveContractSubItems`) the executive sidebar's Contract Management submenu (FMP-UI-26) — this cleanup applies to both automatically, since they share the one array. `CONTRACT_STAFF_ITEMS` (a separate array for the Contract-Staff-tier persona — Dashboard/My Tasks/Erection Dashboard) was not touched; the ticket's own "current submenu" listing matches `CONTRACT_ITEMS` only.
+
+### Part B — Schedule Planning main module
+
+- Label: exactly "Schedule Planning" (not "Schedule"/"Planning Schedule"/"Contract Schedule Management", per the ticket's own explicit list of labels NOT to use).
+- Route: `/contracts/schedule` — the existing Contract Management schedule page, unchanged. No new route created.
+- Icon: `Calendar` (the same icon the old submenu's "Schedule" entry already used).
+- Added in 3 places, after Task Management in each, since this app's sidebar has 2 independently-rendered "main sidebar" shapes plus the Contract-Management-only flat variant of the first:
+  1. `EXECUTIVE_SIDEBAR_ITEMS` (the flat Executive Manager sidebar, FMP-UI-03/23/28/29) — now 12 items, Schedule Planning last.
+  2. `MAIN_GROUPS`'s "Operations" group (the grouped/dropdown sidebar for every other persona) — added after Task Management, gated on the same `CONTRACTS_MANAGEMENT` module Technical/Erection already use there — no new permission.
+  3. `CONTRACTS_MANAGEMENT_EXTRA_ITEMS` (renamed from `TECHNICAL_AND_ERECTION_ITEMS` — see Key Implementation Notes) — the flat Contract-Management-only persona's own copy of Technical/Erection, now including Schedule Planning too, so that persona doesn't lose it just because it's no longer inside the submenu.
+
+### Part C — Active state
+
+- Schedule Planning lights up on `/contracts/schedule` and its own sub-routes via `isExecutiveItemActive()`'s existing generic fallback (exact/prefix match) — no special case needed, since only `/contracts/executive` itself has a special case in that function.
+- Contract Management's own parent row no longer stays active while on `/contracts/schedule`: its active check is `executiveContractSubActive || isExecutiveItemActive('/contracts/executive', pathname)` (FMP-UI-26/27) — `executiveContractSubActive` is derived from `CONTRACT_ITEMS`, which no longer contains Schedule at all, so it can never be true for that route; the second half is an exact match that was never true for `/contracts/schedule` either.
+- Contract Management's chevron/expand-toggle behavior (FMP-UI-27) is completely unchanged — nothing about its own state or rendering was touched, only the list of items it displays.
+- Dashboard, Contract List, Payments, Issue Log, Claim Log, Closeout Requests, and Contract Parties keep their exact existing active-state logic (`isContractItemActive()`/`isExecutiveContractSubItemActive()`), untouched.
+
+### Part D — Routing safety
+
+No file moved, no route created or deleted. `/contracts/schedule` keeps living exactly where it already did, under the Contract Management route tree — only its SIDEBAR link location (and the existence of 2 more links to it) changed.
+
+### Files changed
+
+- `apps/web/src/app/(protected)/_components/sidebar.tsx`
+- `context/progress-tracker.md`, `context/ui-registry.md`
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web test` | ✓ 1108/1108 (unchanged — no test imports these sidebar arrays directly) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+
+No backend file was opened; API typecheck/tests/migrate-status were not re-run for this reason (the ticket's own checklist for this unit lists only lint/web-typecheck/web-tests/web-build).
+
+### Key Implementation Notes
+
+- `TECHNICAL_AND_ERECTION_ITEMS` was renamed to `CONTRACTS_MANAGEMENT_EXTRA_ITEMS` (one rename, one usage site, one doc comment) rather than left as-is with a 3rd, differently-themed item added — the old name would have been actively misleading once it also held Schedule Planning.
+- Scope decision: the ticket's Part B "main sidebar order" list, read literally, omits Estimation entirely (jumps Contract Management → Technical). Interpreted as the ticket simply not mentioning Estimation (out of scope for THIS ticket) rather than a second instruction to remove it again — Estimation (restored in FMP-UI-29 after direct feedback) stays exactly where it is; only Schedule Planning was appended at the end, after Task Management, as asked.
+- Scope decision: the ticket's Part B/C wording ("main sidebar item", "parent chevron") most closely matches the EXECUTIVE flat sidebar's recently-built chevron/submenu mechanics (FMP-UI-26/27), so that was treated as the primary target — but Schedule Planning was ALSO added to the non-executive `MAIN_GROUPS` Operations list and the Contract-Management-only flat section, since those personas would otherwise lose their only sidebar path to `/contracts/schedule` once it left the submenu (Part A's cleanup removes `CONTRACT_ITEMS`' "Schedule" entry for every persona that reads that array, not just the executive one).
+
+## FMP-UI-31 — Redesign Technical Dashboard for One-Screen Workflow Control (Completed 2026-10-07)
+
+Redesign of `/technical` (the Technical Dashboard). One small additive backend read-only aggregate (same pattern as FMP-UI-29); everything else is frontend. No Technical workflow, BOQ drawing confirmation, piece generation, or Production/Storage/Erection logic changed.
+
+### Old layout
+
+Header (already compact, 3 actions) → 7-card KPI row → Stage Progress Overview + a ONE-SENTENCE Next Action Focus → an UNCAPPED jobs table (up to 50 rows) → an UNCAPPED Needs Attention list (one row per flagged job, no limit) + Recent Activity (already capped to 5). The uncapped jobs table and uncapped Needs Attention list were the real height problems; BOQ drawing/piece data wasn't shown anywhere on the page.
+
+### New layout
+
+Header (unchanged actions; subtitle reworded to this unit's exact required wording; container widened `max-w-7xl`→`max-w-[1600px]`) → KPI row (same 7 cards, 2 labels renamed to the exact required wording) → **Contract/Project selector + Selected Job Progress** (new, full width) → Stage Progress Overview + **Next Action Focus rebuilt into a real top-5 list** (was one sentence) → Technical Workflow Jobs (same table, capped to 5, reordered so flagged/urgent jobs float to the front) → **Needs Attention rebuilt into 5 fixed named-count rows** (was an uncapped per-record list) + Recent Activity (unchanged, already 5).
+
+### Backend change (additive, read-only)
+
+- `apps/api/src/technical/technical.service.ts` — new `TechnicalBoqAttentionSummary` interface and `buildBoqAttentionSummary(contractIds)` private method, attached to `TechnicalDashboardResult.boqAttention`. Three read-only Prisma queries against `ContractBoqDrawingConfirmation`/`ContractBoqPiece` — the exact same tables, same per-item business rules, and same "put the cross-cutting aggregate in the CALLING dashboard's own service" approach `contract-dashboard.service.ts`'s `buildBoqPieceOverview()` already established in FMP-UI-29. Scoped to only the jobs whose Technical workflow has actually started (a not-yet-started job trivially has no BOQ confirmation, so counting it would inflate "missing confirmation" with jobs nobody is working on), and to the same ≤50-contract set already fetched for the jobs list — no broader query than what's already on the page.
+- `apps/api/src/technical/technical.service.test.ts` — mock Prisma client extended with the new model delegates; 5 new focused tests (zero-query short-circuit when nothing's started, correct contractId scoping, each of the 3 counts' own logic).
+- `apps/web/src/lib/technical-api.ts` — mirrored `TechnicalBoqAttentionSummary` type, added to `TechnicalDashboardData`.
+
+### Frontend — new files
+
+- `apps/web/src/app/(protected)/technical/_lib/technical-dashboard-selector-helpers.ts` (+ test, 22 cases) — `pickDefaultTechnicalJob` (first job flagged in Needs Attention, else most recently updated started-and-not-completed job, else the first job of any kind), `searchJobsLocally` (client-side only — searches the already-loaded `jobs` list, no network call), `fiveStepFlow` (the 5-step Drawing/SD & Calc./Approval/FD Issued/Ready state), `selectedJobBoqSummary`, `buildTechnicalNeedsAttentionRows`, `prioritizeJobsForTable`.
+- `apps/web/src/app/(protected)/technical/_components/technical-job-selector.tsx` — the one client component on this page. Reuses the EXACT SAME read-only server action the Contract Management dashboard added in FMP-UI-29 (`getContractBoqProgressForDashboardAction`, generic — works for any contract id) for the per-job BOQ summary; needed no new search action at all, since search runs entirely against the already-fetched `jobs` array.
+- `apps/web/src/app/(protected)/technical/_lib/technical-format.ts` — gained `STAGE_ACTION_LABELS` (moved from page.tsx, now shared with the rebuilt Next Action Focus panel) and `STAGE_LABELS` (a client-safe local copy of `technical-api.ts`'s own `TECHNICAL_STAGE_LABELS` — see Key Implementation Notes for why a direct import broke the build).
+- `apps/web/src/app/(protected)/technical/_components/next-action-panel.tsx` and `needs-attention-panel.tsx` — both rebuilt (see "New layout" above); `page.tsx` updated to match (new imports, 2 KPI label renames, selector wired in, jobs table capped/reordered, `NeedsAttentionPanel`'s new `rows` prop).
+
+### Contract/Project selector behavior
+
+Search matches contract no., job order, or project name, entirely against the dashboard's own already-loaded `jobs` list (no network round-trip for search itself — see `searchJobsLocally()`'s own doc comment). "Drawing No." search (the ticket's own "if available" qualifier) was not implemented — no real drawing-number index exists to search against without a new backend capability, so it was left out rather than faked. Selecting a job never navigates away; only "Open Stage"/"Open Contract" do.
+
+### Selected Job Progress behavior
+
+Contract No., Project Name, Job Order, Current Stage, Next Action, Due/Planned, Owner, Status — all from the already-fetched `TechnicalJobRow`. The 5-step flow (Drawing/SD & Calc./Approval/FD Issued/Ready) and the BOQ summary (BOQ Items/Drawing Confirmed Pieces/Pieces Generated/Needs Attention) both update when a new job is picked, fetched via the reused FMP-UI-29 server action.
+
+### KPI cards
+
+Unchanged values; 2 labels renamed to this unit's exact required wording ("Ready for Production Release"→"Ready for Production", "Needs Attention / Overdue"→"Needs Attention").
+
+### BOQ drawing/piece summary behavior
+
+Per-job (Selected Job Progress): real numbers from the existing per-contract BOQ endpoint, honest "No BOQ drawing confirmation yet." when none exist. Platform-wide (Needs Attention panel): the new `boqAttention` aggregate feeds 3 of its 5 rows.
+
+### Next Action Focus behavior
+
+Top 5 real Needs Attention items (was 1 aggregate sentence), each with Job Order/Contract No., Project, Next Action (short wording, shared with the jobs table), Current Stage, and an Open button. Empty state unchanged: "All Technical workflow items are currently on track."
+
+### Technical Workflow Jobs behavior
+
+Same existing table (kept per this unit's own fallback — no full jobs list page exists to redirect a trimmed-column version to), capped to 5 rows, reordered so a flagged/urgent job always appears in those 5 even if it isn't among the 5 most recently updated. No "View all technical jobs" link was added — see Key Implementation Notes.
+
+### Recent Activity behavior
+
+Unchanged — already capped to 5 since FMP-TECH-05P.
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 2033/2033 (5 new) |
+| `pnpm --filter @recafco/web test` | ✓ 1130/1130 (22 new) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ 58 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- **A real build break, fixed before verification:** `technical-job-selector.tsx` (a `'use client'` component) initially imported `TECHNICAL_STAGE_LABELS` directly (a value, not a type) from `@/lib/technical-api` — that module does a top-level `import { cookies } from 'next/headers'`, and pulling ANY value export from it into a client component's bundle fails the build (Turbopack: "Ecmascript file had an error"). `_lib/technical-format.ts` had already solved this exact problem once before for `TECHNICAL_STAGE_ORDER` (its own `STAGE_ORDER` local copy, with a doc comment explaining why) — added a matching `STAGE_LABELS` local copy there and pointed the component at it instead. Reusable takeaway: before a NEW client component imports anything from `technical-api.ts` (or any `*-api.ts` file using `cookies()`/`next/headers`), check whether it's a `type` import (always safe) or a value import (only safe from a Server Component) — and check `_lib/technical-format.ts` first, since it already exists specifically to hold client-safe local copies of exactly this kind of value.
+- **"View All BOQ Progress"-style button omitted:** no full "Technical Jobs" list page exists (only the per-job `/technical/jobs/{id}` detail route), so per this ticket's own "if a full jobs page does not exist, keep existing table" fallback, the existing table was kept (just capped/reordered) and no "View all technical jobs" link was added, rather than linking to something that doesn't exist.
+- The new `boqAttention` aggregate is scoped to jobs with a STARTED workflow only (not every contract in department scope) — a deliberate choice so "missing BOQ confirmation" means "of the jobs Technical is actually working on, how many haven't had anything confirmed yet," not "every contract that could theoretically start Technical someday," which would have made the number far larger and far less actionable.
+
+## FMP-UI-32 — Redesign Production & Planning Dashboard for Piece Production Flow (Completed 2026-10-07)
+
+Redesign of `/production/executive` (the Production & Planning Executive Module Landing Page — reached from the sidebar, NOT the separate order-based `/production/dashboard`, which is untouched at its own route). Two small additive backend read-only endpoints on the EXISTING Piece Production screen's own service (no new module); everything else is frontend. No Production Piece screen behavior, Technical drawing confirmation, piece generation, Storage Yard & Delivery, Erection, or New Contract Register logic changed. No production order/batch workflow or inventory/store movement added.
+
+### Root identification
+
+The complaint ("still focused on old production order placeholders," "Needs Attention says not available," "Quick links are generic") matched `/production/executive` exactly: it showed the 4 order-based metrics (Scheduled/In Progress/Paused/Completed This Month) via `ExecutiveKpiGrid`, a permanently `available={false}` Needs Attention panel with the literal note "Production & Planning does not yet track a delayed or at-risk order state," a recent-ORDERS table, and `ExecutiveQuickLinks` pointing at Scheduled/In Progress/Paused — confirmed by reading the file before changing anything. The separate operational `/production/dashboard` (same old order metrics, its own route) was not touched.
+
+### Backend changes (additive, read-only — both on the existing Piece Production screen's own service)
+
+- `apps/api/src/production/production-pieces.service.ts` — two new methods:
+  - `contractProgress(actor)` / `buildProductionContractProgress()` — ONE `contractBoqPiece.findMany` (same non-cancelled population `summary()`/`screenStatusGroups()` already read) reduced in JS into a per-contract breakdown (ready/inProduction/produced/onHold/rejected/lastUpdatedAt). This single array feeds the KPI row, Overall Production Flow, the Contract/Project selector (search runs client-side against it — no network call), Selected Project Production, and the Production Work Queue — 5 sections, one query.
+  - `recentUpdates(actor, limit=5)` — reads the SAME `contractBoqPieceStatusHistory` table the existing per-piece `history()` method already reads, just without a `pieceId` filter (`orderBy: createdAt desc, take: 5`), for "Recent Production Updates."
+- `apps/api/src/production/production-pieces.controller.ts` — two new routes, `GET /production/pieces/contract-progress` and `GET /production/pieces/recent-updates`, both `@Permissions('production.read')` (same gate every other route on this controller already uses).
+- `apps/api/src/production/production-pieces.service.test.ts` — 9 new tests (contract grouping, Hold/Rejected kept separate, cancelled-piece exclusion, multi-contract correctness, lastUpdatedAt = max per contract; recent-updates mapping, null-actor handling, limit/ordering).
+- `apps/web/src/lib/production-pieces-api.ts` — mirrored `ProductionContractProgress`/`RecentPieceUpdate` types, 2 new client functions.
+
+### Frontend — new files
+
+- `apps/web/src/app/(protected)/production/executive/_lib/production-dashboard-helpers.ts` (+ test, 19 cases) — `pickDefaultProductionContract` (first with Ready pieces, else first with In-Production pieces, else most recently updated), `searchProductionContractsLocally`, `buildOverallProductionFlow`, `buildProductionKpis`, `selectedProjectProduction`, `buildProductionNeedsAttentionRows`, `buildProductionWorkQueue`.
+- `apps/web/src/app/(protected)/production/executive/_components/production-contract-selector.tsx` — the one client component on this page. Simpler than the equivalent on the Contract Management/Technical dashboards (FMP-UI-29/31): since `contractProgress()` already returns every contract's FULL piece breakdown in one array, selecting a different contract is a plain synchronous state change — no fetch, no loading state, no server action needed at all.
+- `apps/web/src/app/(protected)/production/executive/_components/production-needs-attention-panel.tsx` — 4 fixed rows (Pieces on Hold, Rejected Pieces, Ready for Production, In Production), always shown, neutral at 0 — same shape as Contract Management's/Technical's own Needs Attention panels (FMP-UI-29/31).
+- `apps/web/src/app/(protected)/production/executive/page.tsx` — full rewrite. Reuses `RefreshButton` (`technical/_components/`) and `BOQ_PIECE_STATUS_LABELS`/`BOQ_PIECE_STATUS_CLASSES` (`technical/_lib/boq-confirmation-helpers.ts`) as-is, both already generic/client-safe — no duplication needed for either.
+
+### KPI card behavior
+
+Ready for Production, In Production, Produced, On Hold, Rejected, Needs Attention (= On Hold + Rejected) — all 6 summed straight from `contractProgress()`, no placeholder zeros when real pieces exist.
+
+### Contract/Project selector behavior
+
+Search matches contract no., job order, or project name — entirely client-side against the already-complete `contracts` array (no network call). "Drawing No."/"Piece Code" search (the ticket's own fuller list) was not implemented: `contractProgress()` is a per-CONTRACT aggregate and doesn't carry piece-level fields — adding them would mean returning raw pieces instead of a contract breakdown, a bigger shape change than this card needs. Selecting a contract never navigates away; only "Open Piece Production"/"View Contract" do.
+
+### Selected Project Production behavior
+
+Ready/In Production/Produced flow tiles plus "Produced: N of Total", "Remaining" (= Total − Produced, so Hold/Rejected pieces are included in Remaining, not double-subtracted — verified against the ticket's own worked example, 20 of 50 / Remaining 30 / Hold-Rejected 2), and a Hold/Rejected line shown only when non-zero. Empty states match the ticket's exact required wording.
+
+### Overall Production Flow behavior
+
+Ready/In Production/Produced, summed across every contract in scope — visible without scrolling, no chart.
+
+### Needs Attention behavior
+
+No longer says "Not available yet." 4 real rows, always shown, red only for Rejected, amber for the rest, neutral at 0. The 2 optional time-based rows the ticket offered ("In Production for long time," "Produced but not sent to Storage") were omitted — no elapsed-time/location data is readily available without new tracking, and the ticket's own instruction was to omit rather than guess.
+
+### Production Work Queue behavior
+
+Max 5 contracts, reordered (Hold/Rejected first, then Ready-pieces-waiting, then most recently updated) — never filtered. Each row's "Open" goes to `/production/pieces?contractId={id}` — a real, already-supported URL param on the existing Piece Production screen (`readFilterValues()` already reads `contractId` from the URL), so the filter genuinely applies, not a plain unfiltered link.
+
+### Recent Production Updates behavior
+
+Max 5 real piece status changes (Piece Code, Status changed to, Contract/Project, Updated time, Updated by when known) from the new `recentUpdates()` endpoint — the "easy to fetch" real version, not the ticket's own fallback ("show existing recent activity instead"), since one more read-only query against an already-read table was genuinely simple.
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 2042/2042 (9 new) |
+| `pnpm --filter @recafco/web test` | ✓ 1149/1149 (19 new) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ 58 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- `contractProgress()` is intentionally a `findMany` reduced in JS, not a `groupBy(['contractId','currentStatus'])` — a groupBy would lose the contract's own `referenceNumber`/`jobOrder`/`title` (not a groupable scalar) and the per-contract max `updatedAt`, both of which a second query would then be needed for anyway. One slightly larger read, correct and simple, beat two smaller-but-incomplete ones.
+- Neither `contractProgress()` nor `recentUpdates()` applies a department-access filter — this matches the EXISTING, unchanged behavior of every other method on this service (`summary()`, `contractOptions()`, `list()`, all already read via the shared `boq-piece-screen.ts` engine with no department scoping), so these 2 additions don't introduce a NEW visibility rule, they just extend the one this screen has always had.
+- Confirmed, before using it, that `/production/pieces?contractId=...` is a real, already-wired URL param (`readFilterValues()`/`buildPieceQuery()` in the Piece Production screen's own helpers) — satisfies the ticket's own "open with filter if possible" instruction with zero changes to that screen.
+
+## FMP-UI-33 — Redesign Storage Yard & Delivery Dashboard for Piece Delivery Flow (Completed 2026-10-07)
+
+Redesign of `/executive/storage-delivery` (the Storage Yard & Delivery Executive Module Landing Page). Two small additive backend read-only endpoints on the EXISTING Piece Delivery screen's own service (no new module) — the exact same pattern FMP-UI-32 established for Production one unit earlier. No Piece Delivery screen behavior, Technical drawing confirmation, piece generation, Production, Erection, or New Contract Register logic changed. No delivery note workflow, vehicle/driver dispatch, or inventory/store movement added.
+
+### Root identification
+
+`/executive/storage-delivery` rendered `ExecutiveComingSoon` with the literal message "Storage Yard & Delivery module will be configured in a future unit." — no longer true: Piece Delivery (FMP-BOQ-08) has existed since before this unit, with its own real backend (`StorageDeliveryPiecesService`) already tracking Produced/In Store/Delivered/Hold/Rejected pieces. Confirmed by reading the file before changing anything.
+
+### Backend changes (additive, read-only — both on the existing Piece Delivery screen's own service)
+
+- `apps/api/src/storage-delivery/storage-delivery-pieces.service.ts` — two new methods, mirroring `ProductionPiecesService`'s own FMP-UI-32 additions field-for-field:
+  - `contractProgress(actor)` / `buildStorageContractProgress()` — one `contractBoqPiece.findMany` (same non-cancelled population `summary()`/`screenStatusGroups()` already read) reduced in JS into a per-contract breakdown (readyForStore/inStore/delivered/onHold/rejected/lastUpdatedAt). Feeds the KPI row, Overall Delivery Flow, the Contract/Project selector, Selected Project Delivery, and the Delivery Work Queue.
+  - `recentUpdates(actor, limit=5)` — reads the same `contractBoqPieceStatusHistory` table the existing `history()` method already reads, without a `pieceId` filter, for "Recent Storage / Delivery Updates." Also selects the piece's CURRENT `currentLocation` for the "Location if available" field — the history table itself has no location column, so this is the piece's current location, not a historical snapshot; noted in the type's own doc comment.
+- `apps/api/src/storage-delivery/storage-delivery-pieces.controller.ts` — two new routes, `GET /storage-delivery/pieces/contract-progress` and `GET /storage-delivery/pieces/recent-updates`, both `@Permissions('storage_delivery.read')`.
+- `apps/api/src/storage-delivery/storage-delivery-pieces.service.test.ts` — 9 new tests (contract grouping, Hold/Rejected kept separate, cancelled-piece exclusion, multi-contract correctness, lastUpdatedAt = max per contract; recent-updates mapping including location, null-actor/location handling, limit/ordering).
+- `apps/web/src/lib/storage-delivery-pieces-api.ts` — mirrored `StorageContractProgress`/`RecentStoragePieceUpdate` types, 2 new client functions.
+
+### Frontend — new files
+
+- `apps/web/src/app/(protected)/executive/storage-delivery/_lib/storage-dashboard-helpers.ts` (+ test, 19 cases) — mirrors Production's own FMP-UI-32 helpers renamed for the Ready-for-Store/In-Store/Delivered flow: `pickDefaultStorageContract`, `searchStorageContractsLocally`, `buildOverallDeliveryFlow`, `buildStorageKpis`, `selectedProjectDelivery`, `buildStorageNeedsAttentionRows`, `buildDeliveryWorkQueue`.
+- `apps/web/src/app/(protected)/executive/storage-delivery/_components/storage-contract-selector.tsx` — the one client component on this page. Same reasoning as Production's selector (FMP-UI-32): `contractProgress()` already returns every contract's full piece breakdown, so selecting is a plain synchronous state change, no fetch.
+- `apps/web/src/app/(protected)/executive/storage-delivery/_components/storage-needs-attention-panel.tsx` — 4 fixed rows, always shown, neutral at 0.
+- `apps/web/src/app/(protected)/executive/storage-delivery/page.tsx` — full rewrite, replacing `ExecutiveComingSoon` entirely. Reuses `RefreshButton` and `BOQ_PIECE_STATUS_LABELS`/`BOQ_PIECE_STATUS_CLASSES` from the Technical module (both already generic/client-safe) — no duplication. Page-level access gate (`isExecutiveManagerOrAdminAccess`) is unchanged from before; the real-data sections additionally check `storage_delivery.read` (the same conditional the old page's own "Piece Delivery" link already used), so an actor without that specific permission still reaches the page with an honest "not available" message instead of fabricated numbers.
+
+### KPI card behavior
+
+Ready for Store, In Store, Delivered, On Hold, Rejected, Needs Attention (= On Hold + Rejected) — all 6 summed from the new `contractProgress()` aggregate; shown as "—" (not `0`) when the actor lacks `storage_delivery.read`, so a permission gap never reads as "genuinely zero pieces."
+
+### Contract/Project selector behavior
+
+Search matches contract no., job order, or project name, entirely client-side. Drawing No./Piece Code search was not implemented — `contractProgress()` is a per-contract aggregate, same limitation and same reasoning as Production's own selector one unit earlier. Selecting never navigates away.
+
+### Selected Project Delivery behavior
+
+Ready for Store/In Store/Delivered flow tiles plus "Delivered: N of Total", Remaining (= Total − Delivered, Hold/Rejected included in Remaining, not double-subtracted — verified against the ticket's own worked example), and a Hold/Rejected line shown only when non-zero.
+
+### Overall Delivery Flow behavior
+
+Ready for Store/In Store/Delivered, summed across every contract in scope, visible without scrolling.
+
+### Needs Attention behavior
+
+Real panel, 4 rows (Pieces on Hold, Rejected Pieces, Ready for Store, In Store), always shown, red only for Rejected. "Produced but not delivered" (the ticket's own optional 5th row) was omitted — needs real elapsed-time data this dashboard doesn't have, and the ticket's own instruction was "do not create fake delay logic."
+
+### Delivery Work Queue behavior
+
+Max 5 contracts, reordered (Hold/Rejected first, then pieces ready/in-store, then most recently updated). Each row's "Open" goes to `/storage-delivery/pieces?contractId={id}` — confirmed, before using it, that `contractId` is a real URL param the Piece Delivery screen's own `readFilterValues()` already reads.
+
+### Recent Storage / Delivery Updates behavior
+
+Max 5 real piece status changes (Piece Code, Status changed to, Contract/Project, current Location when known, Updated time, Updated by when known) from the new `recentUpdates()` endpoint.
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 2051/2051 (9 new) |
+| `pnpm --filter @recafco/web test` | ✓ 1168/1168 (19 new) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ 58 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- This unit is close to a structural copy of FMP-UI-32 (Production), renamed for the Ready-for-Store/In-Store/Delivered flow instead of Ready/In-Production/Produced — deliberately: both modules sit on the exact same shared BOQ piece engine (`technical/boq-piece-screen.ts`/`boq-piece-generation.ts`), just with different visible-status sets and different write permissions, so their dashboards' own shape should match too, for the same reason `ProductionPiecesService` and `StorageDeliveryPiecesService` already mirror each other method-for-method.
+- `ContractBoqPieceStatusHistory` has no location column, so "Location if available" in Recent Updates necessarily shows the piece's CURRENT location, not where it was at that historical moment — documented on the type itself (`RecentStoragePieceUpdate.currentLocation`'s own comment) rather than left as a silent approximation.
+- Page-level access intentionally stayed on `isExecutiveManagerOrAdminAccess` (unchanged) rather than switching to `storage_delivery.read` directly — the ticket's own "Do not change permissions unless only read-only dashboard access requires existing permission usage" and the pre-existing page already had this exact two-tier shape (page-level gate + an inner `storage_delivery.read` check for the one real feature it had). Extending that same two-tier shape to the newly-real data sections was the smaller, more consistent change.
+
+## FMP-UI-34 — Redesign Erection Dashboard for Piece Erection Flow (Completed 2026-10-07)
+
+Redesign of `/contracts/erection-executive` (the Erection Executive Module Landing Page). Two small additive backend read-only endpoints on the EXISTING Piece Erection screen's own service — the same pattern FMP-UI-32/33 established for Production and Storage Yard & Delivery. No Piece Erection screen behavior, old erection workflow logic, Technical, Production, Storage Yard & Delivery, or New Contract Register logic changed. No crew/team assignment, QA/QC workflow, site inspection workflow, or inventory/store movement added. The old erection workflow is NOT removed.
+
+### Root identification
+
+`/contracts/erection-executive` rendered the shared `ErectionWorkflowStatusDashboard` component (KPI grid + Needs Attention + Recent Activity, all scoped to the OLDER method-statement/checklist workflow) as its entire body, with Piece Erection reduced to one small link above it — exactly the ticket's own complaint ("Dashboard focuses on old workflow status instead of piece erection flow," "Piece Erection is only a small button"). Confirmed by reading the file before changing anything.
+
+### Backend changes (additive, read-only — both on the existing Piece Erection screen's own service)
+
+- `apps/api/src/erection/erection-pieces.service.ts` — two new methods, mirroring `ProductionPiecesService`/`StorageDeliveryPiecesService`'s own FMP-UI-32/33 additions field-for-field: `contractProgress(actor)` / `buildErectionContractProgress()` (readyForErection/erected/completed/onHold/rejected/lastUpdatedAt per contract) and `recentUpdates(actor, limit=5)` (reusing the same `contractBoqPieceStatusHistory` table `history()` already reads, including the piece's current `currentLocation` for "Location / site note").
+- `apps/api/src/erection/erection-pieces.controller.ts` — two new routes, `GET /erection/pieces/contract-progress` and `GET /erection/pieces/recent-updates`, both `@Permissions('erection.read')`.
+- `apps/api/src/erection/erection-pieces.service.test.ts` — 9 new tests, same coverage shape as the Production/Storage equivalents.
+- `apps/web/src/lib/erection-pieces-api.ts` — mirrored `ErectionContractProgress`/`RecentErectionPieceUpdate` types, 2 new client functions.
+
+### Frontend — new files
+
+- `apps/web/src/app/(protected)/contracts/erection-executive/_lib/erection-dashboard-helpers.ts` (+ test, 19 cases) — mirrors Production's/Storage's own helpers renamed for Ready-for-Erection/Erected/Completed.
+- `apps/web/src/app/(protected)/contracts/erection-executive/_components/erection-contract-selector.tsx` — the one client component, same no-fetch-on-select design as the other 2 piece dashboards.
+- `apps/web/src/app/(protected)/contracts/erection-executive/_components/erection-needs-attention-panel.tsx` — 4 fixed rows, always shown, neutral at 0.
+- `apps/web/src/app/(protected)/contracts/erection-executive/_components/erection-workflow-summary-card.tsx` — **new, specific to this unit**: this unit's own required "Option B" (ticket section 9) — a small 3-figure card (Contracts in workflow / Overdue workflow items / Waiting approval, from `ErectionDashboardKpis.totalErectionContracts`/`delayedAttentionRequired`/`submittedForApproval` — the SAME `contractsApi.erectionDashboard()` data `ErectionWorkflowStatusDashboard` already computed, no new query) with an "Open Erection Workflow" button to the full, untouched `/contracts/erection-dashboard` page.
+- `apps/web/src/app/(protected)/contracts/erection-executive/page.tsx` — full rewrite. `ErectionWorkflowStatusDashboard` is no longer imported here (still used, unchanged, by `/contracts/erection-dashboard` itself).
+
+### KPI card behavior
+
+Ready for Erection, Erected, Completed, On Hold, Rejected, Needs Attention (= On Hold + Rejected) — all 6 summed from the new `contractProgress()` aggregate.
+
+### Contract/Project selector behavior
+
+Searches contract no./job order/project name, entirely client-side. Drawing No./Piece Code search not implemented (same limitation as Production's/Storage's own selectors). Never navigates away on select.
+
+### Selected Project Erection behavior
+
+Ready for Erection → Erected → Completed flow, "Completed: N of Total", Remaining, Hold/Rejected — matches the ticket's own worked example exactly.
+
+### Overall Erection Flow behavior
+
+Ready for Erection/Erected/Completed, summed across every contract in scope, visible without scrolling.
+
+### Needs Attention behavior
+
+4 real rows (Pieces on Hold, Rejected Pieces, Ready for Erection, Erected), always shown. "Erected but not completed" and "old workflow overdue items" (the ticket's own optional extra rows) were omitted from THIS panel — the first needs real elapsed-time data this dashboard doesn't have, and the second would mix 2 different counting systems (BOQ pieces vs. the old workflow's own attention items) into one row; the old workflow's own real "Overdue workflow items" figure instead has its own place, the Erection Workflow summary card.
+
+### Erection Work Queue behavior
+
+Max 5 contracts, reordered (Hold/Rejected first, then pending pieces, then most recently updated). Each row's "Open" goes to `/erection/pieces?contractId={id}` — confirmed, before using it, that `contractId` is a real, already-working URL param on the Piece Erection screen.
+
+### Recent Erection Updates behavior
+
+Max 5 real piece status changes, including the piece's current location/site note when known.
+
+### Old Erection Workflow summary behavior
+
+A compact card, not the module's old full dashboard component — 3 real figures (Contracts in workflow, Overdue workflow items, Waiting approval) plus one button to the full, completely untouched `/contracts/erection-dashboard` page. Rendered unconditionally (gated on `contracts.read`, the page's own access check, not `erection.read`), so it stays visible even for an actor who can view this page but lacks the BOQ-piece permission — "old workflow remains accessible" must not depend on the newer permission.
+
+### Verification Results (2026-10-07)
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @recafco/api typecheck` | ✓ 0 errors |
+| `pnpm --filter @recafco/web typecheck` | ✓ 0 errors |
+| `pnpm lint` | ✓ 0 errors |
+| `pnpm --filter @recafco/api test` | ✓ 2060/2060 (9 new) |
+| `pnpm --filter @recafco/web test` | ✓ 1187/1187 (19 new) |
+| `pnpm --filter @recafco/web build` | ✓ exit 0 |
+| `pnpm db:migrate:status` | ✓ 58 migrations, up to date (no schema change) |
+
+### Key Implementation Notes
+
+- This is the 3rd of 3 near-identical dashboard redesigns on the same shared BOQ piece engine (Production FMP-UI-32, Storage Yard & Delivery FMP-UI-33, Erection FMP-UI-34) — the mechanical "port the sibling module's dashboard shape, renamed" approach (documented as its own reusable takeaway in ui-registry.md under FMP-UI-33) applied a second time, with one genuinely new piece: the "demote, don't remove" requirement for the OLD erection workflow, which neither sibling module had (Production/Storage never had a separate "old workflow" to preserve).
+- `ErectionWorkflowStatusDashboard` (the shared component) is untouched and still fully used at its own route (`/contracts/erection-dashboard`) — this unit only stopped importing it into the EXECUTIVE landing page specifically, replacing it there with the new compact summary card.
+- A real access-scoping bug was caught and fixed before finishing: the Erection Workflow summary card was initially nested inside the `canReadPieces` conditional block, which would have hidden "old workflow remains accessible" behind the NEW `erection.read` permission — wrong, since the old workflow data has always been gated on `contracts.read` only (the page's own top-level check). Moved the summary card to render unconditionally once this was noticed.
+
 ## Risks
 
 - Incomplete module requirements
@@ -14178,3 +14584,116 @@ No table changes. **New permissions (data migration `20261007200000_add_storage_
 - **Bulk update, history, skips:** same as Production — mixed jobs allowed, cancelled/same-status pieces skipped with counts, one history row per moved piece.
 - **Not built:** no delivery notes, vehicle/driver dispatch, stock movements or Erection link; Technical, Production screen behaviour, piece generation and New Contract Register untouched.
 - Verified: lint, API + web typecheck, 1992 API / 1058 web tests (31 API + 10 web new), web build, migrate status clean; live check on temp port 4011 (Technical → Production Produced → Storage In Store with Yard A / Delivered with Site, blocked statuses, viewer blocked, filters, summary, history). My test pieces/history were removed; the "[UAT] BOQ-08 check" contract remains. Not checked in a browser.
+
+## FMP-BOQ-09 — Erection Piece Update Screen (Completed 2026-10-07)
+
+No table changes. **New permissions (data migration `20261007300000_add_erection_permissions`, additive):** `erection.read` and `erection.update`. Erection had no permissions of its own (it is a Contract Management sub-view), so borrowing `contracts.*` would have been broader than intended. Grants: SUPER_ADMIN, ADMIN, EXECUTIVE_MANAGER = read + update; VIEWER = read only. Give `erection.update` to a role in Administration → Roles to create real erection staff.
+- **Page:** Erection → **Piece Erection** at `/erection/pieces`; sidebar item "Piece Erection" (needs `erection.read`) and a "Piece Erection" button on the Erection dashboard and the executive Erection page. The existing Erection pages are otherwise unchanged.
+- **API (`erection/pieces`, new module):** `GET /`, `GET /summary`, `GET /contracts`, `GET /allowed-statuses`, `POST /bulk-status`, `GET /:pieceId/history`. Update is checked in the service (`erection.update`); read-only users get an empty allowed list and no update controls. Reuses the shared read helpers (`boq-piece-screen.ts`) and the one status-update engine (`applyPieceStatusUpdate`).
+- **Allowed statuses:** Erected, Completed, Hold, Rejected only; Drawing Ready, In Production, Produced, In Store, Delivered, Cancelled are blocked ("You cannot update pieces to this status."). No admin override here.
+- **List/filters:** default Delivered + Erected; Status All / Delivered / Erected / Completed / Hold / Rejected; Search, Contract, Drawing No, BOQ Item; cancelled and not-yet-delivered pieces never listed. Cards: Ready for Erection (Delivered), Erected, Completed, On Hold / Rejected.
+- **Location / site note (optional):** the status-update engine now also stores an optional place when moving to Erected or Completed (e.g. Site Area A, Grid B4, Roof level) in the piece's current location and in the history note ("Installed · Location: Grid B4"); Storage's In Store / Delivered behaviour is unchanged. No location master data.
+- **Bulk update, history, skips:** same as the other screens — mixed jobs allowed, cancelled/same-status pieces skipped with counts, one history row per moved piece.
+- **Not built:** no erection planning workflow, crews/teams, site inspections, QA/QC workflow, inventory or notifications; Technical, Production, Storage Yard & Delivery behaviour, piece generation and New Contract Register untouched.
+- Verified: lint, API + web typecheck, 2023 API / 1068 web tests (31 API + 10 web new), web build, migrate status clean; live check on temp port 4011 across the whole flow (Technical → Production Produced → Storage In Store/Delivered → Erection Erected with "Grid B4" / Completed; blocked statuses; viewer blocked; filters; summary; full six-step history). My test pieces/history were removed; the "[UAT] BOQ-09 check" contract remains. Not checked in a browser.
+
+## FMP-BOQ-10 — Contract BOQ Piece Progress Summary (Completed 2026-10-07)
+
+Frontend only — no schema, API, permission or workflow changes. New Contract Detail tab **BOQ Progress** (`/contracts/[id]/boq-progress`, placed after Production Status; it is separate from the manual CM-59 "Production Status" tab, which is untouched).
+- **Data:** read through the existing Technical read endpoints (`GET technical/jobs/:contractId/boq-confirmations` for the per-item numbers and `GET …/boq-pieces` for the piece list), both already gated by `contracts.read` plus the contract's department access. Anyone who can view the contract can view this tab; there is no update permission involved.
+- **Overall totals:** Confirmed Pieces, Pieces Generated, Produced, Delivered, Erected, Completed (pieces currently in that status) and Needs Attention (number of BOQ items that need review).
+- **Per BOQ item:** Contract Qty + unit → Drawing Confirmed Pieces → Pieces Generated, a "N of M completed" bar (Completed / Pieces Generated, 0 when nothing is generated), tiles for Drawing Ready / In Production / Produced / In Store / Delivered / Erected / Completed / Hold + Rejected.
+- **Needs Attention** when: confirmed ≠ generated (either way, including confirmed but not yet generated), or any piece is Hold, Rejected or Cancelled; shows "Some pieces need review." with the reasons. No alerts or notifications.
+- **View Pieces:** read-only popup (piece code, drawing no, status, size/specification, location, last updated) with filters All / Drawing Ready / In Production / Produced / In Store / Delivered / Erected / Completed / Hold / Rejected / Cancelled. No tick boxes, no status controls, no History/update buttons in Contract Management.
+- **Empty states:** "No BOQ items found." / "Technical has not confirmed drawing pieces yet." / "Pieces have not been generated yet." / "No pieces found."
+- Technical, Production, Storage Yard & Delivery and Erection screens, piece generation and New Contract Register are unchanged.
+- Verified: lint, API + web typecheck, 2023 API (unchanged) / 1086 web tests (18 new), web build, migrate status clean; live render check (temp API 4011 + temp web 3011): empty state, "confirmed but not generated", then a progressed contract showing "1 of 6 completed", Erected 2, Completed 1, Hold 1 with Needs Attention, no update controls in the page, a viewer account gets 200, no login gets a redirect. Test data removed; the "[UAT] BOQ-10 check" contract remains. Not checked in a browser.
+
+## FMP-UI-35 — Piece Flow Dashboard Consistency Polish (Completed 2026-10-07)
+
+UI consistency pass only, across the 5 dashboards redesigned in FMP-UI-29/31/32/33/34 (Contract Management `/contracts/executive`, Technical `/technical`, Production & Planning `/production/executive`, Storage Yard & Delivery `/executive/storage-delivery`, Erection `/contracts/erection-executive`). No business logic, BOQ/workflow logic, permission, route or schema changes; no data invented. The 5 dashboards' own backend aggregates (`contractProgress()`/`recentUpdates()` on each module's piece service, and Contract Management's/Technical's `boqOverview`/`boqAttention`) are untouched.
+- **Two new shared components** (`apps/web/src/app/(protected)/_components/`): `dashboard-kpi-card.tsx` (`DashboardKpiCard` — icon + value + label, 4-tone palette neutral/warning/error/success, renders `null`/`undefined` value as "—") and `dashboard-needs-attention-panel.tsx` (`DashboardNeedsAttentionPanel` — a row list that collapses to a single "No urgent items." success state when every row's value is 0; each row is a `<Link>` when it carries an `href`, plain text otherwise). All 5 dashboards now render their KPI row and Needs Attention panel through these two components instead of 5 separate near-duplicate inline implementations.
+- **Needs Attention rows now link somewhere real on all 4 piece-flow dashboards.** Contract Management's rows already linked into the contract (FMP-UI-29). Production (`buildProductionNeedsAttentionRows`), Storage (`buildStorageNeedsAttentionRows`) and Erection (`buildErectionNeedsAttentionRows`) all gained a new `href` field this unit, pointing at `/production/pieces?statuses=…`, `/storage-delivery/pieces?statuses=…` and `/erection/pieces?statuses=…` respectively (all 3 screens already support `?statuses=` filtering) — each row's own real status, not a made-up one. Technical's rows use the generic panel without hrefs (its attention figures are BOQ-item counts, not a single piece status, so there is no one status filter to link to — left as plain rows rather than inventing a link).
+- **Header pattern unified:** all 5 headers are now `icon + title/subtitle` inside the same bordered/shadow card, action buttons at `h-9`. Technical already had this shape; Contract Management, Production, Storage ("Warehouse" icon) and Erection ("HardHat" icon) gained the icon and the `h-9` button sizing to match.
+- **Deleted** (fully replaced by the 2 shared components, no longer referenced anywhere): `technical/_components/needs-attention-panel.tsx`, `technical/_components/technical-kpi-card.tsx`, `production/executive/_components/production-needs-attention-panel.tsx`, `executive/storage-delivery/_components/storage-needs-attention-panel.tsx`, `contracts/erection-executive/_components/erection-needs-attention-panel.tsx`. Left untouched: `contracts/erection-dashboard/_components/erection-needs-attention-panel.tsx` (a different, older component belonging to the legacy `/contracts/erection-dashboard` workflow route, outside this unit's scope) and `contracts/erection-executive/_components/erection-workflow-summary-card.tsx` (the intentionally-preserved legacy workflow summary, gated on `contracts.read` not `erection.read`).
+- **Wording check:** grepped all 5 dashboards' own files for "lifecycle", "entity", "orchestration", "state machine", "operational queue", "pipeline entity", "workflow state" — no hits in any of this unit's own code (2 pre-existing, unrelated hits elsewhere: a Technical helper comment/test about status ordering, and a Production `actions.ts` comment — neither user-visible, neither touched).
+- **Sidebar, Schedule Planning position, and the cleaned Contract Management submenu** (FMP-UI-26/27/28/29/30) re-confirmed unaffected — this unit made no sidebar edits.
+- Verified: lint clean, API typecheck clean (unchanged), web typecheck clean, 2060 API tests (unchanged) / 1190 web tests across 65 web test files (new: 1 Production href test, 1 Storage href test, 1 Erection href test), web build succeeds (all 5 target routes present, `ƒ` dynamic as before), migrate status clean (no schema touched). Not checked in a browser — relied on typecheck + lint + build (which statically renders every page) + the pure-function helper tests, per this project's existing UI-verification convention (no component/page-render test precedent anywhere in this codebase).
+
+## FMP-BOQ-11 — Technical Drawing / Calculation Group Foundation (Completed 2026-10-08)
+
+- **Schema (additive, migration `20261008000000_add_technical_drawing_groups`, applied with `migrate deploy`, no drift):** enum `technical_drawing_group_status` (Draft, Submitted, Approved, Released to Production, Revised, Cancelled); table `technical_drawing_groups` (contract, BOQ item, optional drawing confirmation, drawing no, calculation ref, group title, status, remarks, created/approved/released by + approved/released at); table `technical_drawing_group_pieces` (group, piece, `active_slot`). FKs are RESTRICT/SET NULL: groups and pieces are never deleted.
+- **One active group per piece:** `active_slot` is 1 while a link is active and NULL once its group is cancelled, with a unique `(piece_id, active_slot)` — so a piece can never be in two active groups (also under simultaneous requests) but can be re-grouped after a cancel. The service also checks first and answers "N pieces are already in another drawing group." Only generated, non-cancelled pieces of the chosen BOQ item can be selected. A group is linked to a drawing confirmation automatically when all its pieces came from the same one.
+- **Statuses (recorded only):** Draft (edit pieces/details freely) → Submit (needs drawing no + at least one piece) → Approve (records who/when) → Release to Production (records who/when). Cancel is allowed before release and frees the pieces. "Revised" exists as a status but has no action yet. Changes are guarded by the expected current status, so two people clicking at once cannot both win. **Releasing does not change any piece status and does not block Production.**
+- **API (Technical module, `technical/jobs/:contractId/drawing-groups`):** `GET /` (per BOQ item: Pieces Generated, Assigned, Not Assigned, Approved Pieces, Released + its groups and allowed actions), `GET /pieces?boqItemId=` (picker, with each piece's current group), `GET /:groupId`, `POST /`, `PATCH /:groupId` (drafts), `POST /:groupId/submit|approve|release|cancel`. Read = `contracts.read`; write = `contracts.update` or `contracts.workflow_update` (no new permissions). The Technical piece list now also returns each piece's current group.
+- **UI:** "Drawing / Calculation Groups" section on the Technical job page (Add Drawing Group, View Groups, group rows with status/actions/View Pieces); Technical's View Pieces shows "Group: … " or "Not assigned" per piece.
+- **Not built:** no drawing/calculation file upload, no change to the Production, Storage Yard & Delivery or Erection screens, piece generation, piece status logic or New Contract Register.
+- Verified: lint, API typecheck, web typecheck (see note), 2090 API / 1199 web tests (35 API + 12 web new), web build, migrate status clean; live check on temp API 4011 + temp web 3011 (overlapping piece refused, submit validation, approve/release order, piece statuses untouched, cancel frees pieces, released group cannot be cancelled, viewer can read but not write, Technical page renders the section with correct counts). Test data removed; the "[UAT] BOQ-11 check" contract remains. Note: while verifying, the dev server's generated file `apps/web/.next/dev/types/routes.d.ts` was momentarily corrupted (written to by the running `next dev`, not by this change), which makes a plain `tsc` fail on that file; web typecheck passes when that generated file is excluded and it is rewritten on the next dev compile. Not checked in a browser.
+
+## FMP-BOQ-12 — Attach Drawing & Calculation Files to Drawing Groups (Completed 2026-10-08)
+
+- **Schema (additive, migration `20261008100000_add_technical_drawing_group_attachments`, no drift):** enum `technical_drawing_group_file_category` (Drawing, Calculation, Approval Document, Other) and table `technical_drawing_group_attachments` (group, contract, BOQ item, random on-disk `file_name`, `original_name`, MIME type, size, `storage_path`, category, remarks, uploaded by, timestamps). Only metadata is in the database. FKs are RESTRICT (groups are never deleted).
+- **Storage:** `storage/technical-drawing-groups/{groupId}/<random-uuid>.<ext>` under the API folder (setting `TECHNICAL_DRAWING_GROUP_FILES_DIR`, new in `packages/config`, default `./storage/technical-drawing-groups`). The uploaded name is never used on disk; paths are confined to the base folder; raw paths are never returned to the browser. If the record cannot be saved the stored file is removed again.
+- **Allowed files:** .pdf .doc .docx .xls .xlsx .png .jpg .jpeg, up to 25 MB; the extension AND the reported file type must match (e.g. a .pdf sent as an image, or an .exe, is refused). Messages: "Please select a file." / "Please select file category." / "File is too large." / "This file type is not allowed." / "File uploaded." / "File removed." / "File not found."
+- **API (`technical/jobs/:contractId/drawing-groups/:groupId/attachments`):** `GET` (list), `POST` (multipart: `file`, `category`, optional `remarks`), `GET /:attachmentId/download`, `DELETE /:attachmentId`. List/download = `contracts.read`; upload/remove = `contracts.update` or `contracts.workflow_update` (no new permissions). Every call re-checks contract access and that the group and file belong to that contract, so a file can't be reached through another contract or group.
+- **Released-group rule:** files can be added and removed only while the group is Draft, Submitted or Approved. Once Released to Production: "Released groups cannot be changed." (upload) / "Released groups cannot have files removed." (remove); cancelled/revised groups: "This group cannot be changed." Released groups' files can still be listed and downloaded. Uploading or removing a file never changes the group's status; files are not required to submit/approve/release (a group with none just shows "No files attached.").
+- **Delete** follows the app's existing attachment pattern (record removed, then the file on disk, best effort) rather than a soft delete.
+- **UI:** file count, View Files, Add Files per group; upload/list/download/remove modal; View Pieces shows each piece's group file count (Technical page). The Contract Management BOQ Progress popup is unchanged.
+- **Not changed:** Production, Storage Yard & Delivery and Erection screens (files are not shown there yet), piece status logic, piece generation, group assignment, New Contract Register.
+- Verified: lint, API + web typecheck, 2114 API / 1206 web tests (24 API + 7 web new), web build, migrate status clean; live check on temp API 4011 + web 3011 (drawing and calculation uploads, .exe / wrong-type / missing file / missing category refused, viewer can list and download but not upload/remove, other contract gets "Drawing group not found.", random names under the group folder, upload/remove allowed through Approved, blocked after release with the plain messages, released files still downloadable, file counts on groups and pieces, web download proxy returns the file). A 26 MB test file is below the 25 MiB limit and was correctly accepted; the oversize rule is covered by unit tests and a browser-side check. Test data and test files on disk removed; "[UAT] BOQ-12 check" / "[UAT] BOQ-12 other" contracts remain. Not checked in a browser.
+
+## FMP-BOQ-13 — Show Released Drawing Files in Production Screen (Completed 2026-10-08)
+
+No schema change. Production (`production.read`) can now see, read-only, the drawing / calculation group and files of each piece — but only once the group is **Released to Production**.
+- **API (`production/pieces`):** the piece list now carries `drawingGroup` per piece: `null` (no group), `{ released: false }` (a draft / submitted / approved / cancelled group — nothing else is revealed: no drawing no, title or files), or for a released group drawing no, calculation ref, title and file count. New `GET :pieceId/drawing-files` (group info + file list, no server paths) and `GET :pieceId/drawing-files/:attachmentId/download`. Both go through one gate: the piece's active group must be Released to Production, and the file must belong to that group; otherwise "Drawing files are not released to Production yet." / "No drawing group assigned." / "File not found." Needs `production.read` — Technical-only or contract-only users do not gain access. The shared list helper only adds group info when Production asks for it, so the Storage and Erection screens are unchanged.
+- **No write access:** Production has no route to upload, edit or delete a Technical file (checked in tests and live: upload/delete on the Production path return 404); Technical's own upload/download and the group rules are untouched.
+- **UI:** per-piece badge (Released / Not released / No drawing group), drawing no · calc ref · file count and **View Files** for released groups, read-only "Drawing / Calculation Files" popup with Download, and an optional warning "Some selected pieces are not released to Production." when marking In Production / Produced. The warning never blocks. Default list, filters and status rules are unchanged (no "Released" filter added; badges only).
+- **Not changed:** Production status rules (pieces that are not released can still be updated — blocking is the separate decision FMP-BOQ-14), Production dashboard, Storage Yard & Delivery, Erection, New Contract Register.
+- Verified: lint, API + web typecheck, 2135 API / 1213 web tests (21 API + 7 web new), web build, migrate status clean; live check on temp API 4011 + web 3011 (released / not released / no group in the list, released file list and download, draft group's file and details never exposed, foreign file id not found, upload/delete routes absent, Technical download still 200, status update unchanged, proxy download and page badges). Test data removed; the "[UAT] BOQ-13 check" contract remains. Not checked in a browser.
+
+## FMP-BOQ-14 — Require Technical Release Before Production Update (Completed 2026-10-08)
+
+No schema change. Production status updates now follow the Technical release.
+- **Rule (API, shared engine with a Production-only switch `requireRelease`):** a piece can be moved to **In Production** or **Produced** only if its active Drawing / Calculation Group is **Released to Production**. Blocked: no group ("No drawing group assigned."), Draft / Submitted / Approved group, or only a cancelled group ("Drawing group is not released to Production."). **Hold** and **Rejected** are never gated (the groups are not even looked up), so an unreleased piece can still be put on hold or rejected for review.
+- **Bulk:** released pieces are updated, the others are skipped with those two plain reasons, and the message reports counts ("1 piece updated. 2 pieces skipped."); if nothing can be updated the single reason is shown. A single-piece update that is blocked gets the same message. History rows are written only for pieces that actually moved. Cancelled and same-status skips still apply first. The check is made on the server before anything is written; the screen only explains it.
+- **UI:** badges unchanged; helper text and skip warning on the update bar (see ui-registry). Dropdown still offers In Production / Produced / Hold / Rejected.
+- **Unchanged:** Technical group creation, release and file upload/download, Production file viewing, Storage Yard & Delivery, Erection, Technical's own piece updates, the Production dashboard and New Contract Register. No production orders/batches or inventory.
+- **Note for rollout:** pieces already In Production or Produced are not affected. Pieces still waiting in Drawing Ready now need their group released by Technical before Production can start them.
+- Verified: lint, API + web typecheck, 2149 API / 1213 web tests (14 API new, web helper test updated), web build, migrate status clean. Not exercised live against a running API this time (covered by unit tests with the group states); not checked in a browser.
+
+## FMP-BOQ-15 — Technical Release Status in Contract BOQ Progress (Completed 2026-10-08)
+
+Frontend only (no API, schema, permission or workflow change). The BOQ Progress tab now also reads Technical's existing read endpoint for drawing groups (`contracts.read`) and merges it per BOQ item.
+- **Numbers:** Assigned to Groups, Not Assigned, Released to Production (pieces in released groups), Not Released (= assigned − released, i.e. in a Draft / Submitted / Approved group). If the grouping data cannot be loaded, the Technical Release box and the grouping reasons are simply left out (nothing false is claimed).
+- **Flow, totals, attention, popups:** see ui-registry (FMP-BOQ-15). Needs Attention is also raised for not-assigned and not-released pieces; the existing mismatch / hold / rejected / cancelled reasons are unchanged. "Released to Production" replaced the Erected total card.
+- **Read-only:** no status, upload, remove or download controls in Contract Management; Technical, Production (including the release rule), Storage Yard & Delivery, Erection and New Contract Register are untouched.
+- Verified: lint, API + web typecheck, 2149 API / 1223 web tests (10 new), web build, migrate status clean; live render on temp servers through three stages (no groups → submitted group → released group) showed the right flow, counts, notes and reasons, with no update controls on the page. Test data removed; "[UAT] BOQ-15 check" remains. Not checked in a browser.
+
+## FMP-BOQ-16 — Drawing Group / Release Status in Technical Dashboard (Completed 2026-10-08)
+
+No schema or permission change. Small read-only API addition: `GET /technical/dashboard` now also returns `releaseByContract` — per started job: confirmed, generated, assigned (pieces in a live drawing group), not assigned, pieces in groups with files, released, not released, group counts (total / with files / no files / submitted / approved / not released) and confirmed-not-generated. Built by a pure function (`buildJobReleaseSummary`, cancelled/revised groups ignored) from three extra read queries; same department scoping as the rest of the dashboard.
+- **Selected Job Progress, flow, Needs Attention, Next Action Focus, jobs table:** see ui-registry (FMP-BOQ-16). Next Action Focus order: confirmed pieces not generated → pieces not assigned → groups with no files → submitted groups waiting approval → approved groups waiting release → existing workflow items; max 5.
+- **KPI row not changed** (the existing "Ready for Production" card means Technical-complete jobs, so it was left alone to avoid changing its meaning); release numbers are in the selected-job box and Needs Attention instead.
+- **Not added:** "BOQ Items Needing Review" row (it needs per-item data the dashboard does not load; BOQ Progress already shows it per item). "Confirmed Pieces Not Generated" already existed as a row and is unchanged.
+- Unchanged: Technical group creation, file upload/download, Production release rule, Production / Storage / Erection, Contract BOQ Progress, New Contract Register.
+- Verified: lint, API + web typecheck, 2153 API / 1233 web tests (4 API + 14 web new), web build, migrate status clean; live check (temp API 4011 + web 3011) through four stages — confirmed-not-generated, generated-no-groups, submitted group without files, released group with a file — the API numbers and the rendered Technical Dashboard matched, and the page has no write controls. Test pieces/groups/files removed; the "[UAT] BOQ-16 check" contract and its started Technical workflow remain in the dev DB (it shows as a job on the dashboard). Not checked in a browser.
+
+## FMP-AUTH-01 — Login With Email or Username (Completed 2026-10-08)
+
+Auth fix only; no frontend, schema, permission, session or cookie change.
+- **Root cause:** `AuthService.login` looked the user up with `findUnique({ where: { username } })` only, so an email never matched. `LoginDto.username` was also capped at 50 chars, which would reject longer emails (email column is 254).
+- **Fix:** identifier is trimmed and matched with `findFirst` on `username` OR `email`, both `mode: 'insensitive'`. DTO max raised to 254. Password hashing, lockout, inactive check, dummy-hash constant-time path and the generic "Invalid credentials" error are unchanged.
+- **Tests:** auth.service tests updated/added (username, email, uppercase email, padded email, wrong password, inactive user by email).
+- Verified: API lint, API typecheck, 2160 API tests, migrate status clean. Web untouched, so web typecheck/tests/build not re-run. Live manual login check not performed.
+
+## FMP-AUTH-01 (part 2) — Email as the Visible Login Identity (Completed 2026-10-08)
+
+No schema change, no migration. Username stays in the database and is still accepted silently at login (hidden fallback).
+- **Create user (API):** `email` is now required; `username` is optional. When omitted it is generated from the email local part (lowercase, unsafe characters removed, min length padded, `name`, `name2`, `name3`… for uniqueness). Duplicate email is rejected case-insensitively (409 `EMAIL_TAKEN`). User list search now also matches email and employee number.
+- **New User form:** Full Name *, Email *, Employee Number only; Username field and its validation messages removed. The unused legacy `createUserAction` was removed.
+- **Created-user screen:** Login Email + Temporary Password; Copy Credentials copies Login Email, Temporary Password, Role, Module Access.
+- **Login page:** label "Email", placeholder "Enter company email"; lookup (trim, case-insensitive email OR username) was done earlier in FMP-AUTH-01; error stays "Invalid credentials".
+- **Users list:** Full Name and Email columns replace Username.
+- Unchanged: roles, permissions, module access, first-login password change, session/cookie behavior.
+- Left as is: the unused legacy `UserForm` component (still has a username input, not rendered anywhere) and the edit-user pages, which show username in places as secondary info.
+- Verified: lint, API + web typecheck, 2163 API / 1239 web tests, web build, migrate status clean. Not exercised live in a browser.

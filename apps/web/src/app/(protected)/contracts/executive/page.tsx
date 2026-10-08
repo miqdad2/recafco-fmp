@@ -2,108 +2,75 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { FileText } from 'lucide-react';
+import { FileText, Activity, ClipboardCheck, Wallet, Receipt, AlertTriangle } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { contractsApi } from '@/lib/contracts-api';
 import type { ContractDashboardData } from '@/lib/contracts-api';
 import { authApi } from '@/lib/auth-api';
+import { fetchBoqConfirmations } from '@/lib/technical-api';
 import { ExecutiveModuleNav } from '../../_components/executive-module-nav';
-import { ExecutiveKpiGrid } from '../../_components/executive-kpi-grid';
-import { ExecutiveQuickLinks } from '../../_components/executive-quick-links';
+import { RefreshButton } from '../../technical/_components/refresh-button';
+import { DashboardKpiCard } from '../../_components/dashboard-kpi-card';
+import { DashboardNeedsAttentionPanel } from '../../_components/dashboard-needs-attention-panel';
+import type { DashboardAttentionRow } from '../../_components/dashboard-needs-attention-panel';
+import {
+  pickDefaultContractId,
+  buildTodaysFocus,
+  buildNeedsAttentionRows,
+} from './_lib/dashboard-selector-helpers';
+import { ContractDashboardLeftColumn } from './_components/contract-dashboard-left-column';
+import type { RecentContractRow, SelectedContractBasics } from './_components/contract-dashboard-left-column';
 
 export const metadata: Metadata = { title: 'Contract Management — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 /**
- * FMP-UI-07 — Executive Module Landing Page for Contract Management. Reuses
- * the exact same /contracts/dashboard data (contractsApi.dashboard()) the
- * module's own full Manager/Staff dashboard already computes — that page
- * (and its rich KPI/financial/discipline views) stays completely untouched
- * at its own route; this is the simplified senior-friendly front door the
- * Executive Dashboard's card and sidebar now link to.
+ * FMP-UI-07 → FMP-UI-07C → FMP-UI-07D → FMP-UI-16 → FMP-UI-16B → FMP-UI-16D —
+ * see this file's git history / progress-tracker.md for the long chain of
+ * polish passes this page went through before this unit. All of that is
+ * superseded by this rewrite; the short version of what carries over:
+ * `ExecutiveModuleNav` (shared chrome, unchanged), `contracts.read` gate
+ * (unchanged), and reusing `contractsApi.dashboard()` as the one data
+ * source for everything that isn't BOQ piece data (unchanged).
  *
- * FMP-UI-07C — KPIs are the 4 named figures (Total/Active/Pending Approvals/
- * Outstanding Payments, the same formula PlatformDashboardService's own card
- * uses) instead of the raw 7-field metrics object; Needs Attention shows 4
- * named real aggregate counts from `manager.summary`/`manager.insights`;
- * Quick Links include "Operational Dashboard" → /contracts/dashboard.
+ * FMP-UI-29 — full redesign per a direct "too narrow, too empty, not
+ * impressive enough" report: the centered `max-w-6xl` layout, the large
+ * top "Quick Actions" box, the basic "Recent Contract Updates" table, and
+ * the complete absence of BOQ piece progress are all replaced with:
+ *   1. Full-width header with compact actions (no more big Quick Actions box).
+ *   2. A Contract/Project selector (search + Recent Contracts row click),
+ *      with a Selected Contract Progress card showing the real
+ *      Confirmed→Generated→Produced→Delivered→Erected→Completed flow for
+ *      whichever contract is selected — `ContractDashboardLeftColumn`
+ *      (the one client component on this page) owns that selection state.
+ *   3. A 6-card KPI row.
+ *   4. An Overall BOQ Piece Progress card — the SAME flow, summed across
+ *      every contract this actor can see, from the new
+ *      `ContractBoqPieceOverview` the API now returns alongside the rest
+ *      of the manager dashboard (see contract-dashboard.service.ts's own
+ *      doc comment on `buildBoqPieceOverview()` for exactly how).
+ *   5. Needs Attention, now 6 named rows (was 4), always shown even at 0.
+ *   6. Today's Focus — up to 5 of the SAME real figures already on this
+ *      page, filtered to the non-zero ones; never a separate computation.
+ * Every number keeps coming from data this app already computes — nothing
+ * here is invented, and nothing writes anything. No Technical/BOQ file is
+ * touched; no route, permission, or workflow logic changed.
  *
- * FMP-UI-07D — polish pass fixing 5 concrete issues found by re-checking
- * this page's actual behavior:
- * 1. The wrong "Contract Management > Contract List > Contract Detail"
- *    breadcrumb TopHeader was rendering ABOVE this page's own correct one —
- *    a real bug in `_lib/contract-workspace-breadcrumb.ts` (this route
- *    wasn't in its known-module-segments list, so it fell through to "looks
- *    like a contract id"). Fixed there, not here — see that file.
- * 2. The duplicate displayName/roleName block (already shown in TopHeader,
- *    always) was removed from the shared `ExecutiveModuleTitle` component.
- * 3. Needs Attention now passes `showZeroCounts` so all 4 figures always
- *    render, including zero, instead of disappearing when nothing needs
- *    attention — this page reads as "4 status figures," not an alert list.
- * 4. Recent Activity is now "Recent Contract Updates," a purpose-built
- *    compact table (Contract No. / Project / Status / Last Updated) instead
- *    of the shared `DashboardRecentTable`, with CANCELLED contracts sorted
- *    after active ones and visually de-emphasized (opacity), never removed
- *    outright — still real data, just reordered/restyled for display, the
- *    exact "filtering display data already available" this unit's own
- *    constraint allows.
- * 5. Quick Links and the primary button used to be one "Actions" section at
- *    the very bottom of the page (superseded — see FMP-UI-16 below).
- *
- * FMP-UI-16 — compact executive layout, first applied to Contract
- * Management (this is the pilot; see progress-tracker.md for which other
- * Executive Module Landing Pages should follow the same pattern next):
- * moved actions off a bottom "Actions" section into `ExecutiveModuleTitle`'s
- * new `actions` slot; put Summary and Needs Attention side-by-side
- * (`lg:grid-cols-2`); trimmed Recent Contract Updates to 5 rows; widened the
- * container and tightened outer spacing.
- *
- * FMP-UI-16B — a second manager report ("title and actions feel
- * disconnected," "action buttons float," "Summary/Attention not visually
- * balanced," "Needs Attention is loose chips, not a structured panel")
- * refined the SAME layout further, all still Contract-Management-specific:
- * 1. The title+actions row from FMP-UI-16 is now wrapped in one actual
- *    "Module Header Card" (`rounded-xl border border-border bg-surface
- *    shadow-sm p-5 lg:p-6`) instead of floating directly on the page
- *    background — `ExecutiveModuleTitle` itself is unchanged (still a bare
- *    flex row with no card styling of its own), this page just wraps it.
- * 2. Summary/Needs Attention split changed from an even `lg:grid-cols-2`
- *    to an explicit ~65/35 split (`lg:grid-cols-[13fr_7fr]`) per this
- *    unit's own "Summary ~65%, Needs Attention ~35%" spec. `ExecutiveKpiGrid`
- *    gets a new `dense` prop (forwarded to `MetricCard`) so its 2×2 tiles
- *    stay comfortably sized in the now-narrower ~65% column instead of the
- *    previous even half.
- * 3. Needs Attention is no longer the shared `ExecutiveAttentionPanel`'s
- *    wrapping "chip row" — it's a bespoke row-list panel built directly in
- *    this file (same precedent as this page's own bespoke Recent Contract
- *    Updates table below: the shared component's exact shape didn't match
- *    what THIS page's own spec asked for, so this page renders its own,
- *    while every other module's landing page keeps using the shared
- *    component exactly as before — this change has zero effect on the
- *    other 9 pages). Each row is a full-width clickable `<Link>` with a
- *    label and a bold number, colored via the same "overdue/critical →
- *    error, open/pending → warning" name-based heuristic
- *    `ExecutiveKpiGrid`/`executive-kpi-grid.tsx` already uses elsewhere in
- *    this app (Overdue Workflow Tasks and Critical Contracts → error/red;
- *    Open Claims → warning/amber; Closing Soon → always neutral, per this
- *    unit's own explicit "Closing Soon can be neutral" instruction — a
- *    contract closing soon isn't inherently a problem the way the other 3
- *    are). A zero value still renders (never hidden), just in neutral
- *    muted text instead of the alert color.
- * 4. Recent Contract Updates trimmed to 3 rows (was 5), per this unit's own
- *    "show only latest 3 rows" instruction.
- *
- * FMP-UI-16D — a manager pointed out that the FMP-UI-16B "Module Header
- * Card" repeated information already obvious from the sidebar's active
- * item, the breadcrumb, and the module card the manager had just clicked:
- * a big icon, "Contract Management" as a title, and a one-line description
- * — none of it new information, just vertical space. Removed entirely
- * (this page no longer imports or renders `ExecutiveModuleTitle` at all —
- * that shared component itself is untouched, still used by the other 9
- * Executive Module Landing Pages exactly as before). The card that used to
- * hold the title+actions row now holds ONLY the actions, relabeled "Quick
- * Actions" — same primary "View Contract List" button + the same
- * `ExecutiveQuickLinks` row, unchanged content, now the first real section
- * after navigation instead of sharing space with a repeated title.
+ * Two things the ticket asked for were deliberately left out, both
+ * because nothing real exists for them (see this unit's own "do not add a
+ * broken button" / "do not invent" instructions):
+ *   - "View All BOQ Progress": no global (cross-contract) BOQ Progress
+ *     page exists — only the per-contract `/contracts/{id}/boq-progress`
+ *     tab does. Omitted from the header actions.
+ *   - Job Order on a contract picked from Recent Contracts or the default
+ *     selection: the dashboard's own `recent` list (shared across 6
+ *     modules' dashboards — contracts/factory-tasks/maintenance/
+ *     production/safety/users all return the exact same shape) doesn't
+ *     carry `jobOrder`, and widening that shared cross-module type for one
+ *     display field here was judged out of proportion. Job Order shows
+ *     "—" for those two paths and the real value once the manager searches
+ *     for a contract (the search result DOES carry it, from
+ *     contractsApi.list()'s richer Contract shape).
  */
 export default async function ContractManagementExecutivePage(): Promise<React.JSX.Element> {
   const store = await cookies();
@@ -119,77 +86,117 @@ export default async function ContractManagementExecutivePage(): Promise<React.J
   if (!permissions.includes('contracts.read')) notFound();
 
   const data: ContractDashboardData | null = dashboardResult.status === 'fulfilled' ? dashboardResult.value : null;
+  const isManager = data?.dashboardType === 'MANAGER';
+  const manager = data?.manager;
 
-  // Same 4 figures as the Executive Dashboard's own Contract Management card
-  // (PlatformDashboardService.buildContractManagementCard) — Total is the
-  // sum of every real status count, Outstanding Payments stays null (honest
-  // "Not available") for a Staff-tier viewer with no manager summary.
-  const kpiMetrics = {
-    totalContracts: data
-      ? data.metrics.totalDraft +
-        data.metrics.totalActive +
-        data.metrics.totalExpiring +
-        data.metrics.totalExpired +
-        data.metrics.totalTerminated +
-        data.metrics.totalClosed +
-        data.metrics.totalCancelled
-      : null,
-    activeContracts: data?.metrics.totalActive ?? null,
-    pendingApprovals: data?.metrics.totalDraft ?? null,
-    outstandingPayments: data?.manager?.summary.outstandingPayments ?? null,
-  };
-
-  // Real records, just reordered for display: cancelled contracts sort after
-  // active/working ones (stable sort keeps each group's own recency order),
-  // so a manager scanning "recent updates" sees working contracts first —
-  // never hidden, just not leading.
+  // Real records, just reordered for display: cancelled contracts sort
+  // after active/working ones (stable sort keeps each group's own recency
+  // order) — never hidden, just not leading. Capped to 5 per this unit's
+  // own "maximum 5 rows" requirement.
   const recentSorted = data
     ? [...data.recent].sort((a, b) => (a.status === 'CANCELLED' ? 1 : 0) - (b.status === 'CANCELLED' ? 1 : 0))
     : [];
-  const recentToShow = recentSorted.slice(0, 3);
+  const recentContracts: RecentContractRow[] = recentSorted.slice(0, 5).map((c) => ({
+    id: c.id, referenceNumber: c.referenceNumber, title: c.title, status: c.status, updatedAt: c.updatedAt,
+  }));
 
-  // FMP-UI-16B — same 4 real figures as before (manager.summary/insights,
-  // unchanged), now with an explicit color `tone` for the bespoke row-list
-  // panel below: `error` for the 2 genuinely urgent figures (name contains
-  // "overdue"/"critical" — the same heuristic `executive-kpi-grid.tsx`
-  // already uses elsewhere in this app), `warning` for the one that's a
-  // lesser but still real concern, and `neutral` for "Closing Soon" (a
-  // contract closing soon isn't inherently a problem, per this unit's own
-  // explicit instruction).
-  const attentionItems: { label: string; value: number; href: string; tone: 'warning' | 'error' | 'neutral' }[] = [
-    { label: 'Open Claims', value: data?.manager?.summary.openClaims ?? 0, href: '/contracts/claims', tone: 'warning' },
-    { label: 'Overdue Workflow Tasks', value: data?.manager?.summary.overdueWorkflowTasks ?? 0, href: '/contracts/workflow?mode=overdue', tone: 'error' },
-    { label: 'Critical Contracts', value: data?.manager?.insights.criticalProjectContracts ?? 0, href: '/contracts', tone: 'error' },
-    { label: 'Closing Soon', value: data?.manager?.insights.contractsClosingSoon ?? 0, href: '/contracts', tone: 'neutral' },
+  // One BOQ fetch per recent row (max 5) — bounded, parallel, read-only.
+  // Reused by both the Recent Contracts table's "BOQ Progress" column and,
+  // for whichever row is the default selection, the Selected Contract
+  // Progress card below (no duplicate fetch for that one).
+  const recentContractsBoqItems = await Promise.all(recentContracts.map((c) => fetchBoqConfirmations(c.id)));
+
+  const defaultContractId = pickDefaultContractId(data?.recent ?? []);
+  const defaultIndex = recentContracts.findIndex((c) => c.id === defaultContractId);
+  const defaultContractRow = defaultIndex >= 0 ? recentContracts[defaultIndex] : undefined;
+  const initialContract: SelectedContractBasics | null = defaultContractRow
+    ? { id: defaultContractRow.id, referenceNumber: defaultContractRow.referenceNumber, title: defaultContractRow.title, status: defaultContractRow.status }
+    : null;
+  const initialBoqItems = defaultIndex >= 0 ? (recentContractsBoqItems[defaultIndex] ?? null) : null;
+
+  const canCreateContract = permissions.includes('contracts.create');
+
+  // KPI row — Total/Active/Pending Approvals use the exact same formula
+  // PlatformDashboardService's own Contract Management card uses (see that
+  // service's own doc comment); Open Claims and Needs Attention are new,
+  // both already-computed real fields (manager.summary.openClaims,
+  // manager.attentionItems.length — the same per-record list the old page
+  // already had, just counted here instead of rendered as a chip row).
+  const kpis: { label: string; value: number | null; icon: LucideIcon; tone?: 'warning' | 'error' | undefined }[] = [
+    {
+      label: 'Total Contracts',
+      value: data
+        ? data.metrics.totalDraft + data.metrics.totalActive + data.metrics.totalExpiring +
+          data.metrics.totalExpired + data.metrics.totalTerminated + data.metrics.totalClosed + data.metrics.totalCancelled
+        : null,
+      icon: FileText,
+    },
+    { label: 'Active Contracts', value: data?.metrics.totalActive ?? null, icon: Activity },
+    { label: 'Pending Approvals', value: data?.metrics.totalDraft ?? null, icon: ClipboardCheck },
+    { label: 'Outstanding Payments', value: manager?.summary.outstandingPayments ?? null, icon: Wallet, tone: (manager?.summary.outstandingPayments ?? 0) > 0 ? 'warning' : undefined },
+    { label: 'Open Claims', value: manager?.summary.openClaims ?? null, icon: Receipt, tone: (manager?.summary.openClaims ?? 0) > 0 ? 'warning' : undefined },
+    { label: 'Needs Attention', value: manager?.attentionItems.length ?? null, icon: AlertTriangle, tone: (manager?.attentionItems.length ?? 0) > 0 ? 'error' : undefined },
   ];
 
+  const attentionRows: DashboardAttentionRow[] = buildNeedsAttentionRows({
+    pendingApprovals: data?.metrics.totalDraft ?? 0,
+    overdueWorkflowTasks: manager?.summary.overdueWorkflowTasks ?? 0,
+    openClaims: manager?.summary.openClaims ?? 0,
+    outstandingPayments: manager?.summary.outstandingPayments ?? 0,
+    boqItemsNeedingReview: manager?.boqOverview.itemsNeedingReview ?? 0,
+    criticalContracts: manager?.insights.criticalProjectContracts ?? 0,
+  });
+
+  const todaysFocus = buildTodaysFocus({
+    approvalsWaiting: data?.metrics.totalDraft ?? 0,
+    paymentsPending: manager?.summary.outstandingPayments ?? 0,
+    claimsToReview: manager?.summary.openClaims ?? 0,
+    boqItemsNeedingReview: manager?.boqOverview.itemsNeedingReview ?? 0,
+    contractsClosingSoon: manager?.insights.contractsClosingSoon ?? 0,
+  });
+
+  const boqOverview = manager?.boqOverview ?? null;
+
   return (
-    <div className="mx-auto max-w-6xl space-y-5 px-5 py-5 lg:px-6">
+    <div className="mx-auto max-w-[1600px] space-y-5 px-5 py-5 lg:px-8">
       <ExecutiveModuleNav code="CONTRACTS_MANAGEMENT" permissions={permissions} />
 
-      {/* FMP-UI-16D — no module icon/title/description here anymore (the
-          manager already knows they're in Contract Management from the
-          sidebar, the breadcrumb above, and the card they just clicked) —
-          this card now holds ONLY the actions, as the first real section
-          after navigation. */}
-      <div className="rounded-xl border border-border bg-surface p-4 shadow-sm lg:p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">Quick Actions</h2>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* 1. Header — FMP-UI-35: brought in line with the other 4 piece-flow
+          dashboards' own header card (bordered/shadowed, an icon beside the
+          title, Refresh + Back to Platform Dashboard present) — this page
+          previously had none of those 3, the one visible outlier among the
+          5. Button order now matches the shared pattern too: primary
+          action first, Refresh, Back to Platform Dashboard, secondary
+          action last. No more large Quick Actions box (FMP-UI-16D's
+          "Quick Actions" card and FMP-UI-07D's ExecutiveQuickLinks row are
+          both still gone). */}
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-border bg-surface px-5 py-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <FileText className="size-6 shrink-0 text-text-secondary" aria-hidden="true" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-text-primary lg:text-3xl">Contract Management</h1>
+            <p className="mt-1 text-sm text-text-secondary">Track contracts, approvals, payments, projects, and BOQ progress.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-sm">
           <Link
             href="/contracts"
-            className="inline-flex h-10 items-center rounded-lg bg-accent px-5 text-sm font-semibold text-accent-foreground shadow-sm transition hover:bg-accent-hover hover:shadow-md focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
+            className="inline-flex h-9 items-center rounded-lg border border-border bg-surface px-4 font-semibold text-text-primary shadow-sm transition hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
           >
             View Contract List
           </Link>
-          <ExecutiveQuickLinks
-            links={[
-              { label: 'Operational Dashboard', href: '/contracts/dashboard' },
-              { label: 'Schedule', href: '/contracts/schedule' },
-              { label: 'Payments', href: '/contracts/payments' },
-              { label: 'Claims', href: '/contracts/claims' },
-              { label: 'Closeout Requests', href: '/contracts/closeouts' },
-            ]}
-          />
+          <RefreshButton />
+          <Link href="/dashboard" className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-text-secondary hover:bg-surface-secondary">
+            Back to Platform Dashboard
+          </Link>
+          {canCreateContract && (
+            <Link
+              href="/contracts/new"
+              className="inline-flex h-9 items-center rounded-lg bg-accent px-4 font-semibold text-accent-foreground shadow-sm transition hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
+            >
+              New Contract Register
+            </Link>
+          )}
         </div>
       </div>
 
@@ -199,130 +206,98 @@ export default async function ContractManagementExecutivePage(): Promise<React.J
         </div>
       )}
 
-      {/* FMP-UI-16B — explicit ~65/35 split (was an even lg:grid-cols-2 in
-          FMP-UI-16), per this unit's own "Summary ~65%, Needs Attention
-          ~35%" spec. Stacked below `lg`, same as everything else on this
-          page. */}
-      <div className="grid gap-4 lg:grid-cols-[13fr_7fr]">
-        <section aria-labelledby="contracts-exec-kpi-heading" className="space-y-3">
-          <h2 id="contracts-exec-kpi-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-            Summary
-          </h2>
-          <ExecutiveKpiGrid metrics={kpiMetrics} icon={FileText} columns={2} dense />
-        </section>
+      {/* 3. KPI row — 6 compact cards, one row on desktop. FMP-UI-35: now
+          the shared DashboardKpiCard every piece-flow dashboard uses. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {kpis.map((kpi) => (
+          <DashboardKpiCard key={kpi.label} label={kpi.label} value={kpi.value} icon={kpi.icon} tone={kpi.tone ?? 'neutral'} />
+        ))}
+      </div>
 
-        <section aria-labelledby="contracts-exec-attention-heading" className="space-y-3">
-          <h2 id="contracts-exec-attention-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-            Needs Attention
-          </h2>
-          {/* FMP-UI-16B — bespoke row-list panel (not the shared
-              ExecutiveAttentionPanel's chip row) — see this file's own
-              top-of-file doc comment for why. Each row is one full-width
-              clickable Link; a zero value still renders, just in neutral
-              muted text rather than an alert color. */}
-          {data?.dashboardType === 'MANAGER' ? (
-            <div className="rounded-xl border border-border bg-surface p-2 shadow-sm lg:p-2.5">
-              <ul className="divide-y divide-border">
-                {attentionItems.map((item) => {
-                  const isAlert = item.tone !== 'neutral' && item.value > 0;
-                  const valueClass = item.tone === 'neutral'
-                    ? 'text-text-primary'
-                    : isAlert
-                      ? item.tone === 'error' ? 'text-error' : 'text-warning'
-                      : 'text-text-secondary';
-                  return (
+      {/* Main layout — left ~65%: selector + selected progress + overall BOQ
+          + recent contracts; right ~35%: needs attention + today's focus. */}
+      <div className="grid gap-4 lg:grid-cols-[13fr_7fr]">
+        <div className="space-y-4">
+          {/* 2 & 7. Contract/Project selector, Selected Contract Progress, Recent Contracts. */}
+          <ContractDashboardLeftColumn
+            initialContract={initialContract}
+            initialBoqItems={initialBoqItems}
+            recentContracts={recentContracts}
+            recentContractsBoqItems={recentContractsBoqItems}
+          />
+
+          {/* 5. Overall BOQ Piece Progress — summed across every contract this actor can see. */}
+          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">Overall BOQ Piece Progress</h2>
+            {!boqOverview || !boqOverview.hasAnyData ? (
+              <div className="mt-2">
+                <p className="text-sm text-text-muted">No BOQ piece progress yet.</p>
+                <p className="mt-0.5 text-xs text-text-muted">Progress will appear after Technical confirms and generates pieces.</p>
+              </div>
+            ) : (
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                {[
+                  ['Confirmed', boqOverview.confirmedPieces],
+                  ['Generated', boqOverview.piecesGenerated],
+                  ['Produced', boqOverview.produced],
+                  ['Delivered', boqOverview.delivered],
+                  ['Completed', boqOverview.completed],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="rounded-lg bg-surface-secondary px-2 py-2 text-center">
+                    <p className="text-lg font-bold text-text-primary">{value}</p>
+                    <p className="text-[11px] text-text-secondary">{label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* 6. Needs Attention — FMP-UI-35: now the shared
+              DashboardNeedsAttentionPanel every piece-flow dashboard uses
+              (collapses to the one required "No urgent items." message
+              when every row is 0, instead of always showing all 6 rows). */}
+          <section aria-labelledby="contracts-exec-attention-heading" className="space-y-2">
+            <h2 id="contracts-exec-attention-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
+              Needs Attention
+            </h2>
+            {isManager ? (
+              <DashboardNeedsAttentionPanel rows={attentionRows} />
+            ) : (
+              <div className="rounded-lg border border-border bg-surface-secondary p-4 text-sm text-text-muted">
+                Not available for your current access level — open the full Contract Dashboard for your assigned tasks.
+              </div>
+            )}
+          </section>
+
+          {/* 8. Today's Focus. */}
+          <section aria-labelledby="contracts-exec-focus-heading" className="space-y-2">
+            <h2 id="contracts-exec-focus-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
+              Today&rsquo;s Focus
+            </h2>
+            <div className="rounded-xl border border-border bg-surface p-3 shadow-sm">
+              {todaysFocus.length === 0 ? (
+                <p className="px-1 py-1 text-sm text-text-muted">No urgent items.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {todaysFocus.map((item) => (
                     <li key={item.label}>
                       <Link
                         href={item.href}
-                        className="flex items-center justify-between gap-3 rounded-lg px-3 py-3 transition hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+                        className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-sm transition hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
                       >
-                        <span className="text-sm font-medium text-text-secondary">{item.label}</span>
-                        <span className={`text-lg font-bold ${valueClass}`}>{item.value}</span>
+                        <span className="text-text-secondary">{item.label}</span>
+                        <span className="font-semibold text-text-primary">{item.value}</span>
                       </Link>
                     </li>
-                  );
-                })}
-              </ul>
+                  ))}
+                </ul>
+              )}
             </div>
-          ) : (
-            <div className="rounded-lg border border-border bg-surface-secondary p-4 text-sm text-text-muted">
-              Not available for your current access level — open the full Contract Dashboard for your assigned tasks.
-            </div>
-          )}
-        </section>
+          </section>
+        </div>
       </div>
-
-      <section aria-labelledby="contracts-exec-recent-heading" className="space-y-3">
-        <h2 id="contracts-exec-recent-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Recent Contract Updates
-        </h2>
-        {recentToShow.length === 0 ? (
-          <div className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-text-muted">
-            No recent contracts in scope.
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-surface-secondary">
-                  <th className="w-32 px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    Contract No.
-                  </th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    Project
-                  </th>
-                  <th className="w-36 px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    Status
-                  </th>
-                  <th className="hidden w-28 px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-text-secondary sm:table-cell">
-                    Last Updated
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentToShow.map((item, i) => {
-                  const cancelled = item.status === 'CANCELLED';
-                  return (
-                    <tr
-                      key={item.id}
-                      className={[
-                        i < recentToShow.length - 1 ? 'border-b border-border' : '',
-                        cancelled ? 'opacity-60' : '',
-                        'transition-colors hover:bg-surface-secondary',
-                      ].join(' ')}
-                    >
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-text-muted">
-                        <Link
-                          href={`/contracts/${item.id}`}
-                          className="rounded hover:text-accent focus:outline-none focus:ring-1 focus:ring-focus"
-                        >
-                          {item.referenceNumber}
-                        </Link>
-                      </td>
-                      <td className="max-w-xs px-4 py-2.5 text-text-primary">
-                        <Link
-                          href={`/contracts/${item.id}`}
-                          className="block rounded hover:text-accent focus:outline-none focus:ring-1 focus:ring-focus"
-                        >
-                          {item.title}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="inline-block whitespace-nowrap rounded border border-border bg-surface-secondary px-2 py-0.5 text-xs font-medium text-text-secondary">
-                          {item.status.replace(/_/g, ' ')}
-                        </span>
-                      </td>
-                      <td className="hidden whitespace-nowrap px-4 py-2.5 text-xs text-text-muted sm:table-cell">
-                        {item.updatedAt.slice(0, 10)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </div>
   );
 }

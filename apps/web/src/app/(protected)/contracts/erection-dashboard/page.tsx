@@ -69,6 +69,7 @@ export default async function ErectionDashboardPage({ searchParams }: PageProps)
     authApi.me(accessToken),
   ]);
   const currentUserId = meResult.ok ? meResult.data.id : null;
+  const permissions: string[] = meResult.ok ? meResult.data.permissions : [];
 
   // FMP-UI-19 — "if user has assigned erection tasks" is scoped to the same
   // already-fetched work queue's own assignedToUserId (a real formal
@@ -96,6 +97,15 @@ export default async function ErectionDashboardPage({ searchParams }: PageProps)
           </div>
         </div>
         <div className="flex flex-col items-end gap-1 text-right">
+          {/* FMP-BOQ-09 — entry to the Piece Erection screen */}
+          {permissions.includes('erection.read') && (
+            <Link
+              href="/erection/pieces"
+              className="mb-1 inline-flex h-9 items-center rounded-md border border-accent/40 bg-accent/5 px-4 text-sm font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              Piece Erection
+            </Link>
+          )}
           {hasMyErectionTasks ? (
             <ErectionMyTasksShortcut />
           ) : (

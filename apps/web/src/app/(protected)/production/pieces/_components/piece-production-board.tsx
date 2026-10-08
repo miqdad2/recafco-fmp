@@ -11,6 +11,17 @@ import {
   validatePieceUpdate,
 } from '../../../technical/_lib/boq-confirmation-helpers';
 import { contractLabel } from '../_lib/production-pieces-helpers';
+import {
+  DRAWING_BADGE_CLASSES,
+  PRODUCTION_DRAWING_TEXT,
+  canViewDrawingFiles,
+  drawingBadge,
+  drawingSummaryText,
+  selectedNotReleasedCount,
+  shouldWarnNotReleased,
+  targetNeedsRelease,
+} from '../_lib/production-drawing-helpers';
+import { ProductionDrawingFilesModal } from './production-drawing-files-modal';
 import { updateProductionPieceStatusAction, getProductionPieceHistoryAction } from '../actions';
 
 interface Props {
@@ -46,12 +57,14 @@ export function PieceProductionBoard({ pieces, allowedStatuses }: Props): React.
   const [updating, setUpdating] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [filesFor, setFilesFor] = useState<{ id: string; pieceCode: string } | null>(null);
   const [history, setHistory] = useState<{ loading: boolean; error: string | null; entries: BoqPieceHistoryEntry[] }>({
     loading: false,
     error: null,
     entries: [],
   });
 
+  const warnNotReleased = shouldWarnNotReleased(targetStatus, selectedNotReleasedCount(pieces, selected));
   const allSelected = pieces.length > 0 && pieces.every((p) => selected.has(p.id));
 
   function toggle(id: string): void {
@@ -138,6 +151,12 @@ export function PieceProductionBoard({ pieces, allowedStatuses }: Props): React.
             </button>
           </div>
           <p className="mt-2 text-xs text-text-secondary">{selected.size} selected</p>
+          {targetNeedsRelease(targetStatus) && (
+            <p className="mt-1 text-xs text-text-secondary">{PRODUCTION_DRAWING_TEXT.helper}</p>
+          )}
+          {warnNotReleased && (
+            <p role="status" className="mt-1 text-xs font-medium text-warning">{PRODUCTION_DRAWING_TEXT.warning}</p>
+          )}
         </div>
       )}
 
@@ -184,12 +203,23 @@ export function PieceProductionBoard({ pieces, allowedStatuses }: Props): React.
                     {p.boqItem.description} · Drawing {p.drawingNo}
                     {p.sizeOrSpecification ? ` · ${p.sizeOrSpecification}` : ''}
                   </p>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 font-medium ${DRAWING_BADGE_CLASSES[drawingBadge(p.drawingGroup).tone]}`}>
+                      {drawingBadge(p.drawingGroup).label}
+                    </span>
+                    {drawingSummaryText(p.drawingGroup) && <span>{drawingSummaryText(p.drawingGroup)}</span>}
+                  </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
                   <span>Updated {formatDate(p.updatedAt)}</span>
                   <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${BOQ_PIECE_STATUS_CLASSES[p.currentStatus]}`}>
                     {BOQ_PIECE_STATUS_LABELS[p.currentStatus]}
                   </span>
+                  {canViewDrawingFiles(p.drawingGroup) && (
+                    <button type="button" onClick={() => setFilesFor({ id: p.id, pieceCode: p.pieceCode })} className={btnCls}>
+                      View Files
+                    </button>
+                  )}
                   <button type="button" onClick={() => void toggleHistory(p.id)} aria-expanded={historyFor === p.id} className={btnCls}>
                     History
                   </button>
@@ -222,6 +252,8 @@ export function PieceProductionBoard({ pieces, allowedStatuses }: Props): React.
           ))}
         </ul>
       </div>
+
+      {filesFor && <ProductionDrawingFilesModal pieceId={filesFor.id} pieceCode={filesFor.pieceCode} onClose={() => setFilesFor(null)} />}
     </div>
   );
 }

@@ -26,6 +26,7 @@ const mockVerify = vi.mocked(verify);
 
 // Shared mock functions for db client operations.
 const mockUserFindUnique = vi.fn();
+const mockUserFindFirst = vi.fn();
 const mockUserUpdate = vi.fn();
 const mockSessionCreate = vi.fn();
 const mockSessionFindUnique = vi.fn();
@@ -37,6 +38,7 @@ const mockAuditCreate = vi.fn();
 const mockClient = {
   user: {
     findUnique: mockUserFindUnique,
+    findFirst: mockUserFindFirst,
     update: mockUserUpdate,
     deleteMany: mockUserDeleteMany,
   },
@@ -91,7 +93,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('returns accessToken and refreshToken on success', async () => {
-      mockUserFindUnique.mockResolvedValue(ACTIVE_USER);
+      mockUserFindFirst.mockResolvedValue(ACTIVE_USER);
       mockVerify.mockResolvedValue(true as never);
       mockSessionCreate.mockResolvedValue({ id: 'session-id-001' });
       mockUserUpdate.mockResolvedValue(ACTIVE_USER);
@@ -104,18 +106,59 @@ describe('AuthService', () => {
       expect(result.mustChangePassword).toBe(false);
     });
 
-    it('normalizes username to lowercase before lookup', async () => {
-      mockUserFindUnique.mockResolvedValue(null);
+    it('looks up by username OR email, case-insensitively, trimmed', async () => {
+      mockUserFindFirst.mockResolvedValue(null);
       mockVerify.mockResolvedValue(false as never);
 
-      await expect(service.login({ username: 'ALICE', password: 'x' })).rejects.toThrow(
-        UnauthorizedException,
-      );
-      expect(mockUserFindUnique).toHaveBeenCalledWith({ where: { username: 'alice' } });
+      await expect(
+        service.login({ username: '  Alice@Recafco.com ', password: 'x' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockUserFindFirst).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { username: { equals: 'Alice@Recafco.com', mode: 'insensitive' } },
+            { email: { equals: 'Alice@Recafco.com', mode: 'insensitive' } },
+          ],
+        },
+      });
+    });
+
+    it.each(['alice', 'ALICE', 'alice@recafco.com', 'Alice@Recafco.com', '  alice@recafco.com  '])(
+      'logs in with identifier %j',
+      async (identifier) => {
+        mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, email: 'alice@recafco.com' });
+        mockVerify.mockResolvedValue(true as never);
+        mockSessionCreate.mockResolvedValue({ id: 'session-id-x' });
+        mockUserUpdate.mockResolvedValue(ACTIVE_USER);
+
+        const result = await service.login({ username: identifier, password: 'correct' });
+        expect(result.accessToken).toBe('mock.access.token');
+      },
+    );
+
+    it('rejects wrong password when logging in by email', async () => {
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, email: 'alice@recafco.com' });
+      mockVerify.mockResolvedValue(false as never);
+
+      await expect(
+        service.login({ username: 'alice@recafco.com', password: 'wrong' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects inactive user logging in by email', async () => {
+      mockUserFindFirst.mockResolvedValue({
+        ...ACTIVE_USER,
+        email: 'alice@recafco.com',
+        isActive: false,
+      });
+
+      await expect(
+        service.login({ username: 'alice@recafco.com', password: 'pass' }),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('runs dummy verify for unknown users (constant-time defense)', async () => {
-      mockUserFindUnique.mockResolvedValue(null);
+      mockUserFindFirst.mockResolvedValue(null);
       mockVerify.mockResolvedValue(false as never);
 
       await expect(service.login({ username: 'nobody', password: 'x' })).rejects.toThrow(
@@ -126,7 +169,7 @@ describe('AuthService', () => {
     });
 
     it('throws 401 INVALID_CREDENTIALS for inactive user', async () => {
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, isActive: false });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, isActive: false });
 
       await expect(service.login({ username: 'alice', password: 'pass' })).rejects.toThrow(
         UnauthorizedException,
@@ -135,7 +178,7 @@ describe('AuthService', () => {
 
     it('throws 401 for locked account (lockedUntil in future)', async () => {
       const future = new Date(Date.now() + 10 * 60 * 1000);
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, lockedUntil: future });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, lockedUntil: future });
 
       await expect(service.login({ username: 'alice', password: 'pass' })).rejects.toThrow(
         UnauthorizedException,
@@ -144,7 +187,7 @@ describe('AuthService', () => {
 
     it('treats expired lockout as unlocked (auto-expire)', async () => {
       const past = new Date(Date.now() - 1000);
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, lockedUntil: past });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, lockedUntil: past });
       mockVerify.mockResolvedValue(true as never);
       mockSessionCreate.mockResolvedValue({ id: 'session-id-002' });
       mockUserUpdate.mockResolvedValue(ACTIVE_USER);
@@ -154,7 +197,7 @@ describe('AuthService', () => {
     });
 
     it('increments failedLoginAttempts on bad password', async () => {
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 2 });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 2 });
       mockVerify.mockResolvedValue(false as never);
 
       await expect(service.login({ username: 'alice', password: 'wrong' })).rejects.toThrow(
@@ -170,7 +213,7 @@ describe('AuthService', () => {
     });
 
     it('sets lockedUntil on 5th failed attempt', async () => {
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 4 });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 4 });
       mockVerify.mockResolvedValue(false as never);
 
       await expect(service.login({ username: 'alice', password: 'wrong' })).rejects.toThrow(
@@ -185,7 +228,7 @@ describe('AuthService', () => {
     });
 
     it('resets failedLoginAttempts to 0 on successful login', async () => {
-      mockUserFindUnique.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 3 });
+      mockUserFindFirst.mockResolvedValue({ ...ACTIVE_USER, failedLoginAttempts: 3 });
       mockVerify.mockResolvedValue(true as never);
       mockSessionCreate.mockResolvedValue({ id: 'session-id-003' });
       mockUserUpdate.mockResolvedValue(ACTIVE_USER);
@@ -200,7 +243,7 @@ describe('AuthService', () => {
     });
 
     it('does not include password or hash in audit metadata', async () => {
-      mockUserFindUnique.mockResolvedValue(ACTIVE_USER);
+      mockUserFindFirst.mockResolvedValue(ACTIVE_USER);
       mockVerify.mockResolvedValue(true as never);
       mockSessionCreate.mockResolvedValue({ id: 'session-id-004' });
       mockUserUpdate.mockResolvedValue(ACTIVE_USER);
@@ -215,7 +258,7 @@ describe('AuthService', () => {
     });
 
     it('includes sessionId in JWT payload', async () => {
-      mockUserFindUnique.mockResolvedValue(ACTIVE_USER);
+      mockUserFindFirst.mockResolvedValue(ACTIVE_USER);
       mockVerify.mockResolvedValue(true as never);
       mockSessionCreate.mockResolvedValue({ id: 'session-abc' });
       mockUserUpdate.mockResolvedValue(ACTIVE_USER);

@@ -145,9 +145,8 @@ export class UsersService {
   ) {}
 
   async create(dto: CreateUserDto, actor: AuthUser): Promise<UserCreatedResult> {
-    const username = dto.username.toLowerCase().trim();
     const displayName = dto.displayName.trim();
-    const email = dto.email ? dto.email.toLowerCase().trim() : null;
+    const email = dto.email.toLowerCase().trim();
     const employeeNumber = dto.employeeNumber ? dto.employeeNumber.toUpperCase().trim() : null;
 
     if (displayName.length === 0) {
@@ -157,6 +156,21 @@ export class UsersService {
     await this.deptAccess.assertCanAccessDepartment(actor, ModuleIdentifier.ADMINISTRATION, dto.departmentId ?? null);
 
     await this.validateOrgConsistency(dto.plantId ?? undefined, dto.locationId ?? undefined);
+
+    // Email is the login identity; reject a duplicate case-insensitively (older rows may be mixed-case).
+    const emailTaken = await this.db
+      .getClient()
+      .user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } });
+    if (emailTaken) {
+      throw new ConflictException({
+        code: 'EMAIL_TAKEN',
+        message: `Email '${email}' is already in use`,
+      });
+    }
+
+    const username = dto.username
+      ? dto.username.toLowerCase().trim()
+      : await this.generateUsername(email);
 
     // Resolve the role to assign — default to VIEWER.
     const roleId = await this.resolveNewUserRole(dto.roleId, actor);
@@ -196,12 +210,28 @@ export class UsersService {
     } catch (err) {
       handleUniqueError(err, {
         username,
-        ...(dto.email !== undefined ? { email: dto.email } : {}),
+        email: dto.email,
         ...(dto.employeeNumber !== undefined ? { employeeNumber: dto.employeeNumber } : {}),
       });
     }
 
     return { user: toSummary(created!), tempPassword };
+  }
+
+  /** Internal username derived from the email local part: lowercase, safe chars, unique (suffix 2, 3, …). */
+  private async generateUsername(email: string): Promise<string> {
+    const local = email.split('@')[0] ?? '';
+    let base = local.toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[^a-z0-9]+/, '');
+    if (base.length < 3) base = `${base}user`.slice(0, 50);
+    base = base.slice(0, 44);
+    for (let n = 1; n < 1000; n++) {
+      const candidate = n === 1 ? base : `${base}${n}`;
+      const existing = await this.db
+        .getClient()
+        .user.findUnique({ where: { username: candidate }, select: { id: true } });
+      if (!existing) return candidate;
+    }
+    throw new ConflictException({ code: 'USERNAME_TAKEN', message: 'Could not generate a unique username' });
   }
 
   async findAll(
@@ -219,6 +249,8 @@ export class UsersService {
       where['OR'] = [
         { username: { contains: query.search.trim(), mode: 'insensitive' } },
         { displayName: { contains: query.search.trim(), mode: 'insensitive' } },
+        { email: { contains: query.search.trim(), mode: 'insensitive' } },
+        { employeeNumber: { contains: query.search.trim(), mode: 'insensitive' } },
       ];
     }
 

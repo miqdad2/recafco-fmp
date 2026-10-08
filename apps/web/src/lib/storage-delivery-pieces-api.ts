@@ -39,6 +39,36 @@ export interface StorageContractOption {
   title: string;
 }
 
+// FMP-UI-33 — mirrors StorageContractProgress in
+// apps/api/src/storage-delivery/storage-delivery-pieces.service.ts exactly.
+export interface StorageContractProgress {
+  contractId: string;
+  referenceNumber: string;
+  jobOrder: string | null;
+  projectName: string;
+  readyForStore: number;
+  inStore: number;
+  delivered: number;
+  onHold: number;
+  rejected: number;
+  lastUpdatedAt: string;
+}
+
+// FMP-UI-33 — mirrors RecentStoragePieceUpdate in
+// apps/api/src/storage-delivery/storage-delivery-pieces.service.ts exactly.
+export interface RecentStoragePieceUpdate {
+  id: string;
+  pieceCode: string;
+  newStatus: BoqPieceStatus;
+  contractId: string;
+  referenceNumber: string;
+  jobOrder: string | null;
+  projectName: string;
+  currentLocation: string | null;
+  createdAt: string;
+  updatedByName: string | null;
+}
+
 export interface StoragePieceQuery {
   statuses?: string;
   search?: string;
@@ -82,6 +112,10 @@ export const storageDeliveryPiecesApi = {
   },
   summary: () => get<StoragePieceSummary>('/storage-delivery/pieces/summary'),
   contracts: () => get<StorageContractOption[]>('/storage-delivery/pieces/contracts'),
+  /** FMP-UI-33 — per-contract piece-status breakdown for the Storage Yard & Delivery dashboard. */
+  contractProgress: () => get<StorageContractProgress[]>('/storage-delivery/pieces/contract-progress'),
+  /** FMP-UI-33 — latest piece status updates across every contract. */
+  recentUpdates: () => get<RecentStoragePieceUpdate[]>('/storage-delivery/pieces/recent-updates'),
   /** The statuses this user may set here; null = could not be resolved (page stays read-only). */
   allowedStatuses: async (): Promise<BoqPieceUpdateStatus[] | null> => {
     const data = await get<{ statuses: BoqPieceUpdateStatus[] }>('/storage-delivery/pieces/allowed-statuses');

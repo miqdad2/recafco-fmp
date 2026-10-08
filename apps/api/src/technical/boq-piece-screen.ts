@@ -38,6 +38,7 @@ export async function listScreenPieces(
   query: PieceScreenListQuery,
   visible: ContractBoqPieceStatus[],
   defaults: ContractBoqPieceStatus[],
+  options: { includeDrawingGroup?: boolean } = {},
 ) {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? 50;
@@ -79,6 +80,18 @@ export async function listScreenPieces(
         updatedAt: true,
         contract: { select: { id: true, referenceNumber: true, jobOrder: true, title: true } },
         boqItem: { select: { description: true } },
+        // FMP-BOQ-13 — only the Production screen asks for the piece's drawing group.
+        ...(options.includeDrawingGroup
+          ? {
+              drawingGroupLinks: {
+                where: { activeSlot: 1 },
+                take: 1,
+                select: {
+                  group: { select: { id: true, drawingNo: true, calculationRef: true, groupTitle: true, status: true, _count: { select: { attachments: true } } } },
+                },
+              },
+            }
+          : {}),
       },
     }),
     client.contractBoqPiece.count({ where }),

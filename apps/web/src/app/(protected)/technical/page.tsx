@@ -12,16 +12,18 @@ import {
   ArrowUpRight,
   ClipboardCheck,
 } from 'lucide-react';
-import { technicalApiFetchResult, TECHNICAL_STAGE_LABELS } from '@/lib/technical-api';
+import { technicalApiFetchResult, TECHNICAL_STAGE_LABELS, fetchBoqConfirmations } from '@/lib/technical-api';
 import type { TechnicalDashboardData, TechnicalJobRow, TechnicalStage } from '@/lib/technical-api';
 import { RefreshButton } from './_components/refresh-button';
-import { NeedsAttentionPanel } from './_components/needs-attention-panel';
 import { RecentActivityPanel } from './_components/recent-activity-panel';
 import { StageProgressOverview } from './_components/stage-progress-overview';
 import { NextActionPanel } from './_components/next-action-panel';
-import { TechnicalKpiCard } from './_components/technical-kpi-card';
-import type { TechnicalKpiAccent } from './_components/technical-kpi-card';
-import { formatDate, stageBadgeClasses } from './_lib/technical-format';
+import { TechnicalJobSelector } from './_components/technical-job-selector';
+import { DashboardKpiCard } from '../_components/dashboard-kpi-card';
+import type { DashboardKpiTone } from '../_components/dashboard-kpi-card';
+import { DashboardNeedsAttentionPanel } from '../_components/dashboard-needs-attention-panel';
+import { formatDate, stageBadgeClasses, STAGE_ACTION_LABELS } from './_lib/technical-format';
+import { pickDefaultTechnicalJob, buildTechnicalNeedsAttentionRows, buildReleaseAttentionRows, jobReleaseIndicator, prioritizeJobsForTable } from './_lib/technical-dashboard-selector-helpers';
 
 // FMP-TECH-05P — Job Order No display-priority fallback: prefer the
 // human-readable Job Order No, then the contract's own reference/quotation
@@ -90,15 +92,10 @@ function jobStageBadgeClasses(job: TechnicalJobRow): string {
   return job.currentStage ? stageBadgeClasses(job.currentStage) : 'bg-surface-secondary text-text-muted';
 }
 
-// FMP-TECH-05Q — shortened to the ticket's own recommended table wording
-// (was the longer, full-sentence versions still used by the Next Action
-// Focus panel's own distinct copy — unrelated, not touched here).
-const STAGE_ACTION_LABELS: Record<TechnicalStage, string> = {
-  DRAWING_RECEIVED: 'Complete drawing receipt',
-  SD_CALCULATION_SUBMISSION: 'Submit SD & Calc.',
-  GETTING_APPROVAL: 'Track approval',
-  FD_ISSUANCE: 'Issue FD',
-};
+// FMP-TECH-05Q — shortened to the ticket's own recommended table wording.
+// FMP-UI-31 — moved to `_lib/technical-format.ts` (STAGE_ACTION_LABELS) so
+// the redesigned Next Action Focus panel can use the exact same wording
+// instead of its own separate copy.
 
 function jobNextActionLabel(job: TechnicalJobRow): string {
   if (!job.workflowStarted) return 'Start Technical Workflow';
@@ -155,10 +152,20 @@ function errorMessage(status: number): string {
   return 'Technical dashboard data could not be loaded. Please try again.';
 }
 
+// FMP-UI-35 — this page's own accent vocabulary (unchanged, still carries
+// real meaning distinctions — e.g. "info" vs "success" vs "error"), mapped
+// onto the shared DashboardKpiCard's smaller tone set below. Kept local
+// now that the dedicated `TechnicalKpiCard` component (which used to own
+// this type) is retired.
+type TechnicalKpiAccent = 'neutral' | 'info' | 'secondary' | 'warning' | 'module' | 'success' | 'error';
+const TECHNICAL_ACCENT_TONE: Record<TechnicalKpiAccent, DashboardKpiTone> = {
+  neutral: 'neutral', info: 'neutral', secondary: 'neutral', module: 'neutral',
+  warning: 'warning', success: 'success', error: 'error',
+};
+
 interface KpiDef {
   label: string;
   value: number | undefined;
-  helperText: string;
   icon: typeof ClipboardList;
   accent: TechnicalKpiAccent;
 }
@@ -170,7 +177,6 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
   const loadError = result.error;
 
   const metrics = dashboard?.metrics;
-  const jobs = dashboard?.jobs ?? [];
   const hasData = dashboard !== null;
   const needsAttentionCount = metrics?.needsAttention ?? 0;
 
@@ -181,23 +187,56 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
   // difference between them), and the 2 cards that should actually stand
   // out keep their own strong color (success / error-when-active).
   const kpis: KpiDef[] = [
-    { label: 'Pending Technical Review', value: metrics?.pendingTechnicalReview, helperText: 'Not yet started', icon: ClipboardList, accent: 'neutral' },
-    { label: 'Drawing Received', value: metrics?.drawingReceived, helperText: 'In drawing intake', icon: FileInput, accent: 'info' },
-    { label: 'SD & Calculation Pending', value: metrics?.sdCalculationPending, helperText: 'Awaiting submission', icon: Calculator, accent: 'info' },
-    { label: 'Waiting Approval', value: metrics?.waitingApproval, helperText: 'Awaiting approval decision', icon: Hourglass, accent: 'info' },
-    { label: 'FD Issued', value: metrics?.fdIssued, helperText: 'Final drawings issued', icon: BadgeCheck, accent: 'info' },
-    { label: 'Ready for Production Release', value: metrics?.readyForProductionRelease, helperText: 'Technical fully completed', icon: PackageCheck, accent: 'success' },
-    { label: 'Needs Attention / Overdue', value: metrics?.needsAttention, helperText: 'Urgent or delayed items', icon: AlertTriangle, accent: needsAttentionCount > 0 ? 'error' : 'neutral' },
+    { label: 'Pending Technical Review', value: metrics?.pendingTechnicalReview, icon: ClipboardList, accent: 'neutral' },
+    { label: 'Drawing Received', value: metrics?.drawingReceived, icon: FileInput, accent: 'info' },
+    { label: 'SD & Calculation Pending', value: metrics?.sdCalculationPending, icon: Calculator, accent: 'info' },
+    { label: 'Waiting Approval', value: metrics?.waitingApproval, icon: Hourglass, accent: 'info' },
+    { label: 'FD Issued', value: metrics?.fdIssued, icon: BadgeCheck, accent: 'info' },
+    // FMP-UI-31 — "Ready for Production Release" → "Ready for Production",
+    // "Needs Attention / Overdue" → "Needs Attention", per this unit's own
+    // exact required KPI label list.
+    { label: 'Ready for Production', value: metrics?.readyForProductionRelease, icon: PackageCheck, accent: 'success' },
+    { label: 'Needs Attention', value: metrics?.needsAttention, icon: AlertTriangle, accent: needsAttentionCount > 0 ? 'error' : 'neutral' },
   ];
 
+  // FMP-UI-31 — Contract/Project selector's default pick + its BOQ summary,
+  // fetched once, server-side (the same reused server-independent function
+  // the per-contract BOQ Progress tab already uses). Jobs table reordered
+  // (not filtered) so a flagged/urgent job always appears inside the first
+  // 5 rows, then capped to 5, per this unit's own "max 5 rows" requirement.
+  const defaultJob = dashboard ? pickDefaultTechnicalJob(dashboard.jobs, dashboard.needsAttention) : null;
+  const initialBoqItems = defaultJob ? await fetchBoqConfirmations(defaultJob.contractId) : null;
+  const jobsForTable = dashboard ? prioritizeJobsForTable(dashboard.jobs, dashboard.needsAttention).slice(0, 5) : [];
+  const releaseByContract = dashboard?.releaseByContract ?? {};
+  const attentionRows = dashboard
+    ? [...buildTechnicalNeedsAttentionRows({
+        needsAttention: dashboard.needsAttention,
+        waitingApproval: dashboard.metrics.waitingApproval,
+        missingBoqConfirmation: dashboard.boqAttention.missingBoqConfirmation,
+        confirmedPiecesNotGenerated: dashboard.boqAttention.confirmedPiecesNotGenerated,
+        rejectedOrHoldPieces: dashboard.boqAttention.rejectedOrHoldPieces,
+      }), ...buildReleaseAttentionRows(releaseByContract)]
+    : [];
+
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-5 py-6 lg:px-6">
-      {/* Header */}
+    // FMP-UI-31 — widened max-w-7xl (1280px) → max-w-[1600px] for "use full
+    // available width" (was leaving visible empty space on wide desktop
+    // screens, the same complaint the Contract Management dashboard had,
+    // FMP-UI-29); vertical rhythm trimmed slightly (py-6→py-5,
+    // space-y-5→space-y-4) to help the new selector section fit without
+    // pushing the page into scrolling.
+    <div className="mx-auto max-w-[1600px] space-y-4 px-5 py-5 lg:px-8">
+      {/* Header — FMP-UI-35: icon simplified from a colored badge down to a
+          plain icon (same treatment the other 4 piece-flow dashboards now
+          use); action buttons sized `h-9` consistently (were bare
+          `px-3 py-1.5`, a slightly different height than the other 4's
+          buttons); "Contract List" renamed "View Contract List" to match
+          the wording every other dashboard already uses. Bordered card,
+          Refresh, and Back to Platform Dashboard were already present and
+          unchanged — this page was closest to the shared pattern already. */}
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-border bg-surface px-5 py-4 shadow-sm">
-        <div className="flex items-center gap-3.5">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-module-technical-light text-module-technical">
-            <Ruler className="size-6" aria-hidden="true" />
-          </span>
+        <div className="flex items-center gap-3">
+          <Ruler className="size-6 shrink-0 text-text-secondary" aria-hidden="true" />
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">Technical Dashboard</h1>
@@ -207,17 +246,17 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
               </span>
             </div>
             <p className="mt-1 text-sm text-text-secondary">
-              Shop drawings, calculations, approvals, and FD issuance — real-time job order tracking for the Technical team.
+              Track drawings, calculations, approvals, and production release.
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
           <RefreshButton />
-          <Link href="/dashboard" className="rounded-md border border-border bg-surface px-3 py-1.5 text-text-secondary hover:bg-surface-secondary">
+          <Link href="/dashboard" className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-text-secondary hover:bg-surface-secondary">
             Back to Platform Dashboard
           </Link>
-          <Link href="/contracts" className="rounded-md border border-border bg-surface px-3 py-1.5 text-text-secondary hover:bg-surface-secondary">
-            Contract List
+          <Link href="/contracts" className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-text-secondary hover:bg-surface-secondary">
+            View Contract List
           </Link>
         </div>
       </div>
@@ -228,25 +267,41 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
         </div>
       )}
 
-      {/* KPI cards */}
+      {/* KPI cards — FMP-UI-35: now the shared DashboardKpiCard every
+          piece-flow dashboard uses (was the Technical-only `TechnicalKpiCard`
+          — bigger padding, a colored icon chip, a 3rd helper-text line,
+          smaller numbers/bigger labels than the other 4 dashboards' own
+          cards). `TECHNICAL_ACCENT_TONE` maps this page's own 7-accent
+          vocabulary (kept as-is, still used for nothing else) onto the
+          shared component's 4 tones — "info"/"secondary"/"module" (this
+          page's "in progress, not yet alarming" accents) all read as
+          `neutral`, the same way Production/Storage/Erection's own
+          in-progress KPI cards already do. */}
       <section aria-labelledby="technical-kpi-heading" className="space-y-3">
         <h2 id="technical-kpi-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
           Summary
         </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
           {kpis.map((kpi) => (
-            <TechnicalKpiCard
+            <DashboardKpiCard
               key={kpi.label}
               label={kpi.label}
-              value={kpi.value}
-              helperText={kpi.helperText}
+              value={hasData ? kpi.value ?? 0 : null}
               icon={kpi.icon}
-              accent={kpi.accent}
-              hasData={hasData}
+              tone={TECHNICAL_ACCENT_TONE[kpi.accent]}
             />
           ))}
         </div>
       </section>
+
+      {/* FMP-UI-31 — Contract/Project selector + Selected Job Progress, full
+          width below the KPI row (this unit's own "Alternative" layout —
+          the 6-figure stage flow + BOQ summary needs more room than a 65%
+          column would give it). Selecting a job never navigates away;
+          "Open Stage"/"Open Contract" are the only links that do. */}
+      {hasData && (
+        <TechnicalJobSelector jobs={dashboard.jobs} initialJob={defaultJob} initialBoqItems={initialBoqItems} releaseByContract={releaseByContract} />
+      )}
 
       {/* Stage progress + next action focus */}
       {hasData && (
@@ -261,13 +316,17 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
         </section>
       )}
 
-      {/* Jobs table */}
+      {/* Jobs table — FMP-UI-31: capped to 5 rows (was every job in scope,
+          up to 50). No "View all technical jobs" link: no full jobs list
+          page exists yet (only the per-job detail route), so per this
+          unit's own "do not add a broken button" instruction, none was
+          added — see progress-tracker.md for this decision. */}
       <section aria-labelledby="technical-jobs-heading" className="space-y-3">
         <h2 id="technical-jobs-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
           Technical Workflow Jobs
         </h2>
 
-        {jobs.length === 0 && !loadError ? (
+        {jobsForTable.length === 0 && !loadError ? (
           <div className="rounded-lg border border-border bg-surface p-10 text-center">
             <ClipboardCheck className="mx-auto size-8 text-text-muted" aria-hidden="true" />
             <p className="mt-3 text-base font-medium text-text-primary">No Technical workflow jobs yet</p>
@@ -301,7 +360,7 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {jobs.map((job) => {
+                {jobsForTable.map((job) => {
                   const status = jobStatusDisplay(job);
                   const ownerShort = shortOwnerName(job.assignedTo);
                   return (
@@ -310,6 +369,9 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
                         <p className="text-sm font-bold leading-snug text-text-primary">{jobOrderDisplay(job)}</p>
                         <p className="mt-0.5 text-xs font-medium leading-snug text-text-secondary">{job.projectName}</p>
                         <p className="text-[11px] leading-snug text-text-muted">{job.clientEmployer}</p>
+                        {jobReleaseIndicator(releaseByContract[job.contractId]) && (
+                          <p className="text-[11px] font-medium leading-snug text-text-secondary">{jobReleaseIndicator(releaseByContract[job.contractId])}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -379,7 +441,7 @@ export default async function TechnicalDashboardPage(): Promise<React.JSX.Elemen
               <AlertTriangle className="size-3.5" aria-hidden="true" />
               Needs Attention
             </h2>
-            <NeedsAttentionPanel items={dashboard.needsAttention} />
+            <DashboardNeedsAttentionPanel rows={attentionRows} />
           </section>
 
           <section aria-labelledby="technical-activity-heading" className="space-y-3">

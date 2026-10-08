@@ -167,3 +167,27 @@ export const STAGE_OPEN_LABELS: Record<TechnicalStage, string> = {
 export function stageHref(contractId: string, stage: TechnicalStage): string {
   return `/technical/jobs/${contractId}/workflow/${STAGE_SLUGS[stage]}`;
 }
+
+// FMP-UI-31 — short "what to do next" wording, originally local to the
+// dashboard page's own jobs table (FMP-TECH-05Q); moved here so the
+// redesigned Next Action Focus panel can show the exact same words for the
+// exact same stage, rather than drifting into its own separate phrasing.
+export const STAGE_ACTION_LABELS: Record<TechnicalStage, string> = {
+  DRAWING_RECEIVED: 'Complete drawing receipt',
+  SD_CALCULATION_SUBMISSION: 'Submit SD & Calc.',
+  GETTING_APPROVAL: 'Track approval',
+  FD_ISSUANCE: 'Issue FD',
+};
+
+// FMP-UI-31 — a local copy of technical-api.ts's own TECHNICAL_STAGE_LABELS,
+// for the exact same reason STAGE_ORDER above is a local copy of
+// TECHNICAL_STAGE_ORDER: this file is imported by 'use client' components
+// (the new TechnicalJobSelector), and a real value import from
+// technical-api.ts would pull its module-level `import { cookies } from
+// 'next/headers'` into the client bundle and fail the build.
+export const STAGE_LABELS: Record<TechnicalStage, string> = {
+  DRAWING_RECEIVED: 'Drawing Received',
+  SD_CALCULATION_SUBMISSION: 'SD & Calculation Submission',
+  GETTING_APPROVAL: 'Getting Approval',
+  FD_ISSUANCE: 'FD Issuance',
+};

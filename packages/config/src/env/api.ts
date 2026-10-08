@@ -83,6 +83,7 @@ export const ApiEnvSchema = z
     INCIDENT_ATTACHMENTS_DIR: z.string().optional(),
     TASK_ATTACHMENTS_DIR: z.string().optional(),
     TECHNICAL_DRAWING_ATTACHMENTS_DIR: z.string().optional(),
+    TECHNICAL_DRAWING_GROUP_FILES_DIR: z.string().optional(),
     // FMP-MAINT-02 — MMS live dashboard API. MMS_INTEGRATION_KEY is optional:
     // when absent, the Maintenance dashboard shows "MMS integration not
     // configured". It must equal MMS's own FMP_INTEGRATION_KEY and is only
@@ -155,6 +156,7 @@ export const ApiEnvSchema = z
       taskAttachmentsDir: raw.TASK_ATTACHMENTS_DIR ?? './storage/task-attachments',
       technicalDrawingAttachmentsDir:
         raw.TECHNICAL_DRAWING_ATTACHMENTS_DIR ?? './storage/technical-drawing-attachments',
+      technicalDrawingGroupFilesDir: raw.TECHNICAL_DRAWING_GROUP_FILES_DIR ?? './storage/technical-drawing-groups',
       mmsBaseUrl: (raw.MMS_BASE_URL || DEFAULT_MMS_BASE_URL).replace(/\/+$/, ''),
       mmsPublicBaseUrl: (raw.MMS_PUBLIC_BASE_URL || DEFAULT_MMS_PUBLIC_BASE_URL).replace(/\/+$/, ''),
       mmsLiveDashboardEndpoint: raw.MMS_LIVE_DASHBOARD_ENDPOINT || DEFAULT_MMS_LIVE_DASHBOARD_ENDPOINT,

@@ -3,6 +3,9 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { contractsApi } from '@/lib/contracts-api';
+import { fetchBoqConfirmations } from '@/lib/technical-api';
+import type { BoqConfirmationItem } from '@/lib/technical-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
@@ -1860,4 +1863,47 @@ export async function assignErectionWorkflowAction(contractId: string, input: As
 
   revalidateErectionWorkflowPaths(contractId);
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-UI-29 — Contract Management dashboard's Contract/Project selector.
+// Read-only: a thin server-action wrapper around contractsApi.list()'s own
+// existing `search` filter (title/referenceNumber/jobOrder/counterpartyName,
+// see contracts.service.ts), the exact same endpoint and department scope
+// the Contract List page already uses — no new backend route, no new
+// scoping rule. Needed because contractsApi's apiFetch reads the access
+// token via next/headers, which only works server-side; this lets the
+// dashboard's client-side search box call it.
+// ---------------------------------------------------------------------------
+
+export interface ContractSelectorResult {
+  id: string;
+  referenceNumber: string;
+  title: string;
+  jobOrder?: string | undefined;
+  status: string;
+  updatedAt: string;
+}
+
+export async function searchContractsForDashboardAction(search: string): Promise<ContractSelectorResult[]> {
+  const trimmed = search.trim();
+  try {
+    const result = await contractsApi.list(
+      trimmed ? { search: trimmed, pageSize: 8 } : { pageSize: 8 },
+    );
+    return result.items.map((c) => ({
+      id: c.id, referenceNumber: c.referenceNumber, title: c.title, jobOrder: c.jobOrder, status: c.status, updatedAt: c.updatedAt,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// FMP-UI-29 — read-only wrapper around the existing fetchBoqConfirmations()
+// (`@/lib/technical-api`, already used by the per-contract BOQ Progress tab,
+// FMP-BOQ-10). No Technical/BOQ file is touched; this only lets the
+// dashboard's client-side selector call it on demand (fetchBoqConfirmations
+// itself reads the access token via next/headers, server-side only).
+export async function getContractBoqProgressForDashboardAction(contractId: string): Promise<BoqConfirmationItem[] | null> {
+  return fetchBoqConfirmations(contractId);
 }

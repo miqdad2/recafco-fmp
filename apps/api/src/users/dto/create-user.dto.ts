@@ -9,23 +9,24 @@ import {
 } from 'class-validator';
 
 export class CreateUserDto {
+  // Optional: the UI no longer asks for it. When omitted, it is generated from the email.
+  @IsOptional()
   @IsString()
   @MinLength(3)
   @MaxLength(50)
   @Matches(/^[a-z0-9][a-z0-9._-]{2,49}$/, {
     message: 'username must be 3–50 chars: lowercase letters, digits, dots, underscores, hyphens; must start with a letter or digit',
   })
-  username!: string;
+  username?: string;
 
   @IsString()
   @MinLength(1)
   @MaxLength(200)
   displayName!: string;
 
-  @IsOptional()
   @IsEmail()
   @MaxLength(254)
-  email?: string;
+  email!: string;
 
   @IsOptional()
   @IsString()

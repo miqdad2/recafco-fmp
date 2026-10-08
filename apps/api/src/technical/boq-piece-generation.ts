@@ -179,7 +179,7 @@ export function summarizeItemPieces(
 // restrictions come in later units)
 // ---------------------------------------------------------------------------
 
-export type PieceSkipReason = 'CANCELLED' | 'SAME_STATUS' | 'NOT_FOUND' | 'CHANGED' | 'NOT_ALLOWED';
+export type PieceSkipReason = 'CANCELLED' | 'SAME_STATUS' | 'NOT_FOUND' | 'CHANGED' | 'NOT_ALLOWED' | 'NO_GROUP' | 'NOT_RELEASED';
 
 export const PIECE_SKIP_MESSAGES: Record<PieceSkipReason, string> = {
   CANCELLED: 'Cancelled pieces cannot be updated.',
@@ -187,6 +187,8 @@ export const PIECE_SKIP_MESSAGES: Record<PieceSkipReason, string> = {
   NOT_FOUND: 'Piece was not found in this job.',
   CHANGED: 'Piece was changed by someone else. Please refresh.',
   NOT_ALLOWED: 'You cannot update pieces to this status.',
+  NO_GROUP: 'No drawing group assigned.',
+  NOT_RELEASED: 'Drawing group is not released to Production.',
 };
 
 /** Returns why a piece cannot move to the target status, or null when the update is allowed. */
@@ -287,4 +289,13 @@ export function productionAllowedPieceStatuses(permissions: string[]): ContractB
  */
 export function storageDeliveryAllowedPieceStatuses(permissions: string[]): ContractBoqPieceStatus[] {
   return permissions.includes('storage_delivery.update') ? [...PIECE_STATUS_OWNERSHIP.STORAGE_DELIVERY] : [];
+}
+
+/**
+ * FMP-BOQ-09 — what the Erection screen may set: Erected, Completed, Hold,
+ * Rejected. No manager/admin override (keeps the screen focused). Needs
+ * erection.update; read-only users get none.
+ */
+export function erectionAllowedPieceStatuses(permissions: string[]): ContractBoqPieceStatus[] {
+  return permissions.includes('erection.update') ? [...PIECE_STATUS_OWNERSHIP.ERECTION] : [];
 }
