@@ -1,8 +1,10 @@
 import { Check, Minus } from 'lucide-react';
 import { PAYMENT_TERM_OPTIONS } from '../../../../_lib/contract-ui-helpers';
+import { NOT_SPECIFIED, paymentTermDetailText, type PaymentTermDetails } from '../../../../_lib/payment-terms-helpers';
 
 interface Props {
   paymentTerms: Record<string, boolean> | undefined;
+  paymentTermDetails?: PaymentTermDetails | null | undefined;
 }
 
 /**
@@ -14,7 +16,7 @@ interface Props {
  * no schema-backed percentage/amount/note) — each chip shows only that real
  * saved boolean, never an invented value.
  */
-export function ContractPaymentTermsStrip({ paymentTerms }: Props): React.JSX.Element {
+export function ContractPaymentTermsStrip({ paymentTerms, paymentTermDetails }: Props): React.JSX.Element {
   return (
     <section className="rounded-lg border border-border bg-surface shadow-sm px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -23,6 +25,7 @@ export function ContractPaymentTermsStrip({ paymentTerms }: Props): React.JSX.El
           {PAYMENT_TERM_OPTIONS.map((o) => {
             const selected = paymentTerms?.[o.key] === true;
             const Icon = selected ? Check : Minus;
+            const detail = paymentTermDetailText(o.key, paymentTerms, paymentTermDetails ?? undefined);
             return (
               <span
                 key={o.key}
@@ -32,6 +35,7 @@ export function ContractPaymentTermsStrip({ paymentTerms }: Props): React.JSX.El
               >
                 <Icon className="size-3.5 shrink-0" aria-hidden="true" />
                 {o.label}
+                {detail ? <span className={`font-normal ${detail === NOT_SPECIFIED ? 'text-text-muted italic' : 'opacity-80'}`}>· {detail}</span> : null}
               </span>
             );
           })}

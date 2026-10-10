@@ -65,7 +65,7 @@ describe('Technical module in user administration (FMP-ACCESS-02)', () => {
     const g = groupModuleAccess(configs(), ['contracts.read', 'contracts.update'], false);
     expect(g.primary?.module).toBe('CONTRACTS_MANAGEMENT');
     expect(g.labelOverrides).toEqual({});
-    expect(g.relatedWorkflows).toEqual(['Technical', 'Erection', 'Schedule Planning']);
+    expect(g.relatedWorkflows).toEqual(['Technical', 'Erection', 'Advanced Planning']);
   });
 
   it('uses the exact label Technical and none of the discouraged ones', () => {

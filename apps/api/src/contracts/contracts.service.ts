@@ -14,6 +14,7 @@ import type { AuthUser } from '../common/types/auth-user';
 import type { CreateContractDto } from './dto/create-contract.dto';
 import type { CreateContractBoqItemDto } from './dto/create-contract-boq-item.dto';
 import type { UpdateContractDto } from './dto/update-contract.dto';
+import { normalizePaymentTermDetails, legacyMissingPercentageKeys } from './payment-terms';
 import type { UpdateContractBasicDetailsDto } from './dto/update-contract-basic-details.dto';
 import type { ContractListQueryDto, PaginatedResult } from './dto/contract-list-query.dto';
 import type { ActivateContractDto } from './dto/activate-contract.dto';
@@ -98,6 +99,7 @@ const CONTRACT_SELECT = {
   projectNumber: true,
   scopeOfWork: true,
   paymentTerms: true,
+  paymentTermDetails: true,
   contractValue: true,
   currency: true,
   startDate: true,
@@ -578,6 +580,12 @@ export class ContractsService {
     const effectiveOriginalContractValue = dto.originalContractValue ?? effectiveContractValue;
     const effectiveOriginalCurrency = dto.originalCurrency ?? effectiveCurrency;
 
+    // FMP-CONTRACT-06 — validate per-term details against the selected terms (create: nothing is legacy).
+    const paymentTermDetails =
+      dto.paymentTerms !== undefined || dto.paymentTermDetails !== undefined
+        ? normalizePaymentTermDetails(dto.paymentTerms, dto.paymentTermDetails)
+        : undefined;
+
     const ownerUserId = dto.ownerUserId ?? actor.id;
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -616,6 +624,7 @@ export class ContractsService {
           ...(dto.projectNumber !== undefined ? { projectNumber: dto.projectNumber } : {}),
           ...(dto.scopeOfWork !== undefined ? { scopeOfWork: dto.scopeOfWork } : {}),
           ...(dto.paymentTerms !== undefined ? { paymentTerms: dto.paymentTerms } : {}),
+          ...(paymentTermDetails !== undefined ? { paymentTermDetails } : {}),
           ...(effectiveContractValue !== undefined ? { contractValue: effectiveContractValue } : {}),
           ...(effectiveCurrency !== undefined ? { currency: effectiveCurrency } : {}),
           ...(dto.startDate !== undefined ? { startDate: new Date(dto.startDate) } : {}),
@@ -736,6 +745,15 @@ export class ContractsService {
       if (dto[f] !== undefined) data[f] = dto[f] === null || dto[f] === '' ? null : new Date(dto[f] as string);
     }
     if (dto.paymentTerms !== undefined) data['paymentTerms'] = dto.paymentTerms;
+    if (dto.paymentTerms !== undefined || dto.paymentTermDetails !== undefined) {
+      // FMP-CONTRACT-06 — a term already selected on a legacy contract without a percentage may stay that way.
+      const existingRec = contract as unknown as Record<string, unknown>;
+      data['paymentTermDetails'] = normalizePaymentTermDetails(
+        dto.paymentTerms ?? (existingRec['paymentTerms'] as Record<string, unknown> | null),
+        dto.paymentTermDetails ?? existingRec['paymentTermDetails'],
+        legacyMissingPercentageKeys(existingRec['paymentTerms'] as Record<string, unknown> | null, existingRec['paymentTermDetails']),
+      );
+    }
     // FMP-CONTRACT-04 — Schedule Status (manager-facing), distinct from lifecycle `status`.
     if (dto.scheduleStatus !== undefined) data['scheduleStatus'] = dto.scheduleStatus;
 
@@ -853,6 +871,15 @@ export class ContractsService {
     if (dto.projectNumber !== undefined) data['projectNumber'] = dto.projectNumber;
     if (dto.scopeOfWork !== undefined) data['scopeOfWork'] = dto.scopeOfWork;
     if (dto.paymentTerms !== undefined) data['paymentTerms'] = dto.paymentTerms;
+    if (dto.paymentTerms !== undefined || dto.paymentTermDetails !== undefined) {
+      // FMP-CONTRACT-06 — a term already selected on a legacy contract without a percentage may stay that way.
+      const existingRec = contract as unknown as Record<string, unknown>;
+      data['paymentTermDetails'] = normalizePaymentTermDetails(
+        dto.paymentTerms ?? (existingRec['paymentTerms'] as Record<string, unknown> | null),
+        dto.paymentTermDetails ?? existingRec['paymentTermDetails'],
+        legacyMissingPercentageKeys(existingRec['paymentTerms'] as Record<string, unknown> | null, existingRec['paymentTermDetails']),
+      );
+    }
     if (effectiveContractValue !== undefined) data['contractValue'] = effectiveContractValue;
     if (effectiveCurrency !== undefined) data['currency'] = effectiveCurrency;
     if (dto.startDate !== undefined) data['startDate'] = new Date(dto.startDate);

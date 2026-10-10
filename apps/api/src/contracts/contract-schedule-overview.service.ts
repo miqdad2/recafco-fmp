@@ -185,6 +185,23 @@ export function computeOverviewRow(input: {
   };
 }
 
+/** Advanced Planning calendar — one planned stage (read-only projection of the stage rows already computed below). */
+export interface ScheduleOverviewCalendarStage {
+  stageKey: ScheduleStageKey;
+  stageName: string;
+  responsibleTeam: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  actualStartDate: string | null;
+  actualEndDate: string | null;
+  delayDays: number | null;
+  plannedQuantity: number | null;
+  plannedMolds: number | null;
+  remarks: string | null;
+}
+
+export type ScheduleOverviewRowWithStages = ScheduleOverviewRow & { calendarStages: ScheduleOverviewCalendarStage[] };
+
 export interface ScheduleOverviewSummary {
   totalActiveContracts: number;
   onTrack: number;
@@ -217,7 +234,7 @@ export function computeOverviewSummary(rows: ScheduleOverviewRow[], today: strin
 const SCHEDULE_OVERVIEW_CONTRACT_CAP = 1000;
 
 export interface ScheduleOverviewResult {
-  rows: ScheduleOverviewRow[];
+  rows: ScheduleOverviewRowWithStages[];
   summary: ScheduleOverviewSummary;
 }
 
@@ -314,7 +331,7 @@ export class ContractScheduleOverviewService {
     const todayDate = utcToday();
     const todayIso = isoDate(todayDate) as string;
 
-    const rows: ScheduleOverviewRow[] = contracts.map((contract) => {
+    const rows: ScheduleOverviewRowWithStages[] = contracts.map((contract) => {
       const contractPlanned = plannedByContract.get(contract.id) ?? [];
       const contractTasks = tasksByContract.get(contract.id) ?? [];
       const contractPayments = paymentsByContract.get(contract.id) ?? [];
@@ -383,7 +400,7 @@ export class ContractScheduleOverviewService {
         };
       });
 
-      return computeOverviewRow({
+      const overviewRow = computeOverviewRow({
         contract: {
           id: contract.id,
           referenceNumber: contract.referenceNumber,
@@ -395,6 +412,24 @@ export class ContractScheduleOverviewService {
         stages,
         today: todayIso,
       });
+
+      const calendarStages: ScheduleOverviewCalendarStage[] = stages
+        .filter((s) => s.plannedStartDate !== null || s.plannedEndDate !== null)
+        .map((s) => ({
+          stageKey: s.stageKey,
+          stageName: s.stageName,
+          responsibleTeam: s.responsibleTeam,
+          plannedStartDate: s.plannedStartDate,
+          plannedEndDate: s.plannedEndDate,
+          actualStartDate: s.actualStartDate,
+          actualEndDate: s.actualEndDate,
+          delayDays: s.delayDays,
+          plannedQuantity: s.plannedQuantity,
+          plannedMolds: s.plannedMolds,
+          remarks: s.remarks,
+        }));
+
+      return { ...overviewRow, calendarStages };
     });
 
     return { rows, summary: computeOverviewSummary(rows, todayIso) };

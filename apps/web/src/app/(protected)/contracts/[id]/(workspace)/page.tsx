@@ -174,7 +174,7 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ContractOverviewScopeCard scopeOfWork={contract.scopeOfWork} />
-        <ContractOverviewPaymentTermsCard paymentTerms={contract.paymentTerms} />
+        <ContractOverviewPaymentTermsCard paymentTerms={contract.paymentTerms} paymentTermDetails={contract.paymentTermDetails} />
         <ContractOverviewAttentionCard items={attentionItems} />
       </div>
 

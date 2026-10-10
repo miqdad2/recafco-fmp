@@ -15,9 +15,10 @@ import {
   ContractValueFields,
 } from '../../_components/contract-form-fields';
 import { BasicContractDetailsFields } from './basic-contract-details-fields';
+import { PaymentTermsFormSection } from '../../_components/payment-terms-editor';
 import { validateBasicDetails } from '../../_lib/contract-party-helpers';
 import type { BasicDetailsErrors } from '../../_lib/contract-party-helpers';
-import { PAYMENT_TERM_OPTIONS, formatContractValue } from '../../_lib/contract-ui-helpers';
+import { formatContractValue } from '../../_lib/contract-ui-helpers';
 import {
   type BoqRow,
   emptyBoqRow,
@@ -192,25 +193,7 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
 
         {/* Section 5 — Payment Terms */}
         <SectionCard badge="5" title="Payment Terms">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {PAYMENT_TERM_OPTIONS.map((opt) => {
-              const Icon = PAYMENT_TERM_ICONS[opt.key];
-              return (
-                <label
-                  key={opt.key}
-                  className="flex items-center justify-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-5 text-sm font-medium text-text-primary text-center cursor-pointer transition-colors has-checked:border-accent has-checked:bg-accent/5 hover:border-border-strong"
-                >
-                  <input
-                    type="checkbox"
-                    name={`paymentTerm_${opt.key}`}
-                    className="rounded border-border text-accent focus:ring-accent"
-                  />
-                  {Icon && <Icon className="size-5 text-text-secondary shrink-0" aria-hidden="true" />}
-                  {opt.label}
-                </label>
-              );
-            })}
-          </div>
+          <PaymentTermsFormSection icons={PAYMENT_TERM_ICONS} />
         </SectionCard>
 
         {/* Section 6 — Contract BOQ / Items */}

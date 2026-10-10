@@ -664,6 +664,7 @@ describe('ContractsService.create', () => {
         projectNumber: 'P-300',
         scopeOfWork: { shopDrawing: true, delivery: false },
         paymentTerms: { advance: true },
+        paymentTermDetails: { advance: { percentage: 10 } },
       },
       ACTOR_VIEWER,
     );
@@ -1162,6 +1163,7 @@ describe('ContractsService.update', () => {
         projectNumber: 'P-300',
         scopeOfWork: { production: true },
         paymentTerms: { retention: true },
+        paymentTermDetails: { retention: { percentage: 5 } },
       },
       ACTOR_ADMIN,
     );
@@ -1510,7 +1512,7 @@ describe('ContractsService.updateBasicDetails (FMP-CONTRACT-03)', () => {
 
     const result = await service.updateBasicDetails(
       'id-1',
-      { ...DTO, quotationNumber: 'Q-1', contractDate: '2026-09-01', endDate: null, paymentTerms: { advance: true } },
+      { ...DTO, quotationNumber: 'Q-1', contractDate: '2026-09-01', endDate: null, paymentTerms: { advance: true }, paymentTermDetails: { advance: { percentage: 10 } } },
       ACTOR_ADMIN,
     );
 
@@ -1518,7 +1520,7 @@ describe('ContractsService.updateBasicDetails (FMP-CONTRACT-03)', () => {
     const call = mockTxContractUpdateMany.mock.calls[0]![0] as { where: Record<string, unknown>; data: Record<string, unknown> };
     expect(call.where['version']).toBe(2);
     expect(Object.keys(call.data).sort()).toEqual(
-      ['contractDate', 'counterpartyName', 'endDate', 'jobOrder', 'paymentTerms', 'quotationNumber', 'title', 'version'],
+      ['contractDate', 'counterpartyName', 'endDate', 'jobOrder', 'paymentTermDetails', 'paymentTerms', 'quotationNumber', 'title', 'version'],
     );
     for (const forbidden of ['status', 'contractValue', 'currency', 'scopeOfWork', 'ownerUserId', 'departmentId', 'scheduleStatus']) {
       expect(call.data).not.toHaveProperty(forbidden);
@@ -1555,6 +1557,107 @@ describe('ContractsService.updateBasicDetails (FMP-CONTRACT-03)', () => {
     mockTxContractUpdateMany.mockResolvedValue({ count: 0 });
     mockTxContractFindUnique.mockResolvedValue({ id: 'contract-1' });
     await expect(service.updateBasicDetails('id-1', DTO, ACTOR_ADMIN)).rejects.toThrow(ConflictException);
+  });
+});
+
+describe('Payment term details through the service (FMP-CONTRACT-06)', () => {
+  it('create saves paymentTerms booleans together with validated details', async () => {
+    mockGetScope.mockResolvedValueOnce(DepartmentAccessScope.ALL_DEPARTMENTS);
+    mockTxContractCreate.mockResolvedValue(makeContract());
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.create(
+      {
+        title: 'T',
+        counterpartyName: 'V',
+        paymentTerms: { advance: true, retention: true, performanceBond: true, insurance: false },
+        paymentTermDetails: { advance: { percentage: 10 }, retention: { percentage: 5 }, performanceBond: { percentage: 10 }, insurance: { percentage: 7 } },
+      },
+      ACTOR_ADMIN,
+    );
+
+    const data = (mockTxContractCreate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data['paymentTerms']).toEqual({ advance: true, retention: true, performanceBond: true, insurance: false });
+    // insurance was not selected → its details are dropped
+    expect(data['paymentTermDetails']).toEqual({ advance: { percentage: 10 }, retention: { percentage: 5 }, performanceBond: { percentage: 10 } });
+  });
+
+  it('create fails when Advance is selected without a percentage, and when a percentage is out of range', async () => {
+    mockGetScope.mockResolvedValue(DepartmentAccessScope.ALL_DEPARTMENTS);
+    await expect(service.create({ title: 'T', counterpartyName: 'V', paymentTerms: { advance: true } }, ACTOR_ADMIN)).rejects.toThrow(
+      UnprocessableEntityException,
+    );
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', paymentTerms: { retention: true }, paymentTermDetails: { retention: { percentage: 150 } } },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    await expect(
+      service.create(
+        { title: 'T', counterpartyName: 'V', paymentTerms: { retention: true }, paymentTermDetails: { retention: { percentage: -2 } } },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
+    expect(mockTxContractCreate).not.toHaveBeenCalled();
+  });
+
+  it('Edit Contract Details updates payment term details and touches nothing else', async () => {
+    mockContractFindUnique.mockResolvedValue(
+      makeContract({ status: ContractStatus.ACTIVE, version: 2, paymentTerms: { advance: true }, paymentTermDetails: { advance: { percentage: 10 } } }),
+    );
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ version: 3 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await service.updateBasicDetails(
+      'id-1',
+      {
+        version: 2,
+        jobOrder: 'JO-9',
+        title: 'T',
+        counterpartyName: 'C',
+        paymentTerms: { advance: true, retention: true },
+        paymentTermDetails: { advance: { percentage: 15 }, retention: { percentage: 5 } },
+      },
+      ACTOR_ADMIN,
+    );
+
+    const call = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(call.data['paymentTermDetails']).toEqual({ advance: { percentage: 15 }, retention: { percentage: 5 } });
+    for (const forbidden of ['status', 'contractValue', 'scopeOfWork', 'scheduleStatus']) {
+      expect(call.data).not.toHaveProperty(forbidden);
+    }
+    expect(mockTxBoqItemDeleteMany).not.toHaveBeenCalled();
+    expect(mockTxBoqItemCreateMany).not.toHaveBeenCalled();
+  });
+
+  it('an old boolean-only contract can be edited without being forced to invent a percentage', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 2, paymentTerms: { advance: true }, paymentTermDetails: null }));
+    mockTxContractUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxContractFindUniqueOrThrow.mockResolvedValue(makeContract({ version: 3 }));
+    mockTxActivityCreate.mockResolvedValue({});
+
+    await expect(
+      service.updateBasicDetails(
+        'id-1',
+        { version: 2, jobOrder: 'JO-9', title: 'T', counterpartyName: 'C', paymentTerms: { advance: true }, paymentTermDetails: {} },
+        ACTOR_ADMIN,
+      ),
+    ).resolves.toBeDefined();
+    const call = mockTxContractUpdateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(call.data['paymentTermDetails']).toEqual({});
+  });
+
+  it('Edit Contract Details still rejects a newly selected Retention without a percentage', async () => {
+    mockContractFindUnique.mockResolvedValue(makeContract({ status: ContractStatus.ACTIVE, version: 2, paymentTerms: { advance: true }, paymentTermDetails: null }));
+    await expect(
+      service.updateBasicDetails(
+        'id-1',
+        { version: 2, jobOrder: 'JO-9', title: 'T', counterpartyName: 'C', paymentTerms: { advance: true, retention: true } },
+        ACTOR_ADMIN,
+      ),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 });
 

@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { SCHEDULE_EMPTY_TITLE, SCHEDULE_EMPTY_BODY, SCHEDULE_EMPTY_NOTE } from '../../../_lib/contract-schedule-plan-form';
 import type { Metadata } from 'next';
 import { CalendarPlus } from 'lucide-react';
 import { contractsApi } from '../../../../../../lib/contracts-api';
@@ -56,13 +57,9 @@ export default async function ContractScheduleTab({ params }: PageProps): Promis
       ) : (
         <section className="rounded-lg border border-dashed border-border bg-surface-secondary/40 p-8 flex flex-col items-center justify-center text-center gap-2">
           <CalendarPlus className="size-6 text-text-muted shrink-0" aria-hidden="true" />
-          <p className="text-sm font-semibold text-text-primary">No planned schedule has been added yet</p>
-          <p className="text-xs text-text-secondary max-w-md">
-            Create this contract&rsquo;s planned timeline for Contract Sign, Advance Payment, Drawing Approval, Estimation Sheet, Casting / Production, Delivery, Erection, and Final Closeout.
-          </p>
-          <p className="text-xs text-text-muted max-w-md">
-            Actual dates will be filled from real system updates such as workflow tasks, payments, production status, and closeout.
-          </p>
+          <p className="text-sm font-semibold text-text-primary">{SCHEDULE_EMPTY_TITLE}</p>
+          <p className="text-xs text-text-secondary max-w-md">{SCHEDULE_EMPTY_BODY}</p>
+          <p className="text-xs text-text-muted max-w-md">{SCHEDULE_EMPTY_NOTE}</p>
           {canUpdate && (
             <div className="mt-1">
               <ContractScheduleEditButton contractId={id} stages={stages} hasPlannedSchedule={false} />

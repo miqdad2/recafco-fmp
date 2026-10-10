@@ -133,7 +133,7 @@ export interface ModuleAccessGroups {
   info: AccessModeInfo;
   /** Single Module Access only: the one module this user works in. */
   primary: UserModuleAccessConfig | null;
-  /** Names of the workflow links that ride on the primary module (Contract Management → Technical, Erection, Schedule Planning). */
+  /** Names of the workflow links that ride on the primary module (Contract Management → Technical, Erection, Advanced Planning). */
   relatedWorkflows: string[];
   /** Multi-Module / Full Platform: every module the role grants. */
   modules: UserModuleAccessConfig[];

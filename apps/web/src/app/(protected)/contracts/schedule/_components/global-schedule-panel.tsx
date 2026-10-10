@@ -11,6 +11,7 @@ import {
   formatOverviewDelayDays,
   overviewDelayDaysClassName,
   filterOverviewRows,
+  scheduleActionLabel,
   type OverviewFilters,
   type DueFilter,
 } from '../_lib/global-schedule-helpers';
@@ -18,6 +19,9 @@ import {
 interface Props {
   rows: ContractScheduleOverviewRow[];
   today: string;
+  /** contracts.update — shows Create/Edit Schedule instead of Open Schedule. */
+  canEdit?: boolean;
+  initialSearch?: string;
 }
 
 const STATUS_OPTIONS: { value: ContractScheduleOverviewStatus | ''; label: string }[] = [
@@ -55,8 +59,8 @@ const TABLE_COLUMNS = [
  * params), not a client Blob download, to stay consistent with every other
  * register page's export behavior.
  */
-export function GlobalSchedulePanel({ rows, today }: Props): React.JSX.Element {
-  const [search, setSearch] = useState('');
+export function GlobalSchedulePanel({ rows, today, canEdit = false, initialSearch = '' }: Props): React.JSX.Element {
+  const [search, setSearch] = useState(initialSearch);
   const [status, setStatus] = useState<ContractScheduleOverviewStatus | ''>('');
   const [team, setTeam] = useState<OverviewFilters['team']>('');
   const [due, setDue] = useState<DueFilter | ''>('');
@@ -135,7 +139,7 @@ export function GlobalSchedulePanel({ rows, today }: Props): React.JSX.Element {
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-surface-secondary/40 py-12 text-center">
             <FileSearch className="size-6 text-text-muted shrink-0" aria-hidden="true" />
-            <p className="text-sm font-medium text-text-secondary mt-1">No active contracts found.</p>
+            <p className="text-sm font-medium text-text-secondary mt-1">No schedule records found.</p>
           </div>
         ) : noContractHasAPlannedSchedule && !hasActiveFilters ? (
           <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-surface-secondary/40 py-12 text-center px-6">
@@ -195,7 +199,7 @@ export function GlobalSchedulePanel({ rows, today }: Props): React.JSX.Element {
                         href={row.actionUrl}
                         className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-text-secondary hover:border-accent hover:text-accent focus:outline-none focus:ring-2 focus:ring-focus"
                       >
-                        Open Schedule
+                        {scheduleActionLabel(row.scheduleStatus, canEdit)}
                         <ArrowUpRight className="size-3.5 shrink-0" aria-hidden="true" />
                       </Link>
                     </td>

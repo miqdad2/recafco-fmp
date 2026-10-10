@@ -1,4 +1,5 @@
 import type { Contract } from '../../../../lib/contracts-api';
+import { paymentTermsStateFrom, toPaymentTermsPayload, validatePaymentTermsState, legacyMissingKeys, type PaymentTermsState } from './payment-terms-helpers';
 
 /** FMP-CONTRACT-03 — form state for the Overview "Edit Contract Details" modal (all strings, so inputs stay controlled). */
 export interface BasicDetailsForm {
@@ -13,7 +14,10 @@ export interface BasicDetailsForm {
   scheduleStatus: string;
   scopeDescription: string;
   notes: string;
-  paymentTerms: Record<string, boolean>;
+  /** FMP-CONTRACT-06 — selected terms plus their percentage / type / status details. */
+  paymentTerms: PaymentTermsState;
+  /** Selected percentage terms saved before percentages existed; they may stay "Not specified". */
+  legacyMissingPercentages: string[];
 }
 
 /** Statuses where basic details may still be edited (closed/terminated/cancelled contracts are final). */
@@ -38,7 +42,8 @@ export function basicDetailsFromContract(c: Contract): BasicDetailsForm {
     scheduleStatus: c.scheduleStatus ?? '',
     scopeDescription: c.scopeDescription ?? '',
     notes: c.notes ?? '',
-    paymentTerms: { ...(c.paymentTerms ?? {}) },
+    paymentTerms: paymentTermsStateFrom(c.paymentTerms, c.paymentTermDetails ?? undefined),
+    legacyMissingPercentages: legacyMissingKeys(c.paymentTerms, c.paymentTermDetails ?? undefined),
   };
 }
 
@@ -48,6 +53,7 @@ export function validateBasicDetails(f: BasicDetailsForm): string[] {
   if (!f.jobOrder.trim()) errors.push('Job Order No is required.');
   if (!f.title.trim()) errors.push('Project / Contract Name is required.');
   if (!f.counterpartyName.trim()) errors.push('Client / Employer is required.');
+  errors.push(...validatePaymentTermsState(f.paymentTerms, f.legacyMissingPercentages));
   return errors;
 }
 
@@ -67,7 +73,7 @@ export function toBasicDetailsPayload(f: BasicDetailsForm, version: number): Rec
     scheduleStatus: nul(f.scheduleStatus),
     scopeDescription: nul(f.scopeDescription),
     notes: nul(f.notes),
-    paymentTerms: f.paymentTerms,
+    ...toPaymentTermsPayload(f.paymentTerms),
   };
 }
 

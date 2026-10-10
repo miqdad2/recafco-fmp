@@ -96,7 +96,7 @@ export default async function ContractPaymentsTab({ params, searchParams }: Page
         nextDueDate={nextDue?.dueDate}
       />
 
-      <ContractPaymentTermsStrip paymentTerms={contract.paymentTerms} />
+      <ContractPaymentTermsStrip paymentTerms={contract.paymentTerms} paymentTermDetails={contract.paymentTermDetails} />
 
       <ContractPaymentFilterBar
         contractId={id}

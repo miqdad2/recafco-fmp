@@ -92,7 +92,7 @@ const MODULE_BREADCRUMBS: Record<string, BreadcrumbItem[]> = {
   ],
   '/contracts/schedule': [
     { label: 'Contract Management', href: '/contracts/dashboard' },
-    { label: 'Schedule' },
+    { label: 'Advanced Planning' },
   ],
   '/contracts/payments': [
     { label: 'Contract Management', href: '/contracts/dashboard' },

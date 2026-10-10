@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Pencil, X } from 'lucide-react';
 import { updateContractBasicDetailsAction } from '../actions';
 import type { Contract } from '../../../../lib/contracts-api';
-import { PAYMENT_TERM_OPTIONS, SCHEDULE_STATUS_OPTIONS } from '../_lib/contract-ui-helpers';
+import { SCHEDULE_STATUS_OPTIONS } from '../_lib/contract-ui-helpers';
+import { PaymentTermsEditor } from './payment-terms-editor';
 import {
   basicDetailsFromContract,
   validateBasicDetails,
@@ -148,21 +149,9 @@ export function ContractEditDetailsAction({ contract }: Props): React.JSX.Elemen
                   Notes / Remarks
                   <textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} className={INPUT_CLS} />
                 </label>
-                <fieldset className="sm:col-span-2">
-                  <legend className="text-sm font-medium text-text-primary">Payment Terms</legend>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                    {PAYMENT_TERM_OPTIONS.map((o) => (
-                      <label key={o.key} className="flex items-center gap-2 text-sm text-text-primary">
-                        <input
-                          type="checkbox"
-                          checked={form.paymentTerms[o.key] === true}
-                          onChange={(e) => set('paymentTerms', { ...form.paymentTerms, [o.key]: e.target.checked })}
-                          className="rounded border-border"
-                        />
-                        {o.label}
-                      </label>
-                    ))}
-                  </div>
+<fieldset className="sm:col-span-2">
+                  <legend className="text-sm font-medium text-text-primary mb-1">Payment Terms</legend>
+                  <PaymentTermsEditor value={form.paymentTerms} onChange={(next) => set('paymentTerms', next)} />
                 </fieldset>
               </div>
             </div>

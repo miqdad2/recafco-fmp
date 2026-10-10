@@ -14763,3 +14763,87 @@ No schema change, no role/permission/user data change.
 - **Fix:** for SELECTED_DEPARTMENTS creators, default to the actor's primary department if granted, else their first granted department (always authorized); ALL_DEPARTMENTS unchanged. List filters, scoping, role permissions and users untouched. Default list view already excludes only CANCELLED (tests exist); list and summary cards share the same department filter.
 - **Existing data:** the two already-created contracts keep `department_id = NULL` and stay hidden for miqdad until backfilled (not done — no data was modified; needs owner approval).
 - Verified: lint, typechecks, tests, build, migrate status (see report).
+
+## FMP-CONTRACT-06 (Payment term percentages / details) — 2026-10-10
+- **Storage:** new additive nullable `contracts.payment_term_details` JSONB (migration `20261010000000_add_contract_payment_term_details`, applied). The existing `paymentTerms` booleans are unchanged and remain the source of truth for "selected" — workflow generation (`Object.values(paymentTerms).some(true)`), the Payments strip and every older reader keep working. Old contracts have NULL details.
+- **Shape (only selected terms are stored):** `advance|retention|performanceBond: {percentage}`, `insurance: {percentage|null}`, `interimPayment: {type: MONTHLY|MILESTONE_BASED|PROGRESS_BASED|OTHER|null, notes}`, `taxClearance: {status: REQUIRED|NOT_REQUIRED|TO_BE_CONFIRMED, notes}`.
+- **API:** `apps/api/src/contracts/payment-terms.ts` validates/normalizes (Advance/Retention/Performance Bond % required when selected, 0–100 decimals, Tax Clearance status required, Insurance % optional, unselected terms dropped); used by create, DRAFT update and `PATCH :id/basic-details`. On edit, a percentage term already selected on a legacy contract with no stored percentage may stay unset; newly selected terms must carry one.
+- **Web:** `PaymentTermsEditor`/`PaymentTermsFormSection` (selected card reveals % input, interim type+notes, tax status+notes) used in New Contract Register, Edit Contract and the Overview Edit Contract Details modal; friendly messages ("Advance % is required."); Overview Payment Terms card and Payments strip show "— 10%", "— Progress Based", "— Required", or "Percentage not set" for older contracts.
+- Unchanged: BOQ, contract value calc, workflow generation, payments module, permissions, status. Existing data untouched.
+- Verified: lint, typechecks, 2240 API / 1341 web tests, web build, migrate status clean. Not exercised in a browser; restart API and web dev server (Prisma client regenerated).
+
+## FMP-CONTRACT-07 (Contract Overview readability for all users) — 2026-10-10
+- **Presentation only** — no API, schema, permission, workflow or data changes. New pure helpers `contract-overview-display-helpers.ts` decide tone/empty states from the already-fetched numbers.
+- **Contract Summary:** a larger key-facts row (Project Name, Company Name, Job Order, Contract Status badge, Days Remaining, Current Contract Value — from `contract.contractValue`) above the secondary fields (Date, Quotation #, Project Number, Contract Manager, Schedule Status). Schedule Status is a badge (Delayed = warning, Completed/On Track = positive, empty = neutral "—"), kept distinct from Contract Status. It uses the existing 5 schedule values (In Progress, On Track, Delayed, Completed, Ahead of Schedule); Not Started/On Hold/Not Applicable do not exist in that field.
+- **Payment Terms:** a selected percentage term with no saved value now reads "Advance — Not specified" (was "Percentage not set"), including Insurance; old contracts are not forced to enter one.
+- **Attention Required:** orange warning style only when there are open items; otherwise a neutral card with a green check and "No open items require attention."
+- **Empty states:** Payment Statement Summary "No payment entries yet.", Production Summary "Production has not started yet.", Documents & Obligations "No attachments or pending obligations." (card links unchanged); Progress Summary adds "No progress recorded yet." only when every ring is 0.
+- Wording is role-neutral (a test scans the Overview components for management-only phrasing). Tabs and all action buttons/permissions unchanged.
+- Verified: lint, typechecks, 1350 web tests, web build, migrate status clean. No API change (2240 API tests unchanged). Not exercised in a browser.
+
+## FMP-CONTRACT-08 (Contract Overview final polish) — 2026-10-10
+- Presentation only; no API/schema/permission/workflow change.
+- **Contract Summary:** three grouped rows driven by `CONTRACT_SUMMARY_LAYOUT` — key facts (Project Name, Company Name, Job Order), key status (Contract Status, Days Remaining, Current Contract Value), secondary details (Date, Quotation #, Project Number, Contract Manager, Schedule Status). Every previous field kept; key rows larger/bolder.
+- **Attention card:** title is "Attention Required" (warning style, count) only with open items; with none it is "No Attention Required", neutral/positive, "No open items require attention."
+- **Production Summary:** status line from `productionStatusMessage` — no tasks: "Production has not started yet."; only pending: "Production tasks are pending."; any in progress: "Production is in progress."; completed + pending: "Production activity has started."; all completed: "Production tasks completed." Counts table still shown whenever tasks exist.
+- **Payment Terms:** "Not specified" (shared `NOT_SPECIFIED`) is muted/italic on the Overview card and Payments strip — never red/warning.
+- Verified: lint, typechecks, 1353 web tests, web build, migrate status clean. Not exercised in a browser.
+
+## FMP-CONTRACT-09 (Contract Detail tabs UI) — 2026-10-10
+- UI only; no routes, labels, permissions, backend or logic changed. All 14 tabs stay visible.
+- Tab definitions moved to `_lib/contract-workspace-tabs.ts` (data: key, label, route segment), grouped visually: **Main** (Overview, Schedule, Payments, Production Status, BOQ Progress) · **Commercial** (Variations / Change Orders, Claims, Risk Assessment) · **Documents & Work** (Documents & Obligations, Workflow & Team Tasks, Issue Log, Attachments) · **History & Closeout** (Activity / Audit History, Closeout).
+- `ContractWorkspaceTabs`: soft container, small uppercase group labels with dividers, red active tab with white text, `aria-current="page"`, `role="group"` per group, icons plus visible text. Desktop: groups wrap as whole groups (no crowded line-wrapping of single tabs). Small screens: one horizontally scrollable row inside the tab bar (page itself never overflows), 36px touch targets, active tab scrolled into view. Active detection now also keeps a tab active on its nested pages (Overview still exact-match only).
+- The layout's staff-tier redirect / focused-erection view that hides the tab bar is untouched.
+- Verified: lint, typechecks, 1360 web tests, web build, migrate status clean. Not exercised in a browser (layout/overflow, light/dark not visually checked).
+
+## FMP-CONTRACT-09B (remove tab grouping) — 2026-10-10
+- Reverses the grouping from FMP-CONTRACT-09: no group labels, headings or dividers. `_lib/contract-workspace-tabs.ts` is a flat `WORKSPACE_TABS` list in the original 14-tab order (Overview … Closeout) with unchanged keys, labels and routes.
+- `ContractWorkspaceTabs`: one soft rounded container, consistent 36px tabs, 16px icons with 8px gap, red active tab (white, semibold, subtle shadow), transparent inactive tabs with hover background, `aria-current="page"`. Desktop wraps cleanly onto a second row; small screens scroll horizontally inside the bar with the active tab scrolled into view. Nested pages keep their tab active (Overview exact-match only).
+- No routes, permissions, backend or logic changed. Verified: lint, typechecks, 1361 web tests, web build, migrate status clean; not exercised in a browser.
+
+## FMP-CONTRACT-10 (Planned Schedule modal usability) — 2026-10-10
+- UI only; the backend (`PATCH :id/schedule/planned`), payload shape, date logic and actual-date derivation are untouched.
+- **Modal:** eight large per-stage cards replaced by one compact table-style layout — columns Stage | Responsible Team | Planned Start | Planned End | Remarks (desktop grid; stacked with field labels on small screens). Wider modal (max-w-6xl), shorter helper text ("Enter planned dates for each stage. Actual dates will update automatically from system activity."), single scroll area, header + Cancel / Save Planned Schedule footer stay fixed.
+- **Responsible Team:** dropdown (Contract Management, Technical, Production, Storage Yard & Delivery, Erection, Finance, Quality Control, Other). Other reveals "Other Team Name"; saved values that do not match an option load as Other with the name prefilled. Stored value is still the plain team string.
+- **Casting / Production only:** a "Production Details" strip with Planned Qty and Planned Molds; no other stage shows or sends them.
+- **Validation (friendly, stage-named):** "Planned End cannot be before Planned Start."; Planned Qty positive number; Planned Molds positive whole number. Dates stay optional per stage.
+- **Empty state** simplified (title + one-line timeline text + "Actual dates will appear automatically from system activity.").
+- Logic lives in `_lib/contract-schedule-plan-form.ts` (tested). Verified: lint, typechecks, 1373 web / 2240 API tests, web build, migrate status clean; not exercised in a browser.
+
+## FMP-PLANNING-01 (Advanced Planning calendar) — 2026-10-10
+- **Rename:** "Schedule Planning" → "Advanced Planning" in the main sidebar, executive sidebar, Contract Management Related Workflows (`access-mode.ts`) and their tests. Route `/contracts/schedule`, gate (`contracts.read`) and links unchanged. Page title "Advanced Planning Calendar", breadcrumb Contract Management > Advanced Planning.
+- **Page:** Calendar View (default) | List View. List View is the existing `GlobalSchedulePanel` table, filters and export, untouched.
+- **Calendar:** Sunday-first month grid (agenda list below `md`); one item per planned stage on its planned start (fallback planned end), showing Job Order/Contract No, stage, team and a status badge. Status is read from existing data: actual end → Completed; planned end before today → Delayed; within 0–7 days → Due This Week; else Planned. Filters: search, team, status, month (with prev/next). Click opens a read-only drawer (contract, job order, client, stage, team, planned start/end, actual, delay, remarks) with Open Contract / Open Schedule.
+- **Backend (additive read-only):** the schedule overview rows now also carry `calendarStages` (planned stages only, a projection of the stage rows already computed). No change to `computeOverviewRow`, status/delay/actual-date derivation, workflow, payment or permissions. No migration.
+- Logic in `contracts/schedule/_lib/advanced-planning-helpers.ts` (tested). Verified: lint, web + API typecheck, 1387 web tests, overview API tests (23), web build, migrate status clean; not exercised in a browser.
+
+## FMP-PLANNING-02 (Advanced Planning calendar polish) — 2026-10-10
+- UI only. **Breadcrumb:** the header breadcrumb for `/contracts/schedule` (`_lib/contract-workspace-breadcrumb.ts`) now reads Contract Management > Advanced Planning (was "Schedule"); the duplicate in-page breadcrumb added in PLANNING-01 was removed. Route, permissions unchanged.
+- **Calendar:** more compact cells (min-h-16, tighter items); item = reference / "Stage · Team" (team dropped when it repeats the stage, via `stageTeamLabel`) / status badge. **Today** button next to the month picker resets the month client-side, filters kept. **Status legend** above the grid. **Upcoming Milestones** panel (right of the calendar on xl, above it on smaller screens): next 8 not-completed milestones from today, in date order, honoring search/team/status (not month), with Open Schedule / Open Contract; empty text "No upcoming milestones found."
+- Drawer, agenda list, List View table, backend, schema untouched. Verified: lint, typecheck, 1390 web tests, web build, migrate status clean; not exercised in a browser.
+
+## FMP-PLANNING-03 (Create/Edit Schedule shortcuts) — 2026-10-10
+- UI only. List View action now reads **Create Schedule** (Not Planned), **Edit Schedule** (planned) for users with `contracts.update` (the same gate as Contract Detail > Schedule); others keep **Open Schedule**. All link to the contract's Schedule tab (source of truth); no modal opened from here, no actual-date editing.
+- Calendar View: **Plan a Contract** button in the Upcoming Milestones header (only with `contracts.update`) switches to List View, carrying the search text. Drawer actions (Open Contract / Open Schedule) unchanged.
+- `scheduleActionLabel` in `global-schedule-helpers.ts`. No backend, permission or schema change. Verified: lint, typecheck, 1392 web tests, web build, migrate status clean; not exercised in a browser.
+
+## FMP-PLANNING-04 (Advanced Planning visual polish) — 2026-10-10
+- Presentation only; no route, permission, backend, schema, filter or KPI-calculation change.
+- Header: updated subtitle, divider, planned/actual note as a chip. KPI cards: local `KpiCard` in `global-schedule-kpi-strip.tsx` (icon tile, number, label, helper text, subtle status top rule); shared `MetricCard` untouched, values still straight from the server summary.
+- Toolbar: search is the primary field (icon, wider); Today is a soft accent button; consistent prev/next buttons; pill-style status legend. Calendar: rounded card, today = filled date circle + ring, Fri/Sat subtly shaded, item hover lift, rounded status pills.
+- Upcoming Milestones: "Upcoming Milestones (N)" + "Next planned activities"; items use the non-repeating stage/team label. Drawer: project/reference eyebrow, larger stage title, status + team chips, tinted footer; still read-only. List View empty text now "No schedule records found."
+- Verified: lint, typecheck, 1395 web tests, web build, migrate status clean; not viewed in a browser.
+
+## FMP-PLANNING-05 (Quick Plan Activity from Advanced Planning) — 2026-10-10
+- **No new endpoint, no new record type.** Quick Plan saves ONE stage through the existing `updateContractSchedulePlanAction` -> `PATCH :id/schedule/planned` (upsert per stage; contracts.update + department scope enforced server-side). Other stages are never sent, so never overwritten; the first save for a contract simply creates its schedule item. Contract Detail > Schedule remains the source of truth; actual dates are not in the form.
+- **UI (contracts.update only):** click a date (or the hover "+" / toolbar "Plan Activity", the only entry on the mobile agenda) -> Plan Activity modal: contract search+select ("Job Order — Project — Client", from the already scope-filtered overview rows), stage (8), team (+Other name), Planned Start (prefilled), Planned End, remarks, Planned Qty/Molds for Casting / Production only. Existing stage with planned dates -> "This activity already has a planned date. Do you want to update it?" with Cancel / Update Activity. Drawer gets **Edit Plan** (prefilled; contract and stage fixed, no overwrite prompt). Hint "Click a date to plan an activity." shown only with contracts.update; empty months still show the grid for them. Success banner "Activity planned successfully." then `router.refresh()` updates calendar, upcoming and list.
+- **Backend (additive, read-only):** overview `calendarStages` also carries plannedQuantity / plannedMolds (for Edit Plan prefill). No logic, permission or schema change.
+- Logic in `schedule/_lib/quick-plan.ts` (reuses `contract-schedule-plan-form.ts`); modal `schedule/_components/quick-plan-modal.tsx`. Verified: lint, web + API typecheck, 1405 web / 1094 API contracts tests, web build, migrate status clean; not exercised in a browser or against a live save.
+
+## FMP-PLANNING-06 (Quick planning UX + Friday off-day) — 2026-10-10
+- UI/validation only; no backend, schema, permission or actual-date change. Contract Schedule stays the source of truth.
+- **Friday off day:** Friday header ("Fri / Friday off") and Friday cells get a subtle warning-tinted background and a "Friday off" tooltip; Saturday is no longer shaded (PLANNING-04 shaded Fri+Sat). Items stay visible; the today circle/ring still shows on a Friday.
+- **Warning (not an error, never blocks):** the Plan Activity / Edit Plan modal shows "This date is Friday, which is normally an off day. You can still plan this activity if required." whenever Planned Start or End is a Friday — including when opened from a Friday cell and when the date is changed.
+- **Save confirmation:** saving with a Friday start/end asks "This activity is planned on Friday, which is normally an off day. Do you want to continue?" — Cancel / Plan Anyway. Order: validation (incl. end-before-start), existing-stage overwrite prompt, Friday prompt, save. Non-Friday saves are unchanged.
+- **Placement:** Plan Activity (calendar-plus icon, contracts.update only) moved out of the filter toolbar to the right of the Calendar/List toggle row (visible in both views). Toolbar = search, team, status, month, prev/next, Today. Hint stays beside the calendar title.
+- Logic: \`isFriday\`, \`hasFridayDate\`, \`FRIDAY_WARNING\`, \`FRIDAY_CONFIRM\` in \`schedule/_lib/quick-plan.ts\`. Verified: lint, typecheck, 1410 web tests, web build, migrate status clean; not exercised in a browser.

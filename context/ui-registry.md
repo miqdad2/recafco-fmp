@@ -3150,3 +3150,33 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 - A Technical-only user is Single Module Access with primary module **Technical**: /dashboard sends them to /technical, the sidebar shows a **Technical** section with one **Dashboard** link (no Contract Management workspace, no Schedule Planning).
 - User creation: **Technical** is a Primary Module / Modules choice (Module Staff suggests Technical Staff, Module Manager suggests Technical Manager). Its department scope is stored on the Contract Management scope row, shown under the name **Technical**; the Edit User tab shows the same.
 - Technical write buttons need technical.update (or the older contracts.update / contracts.workflow_update); deleting others files needs technical.manage / contracts.manage.
+
+## Payment Terms editor (FMP-CONTRACT-06)
+- Path: `apps/web/src/app/(protected)/contracts/_components/payment-terms-editor.tsx` (`PaymentTermsEditor` controlled, `PaymentTermsFormSection` for plain-form screens) + `_lib/payment-terms-helpers.ts`
+- Purpose: Payment Terms checkbox cards; a selected card shows its own compact inputs (Advance/Retention/Performance Bond/Insurance %, Interim type + notes, Tax Clearance status + notes). Reused in New Contract Register, Edit Contract and the Edit Contract Details modal; Overview card/Payments strip render the saved details via `paymentTermDetailText`.
+
+## Contract Overview display states (FMP-CONTRACT-07)
+- Path: `apps/web/src/app/(protected)/contracts/_lib/contract-overview-display-helpers.ts` + `_components/contract-overview-*.tsx`
+- Patterns: Summary card = larger "key facts" row + secondary fields; Schedule Status badge (warning/positive/neutral); Attention card neutral-with-check when empty (warning only with open items); `EmptyState` message in place of all-zero summary tables (payments, production, documents); Progress "No progress recorded yet." helper; payment-term detail "Not specified".
+- FMP-CONTRACT-08: Contract Summary is three grouped rows (`CONTRACT_SUMMARY_LAYOUT`); Attention card title switches to "No Attention Required" when empty; Production Summary shows a one-line state message (`productionStatusMessage`); "Not specified" payment-term values are muted italic.
+
+## Contract workspace tab bar (FMP-CONTRACT-09)
+- Path: `apps/web/src/app/(protected)/contracts/_components/contract-workspace-tabs.tsx` + `_lib/contract-workspace-tabs.ts`
+- Pattern: grouped tab bar (group label + divider, red active tab, icon + text); wraps by group on desktop, scrolls horizontally inside its own container on small screens with the active tab scrolled into view. Tab data (keys, labels, segments) lives in the lib file; icons are mapped by key in the component.
+- FMP-CONTRACT-09B: the Contract workspace tab bar is single-level again (grouping removed). Flat list in `_lib/contract-workspace-tabs.ts`; wraps on desktop, scrolls inside the bar on small screens.
+
+## Planned Schedule modal (FMP-CONTRACT-10)
+- Path: `apps/web/src/app/(protected)/contracts/[id]/(workspace)/schedule/_components/contract-schedule-edit-drawer.tsx` + `_lib/contract-schedule-plan-form.ts`
+- Pattern: one compact row per stage (Stage, Responsible Team select with "Other Team Name", Planned Start/End, Remarks); stage-specific "Production Details" strip only for Casting / Production; fixed header/footer with a single scroll area.
+
+## Advanced Planning calendar (FMP-PLANNING-01)
+- Path: `apps/web/src/app/(protected)/contracts/schedule/_components/advanced-planning-panel.tsx` + `_lib/advanced-planning-helpers.ts`
+- Pattern: Calendar View | List View toggle (calendar default; list = unchanged `GlobalSchedulePanel`); month grid with compact items (reference, stage, team, status badge, subtle team-colored left border, "+N more"); agenda list below `md`; read-only right-side details drawer (Escape/backdrop closes) with Open Contract / Open Schedule links.
+- FMP-PLANNING-02: calendar item = reference / "Stage · Team" (no repeated wording) / status badge; Today button beside the month picker; status legend; "Upcoming Milestones" side panel (xl) / above-calendar block (smaller) with Open Schedule / Open Contract. Helpers: `stageTeamLabel`, `upcomingMilestones`.
+- FMP-PLANNING-03: List View row action = Create Schedule / Edit Schedule (contracts.update) or Open Schedule; "Plan a Contract" button in Upcoming Milestones switches to List View (search carried over). Helper: `scheduleActionLabel`.
+- FMP-PLANNING-04: Advanced Planning KPI cards (`KpiCard` in `global-schedule-kpi-strip.tsx`: icon tile + number + label + helper, status top rule); search-primary toolbar, today date-circle, Fri/Sat shading, pill legend, drawer header with status + team chips. Page-local; `MetricCard` unchanged.
+
+## Quick Plan Activity (FMP-PLANNING-05)
+- Path: `apps/web/src/app/(protected)/contracts/schedule/_components/quick-plan-modal.tsx` + `_lib/quick-plan.ts`
+- Pattern: centered modal (Plan Activity / Edit Plan) with searchable contract select, stage/team selects, planned dates, production strip for Casting / Production only, inline friendly errors, in-modal overwrite confirmation (Cancel / Update Activity). Entry points are contracts.update-gated: date-cell click + hover "+", toolbar "Plan Activity", drawer "Edit Plan". Success banner via role="status".
+- FMP-PLANNING-06: Friday off-day column (warning-tinted header "Friday off" + cells), Friday warning banner and "Plan Anyway" confirmation in the Quick Plan modal; Plan Activity button right-aligned on the view-toggle row (not in the filter toolbar).

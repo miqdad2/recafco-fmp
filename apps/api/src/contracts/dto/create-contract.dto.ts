@@ -85,6 +85,11 @@ export class CreateContractDto {
   @IsObject()
   paymentTerms?: Record<string, boolean>;
 
+  // FMP-CONTRACT-06 — per-term percentages / types / status; validated in payment-terms.ts.
+  @IsOptional()
+  @IsObject()
+  paymentTermDetails?: Record<string, unknown>;
+
   @IsOptional()
   @IsString()
   @MaxLength(150)

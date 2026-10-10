@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { contractsApi } from '@/lib/contracts-api';
+import { readPaymentTermsState, validatePaymentTermsState, toPaymentTermsPayload, anyPaymentTermSelected } from './_lib/payment-terms-helpers';
 import { fetchBoqConfirmations } from '@/lib/technical-api';
 import type { BoqConfirmationItem } from '@/lib/technical-api';
 
@@ -111,7 +112,6 @@ const SCOPE_OF_WORK_KEYS = [
   'other',
   'notApplicable',
 ];
-const PAYMENT_TERM_KEYS = ['advance', 'retention', 'performanceBond', 'insurance', 'interimPayment', 'taxClearance'];
 
 function readCheckboxGroup(formData: FormData, prefix: string, keys: string[]): Record<string, boolean> | undefined {
   const group: Record<string, boolean> = {};
@@ -158,7 +158,16 @@ export async function createContractAction(
   const quotationNumber = (formData.get('quotationNumber') as string | null)?.trim() || undefined;
   const projectNumber = (formData.get('projectNumber') as string | null)?.trim() || undefined;
   const scopeOfWork = readScopeOfWork(formData);
-  const paymentTerms = readCheckboxGroup(formData, 'paymentTerm', PAYMENT_TERM_KEYS);
+  // FMP-CONTRACT-06 — selected terms + their percentage/type/status details, validated with friendly messages.
+  const paymentTermsState = readPaymentTermsState(formData);
+  const paymentTermsErrors = validatePaymentTermsState(
+    paymentTermsState,
+    ((formData.get('paymentTermLegacyMissing') as string | null) ?? '').split(',').filter(Boolean),
+  );
+  if (paymentTermsErrors.length > 0) return { error: paymentTermsErrors.join(' ') };
+  const paymentTermsPayload = anyPaymentTermSelected(paymentTermsState) ? toPaymentTermsPayload(paymentTermsState) : undefined;
+  const paymentTerms = paymentTermsPayload?.paymentTerms;
+  const paymentTermDetails = paymentTermsPayload?.paymentTermDetails;
   const boqItemsRaw = (formData.get('boqItems') as string | null)?.trim();
   let boqItems: unknown[] | undefined;
   if (boqItemsRaw) {
@@ -210,6 +219,7 @@ export async function createContractAction(
     ...(projectNumber !== undefined ? { projectNumber } : {}),
     ...(scopeOfWork !== undefined ? { scopeOfWork } : {}),
     ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+    ...(paymentTermDetails !== undefined ? { paymentTermDetails } : {}),
     ...(boqItems !== undefined ? { boqItems } : {}),
     ...(contractValue !== undefined && !isNaN(contractValue) ? { contractValue } : {}),
     ...(currency !== undefined ? { currency } : {}),
@@ -266,7 +276,16 @@ export async function updateContractAction(
   const quotationNumber = (formData.get('quotationNumber') as string | null)?.trim() || undefined;
   const projectNumber = (formData.get('projectNumber') as string | null)?.trim() || undefined;
   const scopeOfWork = readScopeOfWork(formData);
-  const paymentTerms = readCheckboxGroup(formData, 'paymentTerm', PAYMENT_TERM_KEYS);
+  // FMP-CONTRACT-06 — selected terms + their percentage/type/status details, validated with friendly messages.
+  const paymentTermsState = readPaymentTermsState(formData);
+  const paymentTermsErrors = validatePaymentTermsState(
+    paymentTermsState,
+    ((formData.get('paymentTermLegacyMissing') as string | null) ?? '').split(',').filter(Boolean),
+  );
+  if (paymentTermsErrors.length > 0) return { error: paymentTermsErrors.join(' ') };
+  const paymentTermsPayload = anyPaymentTermSelected(paymentTermsState) ? toPaymentTermsPayload(paymentTermsState) : undefined;
+  const paymentTerms = paymentTermsPayload?.paymentTerms;
+  const paymentTermDetails = paymentTermsPayload?.paymentTermDetails;
   // Always present on the edit form (even as "[]") so the backend can tell
   // "cleared to zero items" apart from "not touched by this request".
   const boqItemsRaw = (formData.get('boqItems') as string | null)?.trim();
@@ -335,6 +354,7 @@ export async function updateContractAction(
     ...(projectNumber !== undefined ? { projectNumber } : {}),
     ...(scopeOfWork !== undefined ? { scopeOfWork } : {}),
     ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+    ...(paymentTermDetails !== undefined ? { paymentTermDetails } : {}),
     ...(boqItems !== undefined ? { boqItems } : {}),
     ...(contractValue !== undefined && !isNaN(contractValue) ? { contractValue } : {}),
     ...(currency !== undefined ? { currency } : {}),

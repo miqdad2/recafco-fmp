@@ -1171,6 +1171,8 @@ model Contract {
   projectNumber            String?                 @map("project_number") @db.VarChar(100)
   scopeOfWork              Json?                   @map("scope_of_work") @db.JsonB
   paymentTerms             Json?                   @map("payment_terms") @db.JsonB
+  // FMP-CONTRACT-06 — percentages / interim type / tax-clearance status per selected term. paymentTerms booleans stay authoritative for "selected".
+  paymentTermDetails       Json?                   @map("payment_term_details") @db.JsonB
   contractValue            Decimal?                @map("contract_value") @db.Decimal(18, 3)
   currency                 String?                 @db.VarChar(3)
   startDate                DateTime?               @map("start_date") @db.Date

@@ -11,7 +11,8 @@ import {
 const contract = {
   jobOrder: 'JO-1', quotationNumber: 'Q-1', title: 'Tower A', projectNumber: null, counterpartyName: 'Client Co',
   contractDate: '2026-09-01T00:00:00.000Z', startDate: undefined, endDate: '2026-12-31T00:00:00.000Z',
-  scopeDescription: 'Precast', scheduleStatus: 'DELAYED', notes: undefined, paymentTerms: { advance: true },
+  scopeDescription: 'Precast', scheduleStatus: 'DELAYED', notes: undefined, paymentTerms: { advance: true, retention: true },
+  paymentTermDetails: { advance: { percentage: 10 } },
 } as unknown as Contract;
 
 describe('contract basic details helpers (FMP-CONTRACT-03)', () => {
@@ -26,7 +27,10 @@ describe('contract basic details helpers (FMP-CONTRACT-03)', () => {
   it('prefills from the existing contract values', () => {
     const f = basicDetailsFromContract(contract);
     expect(f).toMatchObject({ jobOrder: 'JO-1', title: 'Tower A', counterpartyName: 'Client Co', projectNumber: '', contractDate: '2026-09-01', endDate: '2026-12-31', startDate: '', scheduleStatus: 'DELAYED' });
-    expect(f.paymentTerms).toEqual({ advance: true });
+    expect(f.paymentTerms.enabled['advance']).toBe(true);
+    expect(f.paymentTerms.percentage['advance']).toBe('10');
+    // Retention was saved as a plain checkbox (no percentage): legacy, may stay unset.
+    expect(f.legacyMissingPercentages).toEqual(['retention']);
   });
 
   it('validates with friendly labels, not field names', () => {
@@ -42,7 +46,7 @@ describe('contract basic details helpers (FMP-CONTRACT-03)', () => {
   it('payload contains only safe fields (no BOQ/workflow/payment/status/value)', () => {
     const payload = toBasicDetailsPayload(basicDetailsFromContract(contract), 4);
     expect(Object.keys(payload).sort()).toEqual([
-      'contractDate', 'counterpartyName', 'endDate', 'jobOrder', 'notes', 'paymentTerms', 'projectNumber',
+      'contractDate', 'counterpartyName', 'endDate', 'jobOrder', 'notes', 'paymentTermDetails', 'paymentTerms', 'projectNumber',
       'quotationNumber', 'scheduleStatus', 'scopeDescription', 'startDate', 'title', 'version',
     ]);
     expect(payload['projectNumber']).toBeNull();
@@ -65,5 +69,16 @@ describe('contract basic details helpers (FMP-CONTRACT-03)', () => {
   it('uses the friendly Schedule Status labels', () => {
     expect(SCHEDULE_STATUS_OPTIONS.map((o) => o.label)).toEqual(['In Progress', 'On Track', 'Delayed', 'Completed', 'Ahead of Schedule']);
     expect(scheduleStatusLabel('AHEAD_OF_SCHEDULE')).toBe('Ahead of Schedule');
+  });
+
+  it('payment term details: payload carries percentages, legacy terms save without one, new terms need one (FMP-CONTRACT-06)', () => {
+    const f = basicDetailsFromContract(contract);
+    expect(validateBasicDetails(f)).toEqual([]);
+    const payload = toBasicDetailsPayload(f, 3);
+    expect(payload['paymentTerms']).toMatchObject({ advance: true, retention: true, performanceBond: false });
+    expect(payload['paymentTermDetails']).toEqual({ advance: { percentage: 10 } });
+
+    const added = { ...f, paymentTerms: { ...f.paymentTerms, enabled: { ...f.paymentTerms.enabled, performanceBond: true } } };
+    expect(validateBasicDetails(added)).toEqual(['Performance Bond % is required.']);
   });
 });

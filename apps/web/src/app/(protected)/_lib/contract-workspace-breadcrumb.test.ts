@@ -93,7 +93,7 @@ describe('contractModuleBreadcrumbItems', () => {
   });
 
   it.each([
-    ['/contracts/schedule', 'Schedule'],
+    ['/contracts/schedule', 'Advanced Planning'],
     ['/contracts/payments', 'Payments'],
     ['/contracts/issues', 'Issue Log'],
     ['/contracts/claims', 'Claim Log'],

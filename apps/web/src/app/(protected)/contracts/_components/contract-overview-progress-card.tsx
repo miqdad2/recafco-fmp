@@ -1,4 +1,5 @@
 import type { TeamProgress } from '../_lib/contract-overview-helpers';
+import { isAllProgressZero, PROGRESS_EMPTY_MESSAGE } from '../_lib/contract-overview-display-helpers';
 
 const SIZE = 88;
 const CENTER = SIZE / 2;
@@ -65,6 +66,9 @@ export function ContractOverviewProgressCard({ technical, production, erection, 
         <ProgressRing percent={erection.percent} colorClassName="stroke-accent" label="Erection Progress" />
         <ProgressRing percent={overall.percent} colorClassName="stroke-text-primary" label="Overall Progress" />
       </div>
+      {isAllProgressZero([technical.percent, production.percent, erection.percent, overall.percent]) && (
+        <p className="mt-3 text-center text-xs text-text-muted">{PROGRESS_EMPTY_MESSAGE}</p>
+      )}
     </section>
   );
 }

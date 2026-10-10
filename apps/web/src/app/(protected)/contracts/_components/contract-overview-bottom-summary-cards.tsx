@@ -1,6 +1,15 @@
 import Link from 'next/link';
 import { formatContractValue } from '../_lib/contract-ui-helpers';
 import type { ProductionTaskSummary } from '../_lib/contract-overview-helpers';
+import {
+  DOCUMENTS_EMPTY_MESSAGE,
+  isDocumentsSummaryEmpty,
+  isPaymentStatementEmpty,
+  isProductionSummaryEmpty,
+  PAYMENT_EMPTY_MESSAGE,
+  PRODUCTION_EMPTY_MESSAGE,
+  productionStatusMessage,
+} from '../_lib/contract-overview-display-helpers';
 
 interface SummaryColumn {
   label: string;
@@ -38,6 +47,11 @@ function SummaryTable({ columns }: { columns: SummaryColumn[] }): React.JSX.Elem
       </table>
     </div>
   );
+}
+
+/** FMP-CONTRACT-07 — friendly empty state in place of a row of zeros (the card footer link stays the next step). */
+function EmptyState({ message }: { message: string }): React.JSX.Element {
+  return <p className="py-4 text-center text-sm text-text-secondary">{message}</p>;
 }
 
 function CardShell({
@@ -100,6 +114,9 @@ export function ContractOverviewPaymentStatementCard({
       href={`/contracts/${contractId}/payments`}
       linkLabel="Go to Payments"
     >
+      {isPaymentStatementEmpty(data) ? (
+        <EmptyState message={PAYMENT_EMPTY_MESSAGE} />
+      ) : (
       <SummaryTable
         columns={[
           { label: 'Total Invoices', value: String(data.totalInvoices) },
@@ -109,6 +126,7 @@ export function ContractOverviewPaymentStatementCard({
           { label: 'Overdue', value: formatContractValue(data.overdueValue, undefined), valueClassName: 'text-error' },
         ]}
       />
+      )}
     </CardShell>
   );
 }
@@ -135,6 +153,11 @@ export function ContractOverviewProductionCard({
       href={`/contracts/${contractId}/workflow`}
       linkLabel="Go to Workflow"
     >
+      {isProductionSummaryEmpty(summary) ? (
+        <EmptyState message={PRODUCTION_EMPTY_MESSAGE} />
+      ) : (
+      <>
+      <p className="mb-2 text-sm text-text-secondary">{productionStatusMessage(summary)}</p>
       <SummaryTable
         columns={[
           { label: 'Tasks', value: String(summary.total) },
@@ -144,6 +167,8 @@ export function ContractOverviewProductionCard({
           { label: 'Overdue', value: String(summary.overdue), valueClassName: 'text-error' },
         ]}
       />
+      </>
+      )}
     </CardShell>
   );
 }
@@ -172,12 +197,16 @@ export function ContractOverviewDocumentsCard({
       href={`/contracts/${contractId}/attachments`}
       linkLabel="Go to Attachments"
     >
+      {isDocumentsSummaryEmpty(totalAttachments) ? (
+        <EmptyState message={DOCUMENTS_EMPTY_MESSAGE} />
+      ) : (
       <SummaryTable
         columns={[
           { label: 'Total Attachments', value: String(totalAttachments) },
           { label: 'Pending Obligations', value: '—', valueClassName: 'text-text-muted' },
         ]}
       />
+      )}
     </CardShell>
   );
 }

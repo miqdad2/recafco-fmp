@@ -73,6 +73,7 @@ export default async function EditContractPage({ params }: PageProps): Promise<R
             ...(contract.projectNumber !== undefined ? { projectNumber: contract.projectNumber } : {}),
             ...(contract.scopeOfWork !== undefined ? { scopeOfWork: contract.scopeOfWork } : {}),
             ...(contract.paymentTerms !== undefined ? { paymentTerms: contract.paymentTerms } : {}),
+            ...(contract.paymentTermDetails !== undefined ? { paymentTermDetails: contract.paymentTermDetails } : {}),
             ...(contract.boqItems !== undefined ? { boqItems: contract.boqItems } : {}),
             ...(contract.contractValue !== undefined ? { contractValue: contract.contractValue } : {}),
             ...(contract.currency !== undefined ? { currency: contract.currency } : {}),

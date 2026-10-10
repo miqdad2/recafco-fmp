@@ -119,11 +119,11 @@ describe('Contract Management Related Workflows', () => {
   const labels = (perms: string[]) => contractRelatedLinks(perms).map((l) => l.label);
   const FULL_FLOW = [...CONTRACT_MANAGER, 'production.read', 'storage_delivery.read', 'erection.read', 'tasks.read'];
 
-  it('Contract Manager (contracts.* only) sees Technical, Erection and Schedule Planning with the same links as before', () => {
+  it('Contract Manager (contracts.* only) sees Technical, Erection and Advanced Planning with the same links as before', () => {
     expect(contractRelatedLinks(CONTRACT_MANAGER)).toEqual([
       { label: 'Technical', href: '/technical' },
       { label: 'Erection', href: '/contracts/erection-dashboard' },
-      { label: 'Schedule Planning', href: '/contracts/schedule' },
+      { label: 'Advanced Planning', href: '/contracts/schedule' },
     ]);
   });
 
@@ -134,7 +134,7 @@ describe('Contract Management Related Workflows', () => {
     expect(labels([...CONTRACT_MANAGER, 'storage_delivery.read'])).toContain('Storage Yard & Delivery');
   });
 
-  it('follows the contract execution flow: Technical, Production & Planning, Storage Yard & Delivery, Erection, Schedule Planning', () => {
+  it('follows the contract execution flow: Technical, Production & Planning, Storage Yard & Delivery, Erection, Advanced Planning', () => {
     expect(labels(FULL_FLOW)).toEqual([
       'Technical',
       'Production & Planning',
@@ -142,7 +142,7 @@ describe('Contract Management Related Workflows', () => {
       'Erection',
       'Piece Erection',
       'Task Management',
-      'Schedule Planning',
+      'Advanced Planning',
     ]);
   });
 
@@ -176,7 +176,7 @@ describe('Contract Management Related Workflows', () => {
   });
 
   it('relatedWorkflowsFor only returns names for Contract Management', () => {
-    expect(relatedWorkflowsFor('CONTRACTS_MANAGEMENT')).toEqual(['Technical', 'Erection', 'Schedule Planning']);
+    expect(relatedWorkflowsFor('CONTRACTS_MANAGEMENT')).toEqual(['Technical', 'Erection', 'Advanced Planning']);
     expect(relatedWorkflowsFor('PRODUCTION_DASHBOARD')).toEqual([]);
     expect(relatedWorkflowsFor(null)).toEqual([]);
   });

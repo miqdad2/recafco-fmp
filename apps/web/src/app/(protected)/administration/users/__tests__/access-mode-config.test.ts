@@ -145,7 +145,7 @@ describe('groupModuleAccess (Edit User → Module Access)', () => {
     const g = groupModuleAccess(configs(), CONTRACT_MANAGER, false);
     expect(g.info.mode).toBe('SINGLE_MODULE');
     expect(g.primary?.module).toBe('CONTRACTS_MANAGEMENT');
-    expect(g.relatedWorkflows).toEqual(['Technical', 'Erection', 'Schedule Planning']);
+    expect(g.relatedWorkflows).toEqual(['Technical', 'Erection', 'Advanced Planning']);
     expect(g.administration).toBeNull();
     expect(g.modules).toEqual([]);
     expect(g.other).toEqual([]);

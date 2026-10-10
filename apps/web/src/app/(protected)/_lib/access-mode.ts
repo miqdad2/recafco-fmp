@@ -92,7 +92,7 @@ export const MODULE_DISPLAY_NAMES: Record<ModuleCode, string> = {
 };
 
 /**
- * Technical, Erection and Schedule Planning are not separate permission modules — they ride on
+ * Technical, Erection and Advanced Planning are not separate permission modules — they ride on
  * Contract Management's contracts.read. Production & Planning, Storage Yard & Delivery and Piece Erection have their own
  * permission codes, in contract execution order (Technical → Production → Storage → Erection → Schedule). For a Single Module Contract Management user they are shown together as
  * "Related Workflows"; each link keeps its own gate, nothing is added or removed.
@@ -106,7 +106,7 @@ export const CONTRACT_RELATED_LINKS: { label: string; href: string; permission?:
   { label: 'Piece Erection', href: '/erection/pieces', permission: 'erection.read' },
   // FMP-ACCESS-01C — operational follow-up; same route and gate (tasks.read) as the main sidebar's Task Management link.
   { label: 'Task Management', href: '/factory-tasks/dashboard', permission: 'tasks.read' },
-  { label: 'Schedule Planning', href: '/contracts/schedule' },
+  { label: 'Advanced Planning', href: '/contracts/schedule' },
 ];
 
 /** The Related Workflows links this user may open (the always-on trio plus any permission-gated ones they hold). */

@@ -15,7 +15,9 @@ import {
   ScopeOfWorkFieldset,
   CraneFields,
 } from '../../../_components/contract-form-fields';
-import { PAYMENT_TERM_OPTIONS, formatContractValue } from '../../../_lib/contract-ui-helpers';
+import { formatContractValue } from '../../../_lib/contract-ui-helpers';
+import { PaymentTermsFormSection } from '../../../_components/payment-terms-editor';
+import type { PaymentTermDetails } from '../../../_lib/payment-terms-helpers';
 import {
   type BoqRow,
   type ExistingBoqItem,
@@ -48,6 +50,7 @@ interface DefaultValues {
   projectNumber?: string;
   scopeOfWork?: Record<string, boolean | string>;
   paymentTerms?: Record<string, boolean>;
+  paymentTermDetails?: PaymentTermDetails | null;
   boqItems?: ExistingBoqItem[];
   contractValue?: string;
   currency?: string;
@@ -272,22 +275,7 @@ export function EditContractForm({
 
         {/* Payment Terms */}
         <SectionCard title="Payment Terms">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {PAYMENT_TERM_OPTIONS.map((opt) => (
-              <label
-                key={opt.key}
-                className="flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm font-medium text-text-primary text-center cursor-pointer transition-colors has-[:checked]:border-accent has-[:checked]:bg-accent/5 hover:border-border-strong"
-              >
-                <input
-                  type="checkbox"
-                  name={`paymentTerm_${opt.key}`}
-                  defaultChecked={defaultValues.paymentTerms?.[opt.key] === true}
-                  className="rounded border-border text-accent focus:ring-accent"
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
+          <PaymentTermsFormSection initialTerms={defaultValues.paymentTerms} initialDetails={defaultValues.paymentTermDetails ?? undefined} />
         </SectionCard>
 
         {/* Erection / Crane Information (only when Erection is selected) */}

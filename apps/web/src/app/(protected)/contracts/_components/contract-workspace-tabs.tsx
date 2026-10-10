@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -19,55 +20,52 @@ import {
   Boxes,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { WORKSPACE_TABS, isWorkspaceTabActive, workspaceTabHref } from '../_lib/contract-workspace-tabs';
 
-interface WorkspaceTab {
-  key: string;
-  label: string;
-  segment: string | null;
-  icon: LucideIcon;
-}
-
-// CM-66C — reverted the CM-66B "primary row + More dropdown" split: with 13
-// tabs, a hidden-behind-a-dropdown group made Activity/Attachments/Claims/
-// Risk/Variations harder to find, not easier. Every tab is shown directly,
-// full name, and the row wraps onto a second line instead of scrolling or
-// clipping — no tab is ever hidden behind another control.
-const WORKSPACE_TABS: WorkspaceTab[] = [
-  { key: 'overview', label: 'Overview', segment: null, icon: LayoutGrid },
-  { key: 'schedule', label: 'Schedule', segment: 'schedule', icon: CalendarDays },
-  { key: 'payments', label: 'Payments', segment: 'payments', icon: Wallet },
-  { key: 'production', label: 'Production Status', segment: 'production', icon: Factory },
-  // FMP-BOQ-10 — read-only piece progress across Technical, Production, Storage & Delivery and Erection.
-  { key: 'boq-progress', label: 'BOQ Progress', segment: 'boq-progress', icon: Boxes },
-  { key: 'variations', label: 'Variations / Change Orders', segment: 'variations', icon: GitBranch },
-  { key: 'claims', label: 'Claims', segment: 'claims', icon: HandCoins },
-  { key: 'risks', label: 'Risk Assessment', segment: 'risks', icon: ShieldAlert },
-  { key: 'documents', label: 'Documents & Obligations', segment: 'documents', icon: FileText },
-  { key: 'workflow', label: 'Workflow & Team Tasks', segment: 'workflow', icon: ListChecks },
-  { key: 'issues', label: 'Issue Log', segment: 'issues', icon: MessageSquareWarning },
-  { key: 'attachments', label: 'Attachments', segment: 'attachments', icon: Paperclip },
-  { key: 'activity', label: 'Activity / Audit History', segment: 'activity', icon: History },
-  { key: 'closeout', label: 'Closeout', segment: 'closeout', icon: CheckCircle2 },
-];
+const TAB_ICONS: Record<string, LucideIcon> = {
+  overview: LayoutGrid,
+  schedule: CalendarDays,
+  payments: Wallet,
+  production: Factory,
+  'boq-progress': Boxes,
+  variations: GitBranch,
+  claims: HandCoins,
+  risks: ShieldAlert,
+  documents: FileText,
+  workflow: ListChecks,
+  issues: MessageSquareWarning,
+  attachments: Paperclip,
+  activity: History,
+  closeout: CheckCircle2,
+};
 
 interface Props {
   contractId: string;
 }
 
+/**
+ * Contract workspace tab bar. CM-66C removed the "More" dropdown so no tab is
+ * ever hidden — that still holds. FMP-CONTRACT-09B: a single simple row of
+ * the same 14 tabs in the original order (no group labels or dividers) inside
+ * one soft container. Desktop: tabs wrap cleanly onto a second row if needed.
+ * Small screens: one horizontally scrollable row (scrolling stays inside this
+ * container, never the page) with the active tab scrolled into view.
+ */
 export function ContractWorkspaceTabs({ contractId }: Props): React.JSX.Element {
   const pathname = usePathname();
-  const base = `/contracts/${contractId}`;
+  const activeRef = useRef<HTMLAnchorElement>(null);
 
-  function hrefFor(tab: WorkspaceTab): string {
-    return tab.segment ? `${base}/${tab.segment}` : base;
-  }
+  useEffect(() => {
+    // Keep the active tab visible when the row is scrolled (small screens).
+    activeRef.current?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [pathname]);
 
   function tabClassName(active: boolean): string {
     return [
-      'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3.5 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-focus',
+      'inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-focus',
       active
-        ? 'bg-accent text-white shadow-sm'
-        : 'text-text-secondary hover:bg-surface hover:text-text-primary',
+        ? 'bg-accent font-semibold text-white shadow-sm'
+        : 'font-medium text-text-secondary hover:bg-surface hover:text-text-primary',
     ].join(' ');
   }
 
@@ -75,20 +73,21 @@ export function ContractWorkspaceTabs({ contractId }: Props): React.JSX.Element 
     <div className="-mx-6 lg:-mx-8 px-6 lg:px-8">
       <nav
         aria-label="Contract workspace sections"
-        className="flex flex-wrap items-center gap-1 rounded-lg bg-surface-secondary p-1"
+        className="flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain rounded-lg bg-surface-secondary p-1.5 lg:flex-wrap lg:overflow-x-visible"
       >
         {WORKSPACE_TABS.map((tab) => {
-          const href = hrefFor(tab);
-          const active = pathname === href;
-          const Icon = tab.icon;
+          const href = workspaceTabHref(contractId, tab);
+          const active = isWorkspaceTabActive(pathname, href, tab);
+          const Icon = TAB_ICONS[tab.key];
           return (
             <Link
               key={tab.key}
               href={href}
+              ref={active ? activeRef : undefined}
               aria-current={active ? 'page' : undefined}
               className={tabClassName(active)}
             >
-              <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+              {Icon && <Icon className="size-4 shrink-0" aria-hidden="true" />}
               {tab.label}
             </Link>
           );

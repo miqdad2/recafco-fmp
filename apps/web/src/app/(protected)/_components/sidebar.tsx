@@ -109,12 +109,12 @@ const MAIN_GROUPS: NavGroup[] = [
       PIECE_ERECTION_ITEM,
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
-      // FMP-UI-30 — Schedule Planning promoted to its own main-sidebar item
+      // FMP-UI-30 — Advanced Planning promoted to its own main-sidebar item
       // (was Contract Management's "Schedule" submenu item, which overlapped
       // in spirit with the separate Task Management module). Same route,
       // same CONTRACTS_MANAGEMENT gate as Technical/Erection above — no new
       // permission, no new route.
-      { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
+      { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
     ],
   },
   {
@@ -126,7 +126,7 @@ const MAIN_GROUPS: NavGroup[] = [
 ];
 
 // FMP-UI-30 — cleaned per a direct "this overlaps with other modules"
-// report: "Schedule" (now its own main sidebar item, "Schedule Planning" —
+// report: "Schedule" (now its own main sidebar item, "Advanced Planning" —
 // see EXECUTIVE_SIDEBAR_ITEMS/MAIN_GROUPS below), "Workflow & Team Tasks"
 // (overlapped with the separate Task Management module), and "Erection
 // Dashboard" (overlapped with the separate Erection module) are all removed
@@ -193,7 +193,7 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
   'Production & Planning': Factory,
   'Task Management': ClipboardList,
   Erection: HardHat,
-  'Schedule Planning': Calendar,
+  'Advanced Planning': Calendar,
   'Storage Yard & Delivery': Warehouse,
   'Piece Erection': HardHat,
 };
@@ -243,7 +243,7 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
 // Management — its real workflow position (cost estimation/quotation is a
 // pre-contract-execution step, the same reasoning FMP-UI-23 originally
 // placed it there for). Every other FMP-UI-28 href/order is unchanged.
-// FMP-UI-30 — Schedule Planning added after Task Management (12th item).
+// FMP-UI-30 — Advanced Planning added after Task Management (12th item).
 // It was Contract Management's own "Schedule" submenu item
 // (`/contracts/schedule`, unchanged) — promoted to a main module because it
 // overlapped in spirit with the separate Task Management module. Its own
@@ -267,7 +267,7 @@ const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }
   { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
-  { label: 'Schedule Planning', href: '/contracts/schedule', icon: Calendar },
+  { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
@@ -432,7 +432,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   const singleModule = sidebarLayout === 'SINGLE_MODULE' || sidebarLayout === 'CONTRACT_SINGLE_MODULE';
   const contractManagementOnly = sidebarLayout === 'CONTRACT_SINGLE_MODULE';
   const singleModuleLabel = singleModule && accessInfo.primaryModule ? MODULE_DISPLAY_NAMES[accessInfo.primaryModule] : null;
-  // Contract Management → Related Workflows: Technical, Erection, Schedule Planning plus any permission-gated workflow links this user holds.
+  // Contract Management → Related Workflows: Technical, Erection, Advanced Planning plus any permission-gated workflow links this user holds.
   const relatedWorkflowItems = contractRelatedLinks(user.permissions).map((l) => ({
     label: l.label,
     href: l.href,
@@ -741,7 +741,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </Link>
               );
             })}
-            {/* FMP-ACCESS-01 — Technical/Erection/Schedule Planning (and any permission-gated workflow links) are the Contract Management workflow: shown under their own "Related Workflows" heading so they no longer read as extra modules. Every link and gate is unchanged. */}
+            {/* FMP-ACCESS-01 — Technical/Erection/Advanced Planning (and any permission-gated workflow links) are the Contract Management workflow: shown under their own "Related Workflows" heading so they no longer read as extra modules. Every link and gate is unchanged. */}
             <p className="px-4 mb-1 mt-4 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
               Related Workflows
             </p>

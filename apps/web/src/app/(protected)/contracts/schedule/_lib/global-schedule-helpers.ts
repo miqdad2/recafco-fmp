@@ -81,3 +81,14 @@ export function filterOverviewRows(rows: ContractScheduleOverviewRow[], filters:
     return true;
   });
 }
+
+/**
+ * FMP-PLANNING-03 — wording of the per-row schedule shortcut. Create/Edit only
+ * for users who can already edit planned schedules (contracts.update, the
+ * same gate as Contract Detail > Schedule); everyone else keeps "Open Schedule".
+ * All variants link to the contract's own Schedule tab, the source of truth.
+ */
+export function scheduleActionLabel(status: ContractScheduleOverviewStatus, canEdit: boolean): 'Create Schedule' | 'Edit Schedule' | 'Open Schedule' {
+  if (!canEdit) return 'Open Schedule';
+  return status === 'Not Planned' ? 'Create Schedule' : 'Edit Schedule';
+}

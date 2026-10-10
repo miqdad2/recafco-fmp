@@ -1,3 +1,4 @@
+import type { PaymentTermDetails } from '@/app/(protected)/contracts/_lib/payment-terms-helpers';
 import { cookies } from 'next/headers';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
@@ -86,6 +87,8 @@ export interface Contract {
   projectNumber?: string;
   scopeOfWork?: Record<string, boolean | string>;
   paymentTerms?: Record<string, boolean>;
+  // FMP-CONTRACT-06 — percentages / interim type / tax-clearance status; absent or null on older contracts.
+  paymentTermDetails?: PaymentTermDetails | null;
   boqItems?: ContractBoqItem[];
   contractValue?: string;
   currency?: string;
@@ -1184,6 +1187,21 @@ export interface UpdateContractScheduleStageInput {
 
 export type ContractScheduleOverviewStatus = 'Delayed' | 'On Track' | 'Not Planned' | 'Completed' | 'Attention';
 
+/** Advanced Planning calendar — a planned stage of one contract (read-only). */
+export interface ContractScheduleCalendarStage {
+  stageKey: ContractScheduleStageKey;
+  stageName: string;
+  responsibleTeam: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  actualStartDate: string | null;
+  actualEndDate: string | null;
+  delayDays: number | null;
+  plannedQuantity?: number | null;
+  plannedMolds?: number | null;
+  remarks: string | null;
+}
+
 export interface ContractScheduleOverviewRow {
   contractId: string;
   contractNumber: string;
@@ -1204,6 +1222,8 @@ export interface ContractScheduleOverviewRow {
   completedStages: number;
   totalStages: number;
   actionUrl: string;
+  /** Planned stages only (those with a planned start or end date). */
+  calendarStages?: ContractScheduleCalendarStage[];
 }
 
 export interface ContractScheduleOverviewSummary {
