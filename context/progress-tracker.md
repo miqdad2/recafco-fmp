@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** FMP-PROD-04 — Produced details and Send to Storage Yard flow (2026-10-14)
+- **Last completed:** FMP-UI-45 — Factory Performance removed from sidebar (2026-10-14)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -15180,3 +15180,7 @@ The Sent to Storage Yard status, the Send to Storage Yard action and Storage's "
 - **Button visibility:** On Hold shows Resume / Reject / History and Rejected History only (no drawing buttons); every other status keeps View/Download Drawing. Produced never shows Mark Produced again. View-only users see the details and drawings but no update buttons.
 - **Fix found on the way:** the Production list's status-filter links used to be dropped when a filter returned no rows (the board was not rendered); it is now always rendered.
 - Summary cards unchanged: Produced = produced and not yet sent; Sent to Storage Yard = handed over.
+
+## FMP-UI-45 — Factory Performance Removed from Sidebar (Completed 2026-10-14)
+
+Removed the "Factory Performance" external link from both sidebar lists (Operations group and the executive list) in `sidebar.tsx`, along with its URL constant and the unused `Gauge` import. The Platform Dashboard card (`factory-performance-card.tsx`, opens http://192.168.1.17:83) is untouched. The generic `external` link support in the sidebar renderer was left in place (reusable, now unused). Frontend-only; no other sidebar item changed.

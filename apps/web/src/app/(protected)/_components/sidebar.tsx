@@ -30,7 +30,6 @@ import {
   Warehouse,
   ChevronDown,
   ChevronRight,
-  Gauge,
   ExternalLink,
   X,
 } from 'lucide-react';
@@ -56,12 +55,6 @@ interface NavItem {
   /** FMP-UI-37 — an external app, not an FMP route: rendered as a plain `<a target="_blank" rel="noopener noreferrer">`, never Next's `<Link>`, and never checked for "active" (there is no in-app route to match against). */
   external?: boolean;
 }
-
-// FMP-UI-37 — the RECAFCO Factory Performance Dashboard runs as a fully
-// separate app (not an FMP route) — the same URL FMP-UI-36's dashboard card
-// already links to, kept as its own constant here since this file doesn't
-// share code with that card's component.
-const FACTORY_PERFORMANCE_URL = 'http://192.168.1.17:83';
 
 /** Single visibility rule for every sidebar item — the one place "can this user see this link" is decided. */
 function isNavItemVisible(item: NavItem, permissions: string[], hasAnyAdminPermission: boolean): boolean {
@@ -125,12 +118,7 @@ const MAIN_GROUPS: NavGroup[] = [
       // same CONTRACTS_MANAGEMENT gate as Technical/Erection above — no new
       // permission, no new route.
       { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
-      // FMP-UI-37 — Factory Performance Dashboard runs as a separate app
-      // (http://192.168.1.17:83), not an FMP module: no `module`/`permission`
-      // gate, so it is visible to anyone who can see this sidebar at all,
-      // per this unit's own "no permission check" requirement. `external`
-      // routes this through a plain new-tab `<a>`, never Next's `<Link>`.
-      { label: 'Factory Performance', href: FACTORY_PERFORMANCE_URL, icon: Gauge, external: true },
+      // FMP-UI-45 — Factory Performance is no longer in the sidebar (its Platform Dashboard card still opens it).
     ],
   },
   {
@@ -287,11 +275,6 @@ const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon; 
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
   { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar },
-  // FMP-UI-37 — Factory Performance Dashboard, 13th item, after Advanced
-  // Planning. Same external app/URL as the Operations group's own entry
-  // above; no active-state check (see the render loop's `item.external`
-  // branch below).
-  { label: 'Factory Performance', href: FACTORY_PERFORMANCE_URL, icon: Gauge, external: true },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
