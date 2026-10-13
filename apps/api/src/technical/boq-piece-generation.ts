@@ -179,16 +179,18 @@ export function summarizeItemPieces(
 // restrictions come in later units)
 // ---------------------------------------------------------------------------
 
-export type PieceSkipReason = 'CANCELLED' | 'SAME_STATUS' | 'NOT_FOUND' | 'CHANGED' | 'NOT_ALLOWED' | 'NO_GROUP' | 'NOT_RELEASED';
+export type PieceSkipReason = 'CANCELLED' | 'SAME_STATUS' | 'NOT_FOUND' | 'CHANGED' | 'NOT_ALLOWED' | 'NO_GROUP' | 'NOT_RELEASED' | 'NOT_PRODUCED' | 'NO_DRAWING';
 
 export const PIECE_SKIP_MESSAGES: Record<PieceSkipReason, string> = {
-  CANCELLED: 'Cancelled pieces cannot be updated.',
-  SAME_STATUS: 'Piece is already in this status.',
-  NOT_FOUND: 'Piece was not found in this job.',
-  CHANGED: 'Piece was changed by someone else. Please refresh.',
-  NOT_ALLOWED: 'You cannot update pieces to this status.',
+  CANCELLED: 'Cancelled elements cannot be updated.',
+  SAME_STATUS: 'Element is already in this status.',
+  NOT_FOUND: 'Element was not found in this job.',
+  CHANGED: 'Element was changed by someone else. Please refresh.',
+  NOT_ALLOWED: 'You cannot update elements to this status.',
   NO_GROUP: 'No drawing group assigned.',
   NOT_RELEASED: 'Drawing group is not released to Production.',
+  NOT_PRODUCED: 'Only produced elements can be sent to Storage Yard.',
+  NO_DRAWING: 'Final drawing is required before production can start.',
 };
 
 /** Returns why a piece cannot move to the target status, or null when the update is allowed. */
@@ -201,15 +203,15 @@ export function pieceSkipReason(
   return null;
 }
 
-/** "Status updated." / "Pieces updated." / "8 pieces updated. 2 pieces skipped." / the single skip reason when nothing changed. */
+/** "Status updated." / "Elements updated." / "8 elements updated. 2 elements skipped." / the single skip reason when nothing changed. */
 export function buildBulkUpdateMessage(updated: number, skippedReasons: PieceSkipReason[]): string {
   const skipped = skippedReasons.length;
-  const plural = (n: number): string => (n === 1 ? '1 piece' : `${n} pieces`);
-  if (skipped === 0) return updated === 1 ? 'Status updated.' : 'Pieces updated.';
+  const plural = (n: number): string => (n === 1 ? '1 element' : `${n} elements`);
+  if (skipped === 0) return updated === 1 ? 'Status updated.' : 'Elements updated.';
   if (updated > 0) return `${plural(updated)} updated. ${plural(skipped)} skipped.`;
   const distinct = new Set(skippedReasons);
   const only = distinct.size === 1 ? [...distinct][0] : undefined;
-  return only ? PIECE_SKIP_MESSAGES[only] : 'Some pieces were skipped.';
+  return only ? PIECE_SKIP_MESSAGES[only] : 'Some elements were skipped.';
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +228,7 @@ export const ALL_PIECE_UPDATE_STATUSES: ContractBoqPieceStatus[] = [
   ContractBoqPieceStatus.DRAWING_READY,
   ContractBoqPieceStatus.IN_PRODUCTION,
   ContractBoqPieceStatus.PRODUCED,
+  ContractBoqPieceStatus.SENT_TO_STORAGE,
   ContractBoqPieceStatus.IN_STORE,
   ContractBoqPieceStatus.DELIVERED,
   ContractBoqPieceStatus.ERECTED,
@@ -245,6 +248,7 @@ export const PIECE_STATUS_OWNERSHIP: Record<PieceUpdateContext, ContractBoqPiece
   PRODUCTION: [
     ContractBoqPieceStatus.IN_PRODUCTION,
     ContractBoqPieceStatus.PRODUCED,
+    ContractBoqPieceStatus.SENT_TO_STORAGE,
     ContractBoqPieceStatus.ON_HOLD,
     ContractBoqPieceStatus.REJECTED,
   ],

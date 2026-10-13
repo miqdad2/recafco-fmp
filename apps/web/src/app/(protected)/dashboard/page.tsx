@@ -20,6 +20,7 @@ import { platformApi } from '@/lib/platform-api';
 import type { PlatformModuleCode } from '@/lib/platform-api';
 import { getLandingPath } from '../_lib/access-mode';
 import { ExecutiveModuleCard, type ModuleAccent } from './_components/executive-module-card';
+import { FactoryPerformanceCard } from './_components/factory-performance-card';
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -231,6 +232,17 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
               accent={CARD_ACCENTS[card.code]}
             />
           ))}
+          {/* FMP-UI-36 — the Factory Performance Dashboard is a separate app,
+              not a permission-gated platform module, so it is not part of
+              `cards` (no API/permission change, per this unit's own
+              requirement). FACTORY_TASKS ("Task Management") is always the
+              LAST card `platform-dashboard.service.ts` pushes when a user
+              has `tasks.read`, so rendering this immediately after the
+              `cards.map` loop places it right after Task Management for
+              every normal user; it still renders even for the rare actor
+              without `tasks.read`, per this unit's own "no permission check"
+              requirement. */}
+          <FactoryPerformanceCard />
         </div>
       </div>
     </div>

@@ -93,7 +93,7 @@ export class TechnicalDrawingGroupFileService {
     const blocked = groupFileChangeBlockedMessage(group.status, 'upload');
     if (blocked) throw new ConflictException({ code: 'DRAWING_GROUP_FILES_LOCKED', message: blocked });
 
-    validateGroupFile(file);
+    const mimeType = validateGroupFile(file);
     if (!input.category || !(GROUP_FILE_CATEGORIES as readonly string[]).includes(input.category)) {
       throw new UnprocessableEntityException({ code: 'GROUP_FILE_CATEGORY_REQUIRED', message: GROUP_FILE_MESSAGES.noCategory });
     }
@@ -108,7 +108,7 @@ export class TechnicalDrawingGroupFileService {
           boqItemId: group.boqItemId,
           fileName,
           originalName: upload.originalname,
-          mimeType: upload.mimetype,
+          mimeType,
           fileSize: upload.size,
           storagePath,
           category: input.category as GroupFileCategory as TechnicalDrawingGroupFileCategory,

@@ -97,10 +97,10 @@ export interface StorageAttentionRow {
 export function buildStorageNeedsAttentionRows(contracts: StorageContractProgress[]): StorageAttentionRow[] {
   const kpis = buildStorageKpis(contracts);
   return [
-    { label: 'Pieces on Hold', value: kpis.onHold, tone: 'warning', href: '/storage-delivery/pieces?statuses=ON_HOLD' },
-    { label: 'Rejected Pieces', value: kpis.rejected, tone: 'error', href: '/storage-delivery/pieces?statuses=REJECTED' },
-    { label: 'Ready for Store', value: kpis.readyForStore, tone: 'warning', href: '/storage-delivery/pieces?statuses=PRODUCED' },
-    { label: 'In Store', value: kpis.inStore, tone: 'warning', href: '/storage-delivery/pieces?statuses=IN_STORE' },
+    { label: 'Pieces on Hold', value: kpis.onHold, tone: 'warning', href: '/storage-delivery/pieces?status=ON_HOLD' },
+    { label: 'Rejected Pieces', value: kpis.rejected, tone: 'error', href: '/storage-delivery/pieces?status=REJECTED' },
+    { label: 'Ready for Store', value: kpis.readyForStore, tone: 'warning', href: '/storage-delivery/pieces?status=SENT_TO_STORAGE' },
+    { label: 'In Store', value: kpis.inStore, tone: 'warning', href: '/storage-delivery/pieces?status=IN_STORE' },
   ];
 }
 

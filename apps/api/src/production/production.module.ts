@@ -9,10 +9,11 @@ import { ProductionController } from './production.controller';
 import { ProductionPiecesController } from './production-pieces.controller';
 import { ProductionPiecesService } from './production-pieces.service';
 import { TechnicalDrawingGroupFileStorageService } from '../technical/technical-drawing-group-file-storage.service';
+import { TechnicalAttachmentStorageService } from '../technical/technical-attachment-storage.service';
 
 @Module({
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
-  providers: [ProductionRefService, ProductionLinesService, ProductionOrdersService, ProductionPiecesService, TechnicalDrawingGroupFileStorageService],
+  providers: [ProductionRefService, ProductionLinesService, ProductionOrdersService, ProductionPiecesService, TechnicalDrawingGroupFileStorageService, TechnicalAttachmentStorageService],
   controllers: [ProductionPiecesController, ProductionController],
   exports: [ProductionOrdersService],
 })

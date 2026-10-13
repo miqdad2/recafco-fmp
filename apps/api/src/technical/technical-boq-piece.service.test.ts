@@ -278,11 +278,11 @@ describe('pieceSkipReason / buildBulkUpdateMessage', () => {
   });
   it('writes the simple messages', () => {
     expect(buildBulkUpdateMessage(1, [])).toBe('Status updated.');
-    expect(buildBulkUpdateMessage(10, [])).toBe('Pieces updated.');
-    expect(buildBulkUpdateMessage(8, ['SAME_STATUS', 'CANCELLED'])).toBe('8 pieces updated. 2 pieces skipped.');
-    expect(buildBulkUpdateMessage(1, ['CANCELLED'])).toBe('1 piece updated. 1 piece skipped.');
-    expect(buildBulkUpdateMessage(0, ['SAME_STATUS'])).toBe('Piece is already in this status.');
-    expect(buildBulkUpdateMessage(0, ['CANCELLED', 'SAME_STATUS'])).toBe('Some pieces were skipped.');
+    expect(buildBulkUpdateMessage(10, [])).toBe('Elements updated.');
+    expect(buildBulkUpdateMessage(8, ['SAME_STATUS', 'CANCELLED'])).toBe('8 elements updated. 2 elements skipped.');
+    expect(buildBulkUpdateMessage(1, ['CANCELLED'])).toBe('1 element updated. 1 element skipped.');
+    expect(buildBulkUpdateMessage(0, ['SAME_STATUS'])).toBe('Element is already in this status.');
+    expect(buildBulkUpdateMessage(0, ['CANCELLED', 'SAME_STATUS'])).toBe('Some elements were skipped.');
   });
 });
 
@@ -317,7 +317,7 @@ describe('TechnicalBoqPieceService status updates', () => {
     const ids = Array.from({ length: 10 }, (_, i) => String(i + 1).padStart(3, '0'));
     mockPieceFindMany.mockResolvedValue(ids.map((id) => piece(id, P.DRAWING_READY)));
     const result = await service.bulkUpdateStatus('k1', ids, 'PRODUCED', 'Produced today', MANAGER);
-    expect(result).toMatchObject({ updatedCount: 10, skippedCount: 0, message: 'Pieces updated.' });
+    expect(result).toMatchObject({ updatedCount: 10, skippedCount: 0, message: 'Elements updated.' });
     const history = mockHistoryCreateMany.mock.calls[0]?.[0].data as { pieceId: string; newStatus: P }[];
     expect(history).toHaveLength(10);
     expect(history.every((h) => h.newStatus === P.PRODUCED)).toBe(true);
@@ -334,7 +334,7 @@ describe('TechnicalBoqPieceService status updates', () => {
     expect(result.updatedCount).toBe(2);
     expect(result.skippedCount).toBe(3);
     expect(result.skipped.map((s) => s.reason).sort()).toEqual(['CANCELLED', 'NOT_FOUND', 'SAME_STATUS']);
-    expect(result.message).toBe('2 pieces updated. 3 pieces skipped.');
+    expect(result.message).toBe('2 elements updated. 3 elements skipped.');
     const history = mockHistoryCreateMany.mock.calls.flatMap((c) => c[0].data as { pieceId: string; oldStatus: P }[]);
     expect(history.find((h) => h.pieceId === 'a')?.oldStatus).toBe(P.DRAWING_READY);
     expect(history.find((h) => h.pieceId === 'b')?.oldStatus).toBe(P.IN_PRODUCTION);
@@ -352,14 +352,14 @@ describe('TechnicalBoqPieceService status updates', () => {
 
   it('same status is skipped with the plain message and writes nothing', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.PRODUCED)]);
-    await expect(service.updateStatus('k1', 'a', 'PRODUCED', undefined, MANAGER)).rejects.toThrow('Piece is already in this status.');
+    await expect(service.updateStatus('k1', 'a', 'PRODUCED', undefined, MANAGER)).rejects.toThrow('Element is already in this status.');
     await expect(service.updateStatus('k1', 'a', 'PRODUCED', undefined, MANAGER)).rejects.toThrow(ConflictException);
     expect(mockHistoryCreateMany).not.toHaveBeenCalled();
   });
 
   it('a cancelled piece cannot be updated', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.CANCELLED)]);
-    await expect(service.updateStatus('k1', 'a', 'DRAWING_READY', undefined, WRITER)).rejects.toThrow('Cancelled pieces cannot be updated.');
+    await expect(service.updateStatus('k1', 'a', 'DRAWING_READY', undefined, WRITER)).rejects.toThrow('Cancelled elements cannot be updated.');
   });
 
   it('moving a piece to Cancelled marks it cancelled but never deletes it', async () => {
@@ -377,7 +377,7 @@ describe('TechnicalBoqPieceService status updates', () => {
   });
 
   it('asks for at least one piece', async () => {
-    await expect(service.bulkUpdateStatus('k1', [], 'PRODUCED', undefined, MANAGER)).rejects.toThrow('Please select at least one piece.');
+    await expect(service.bulkUpdateStatus('k1', [], 'PRODUCED', undefined, MANAGER)).rejects.toThrow('Please select at least one element.');
   });
 
   it('a read-only user cannot update, but can read history', async () => {
@@ -439,14 +439,14 @@ describe('allowedPieceStatuses', () => {
     expect(allowedPieceStatuses('TECHNICAL', ['contracts.workflow_update'])).toEqual([P.DRAWING_READY, P.ON_HOLD, P.REJECTED, P.CANCELLED]);
   });
   it('the other departments own their own statuses (ready for later units)', () => {
-    expect(PIECE_STATUS_OWNERSHIP.PRODUCTION).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.ON_HOLD, P.REJECTED]);
+    expect(PIECE_STATUS_OWNERSHIP.PRODUCTION).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.SENT_TO_STORAGE, P.ON_HOLD, P.REJECTED]);
     expect(PIECE_STATUS_OWNERSHIP.STORAGE_DELIVERY).toEqual([P.IN_STORE, P.DELIVERED, P.ON_HOLD, P.REJECTED]);
     expect(PIECE_STATUS_OWNERSHIP.ERECTION).toEqual([P.ERECTED, P.COMPLETED, P.ON_HOLD, P.REJECTED]);
   });
   it('manager/admin override (contracts.manage) may set every status, in any department context', () => {
     for (const ctx of ['TECHNICAL', 'PRODUCTION', 'STORAGE_DELIVERY', 'ERECTION'] as const) {
       const all = allowedPieceStatuses(ctx, ['contracts.manage']);
-      expect(all).toHaveLength(10);
+      expect(all).toHaveLength(11);
       expect(all).toEqual(expect.arrayContaining([P.PRODUCED, P.DELIVERED, P.ERECTED, P.COMPLETED]));
       expect(all).not.toContain(P.NOT_STARTED);
     }
@@ -475,7 +475,7 @@ describe('TechnicalBoqPieceService department status controls', () => {
   it.each(['IN_PRODUCTION', 'PRODUCED', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED'] as const)(
     'a normal Technical user cannot set %s',
     async (status) => {
-      await expect(service.updateStatus('k1', 'a', status, undefined, WRITER)).rejects.toThrow('You cannot update pieces to this status.');
+      await expect(service.updateStatus('k1', 'a', status, undefined, WRITER)).rejects.toThrow('You cannot update elements to this status.');
       await expect(service.updateStatus('k1', 'a', status, undefined, WRITER)).rejects.toThrow(ForbiddenException);
     },
   );
@@ -493,7 +493,7 @@ describe('TechnicalBoqPieceService department status controls', () => {
 
   it('a blocked bulk update returns the skipped count and the simple reason, and writes nothing', async () => {
     const result = await service.bulkUpdateStatus('k1', ['a', 'b', 'c'], 'PRODUCED', 'x', WRITER);
-    expect(result).toMatchObject({ updatedCount: 0, skippedCount: 3, message: 'You cannot update pieces to this status.' });
+    expect(result).toMatchObject({ updatedCount: 0, skippedCount: 3, message: 'You cannot update elements to this status.' });
     expect(result.skipped.every((s) => s.reason === 'NOT_ALLOWED')).toBe(true);
     expect(mockPieceFindMany).not.toHaveBeenCalled();
     expect(mockPieceUpdateMany).not.toHaveBeenCalled();
@@ -515,7 +515,7 @@ describe('TechnicalBoqPieceService department status controls', () => {
 
   it('allowedStatuses: Technical writer gets the four Technical statuses, manager gets all, read-only gets none', () => {
     expect(service.allowedStatuses(WRITER).statuses).toEqual([P.DRAWING_READY, P.ON_HOLD, P.REJECTED, P.CANCELLED]);
-    expect(service.allowedStatuses(MANAGER).statuses).toHaveLength(10);
+    expect(service.allowedStatuses(MANAGER).statuses).toHaveLength(11);
     expect(service.allowedStatuses(READER).statuses).toEqual([]);
   });
 });

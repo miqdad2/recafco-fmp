@@ -13,6 +13,10 @@ export interface ProductionPiece {
   sizeOrSpecification: string | null;
   currentStatus: BoqPieceStatus;
   updatedAt: string;
+  /** The latest status change (who / note) — empty when the element was only released and never updated. */
+  /** FMP-PROD-03 — where the element's final drawing comes from (its group, or its own files). */
+  drawing: { source: 'GROUP' | 'INDIVIDUAL' | 'NONE'; reference: string; groupTitle: string | null; fileCount: number; hasDrawing: boolean };
+  statusHistory: { newStatus: BoqPieceStatus; note: string | null; createdAt: string; updatedByUser: { displayName: string } | null }[];
   contract: { id: string; referenceNumber: string; jobOrder: string | null; title: string };
   boqItem: { description: string };
   /**
@@ -37,6 +41,7 @@ export interface ProductionPieceSummary {
   readyForProduction: number;
   inProduction: number;
   produced: number;
+  sentToStorage: number;
   onHoldOrRejected: number;
 }
 
@@ -54,9 +59,11 @@ export interface ProductionContractProgress {
   referenceNumber: string;
   jobOrder: string | null;
   projectName: string;
+  clientName: string;
   readyForProduction: number;
   inProduction: number;
   produced: number;
+  sentToStorage: number;
   onHold: number;
   rejected: number;
   lastUpdatedAt: string;

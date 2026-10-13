@@ -36,7 +36,7 @@ interface Props {
 // Contract Management can see pieces but never change them. Cancelled is its own
 // filter here (the department update screens never list cancelled pieces).
 const FILTER_ORDER: (BoqPieceStatus | 'ALL')[] = [
-  'ALL', 'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
+  'ALL', 'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'SENT_TO_STORAGE', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
 ];
 const FILTERS = FILTER_ORDER.map((value) => ({ value, label: value === 'ALL' ? 'All' : BOQ_PIECE_STATUS_LABELS[value] }));
 

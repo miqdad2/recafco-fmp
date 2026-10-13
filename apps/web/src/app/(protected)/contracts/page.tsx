@@ -7,6 +7,10 @@ import { ContractFilterBar } from './_components/contract-filter-bar';
 import { ContractListTable } from './_components/contract-list-table';
 import { contractsApi } from '../../../lib/contracts-api';
 import { getUserPermissions } from './_lib/get-user-permissions';
+import { fetchBoqConfirmations } from '@/lib/technical-api';
+import { summarizeProgress } from './executive/_lib/project-overview-helpers';
+import type { ProjectProgress } from './executive/_lib/project-overview-helpers';
+import { countNeedingAttention, isDateWindowFilter, matchesDueWindow, statusApiValue } from './_lib/contract-list-view-helpers';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
@@ -33,35 +37,37 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const scheduleStatusFilter = typeof params['scheduleStatus'] === 'string' ? params['scheduleStatus'] : undefined;
   const contractTypeFilter = typeof params['contractType'] === 'string' ? params['contractType'] : undefined;
   const daysRemainingFilter = typeof params['daysRemaining'] === 'string' ? params['daysRemaining'] : undefined;
+  // FMP-UI-41 — the Status choice (Draft / Active / Pending Approval / Closed / Cancelled) is the API's own `status` filter.
+  const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
   const ownerFilter = typeof params['ownerUserId'] === 'string' ? params['ownerUserId'] : undefined;
   const search = typeof params['search'] === 'string' ? params['search'] : undefined;
   const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
 
   const hasActiveFilters = Boolean(
-    lifecycleFilter ?? scheduleStatusFilter ?? contractTypeFilter ?? daysRemainingFilter ?? ownerFilter ?? search,
+    lifecycleFilter ?? statusFilter ?? scheduleStatusFilter ?? contractTypeFilter ?? daysRemainingFilter ?? ownerFilter ?? search,
   );
 
   // CM-69I — the exact same filter scope passed to both list() (the table)
   // and summary() (the KPI cards), so the two can never disagree about what
   // "currently visible" means — no separate global/filter-blind KPI query.
+  // Status wins over View when both are chosen (the API reads lifecycleStatus first, so View is left out then).
+  // "This Month" and "Next 3 Months" have no API filter: those load up to 100 contracts and are cut by due date
+  // below; "Due Soon" / "Overdue" use the API's own filters.
+  const statusApi = statusApiValue(statusFilter);
+  const dateWindow = isDateWindowFilter(daysRemainingFilter) ? daysRemainingFilter : undefined;
   const filterParams = {
-    ...(lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
+    ...(statusApi ? { status: statusApi } : lifecycleFilter ? { lifecycleStatus: lifecycleFilter } : {}),
     ...(scheduleStatusFilter ? { scheduleStatus: scheduleStatusFilter } : {}),
     ...(contractTypeFilter ? { contractType: contractTypeFilter } : {}),
-    ...(daysRemainingFilter ? { daysRemaining: daysRemainingFilter } : {}),
+    ...(daysRemainingFilter && !dateWindow ? { daysRemaining: daysRemainingFilter } : {}),
     ...(ownerFilter ? { ownerUserId: ownerFilter } : {}),
     ...(search ? { search } : {}),
   };
 
-  const [listRes, summaryRes, dashboardRes, peopleRes, closeoutsRes] = await Promise.allSettled([
-    contractsApi.list({ page, pageSize: PAGE_SIZE, ...filterParams }),
+  const [listRes, summaryRes, dashboardRes] = await Promise.allSettled([
+    contractsApi.list(dateWindow ? { page: 1, pageSize: 100, ...filterParams } : { page, pageSize: PAGE_SIZE, ...filterParams }),
     contractsApi.summary(filterParams),
     contractsApi.dashboard(),
-    contractsApi.people(),
-    // CM-43 — reuses the existing CM-38 closeout register (pendingOnly) purely
-    // to know which contracts have a request awaiting review, so the row's
-    // primary action can become "Review Closeout" — no new backend endpoint.
-    contractsApi.listCloseouts({ pendingOnly: true, pageSize: 100 }),
   ]);
 
   let error: string | null = null;
@@ -72,18 +78,30 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
   const summary = summaryRes.status === 'fulfilled' ? summaryRes.value : null;
   const scope = dashboardRes.status === 'fulfilled' ? dashboardRes.value.scope : undefined;
-  const people = peopleRes.status === 'fulfilled' ? peopleRes.value : [];
-  const contracts = result?.items ?? [];
-  const total = result?.total ?? 0;
-  const totalPages = result?.totalPages ?? 1;
-  const pendingCloseoutContractIds = new Set(
-    closeoutsRes.status === 'fulfilled' ? closeoutsRes.value.items.map((c) => c.contractId) : [],
-  );
+  let contracts = result?.items ?? [];
+  let total = result?.total ?? 0;
+  let totalPages = result?.totalPages ?? 1;
+  if (dateWindow) {
+    const inWindow = contracts.filter((c) => matchesDueWindow(c, dateWindow));
+    total = inWindow.length;
+    totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    contracts = inWindow.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  }
+
+  // FMP-UI-40 — one read-only BOQ progress fetch per contract on this page (max 25, in parallel).
+  // A cancelled contract has nothing left to track.
+  const boqResults = await Promise.all(contracts.map((c) => (c.status === 'CANCELLED' ? Promise.resolve(null) : fetchBoqConfirmations(c.id))));
+  const boqProgress: Record<string, ProjectProgress | null> = {};
+  contracts.forEach((c, i) => {
+    boqProgress[c.id] = summarizeProgress(boqResults[i] ?? null);
+  });
+  const needsAttention = countNeedingAttention(contracts);
 
   function buildHref(overrides: Record<string, string | undefined>): string {
     const q = new URLSearchParams();
     const merged = {
       lifecycleStatus: lifecycleFilter,
+      status: statusFilter,
       scheduleStatus: scheduleStatusFilter,
       contractType: contractTypeFilter,
       daysRemaining: daysRemainingFilter,
@@ -100,14 +118,14 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   }
 
   return (
-    <div className="px-6 lg:px-8 py-6 max-w-[1920px] mx-auto space-y-6">
+    <div className="px-4 lg:px-6 py-5 max-w-[1920px] mx-auto space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract List</h1>
-          <p className="mt-1.5 text-sm text-text-secondary">View and manage all contracts in one place.</p>
+          <p className="mt-1.5 text-sm text-text-secondary">Find and manage contracts, project status, BOQ, payments, and issues.</p>
+          <div className="mt-2"><DashboardScopeBadge scope={scope} /></div>
         </div>
-        <div className="flex items-center gap-3">
-          <DashboardScopeBadge scope={scope} />
+        <div className="flex flex-wrap items-center gap-3">
           {canCreate && (
             <Link
               href="/contracts/new"
@@ -116,6 +134,13 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
               + New Contract Register
             </Link>
           )}
+          <Link
+            href="/contracts/dashboard"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
+            Open Dashboard
+          </Link>
           <button
             type="button"
             disabled
@@ -125,26 +150,17 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
             <Download className="size-3.5 shrink-0" aria-hidden="true" />
             Export Excel
           </button>
-          <Link
-            href="/contracts/dashboard"
-            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
-          >
-            <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
-            Open Dashboard
-          </Link>
         </div>
       </div>
 
-      <ContractSummaryCards summary={summary} buildHref={buildHref} />
+      <ContractSummaryCards summary={summary} needsAttention={needsAttention} buildHref={buildHref} />
 
       <ContractFilterBar
         search={search}
-        scheduleStatus={scheduleStatusFilter}
-        contractType={contractTypeFilter}
-        ownerUserId={ownerFilter}
-        daysRemaining={daysRemainingFilter}
         lifecycleStatus={lifecycleFilter}
-        people={people}
+        status={statusFilter}
+        daysRemaining={daysRemainingFilter}
+        carried={{ scheduleStatus: scheduleStatusFilter, contractType: contractTypeFilter, ownerUserId: ownerFilter }}
         hasActiveFilters={hasActiveFilters}
       />
 
@@ -156,9 +172,8 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
 
       {contracts.length === 0 && !error ? (
         <div className="rounded-lg border border-border bg-surface p-12 text-center">
-          <p className="text-sm text-text-secondary">
-            {hasActiveFilters ? 'No contracts match the current filters.' : 'No contracts yet.'}
-          </p>
+          <p className="text-sm font-medium text-text-primary">{hasActiveFilters ? 'No contracts found' : 'No contracts yet.'}</p>
+          {hasActiveFilters && <p className="mt-1 text-xs text-text-muted">Try clearing filters or searching another contract.</p>}
           {canCreate && !hasActiveFilters && (
             <Link
               href="/contracts/new"
@@ -172,8 +187,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
         <>
           <ContractListTable
             contracts={contracts}
-            permissions={permissions}
-            pendingCloseoutContractIds={pendingCloseoutContractIds}
+            boqProgress={boqProgress}
             page={page}
             pageSize={PAGE_SIZE}
             total={total}

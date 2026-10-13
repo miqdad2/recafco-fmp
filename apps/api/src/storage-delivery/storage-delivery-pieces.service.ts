@@ -7,7 +7,7 @@ import type { PieceUpdateTargetStatus } from '../technical/dto/boq-piece-status.
 import { storageDeliveryAllowedPieceStatuses } from '../technical/boq-piece-generation';
 import { applyPieceStatusUpdate } from '../technical/boq-piece-status-update';
 import type { PieceStatusUpdateResult } from '../technical/boq-piece-status-update';
-import { listScreenPieces, parseScreenStatuses, screenContractOptions, screenPieceHistory, screenStatusGroups } from '../technical/boq-piece-screen';
+import { SENT_TO_STORAGE_ELEMENT_FILTER, listScreenPieces, parseScreenStatuses, screenContractOptions, screenPieceHistory, screenStatusGroups } from '../technical/boq-piece-screen';
 
 // ---------------------------------------------------------------------------
 // FMP-BOQ-08 — Storage Yard & Delivery view of the BOQ piece engine. It only
@@ -15,24 +15,24 @@ import { listScreenPieces, parseScreenStatuses, screenContractOptions, screenPie
 // engine; it creates no delivery notes, stock movements or dispatch records.
 // ---------------------------------------------------------------------------
 
-/** Statuses this screen shows; anything else (Drawing Ready, In Production, Erected ...) never appears here. */
+/** Statuses this screen shows; anything else (Ready, In Production, Produced-but-not-sent, Erected ...) never appears here. */
 export const STORAGE_VISIBLE_STATUSES: ContractBoqPieceStatus[] = [
-  ContractBoqPieceStatus.PRODUCED,
+  ContractBoqPieceStatus.SENT_TO_STORAGE,
   ContractBoqPieceStatus.IN_STORE,
   ContractBoqPieceStatus.DELIVERED,
   ContractBoqPieceStatus.ON_HOLD,
   ContractBoqPieceStatus.REJECTED,
 ];
 
-/** Default list = Produced + In Store. */
-export const STORAGE_DEFAULT_STATUSES: ContractBoqPieceStatus[] = [ContractBoqPieceStatus.PRODUCED, ContractBoqPieceStatus.IN_STORE];
+/** Default list = Sent to Storage Yard + In Store. */
+export const STORAGE_DEFAULT_STATUSES: ContractBoqPieceStatus[] = [ContractBoqPieceStatus.SENT_TO_STORAGE, ContractBoqPieceStatus.IN_STORE];
 
 export function parseStorageStatuses(statuses: string | undefined): ContractBoqPieceStatus[] {
   return parseScreenStatuses(statuses, STORAGE_VISIBLE_STATUSES, STORAGE_DEFAULT_STATUSES);
 }
 
 export interface StoragePieceSummary {
-  /** Produced pieces not yet stored or delivered. */
+  /** Elements Production has sent over that are not yet stored or delivered. */
   readyForStore: number;
   inStore: number;
   delivered: number;
@@ -43,7 +43,7 @@ export function buildStorageSummary(groups: { currentStatus: ContractBoqPieceSta
   const n = (...statuses: ContractBoqPieceStatus[]): number =>
     groups.filter((g) => statuses.includes(g.currentStatus)).reduce((sum, g) => sum + g.count, 0);
   return {
-    readyForStore: n(ContractBoqPieceStatus.PRODUCED),
+    readyForStore: n(ContractBoqPieceStatus.SENT_TO_STORAGE),
     inStore: n(ContractBoqPieceStatus.IN_STORE),
     delivered: n(ContractBoqPieceStatus.DELIVERED),
     onHoldOrRejected: n(ContractBoqPieceStatus.ON_HOLD, ContractBoqPieceStatus.REJECTED),
@@ -92,7 +92,7 @@ export function buildStorageContractProgress(
       byContract.set(r.contractId, entry);
     }
     switch (r.currentStatus) {
-      case ContractBoqPieceStatus.PRODUCED: entry.readyForStore++; break;
+      case ContractBoqPieceStatus.SENT_TO_STORAGE: entry.readyForStore++; break;
       case ContractBoqPieceStatus.IN_STORE: entry.inStore++; break;
       case ContractBoqPieceStatus.DELIVERED: entry.delivered++; break;
       case ContractBoqPieceStatus.ON_HOLD: entry.onHold++; break;
@@ -142,24 +142,24 @@ export class StorageDeliveryPiecesService {
 
   async list(query: ProductionPieceListQueryDto, actor: AuthUser) {
     this.requireRead(actor);
-    return listScreenPieces(this.db, query, STORAGE_VISIBLE_STATUSES, STORAGE_DEFAULT_STATUSES);
+    return listScreenPieces(this.db, query, STORAGE_VISIBLE_STATUSES, STORAGE_DEFAULT_STATUSES, { sentToStorageOnly: true });
   }
 
   async summary(actor: AuthUser): Promise<StoragePieceSummary> {
     this.requireRead(actor);
-    return buildStorageSummary(await screenStatusGroups(this.db));
+    return buildStorageSummary(await screenStatusGroups(this.db, { sentToStorageOnly: true }));
   }
 
   async contractOptions(actor: AuthUser) {
     this.requireRead(actor);
-    return screenContractOptions(this.db);
+    return screenContractOptions(this.db, { sentToStorageOnly: true });
   }
 
   /** FMP-UI-33 — see buildStorageContractProgress()'s own doc comment above. */
   async contractProgress(actor: AuthUser): Promise<StorageContractProgress[]> {
     this.requireRead(actor);
     const rows = await this.db.getClient().contractBoqPiece.findMany({
-      where: { isCancelled: false },
+      where: { isCancelled: false, ...SENT_TO_STORAGE_ELEMENT_FILTER },
       select: {
         contractId: true,
         currentStatus: true,
@@ -177,6 +177,10 @@ export class StorageDeliveryPiecesService {
   async recentUpdates(actor: AuthUser, limit = 5): Promise<RecentStoragePieceUpdate[]> {
     this.requireRead(actor);
     const rows = await this.db.getClient().contractBoqPieceStatusHistory.findMany({
+      where: {
+        newStatus: { in: STORAGE_VISIBLE_STATUSES },
+        piece: { isCancelled: false, ...SENT_TO_STORAGE_ELEMENT_FILTER },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {

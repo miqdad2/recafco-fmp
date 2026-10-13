@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { AlertCircle, User, Lock, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, ArrowRight, User, Lock, Eye, EyeOff, TriangleAlert } from 'lucide-react';
 import type { LoginState } from '../actions';
 
 interface Props {
@@ -13,7 +13,7 @@ interface Props {
 // state as before — nothing about how credentials are submitted or
 // validated changed, only how the fields and error message look.
 //
-// FMP-UI-08C — field spacing loosened (space-y-5 → space-y-6) and every
+// FMP-UI-08C — field spacing loosened (space-y-4 → space-y-6) and every
 // focus ring switched from the generic blue `--color-focus` to RECAFCO's own
 // brand colors: `ring-accent` (red) on the inputs, `ring-nav` (navy) on the
 // button — a navy ring reads clearly against the button's own red fill,
@@ -57,6 +57,7 @@ interface Props {
 export function LoginForm({ action }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState(action, null);
   const [showPassword, setShowPassword] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
 
   return (
     <form action={formAction} className="space-y-6">
@@ -83,8 +84,8 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             required
             autoComplete="username"
             autoFocus
-            placeholder="Enter company email"
-            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-3 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
+            placeholder="Enter your company email"
+            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-3 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
       </div>
@@ -101,8 +102,11 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             type={showPassword ? 'text' : 'password'}
             required
             autoComplete="current-password"
-            placeholder="Enter password"
-            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-11 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-nav"
+            placeholder="Enter your password"
+            aria-describedby={capsLock ? 'caps-lock-warning' : undefined}
+            onKeyUp={(e) => setCapsLock(e.getModifierState('CapsLock'))}
+            onBlur={() => setCapsLock(false)}
+            className="h-12 w-full rounded-lg border border-border bg-surface pl-11 pr-11 text-base text-text-primary placeholder:text-text-muted transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-accent"
           />
           <button
             type="button"
@@ -114,14 +118,24 @@ export function LoginForm({ action }: Props): React.JSX.Element {
             {showPassword ? <EyeOff className="size-5" aria-hidden="true" /> : <Eye className="size-5" aria-hidden="true" />}
           </button>
         </div>
+        {capsLock && (
+          <p id="caps-lock-warning" role="status" className="mt-2 flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+            <TriangleAlert className="size-4 text-accent" aria-hidden="true" />
+            Caps Lock is on
+          </p>
+        )}
       </div>
 
       <button
         type="submit"
         disabled={isPending}
-        className="h-12 w-full rounded-lg bg-accent text-base font-semibold text-accent-foreground shadow-md transition-all hover:bg-accent-hover hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-nav focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-13 w-full items-center justify-center gap-2 rounded-lg bg-accent text-base font-semibold text-accent-foreground shadow-md transition-all hover:bg-accent-hover hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-nav focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isPending ? 'Signing in…' : 'Sign in'}
+        {isPending ? 'Signing in…' : (
+          <>
+            Sign in <ArrowRight className="size-4" aria-hidden="true" />
+          </>
+        )}
       </button>
     </form>
   );

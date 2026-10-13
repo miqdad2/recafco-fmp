@@ -12,14 +12,14 @@ import {
 import { pieceUpdateOptionsFor } from '../../../technical/_lib/boq-confirmation-helpers';
 
 describe('status filter', () => {
-  it('defaults to Produced + In Store and sends no explicit status (the API applies the default)', () => {
+  it('defaults to Sent to Storage Yard + In Store and sends no explicit status (the API applies the default)', () => {
     const values = readStorageFilterValues({});
     expect(values.status).toBe('DEFAULT');
     expect(buildStorageQuery(values)).toEqual({});
     expect(hasActiveStorageFilters(values)).toBe(false);
   });
-  it('offers All, Produced, In Store, Delivered, Hold and Rejected', () => {
-    expect(STORAGE_STATUS_FILTERS.map((f) => f.label)).toEqual(['Produced + In Store', 'All', 'Produced', 'In Store', 'Delivered', 'Hold', 'Rejected']);
+  it('offers All, Sent to Storage Yard, In Store, Delivered, Hold and Rejected', () => {
+    expect(STORAGE_STATUS_FILTERS.map((f) => f.label)).toEqual(['Sent to Storage Yard + In Store', 'All', 'Sent to Storage Yard', 'In Store', 'Delivered', 'Hold', 'Rejected']);
   });
   it('maps a chosen status to the API list and keeps the other filters', () => {
     const values = readStorageFilterValues({ status: 'DELIVERED', search: ' hc ', contractId: 'c1', drawingNo: 'HC-1', boqItem: 'Slab', page: '2' });
@@ -63,7 +63,7 @@ describe('wording', () => {
   it('empty state when no produced pieces are ready', () => {
     expect(storageEmptyStateText(false)).toEqual({
       title: 'No pieces ready for storage or delivery.',
-      help: 'Pieces will appear here after Production marks them as Produced.',
+      help: 'Elements will appear here after Production sends them to Storage Yard.',
     });
     expect(storageEmptyStateText(true).title).toBe('No pieces match these filters.');
   });

@@ -130,6 +130,7 @@ export {
   TechnicalFdIssueMethod,
   TechnicalFdStatus,
   ContractBoqConfirmationStatus,
+  ContractBoqAttachmentSource,
   ContractBoqPieceStatus,
   TechnicalDrawingGroupStatus,
   TechnicalDrawingGroupFileCategory,

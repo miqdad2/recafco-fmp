@@ -228,7 +228,7 @@ describe('ErectionPiecesService status updates', () => {
   it('bulk update to Erected works and writes a history row for every piece', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.DELIVERED), piece('b', P.DELIVERED)]);
     const result = await service.bulkUpdateStatus(['a', 'b'], 'ERECTED', 'Installed', undefined, ERECTOR);
-    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Pieces updated.' });
+    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Elements updated.' });
     const history = mockHistoryCreateMany.mock.calls[0]?.[0].data as { oldStatus: P; newStatus: P; note: string; updatedById: string }[];
     expect(history).toHaveLength(2);
     expect(history[0]).toMatchObject({ oldStatus: P.DELIVERED, newStatus: P.ERECTED, note: 'Installed', updatedById: 'u1' });
@@ -252,7 +252,7 @@ describe('ErectionPiecesService status updates', () => {
     'cannot set %s — blocked with the simple message and nothing is written',
     async (status) => {
       const result = await service.bulkUpdateStatus(['a'], status, undefined, undefined, ERECTOR);
-      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update pieces to this status.' });
+      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update elements to this status.' });
       expect(mockPieceFindMany).not.toHaveBeenCalled();
       expect(mockHistoryCreateMany).not.toHaveBeenCalled();
     },
@@ -265,7 +265,7 @@ describe('ErectionPiecesService status updates', () => {
 
   it('even the admin override stays inside the Erection statuses', async () => {
     const result = await service.bulkUpdateStatus(['a'], 'DELIVERED', undefined, undefined, ADMIN);
-    expect(result.message).toBe('You cannot update pieces to this status.');
+    expect(result.message).toBe('You cannot update elements to this status.');
   });
 
   it('a read-only user can view but cannot update', async () => {

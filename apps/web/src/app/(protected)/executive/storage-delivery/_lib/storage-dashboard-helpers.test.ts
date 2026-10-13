@@ -122,10 +122,10 @@ describe('buildStorageNeedsAttentionRows', () => {
   it('each row links to the Piece Delivery screen pre-filtered to its own real status', () => {
     const rows = buildStorageNeedsAttentionRows([]);
     expect(rows.map((r) => r.href)).toEqual([
-      '/storage-delivery/pieces?statuses=ON_HOLD',
-      '/storage-delivery/pieces?statuses=REJECTED',
-      '/storage-delivery/pieces?statuses=PRODUCED',
-      '/storage-delivery/pieces?statuses=IN_STORE',
+      '/storage-delivery/pieces?status=ON_HOLD',
+      '/storage-delivery/pieces?status=REJECTED',
+      '/storage-delivery/pieces?status=SENT_TO_STORAGE',
+      '/storage-delivery/pieces?status=IN_STORE',
     ]);
   });
 });

@@ -17,9 +17,9 @@ describe('status filter', () => {
     expect(buildPieceQuery(values)).toEqual({});
     expect(hasActiveFilters(values)).toBe(false);
   });
-  it('offers All, Drawing Ready, In Production, Produced, Hold and Rejected', () => {
+  it('offers Ready, In Production, Produced, On Hold, Rejected, Sent to Storage Yard and All', () => {
     expect(PRODUCTION_STATUS_FILTERS.map((f) => f.label)).toEqual([
-      'Ready + In Production', 'All', 'Drawing Ready', 'In Production', 'Produced', 'Hold', 'Rejected',
+      'Ready + In Production', 'Ready for Production', 'In Production', 'Produced', 'On Hold', 'Rejected', 'Sent to Storage Yard', 'All',
     ]);
   });
   it('maps a chosen status to the API list and keeps the other filters', () => {
@@ -49,15 +49,15 @@ describe('Production update dropdown', () => {
 });
 
 describe('wording', () => {
-  it('has the four summary cards', () => {
-    expect(SUMMARY_CARDS.map((c) => c.label)).toEqual(['Ready for Production', 'In Production', 'Produced', 'On Hold / Rejected']);
+  it('has the five summary cards', () => {
+    expect(SUMMARY_CARDS.map((c) => c.label)).toEqual(['Ready for Production', 'In Production', 'Produced', 'On Hold / Rejected', 'Sent to Storage Yard']);
   });
   it('empty state when no pieces are ready', () => {
     expect(emptyStateText(false)).toEqual({
-      title: 'No pieces ready for production.',
-      help: 'Pieces will appear here after Technical confirms drawings and generates pieces.',
+      title: 'No elements ready for production.',
+      help: 'Elements will appear here after Technical releases them to Production.',
     });
-    expect(emptyStateText(true).title).toBe('No pieces match these filters.');
+    expect(emptyStateText(true).title).toBe('No elements match these filters.');
   });
   it('labels a job by job order, else system reference — never an id', () => {
     expect(contractLabel({ referenceNumber: 'CONTRACT-2026-000012', jobOrder: 'JO-100', title: 'Tower A' })).toBe('JO-100 · Tower A');

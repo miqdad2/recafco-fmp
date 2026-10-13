@@ -4,12 +4,13 @@ import type { ProductionPieceQuery, ProductionPieceSummary } from '@/lib/product
 
 export const PRODUCTION_STATUS_FILTERS: { value: string; label: string; statuses: string | undefined }[] = [
   { value: 'DEFAULT', label: 'Ready + In Production', statuses: undefined },
-  { value: 'ALL', label: 'All', statuses: 'DRAWING_READY,IN_PRODUCTION,PRODUCED,ON_HOLD,REJECTED' },
-  { value: 'DRAWING_READY', label: 'Drawing Ready', statuses: 'DRAWING_READY' },
+  { value: 'DRAWING_READY', label: 'Ready for Production', statuses: 'DRAWING_READY' },
   { value: 'IN_PRODUCTION', label: 'In Production', statuses: 'IN_PRODUCTION' },
   { value: 'PRODUCED', label: 'Produced', statuses: 'PRODUCED' },
-  { value: 'ON_HOLD', label: 'Hold', statuses: 'ON_HOLD' },
+  { value: 'ON_HOLD', label: 'On Hold', statuses: 'ON_HOLD' },
   { value: 'REJECTED', label: 'Rejected', statuses: 'REJECTED' },
+  { value: 'SENT_TO_STORAGE', label: 'Sent to Storage Yard', statuses: 'SENT_TO_STORAGE' },
+  { value: 'ALL', label: 'All', statuses: 'DRAWING_READY,IN_PRODUCTION,PRODUCED,SENT_TO_STORAGE,ON_HOLD,REJECTED' },
 ];
 
 function first(v: string | string[] | undefined): string | undefined {
@@ -62,15 +63,16 @@ export const SUMMARY_CARDS: { key: keyof ProductionPieceSummary; label: string }
   { key: 'inProduction', label: 'In Production' },
   { key: 'produced', label: 'Produced' },
   { key: 'onHoldOrRejected', label: 'On Hold / Rejected' },
+  { key: 'sentToStorage', label: 'Sent to Storage Yard' },
 ];
 
-/** Empty-state wording: "no pieces ready" when nothing is filtered, otherwise a plain "no match". */
+/** Empty-state wording: "no elements ready" when nothing is filtered, otherwise a plain "no match". */
 export function emptyStateText(filtered: boolean): { title: string; help: string } {
   return filtered
-    ? { title: 'No pieces match these filters.', help: 'Try a different status or clear the filters.' }
+    ? { title: 'No elements match these filters.', help: 'Try a different status or clear the filters.' }
     : {
-        title: 'No pieces ready for production.',
-        help: 'Pieces will appear here after Technical confirms drawings and generates pieces.',
+        title: 'No elements ready for production.',
+        help: 'Elements will appear here after Technical releases them to Production.',
       };
 }
 

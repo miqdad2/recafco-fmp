@@ -44,6 +44,18 @@ export function AppShell({ user, children }: AppShellProps): React.JSX.Element {
     return () => document.removeEventListener('keydown', handler);
   }, [mobileOpen]);
 
+  // FMP-UI-44B — inside the protected shell the browser window itself must never be the scroller:
+  // only <main> scrolls. Applied to <html> while the shell is mounted and removed on leaving
+  // (login and other pages outside the shell keep normal page scrolling).
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = previous;
+    };
+  }, []);
+
   // Prevent background scroll when mobile nav is open
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
@@ -62,8 +74,18 @@ export function AppShell({ user, children }: AppShellProps): React.JSX.Element {
     lastFocusRef.current?.focus();
   }, []);
 
+  // FMP-UI-44 / 44B — the shell is exactly one viewport tall and never scrolls itself: the sidebar
+  // and header stay put and only <main> scrolls.
+  //  - `overflow-clip` (not `overflow-hidden`): a hidden-overflow box can still be scrolled by the
+  //    browser (focusing an invalid field, scrollIntoView, an anchor jump); a clipped one cannot.
+  //  - `relative` on the shell AND on <main> is what actually stopped the page scrolling on New
+  //    Contract Register: a position:absolute child with no positioned ancestor (the visually hidden
+  //    file inputs, `sr-only`) is placed against the whole page, so `overflow-clip` on the shell
+  //    could not clip it and it made the document taller than the window. With <main> as the
+  //    containing block it scrolls inside <main> instead.
+  //  - `h-dvh` follows the visible height on phones/tablets, where 100vh is taller than the screen.
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="relative flex h-dvh overflow-clip">
       {/* Mobile backdrop */}
       {mobileOpen && (
         <div
@@ -75,9 +97,9 @@ export function AppShell({ user, children }: AppShellProps): React.JSX.Element {
 
       <Sidebar user={user} mobileOpen={mobileOpen} onClose={closeMenu} pathname={pathname} />
 
-      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+      <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-clip">
         <TopHeader user={user} onMenuOpen={openMenu} />
-        <main id="main-content" className="flex-1 overflow-auto bg-background" tabIndex={-1}>
+        <main id="main-content" className="relative flex-1 min-h-0 overflow-auto overscroll-contain bg-background" tabIndex={-1}>
           {shouldShowReadOnlyBanner(pathname, user.permissions, user.fullPlatformAccess === true) && (
             <p role="status" className="mx-6 mt-4 rounded-md border border-info/20 bg-info-light px-3 py-2 text-xs text-info">
               {FULL_PLATFORM_READ_ONLY_MESSAGE}

@@ -6,12 +6,13 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { hasTechnicalRead, hasTechnicalWrite } from './technical-permissions';
-import { ContractBoqConfirmationStatus, ModuleIdentifier } from '@recafco/database';
+import { randomUUID } from 'node:crypto';
+import { ContractBoqConfirmationStatus, ContractBoqPieceStatus, ModuleIdentifier } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { DepartmentAccessService } from '../department-access/department-access.service';
 import type { AuthUser } from '../common/types/auth-user';
 import type { SaveBoqDrawingConfirmationDto } from './dto/boq-drawing-confirmation.dto';
-import { summarizeItemPieces } from './boq-piece-generation';
+import { planPieceGeneration, summarizeItemPieces } from './boq-piece-generation';
 import type { PieceGroupRow } from './boq-piece-generation';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,17 @@ export function sumConfirmedPieces(
   if (confirmed.length === 0) return null;
   return confirmed.reduce((sum, r) => sum + (r.confirmedPieces ?? 0), 0);
 }
+
+// FMP-TECH-26 — one active confirmation per BOQ item, edited in place while no element has moved on.
+export const CONFIRMATION_MESSAGES = {
+  alreadyConfirmed: 'Elements are already confirmed for this BOQ item. Use Edit Confirmation if changes are needed.',
+  inUseEdit: 'This confirmation cannot be changed because elements are already used in later steps.',
+  inUseCancel: 'This confirmation cannot be cancelled because elements are already used in later steps.',
+  notConfirmed: 'Only a confirmed drawing can be edited here.',
+} as const;
+
+const REMOVED_NOTE = 'Removed: the confirmed number of elements was reduced.';
+const CANCELLED_NOTE = 'Removed: the element confirmation was cancelled.';
 
 const CONFIRMATION_SELECT = {
   id: true,
@@ -180,6 +192,7 @@ export class TechnicalBoqConfirmationService {
       select: { id: true },
     });
     if (!item) throw unprocessable('BOQ_ITEM_REQUIRED', 'Please select BOQ item.');
+    await this.assertNoActiveConfirmation(item.id);
 
     const confirm = dto.action === 'CONFIRM';
     return this.db.getClient().contractBoqDrawingConfirmation.create({
@@ -215,6 +228,7 @@ export class TechnicalBoqConfirmationService {
     if (!dto.drawingNo?.trim()) throw unprocessable('BOQ_DRAWING_NO_REQUIRED', 'Please enter drawing number.');
     const confirm = dto.action === 'CONFIRM';
     const pieces = assertConfirmedPieces(dto.confirmedPieces, confirm);
+    if (confirm) await this.assertNoActiveConfirmation(existing.boqItemId, id);
 
     return this.db.getClient().contractBoqDrawingConfirmation.update({
       where: { id },
@@ -230,6 +244,147 @@ export class TechnicalBoqConfirmationService {
           : {}),
       },
       select: { ...CONFIRMATION_SELECT },
+    });
+  }
+
+  /** A BOQ item has at most one active (Confirmed) confirmation; a second one would double its elements. */
+  private async assertNoActiveConfirmation(boqItemId: string, exceptId?: string): Promise<void> {
+    const active = await this.db.getClient().contractBoqDrawingConfirmation.findFirst({
+      where: { boqItemId, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, ...(exceptId ? { id: { not: exceptId } } : {}) },
+      select: { id: true },
+    });
+    if (active) throw new ConflictException({ code: 'BOQ_ALREADY_CONFIRMED', message: CONFIRMATION_MESSAGES.alreadyConfirmed });
+  }
+
+  /** The confirmation's live elements, and whether any has moved past generation (in a drawing group, or beyond its starting status). */
+  private async elementUsage(confirmationId: string) {
+    const live = await this.db.getClient().contractBoqPiece.findMany({
+      where: { drawingConfirmationId: confirmationId, isCancelled: false },
+      select: { id: true, pieceNo: true, currentStatus: true, drawingGroupLinks: { where: { activeSlot: 1 }, select: { id: true } } },
+    });
+    const inUse = live.some((p) => p.currentStatus !== ContractBoqPieceStatus.DRAWING_READY || p.drawingGroupLinks.length > 0);
+    return { live, inUse };
+  }
+
+  /**
+   * FMP-TECH-26 — edit a CONFIRMED confirmation in place. Text fields (drawing reference, title,
+   * specification, revision, remarks) can always change and are copied to the confirmation's elements.
+   * The number of elements can change only while none of them is used in a later step: a larger number
+   * adds the missing elements, a smaller one cancels the surplus (kept as cancelled, never deleted).
+   */
+  async editConfirmed(contractId: string, id: string, dto: SaveBoqDrawingConfirmationDto, actor: AuthUser) {
+    this.requireWrite(actor);
+    await this.loadContract(contractId, actor);
+    const existing = await this.loadConfirmation(contractId, id);
+
+    if (existing.confirmationStatus !== ContractBoqConfirmationStatus.CONFIRMED) {
+      throw new ConflictException({ code: 'BOQ_CONFIRMATION_NOT_CONFIRMED', message: CONFIRMATION_MESSAGES.notConfirmed });
+    }
+    if (!dto.drawingNo?.trim()) throw unprocessable('BOQ_DRAWING_NO_REQUIRED', 'Please enter drawing number.');
+    const wanted = assertConfirmedPieces(dto.confirmedPieces, true) as number;
+
+    const { live, inUse } = await this.elementUsage(id);
+    const countChanged = wanted !== existing.confirmedPieces;
+    if (countChanged && inUse) {
+      throw new ConflictException({ code: 'BOQ_CONFIRMATION_IN_USE', message: CONFIRMATION_MESSAGES.inUseEdit });
+    }
+
+    const drawingNo = dto.drawingNo.trim();
+    const spec = dto.sizeOrSpecification ?? null;
+    const client = this.db.getClient();
+    const item = await client.contractBoqItem.findFirst({ where: { id: existing.boqItemId, contractId }, select: { sortOrder: true } });
+
+    return client.$transaction(async (tx) => {
+      const updated = await tx.contractBoqDrawingConfirmation.update({
+        where: { id },
+        data: {
+          drawingNo,
+          drawingTitle: dto.drawingTitle ?? null,
+          confirmedPieces: wanted,
+          sizeOrSpecification: spec,
+          revision: dto.revision ?? null,
+          remarks: dto.remarks ?? null,
+        },
+        select: { ...CONFIRMATION_SELECT },
+      });
+
+      if (drawingNo !== existing.drawingNo || spec !== existing.sizeOrSpecification) {
+        await tx.contractBoqPiece.updateMany({ where: { drawingConfirmationId: id }, data: { drawingNo, sizeOrSpecification: spec } });
+      }
+
+      if (countChanged) {
+        const surplus = live.filter((p) => p.pieceNo > wanted);
+        if (surplus.length > 0) {
+          await this.cancelElements(tx, surplus.map((p) => p.id), REMOVED_NOTE, actor.id);
+        } else {
+          // Bigger number: bring back elements this edit removed earlier, then create the rest.
+          const cancelled = await tx.contractBoqPiece.findMany({
+            where: { drawingConfirmationId: id, isCancelled: true, pieceNo: { lte: wanted } },
+            select: { id: true },
+          });
+          if (cancelled.length > 0) {
+            const removedByEdit = await tx.contractBoqPieceStatusHistory.findMany({
+              where: { pieceId: { in: cancelled.map((p) => p.id) }, note: REMOVED_NOTE },
+              select: { pieceId: true },
+            });
+            const restoreIds = [...new Set(removedByEdit.map((h) => h.pieceId))];
+            if (restoreIds.length > 0) {
+              await tx.contractBoqPiece.updateMany({ where: { id: { in: restoreIds } }, data: { isCancelled: false, currentStatus: ContractBoqPieceStatus.DRAWING_READY } });
+              await tx.contractBoqPieceStatusHistory.createMany({
+                data: restoreIds.map((pieceId) => ({
+                  pieceId,
+                  oldStatus: ContractBoqPieceStatus.CANCELLED,
+                  newStatus: ContractBoqPieceStatus.DRAWING_READY,
+                  note: 'Restored: the confirmed number of elements was increased.',
+                  updatedById: actor.id,
+                })),
+              });
+            }
+          }
+          const everyPiece = await tx.contractBoqPiece.findMany({ where: { contractId }, select: { drawingConfirmationId: true, pieceNo: true, pieceCode: true } });
+          const planned = planPieceGeneration(
+            [{ id, boqItemId: existing.boqItemId, boqItemSortOrder: item?.sortOrder ?? 0, drawingNo, confirmedPieces: wanted, sizeOrSpecification: spec, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED }],
+            everyPiece,
+            randomUUID,
+          );
+          if (planned.length > 0) {
+            await tx.contractBoqPiece.createMany({
+              data: planned.map((p) => ({
+                id: p.id,
+                contractId,
+                boqItemId: p.boqItemId,
+                drawingConfirmationId: p.drawingConfirmationId,
+                pieceNo: p.pieceNo,
+                pieceCode: p.pieceCode,
+                currentStatus: ContractBoqPieceStatus.DRAWING_READY,
+                drawingNo: p.drawingNo,
+                ...(p.sizeOrSpecification ? { sizeOrSpecification: p.sizeOrSpecification } : {}),
+              })),
+            });
+            await tx.contractBoqPieceStatusHistory.createMany({
+              data: planned.map((p) => ({ pieceId: p.id, newStatus: ContractBoqPieceStatus.DRAWING_READY, note: 'Created: the confirmed number of elements was increased.', updatedById: actor.id })),
+            });
+          }
+        }
+      }
+      return updated;
+    });
+  }
+
+  /** Marks elements Cancelled (kept for history, never deleted) with a history entry each. */
+  private async cancelElements(
+    tx: unknown,
+    pieceIds: string[],
+    note: string,
+    actorId: string,
+  ): Promise<void> {
+    const t = tx as {
+      contractBoqPiece: { updateMany: (args: unknown) => Promise<unknown> };
+      contractBoqPieceStatusHistory: { createMany: (args: unknown) => Promise<unknown> };
+    };
+    await t.contractBoqPiece.updateMany({ where: { id: { in: pieceIds } }, data: { isCancelled: true, currentStatus: ContractBoqPieceStatus.CANCELLED } });
+    await t.contractBoqPieceStatusHistory.createMany({
+      data: pieceIds.map((pieceId) => ({ pieceId, oldStatus: ContractBoqPieceStatus.DRAWING_READY, newStatus: ContractBoqPieceStatus.CANCELLED, note, updatedById: actorId })),
     });
   }
 
@@ -291,18 +446,19 @@ export class TechnicalBoqConfirmationService {
         message: 'This drawing confirmation cannot be cancelled.',
       });
     }
-    // FMP-BOQ-04 — once pieces were created from a drawing it can no longer be cancelled.
-    const pieceCount = await this.db.getClient().contractBoqPiece.count({ where: { drawingConfirmationId: id } });
-    if (pieceCount > 0) {
-      throw new ConflictException({
-        code: 'BOQ_CONFIRMATION_HAS_PIECES',
-        message: 'Pieces were already generated from this drawing, so it cannot be cancelled.',
-      });
+    // FMP-TECH-26 — elements are generated as soon as a confirmation is made, so cancelling is allowed only
+    // while none of them is used in a later step; they are then marked Cancelled (kept, never deleted).
+    const { live, inUse } = await this.elementUsage(id);
+    if (inUse) {
+      throw new ConflictException({ code: 'BOQ_CONFIRMATION_IN_USE', message: CONFIRMATION_MESSAGES.inUseCancel });
     }
-    return this.db.getClient().contractBoqDrawingConfirmation.update({
-      where: { id },
-      data: { confirmationStatus: ContractBoqConfirmationStatus.CANCELLED },
-      select: { ...CONFIRMATION_SELECT },
+    return this.db.getClient().$transaction(async (tx) => {
+      if (live.length > 0) await this.cancelElements(tx, live.map((p) => p.id), CANCELLED_NOTE, actor.id);
+      return tx.contractBoqDrawingConfirmation.update({
+        where: { id },
+        data: { confirmationStatus: ContractBoqConfirmationStatus.CANCELLED },
+        select: { ...CONFIRMATION_SELECT },
+      });
     });
   }
 }

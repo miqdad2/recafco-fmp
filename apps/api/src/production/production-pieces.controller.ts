@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Res, HttpCode, UseGuards, St
 import type { Response } from 'express';
 import { ProductionPiecesService } from './production-pieces.service';
 import { TechnicalDrawingGroupFileStorageService } from '../technical/technical-drawing-group-file-storage.service';
+import { TechnicalAttachmentStorageService } from '../technical/technical-attachment-storage.service';
 import { ProductionPieceListQueryDto } from './dto/production-piece.dto';
 import { BulkUpdatePieceStatusDto } from '../technical/dto/boq-piece-status.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -27,6 +28,7 @@ export class ProductionPiecesController {
   constructor(
     private readonly service: ProductionPiecesService,
     private readonly fileStorage: TechnicalDrawingGroupFileStorageService,
+    private readonly elementFileStorage: TechnicalAttachmentStorageService,
   ) {}
 
   @Get()
@@ -95,12 +97,50 @@ export class ProductionPiecesController {
     @CurrentUser() actor: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
-    const { storagePath, originalName, mimeType } = await this.service.drawingFileForDownload(pieceId, attachmentId, actor);
+    const { storagePath, originalName, mimeType, source } = await this.service.drawingFileForDownload(pieceId, attachmentId, actor);
     res.set({
       'Content-Type': mimeType,
       'Content-Disposition': `attachment; filename="${encodeURIComponent(originalName)}"`,
     });
-    return new StreamableFile(this.fileStorage.createReadStream(storagePath));
+    return new StreamableFile(this.storageFor(source).createReadStream(storagePath));
+  }
+
+  // FMP-PROD-03 — same file, shown inside the drawing viewer (inline) instead of downloaded.
+  @Get(':pieceId/drawing-files/:attachmentId/view')
+  @Permissions('production.read')
+  async viewDrawingFile(
+    @Param('pieceId', new ParseUUIDPipe({ version: '4' })) pieceId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { storagePath, originalName, mimeType, source } = await this.service.drawingFileForDownload(pieceId, attachmentId, actor);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(originalName)}"`,
+    });
+    return new StreamableFile(this.storageFor(source).createReadStream(storagePath));
+  }
+
+  // FMP-PROD-03 — PNG preview of a TIFF drawing, for the viewer only. Download still serves the original.
+  @Get(':pieceId/drawing-files/:attachmentId/preview')
+  @Permissions('production.read')
+  async previewDrawingFile(
+    @Param('pieceId', new ParseUUIDPipe({ version: '4' })) pieceId: string,
+    @Param('attachmentId', new ParseUUIDPipe({ version: '4' })) attachmentId: string,
+    @CurrentUser() actor: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { previewPath, originalName, source } = await this.service.drawingFilePreview(pieceId, attachmentId, actor);
+    res.set({
+      'Content-Type': 'image/png',
+      'Content-Disposition': `inline; filename="${encodeURIComponent(originalName.replace(/.tiff?$/i, ''))}.png"`,
+    });
+    return new StreamableFile(this.storageFor(source).createReadStream(previewPath));
+  }
+
+  private storageFor(source: 'GROUP' | 'INDIVIDUAL'): TechnicalDrawingGroupFileStorageService | TechnicalAttachmentStorageService {
+    return source === 'GROUP' ? this.fileStorage : this.elementFileStorage;
   }
 
   @Get(':pieceId/history')

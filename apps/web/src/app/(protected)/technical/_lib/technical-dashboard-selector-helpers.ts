@@ -73,7 +73,7 @@ export interface SelectedJobBoqSummary {
   needsAttention: boolean;
 }
 
-/** BOQ Items / Drawing Confirmed Pieces / Pieces Generated / Needs Attention for the Selected Job Progress card — reuses the exact same per-item rules `contractTotals()` already applies on the per-contract BOQ Progress tab. */
+/** BOQ Items / Drawing Confirmed Elements / Elements Generated / Needs Attention for the Selected Job Progress card — reuses the exact same per-item rules `contractTotals()` already applies on the per-contract BOQ Progress tab. */
 export function selectedJobBoqSummary(items: BoqConfirmationItem[] | null): SelectedJobBoqSummary {
   if (items === null || items.length === 0) {
     return { emptyMessage: 'No BOQ drawing confirmation yet.', boqItemCount: 0, confirmedPieces: 0, piecesGenerated: 0, needsAttention: false };
@@ -115,8 +115,8 @@ export function buildTechnicalNeedsAttentionRows(input: {
     { label: 'Overdue Jobs', value: overdueJobs, tone: 'error' },
     { label: 'Waiting Approval', value: input.waitingApproval, tone: 'warning' },
     { label: 'Missing BOQ Drawing Confirmation', value: input.missingBoqConfirmation, tone: 'warning' },
-    { label: 'Confirmed Pieces Not Generated', value: input.confirmedPiecesNotGenerated, tone: 'warning' },
-    { label: 'Rejected / Hold Pieces', value: input.rejectedOrHoldPieces, tone: 'warning' },
+    { label: 'Confirmed Elements Not Generated', value: input.confirmedPiecesNotGenerated, tone: 'warning' },
+    { label: 'Rejected / Hold Elements', value: input.rejectedOrHoldPieces, tone: 'warning' },
   ];
 }
 
@@ -133,10 +133,10 @@ export function prioritizeJobsForTable(jobs: TechnicalJobRow[], needsAttention: 
 // ---------------------------------------------------------------------------
 
 export const RELEASE_MESSAGES = {
-  noPieces: 'No pieces generated yet.',
-  noBoq: 'No BOQ pieces generated yet.',
+  noPieces: 'No elements generated yet.',
+  noBoq: 'No BOQ elements generated yet.',
   noGroups: 'No drawing groups created yet.',
-  noneReleased: 'No pieces released to Production yet.',
+  noneReleased: 'No elements released to Production yet.',
   noFiles: 'No files attached.',
   upToDate: 'All Technical release work is up to date.',
 } as const;
@@ -164,7 +164,7 @@ export function releaseFlow(r: JobReleaseSummary): { key: string; label: string;
 /** The compact counts in Selected Job Progress. */
 export function releaseCounts(r: JobReleaseSummary): { label: string; value: number; warn: boolean }[] {
   return [
-    { label: 'Pieces Generated', value: r.generated, warn: false },
+    { label: 'Elements Generated', value: r.generated, warn: false },
     { label: 'Assigned to Groups', value: r.assigned, warn: false },
     { label: 'Not Assigned', value: r.notAssigned, warn: r.notAssigned > 0 },
     { label: 'Released to Production', value: r.released, warn: false },
@@ -188,7 +188,7 @@ export function buildReleaseAttentionRows(releaseByContract: Record<string, JobR
   const all = Object.values(releaseByContract);
   const sum = (fn: (r: JobReleaseSummary) => number): number => all.reduce((t, r) => t + fn(r), 0);
   return [
-    { label: 'Pieces Not Assigned', value: sum((r) => r.notAssigned), tone: 'warning' },
+    { label: 'Elements Not Assigned', value: sum((r) => r.notAssigned), tone: 'warning' },
     { label: 'Groups Not Released', value: sum((r) => r.groupsNotReleased), tone: 'warning' },
     { label: 'Groups With No Files', value: sum((r) => r.groupsNoFiles), tone: 'warning' },
   ];
@@ -205,8 +205,8 @@ export interface NextActionItem {
 }
 
 /**
- * Next Action Focus, at most 5, in this order: confirmed pieces not generated,
- * generated pieces not assigned, groups with no files, submitted groups waiting
+ * Next Action Focus, at most 5, in this order: confirmed elements not generated,
+ * generated elements not assigned, groups with no files, submitted groups waiting
  * approval, approved groups waiting release, then the existing workflow actions.
  */
 export function buildNextActionItems(
@@ -217,8 +217,8 @@ export function buildNextActionItems(
 ): NextActionItem[] {
   const jobOf = (id: string): TechnicalJobRow | undefined => jobs.find((j) => j.contractId === id);
   const rules: { id: string; count: (r: JobReleaseSummary) => number; text: (n: number) => string }[] = [
-    { id: 'not-generated', count: (r) => r.confirmedNotGenerated, text: (n) => `${n} confirmed ${n === 1 ? 'piece' : 'pieces'} not generated` },
-    { id: 'not-assigned', count: (r) => r.notAssigned, text: (n) => `${n} ${n === 1 ? 'piece' : 'pieces'} not assigned to groups` },
+    { id: 'not-generated', count: (r) => r.confirmedNotGenerated, text: (n) => `${n} confirmed ${n === 1 ? 'element' : 'elements'} not generated` },
+    { id: 'not-assigned', count: (r) => r.notAssigned, text: (n) => `${n} ${n === 1 ? 'element' : 'elements'} not assigned to groups` },
     { id: 'no-files', count: (r) => r.groupsNoFiles, text: (n) => plural(n, 'group has no files', 'groups have no files') },
     { id: 'waiting-approval', count: (r) => r.groupsSubmitted, text: (n) => plural(n, 'submitted group waiting approval', 'submitted groups waiting approval') },
     { id: 'waiting-release', count: (r) => r.groupsApproved, text: (n) => plural(n, 'approved group waiting release', 'approved groups waiting release') },

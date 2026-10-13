@@ -6,9 +6,9 @@ import type { BoqConfirmationItem, BoqPieceStatus, DrawingGroupItem } from '@/li
 
 /** The per-item status tiles, in the order the work flows. Hold and Rejected share one tile. */
 export const PROGRESS_TILES: { key: string; label: string; statuses: BoqPieceStatus[] }[] = [
-  { key: 'drawingReady', label: 'Drawing Ready', statuses: ['DRAWING_READY'] },
+  { key: 'drawingReady', label: 'Elements Generated', statuses: ['DRAWING_READY'] },
   { key: 'inProduction', label: 'In Production', statuses: ['IN_PRODUCTION'] },
-  { key: 'produced', label: 'Produced', statuses: ['PRODUCED'] },
+  { key: 'produced', label: 'Produced', statuses: ['PRODUCED', 'SENT_TO_STORAGE'] },
   { key: 'inStore', label: 'In Store', statuses: ['IN_STORE'] },
   { key: 'delivered', label: 'Delivered', statuses: ['DELIVERED'] },
   { key: 'erected', label: 'Erected', statuses: ['ERECTED'] },
@@ -121,7 +121,7 @@ export function contractTotals(items: ItemLike[]): ContractProgressTotals {
     confirmedPieces: sum((i) => i.confirmedPieces ?? 0),
     piecesGenerated: sum((i) => i.piecesGenerated),
     releasedToProduction: sum((i) => i.technical?.released ?? 0),
-    produced: sum((i) => i.statusCounts.PRODUCED ?? 0),
+    produced: sum((i) => (i.statusCounts.PRODUCED ?? 0) + (i.statusCounts.SENT_TO_STORAGE ?? 0)),
     delivered: sum((i) => i.statusCounts.DELIVERED ?? 0),
     erected: sum((i) => i.statusCounts.ERECTED ?? 0),
     completed: sum((i) => i.statusCounts.COMPLETED ?? 0),
@@ -174,7 +174,7 @@ export function progressFlow(item: ItemLike): { key: string; label: string; coun
     { key: 'confirmed', label: 'Confirmed', count: item.confirmedPieces },
     { key: 'generated', label: 'Generated', count: item.piecesGenerated },
     { key: 'released', label: 'Released', count: item.technical ? item.technical.released : null },
-    { key: 'produced', label: 'Produced', count: c.PRODUCED ?? 0 },
+    { key: 'produced', label: 'Produced', count: (c.PRODUCED ?? 0) + (c.SENT_TO_STORAGE ?? 0) },
     { key: 'delivered', label: 'Delivered', count: c.DELIVERED ?? 0 },
     { key: 'completed', label: 'Completed', count: c.COMPLETED ?? 0 },
   ];

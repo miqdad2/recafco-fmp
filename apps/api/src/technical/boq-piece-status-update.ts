@@ -43,6 +43,8 @@ export interface PieceStatusUpdateParams {
   actorId: string;
   /** FMP-BOQ-14 — Production: In Production / Produced need the piece's drawing group to be Released to Production. */
   requireRelease?: boolean;
+  /** FMP-PROD-03 — Production: an element cannot start production (Ready → In Production) without a final drawing (its own files or its group's). */
+  requireDrawing?: boolean;
   /** Statuses the calling screen/user may set. A target outside this list is blocked before anything is read or written. */
   allowedStatuses: ContractBoqPieceStatus[];
 }
@@ -73,14 +75,17 @@ export async function applyPieceStatusUpdate(
 
   const found = await client.contractBoqPiece.findMany({
     where: { id: { in: pieceIds }, ...scope },
-    select: { id: true, pieceCode: true, currentStatus: true, isCancelled: true },
+    select: { id: true, pieceCode: true, currentStatus: true, isCancelled: true, releasedToProductionAt: true,
+      _count: { select: { attachments: true } },
+      drawingGroupLinks: { where: { activeSlot: 1 }, take: 1, select: { group: { select: { _count: { select: { attachments: true } } } } } },
+    },
   });
   const byId = new Map(found.map((p) => [p.id, p]));
 
   // FMP-BOQ-14 — Hold / Rejected are never gated; only starting or finishing production needs a release.
   const releaseGate =
     params.requireRelease && (target === ContractBoqPieceStatus.IN_PRODUCTION || target === ContractBoqPieceStatus.PRODUCED)
-      ? await releaseSkipReasons(client, found.map((p) => p.id))
+      ? await releaseSkipReasons(client, found.map((p) => ({ id: p.id, releasedOnItsOwn: Boolean(p.releasedToProductionAt) })))
       : null;
 
   const skipped: SkippedPiece[] = [];
@@ -91,7 +96,14 @@ export async function applyPieceStatusUpdate(
       skipped.push({ pieceId: id, pieceCode: null, reason: 'NOT_FOUND', message: PIECE_SKIP_MESSAGES.NOT_FOUND });
       continue;
     }
-    const reason = pieceSkipReason(piece, target) ?? (releaseGate ? releaseGate.get(id) ?? null : null);
+    // Handover to Storage Yard is only for produced elements.
+    const notProduced =
+      target === ContractBoqPieceStatus.SENT_TO_STORAGE && piece.currentStatus !== ContractBoqPieceStatus.PRODUCED ? ('NOT_PRODUCED' as const) : null;
+    const noDrawing =
+      params.requireDrawing && target === ContractBoqPieceStatus.IN_PRODUCTION && piece.currentStatus === ContractBoqPieceStatus.DRAWING_READY && !hasFinalDrawing(piece)
+        ? ('NO_DRAWING' as const)
+        : null;
+    const reason = pieceSkipReason(piece, target) ?? notProduced ?? (releaseGate ? releaseGate.get(id) ?? null : null) ?? noDrawing;
     if (reason) skipped.push({ pieceId: id, pieceCode: piece.pieceCode, reason, message: PIECE_SKIP_MESSAGES[reason] });
     else toUpdate.push(piece);
   }
@@ -151,6 +163,14 @@ export async function applyPieceStatusUpdate(
   };
 }
 
+/** Final drawing files exist for the element: its own, or those of its active drawing group. */
+export function hasFinalDrawing(piece: {
+  _count?: { attachments: number };
+  drawingGroupLinks?: { group: { _count: { attachments: number } } }[];
+}): boolean {
+  return (piece._count?.attachments ?? 0) > 0 || (piece.drawingGroupLinks?.[0]?.group._count.attachments ?? 0) > 0;
+}
+
 /**
  * For each piece: null-free map of why it is not released (NO_GROUP / NOT_RELEASED);
  * pieces in a Released-to-Production active group are absent (= allowed). A piece
@@ -158,14 +178,18 @@ export async function applyPieceStatusUpdate(
  */
 async function releaseSkipReasons(
   client: ReturnType<DatabaseService['getClient']>,
-  pieceIds: string[],
+  pieces: { id: string; releasedOnItsOwn: boolean }[],
 ): Promise<Map<string, PieceSkipReason>> {
+  const pieceIds = pieces.map((p) => p.id);
   const links = await client.technicalDrawingGroupPiece.findMany({
     where: { pieceId: { in: pieceIds } },
     select: { pieceId: true, activeSlot: true, group: { select: { status: true } } },
   });
+  // An element Technical released on its own (own final drawings) has no group but is still released.
+  const releasedOnItsOwn = new Set(pieces.filter((p) => p.releasedOnItsOwn).map((p) => p.id));
   const result = new Map<string, PieceSkipReason>();
   for (const id of pieceIds) {
+    if (releasedOnItsOwn.has(id)) continue;
     const own = links.filter((l) => l.pieceId === id);
     const active = own.find((l) => l.activeSlot === 1);
     if (active) {

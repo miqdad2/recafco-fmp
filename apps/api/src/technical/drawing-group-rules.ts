@@ -9,18 +9,23 @@ import { TechnicalDrawingGroupStatus as S } from '@recafco/database';
 export const GROUP_MESSAGES = {
   boqItemRequired: 'Please select BOQ item.',
   drawingNoRequired: 'Please enter drawing number.',
-  piecesRequired: 'Please select at least one piece.',
-  piecesUnavailable: 'Some selected pieces are not available for this BOQ item.',
+  piecesRequired: 'Please select at least one element.',
+  piecesUnavailable: 'Some selected elements are not available for this BOQ item.',
   notFound: 'Drawing group not found.',
   onlyDraftChange: 'Only a draft group can be changed.',
   onlyDraftSubmit: 'Only a draft group can be submitted.',
   onlySubmittedApprove: 'Only a submitted group can be approved.',
   onlyApprovedRelease: 'Only an approved group can be released to Production.',
   notCancellable: 'This group cannot be cancelled.',
+  // FMP-TECH-27 — an element with its own final drawing (or already released) is not put into a group.
+  piecesCoveredIndividually: 'Some selected elements already have their own final drawing or were released, so they cannot join a group.',
+  // FMP-TECH-24 — a group reaches Production only with its final drawing files.
+  filesRequiredForRelease: 'Final drawing files are required before release to Production.',
+  elementsRequiredForRelease: 'A group needs at least one element before release to Production.',
 } as const;
 
 export function piecesAlreadyGroupedMessage(count: number): string {
-  return count === 1 ? '1 piece is already in another drawing group.' : `${count} pieces are already in another drawing group.`;
+  return count === 1 ? '1 element is already in another drawing group.' : `${count} elements are already in another drawing group.`;
 }
 
 /** Statuses in which a group still holds its pieces. Cancelled / Revised groups release them for re-assignment. */
@@ -96,6 +101,10 @@ export interface JobReleaseSummary {
   /** Groups not yet Released to Production (Draft, Submitted or Approved). */
   groupsNotReleased: number;
   confirmedNotGenerated: number;
+  /** FMP-TECH-27 — elements outside any group that have their own final drawing file. */
+  individuallyCovered: number;
+  /** Elements released to Production on their own (not through a group). */
+  individuallyReleased: number;
 }
 
 export interface ReleaseGroupInput {
@@ -105,7 +114,12 @@ export interface ReleaseGroupInput {
 }
 
 /** Builds one job's release numbers. Cancelled / Revised groups are ignored (they hold no pieces). */
-export function buildJobReleaseSummary(confirmed: number, generated: number, groups: ReleaseGroupInput[]): JobReleaseSummary {
+export function buildJobReleaseSummary(
+  confirmed: number,
+  generated: number,
+  groups: ReleaseGroupInput[],
+  individual: { covered: number; released: number } = { covered: 0, released: 0 },
+): JobReleaseSummary {
   const live = groups.filter((g) => ACTIVE_GROUP_STATUSES.includes(g.status));
   const assigned = live.reduce((sum, g) => sum + g.pieceCount, 0);
   const released = live.filter((g) => g.status === S.RELEASED_TO_PRODUCTION).reduce((sum, g) => sum + g.pieceCount, 0);
@@ -125,5 +139,7 @@ export function buildJobReleaseSummary(confirmed: number, generated: number, gro
     groupsApproved: live.filter((g) => g.status === S.APPROVED).length,
     groupsNotReleased: live.filter((g) => g.status !== S.RELEASED_TO_PRODUCTION).length,
     confirmedNotGenerated: Math.max(0, confirmed - generated),
+    individuallyCovered: individual.covered,
+    individuallyReleased: individual.released,
   };
 }

@@ -3,9 +3,9 @@ import type { StoragePieceQuery, StoragePieceSummary } from '@/lib/storage-deliv
 // FMP-BOQ-08 — wording and filter handling for the Piece Delivery screen.
 
 export const STORAGE_STATUS_FILTERS: { value: string; label: string; statuses: string | undefined }[] = [
-  { value: 'DEFAULT', label: 'Produced + In Store', statuses: undefined },
-  { value: 'ALL', label: 'All', statuses: 'PRODUCED,IN_STORE,DELIVERED,ON_HOLD,REJECTED' },
-  { value: 'PRODUCED', label: 'Produced', statuses: 'PRODUCED' },
+  { value: 'DEFAULT', label: 'Sent to Storage Yard + In Store', statuses: undefined },
+  { value: 'ALL', label: 'All', statuses: 'SENT_TO_STORAGE,IN_STORE,DELIVERED,ON_HOLD,REJECTED' },
+  { value: 'SENT_TO_STORAGE', label: 'Sent to Storage Yard', statuses: 'SENT_TO_STORAGE' },
   { value: 'IN_STORE', label: 'In Store', statuses: 'IN_STORE' },
   { value: 'DELIVERED', label: 'Delivered', statuses: 'DELIVERED' },
   { value: 'ON_HOLD', label: 'Hold', statuses: 'ON_HOLD' },
@@ -40,7 +40,7 @@ export function readStorageFilterValues(params: Record<string, string | string[]
   };
 }
 
-/** Form values → API query. The default filter sends no status so the API applies Produced + In Store. */
+/** Form values → API query. The default filter sends no status so the API applies Sent to Storage Yard + In Store. */
 export function buildStorageQuery(values: StorageFilterValues): StoragePieceQuery {
   const statuses = STORAGE_STATUS_FILTERS.find((f) => f.value === values.status)?.statuses;
   return {
@@ -70,7 +70,7 @@ export function storageEmptyStateText(filtered: boolean): { title: string; help:
     ? { title: 'No pieces match these filters.', help: 'Try a different status or clear the filters.' }
     : {
         title: 'No pieces ready for storage or delivery.',
-        help: 'Pieces will appear here after Production marks them as Produced.',
+        help: 'Elements will appear here after Production sends them to Storage Yard.',
       };
 }
 

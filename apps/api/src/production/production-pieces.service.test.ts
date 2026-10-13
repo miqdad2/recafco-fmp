@@ -6,8 +6,10 @@ import {
   parseProductionStatuses,
   buildProductionSummary,
   PRODUCTION_DEFAULT_STATUSES,
+  PRODUCTION_VISIBLE_STATUSES,
 } from './production-pieces.service';
 import { productionAllowedPieceStatuses } from '../technical/boq-piece-generation';
+import { RELEASED_ELEMENT_FILTER } from '../technical/boq-piece-screen';
 import type { DatabaseService } from '../database/database.service';
 import type { AuthUser } from '../common/types/auth-user';
 
@@ -45,7 +47,7 @@ const VIEWER = actor(['production.read']);
 const NO_ACCESS = actor(['contracts.read']);
 const ADMIN = actor(['production.read', 'production.update', 'production.manage', 'contracts.manage']);
 
-const piece = (id: string, status: P) => ({ id, pieceCode: `HC-001-${id}`, currentStatus: status, isCancelled: status === P.CANCELLED });
+const piece = (id: string, status: P) => ({ id, pieceCode: `HC-001-${id}`, currentStatus: status, isCancelled: status === P.CANCELLED, _count: { attachments: 1 } });
 
 let service: ProductionPiecesService;
 beforeEach(() => {
@@ -59,7 +61,7 @@ beforeEach(() => {
 
 describe('production status rules', () => {
   it('Production may set In Production, Produced, Hold and Rejected — nothing else', () => {
-    expect(productionAllowedPieceStatuses(['production.update'])).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.ON_HOLD, P.REJECTED]);
+    expect(productionAllowedPieceStatuses(['production.update'])).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.SENT_TO_STORAGE, P.ON_HOLD, P.REJECTED]);
     const allowed = productionAllowedPieceStatuses(['production.update']);
     for (const blocked of [P.DRAWING_READY, P.IN_STORE, P.DELIVERED, P.ERECTED, P.COMPLETED, P.CANCELLED]) {
       expect(allowed).not.toContain(blocked);
@@ -67,7 +69,7 @@ describe('production status rules', () => {
   });
   it('read-only users get no update statuses, and the manager/admin override does not widen the Production list', () => {
     expect(productionAllowedPieceStatuses(['production.read'])).toEqual([]);
-    expect(productionAllowedPieceStatuses(['production.manage', 'contracts.manage'])).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.ON_HOLD, P.REJECTED]);
+    expect(productionAllowedPieceStatuses(['production.manage', 'contracts.manage'])).toEqual([P.IN_PRODUCTION, P.PRODUCED, P.SENT_TO_STORAGE, P.ON_HOLD, P.REJECTED]);
   });
 });
 
@@ -91,6 +93,8 @@ describe('ProductionPiecesService.list', () => {
     const where = mockPieceFindMany.mock.calls[0]?.[0].where;
     expect(where.currentStatus).toEqual({ in: [P.DRAWING_READY, P.IN_PRODUCTION] });
     expect(where.isCancelled).toBe(false);
+    // FMP-TECH-24 — only elements in a group released to Production reach this screen.
+    expect(where.AND).toEqual(RELEASED_ELEMENT_FILTER.AND);
   });
 
   it('applies the status, contract, drawing, BOQ item and search filters', async () => {
@@ -121,7 +125,7 @@ describe('summary', () => {
         { currentStatus: P.REJECTED, count: 1 },
         { currentStatus: P.DELIVERED, count: 9 },
       ]),
-    ).toEqual({ readyForProduction: 40, inProduction: 5, produced: 3, onHoldOrRejected: 2 });
+    ).toEqual({ readyForProduction: 40, inProduction: 5, produced: 3, sentToStorage: 0, onHoldOrRejected: 2 });
   });
 
   it('counts update after a status change (Ready 50 → Ready 40 + In Production 10)', () => {
@@ -138,17 +142,17 @@ describe('summary', () => {
     mockPieceGroupBy.mockResolvedValue([{ currentStatus: P.DRAWING_READY, _count: { _all: 7 } }]);
     const result = await service.summary(VIEWER);
     expect(result.readyForProduction).toBe(7);
-    expect(mockPieceGroupBy.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+    expect(mockPieceGroupBy.mock.calls[0]?.[0].where).toEqual({ isCancelled: false, ...RELEASED_ELEMENT_FILTER });
   });
 
   it('shows the empty state numbers when nothing is ready', async () => {
     mockPieceGroupBy.mockResolvedValue([]);
-    expect(await service.summary(VIEWER)).toEqual({ readyForProduction: 0, inProduction: 0, produced: 0, onHoldOrRejected: 0 });
+    expect(await service.summary(VIEWER)).toEqual({ readyForProduction: 0, inProduction: 0, produced: 0, sentToStorage: 0, onHoldOrRejected: 0 });
   });
 });
 
 describe('contractProgress (FMP-UI-32)', () => {
-  const contractRef: { referenceNumber: string; jobOrder: string | null; title: string } = { referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A' };
+  const contractRef: { referenceNumber: string; jobOrder: string | null; title: string; counterpartyName: string } = { referenceNumber: 'CT-1', jobOrder: 'JO-1', title: 'Tower A', counterpartyName: 'Acme' };
   const row = (contractId: string, status: P, updatedAt: string, contract = contractRef) => ({
     contractId, currentStatus: status, updatedAt: new Date(updatedAt), contract,
   });
@@ -170,7 +174,7 @@ describe('contractProgress (FMP-UI-32)', () => {
     const [result] = await service.contractProgress(VIEWER);
 
     expect(result).toMatchObject({
-      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A',
+      contractId: 'c1', referenceNumber: 'CT-1', jobOrder: 'JO-1', projectName: 'Tower A', clientName: 'Acme',
       readyForProduction: 2, inProduction: 1, produced: 1, onHold: 1, rejected: 1,
     });
   });
@@ -178,13 +182,13 @@ describe('contractProgress (FMP-UI-32)', () => {
   it('never queries cancelled pieces', async () => {
     mockPieceFindMany.mockResolvedValue([]);
     await service.contractProgress(VIEWER);
-    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false, ...RELEASED_ELEMENT_FILTER });
   });
 
   it('keeps separate contracts as separate entries', async () => {
     mockPieceFindMany.mockResolvedValue([
       row('c1', P.DRAWING_READY, '2026-01-01T00:00:00Z'),
-      row('c2', P.PRODUCED, '2026-01-01T00:00:00Z', { referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse' }),
+      row('c2', P.PRODUCED, '2026-01-01T00:00:00Z', { referenceNumber: 'CT-2', jobOrder: null, title: 'Warehouse', counterpartyName: 'Beta' }),
     ]);
 
     const result = await service.contractProgress(VIEWER);
@@ -248,13 +252,21 @@ describe('recentUpdates (FMP-UI-32)', () => {
     await service.recentUpdates(VIEWER, 5);
     expect(mockHistoryFindMany.mock.calls[0]?.[0]).toMatchObject({ orderBy: { createdAt: 'desc' }, take: 5 });
   });
+
+  it('only reads history of released elements, in Production-visible statuses', async () => {
+    mockHistoryFindMany.mockResolvedValue([]);
+    await service.recentUpdates(VIEWER);
+    const where = mockHistoryFindMany.mock.calls[0]?.[0].where;
+    expect(where.newStatus.in).toEqual(PRODUCTION_VISIBLE_STATUSES);
+    expect(where.piece).toEqual({ isCancelled: false, ...RELEASED_ELEMENT_FILTER });
+  });
 });
 
 describe('ProductionPiecesService status updates', () => {
   it('bulk update to Produced works and writes a history row for every piece, across jobs', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.IN_PRODUCTION), piece('b', P.IN_PRODUCTION)]);
     const result = await service.bulkUpdateStatus(['a', 'b'], 'PRODUCED', 'Produced today', PRODUCER);
-    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Pieces updated.' });
+    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Elements updated.' });
     // Not limited to one contract: Production sees pieces from every job.
     expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ id: { in: ['a', 'b'] } });
     const history = mockHistoryCreateMany.mock.calls[0]?.[0].data as { pieceId: string; oldStatus: P; newStatus: P; note: string; updatedById: string }[];
@@ -274,7 +286,7 @@ describe('ProductionPiecesService status updates', () => {
     'Production cannot set %s — blocked with the simple message and nothing is written',
     async (status) => {
       const result = await service.bulkUpdateStatus(['a'], status, undefined, PRODUCER);
-      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update pieces to this status.' });
+      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update elements to this status.' });
       expect(mockPieceFindMany).not.toHaveBeenCalled();
       expect(mockHistoryCreateMany).not.toHaveBeenCalled();
     },
@@ -288,7 +300,7 @@ describe('ProductionPiecesService status updates', () => {
 
   it('even the admin override stays inside the Production statuses on this screen', async () => {
     const result = await service.bulkUpdateStatus(['a'], 'DELIVERED', undefined, ADMIN);
-    expect(result.message).toBe('You cannot update pieces to this status.');
+    expect(result.message).toBe('You cannot update elements to this status.');
   });
 
   it('a read-only user can view but cannot update', async () => {
@@ -310,6 +322,55 @@ describe('ProductionPiecesService status updates', () => {
   });
 });
 
+describe('Start Production needs a final drawing (FMP-PROD-03)', () => {
+  const noDrawing = (id: string) => ({ ...piece(id, P.DRAWING_READY), _count: { attachments: 0 }, drawingGroupLinks: [] });
+  const groupDrawing = (id: string) => ({ ...piece(id, P.DRAWING_READY), _count: { attachments: 0 }, drawingGroupLinks: [{ group: { _count: { attachments: 2 } } }] });
+
+  it('an element with no final drawing is skipped with the plain message and nothing is written for it', async () => {
+    mockPieceFindMany.mockResolvedValue([noDrawing('a'), piece('b', P.DRAWING_READY)]);
+    const r = await service.bulkUpdateStatus(['a', 'b'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.updatedCount).toBe(1);
+    expect(r.skipped).toEqual([expect.objectContaining({ pieceId: 'a', reason: 'NO_DRAWING', message: 'Final drawing is required before production can start.' })]);
+    const history = mockHistoryCreateMany.mock.calls.flatMap((c) => c[0].data as { pieceId: string }[]);
+    expect(history.map((h) => h.pieceId)).toEqual(['b']);
+  });
+
+  it('an element covered by its group drawing can start', async () => {
+    mockPieceFindMany.mockResolvedValue([groupDrawing('a')]);
+    const r = await service.bulkUpdateStatus(['a'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.updatedCount).toBe(1);
+  });
+
+  it('resuming a held element does not need the drawing check again', async () => {
+    mockPieceFindMany.mockResolvedValue([{ ...piece('a', P.ON_HOLD), _count: { attachments: 0 } }]);
+    const r = await service.bulkUpdateStatus(['a'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.updatedCount).toBe(1);
+  });
+});
+
+describe('handover to Storage Yard (FMP-PROD-02)', () => {
+  it('only a produced element can be sent to Storage Yard', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('a', P.PRODUCED), piece('b', P.IN_PRODUCTION), piece('c', P.DRAWING_READY)]);
+    groups({ a: [{ status: 'RELEASED_TO_PRODUCTION' }] });
+    const r = await service.bulkUpdateStatus(['a', 'b', 'c'], 'SENT_TO_STORAGE', 'Handover', PRODUCER);
+    expect(r.updatedCount).toBe(1);
+    expect(r.skipped.map((s) => s.reason)).toEqual(['NOT_PRODUCED', 'NOT_PRODUCED']);
+    const history = mockHistoryCreateMany.mock.calls.flatMap((c) => c[0].data as { pieceId: string; newStatus: P }[]);
+    expect(history).toEqual([expect.objectContaining({ pieceId: 'a', newStatus: P.SENT_TO_STORAGE })]);
+  });
+
+  it('read-only users cannot send anything', async () => {
+    await expect(service.bulkUpdateStatus(['a'], 'SENT_TO_STORAGE', undefined, VIEWER)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('an element Technical released on its own (no group) can start production', async () => {
+    mockPieceFindMany.mockResolvedValue([{ ...piece('a', P.DRAWING_READY), releasedToProductionAt: new Date('2026-03-01T00:00:00Z') }]);
+    groups({});
+    const r = await service.bulkUpdateStatus(['a'], 'IN_PRODUCTION', undefined, PRODUCER);
+    expect(r.updatedCount).toBe(1);
+  });
+});
+
 describe('history', () => {
   it('returns the piece history newest first', async () => {
     mockPieceFindUnique.mockResolvedValue({ id: 'a', pieceCode: 'HC-001-001' });
@@ -321,6 +382,15 @@ describe('history', () => {
   it('404s for an unknown piece', async () => {
     mockPieceFindUnique.mockResolvedValue(null);
     await expect(service.history('x', VIEWER)).rejects.toThrow(NotFoundException);
+  });
+  it('ends with "Released from Technical" when the element was released on its own', async () => {
+    mockPieceFindUnique.mockResolvedValue({
+      id: 'a', pieceCode: 'DN-0001-006', releasedToProductionAt: new Date('2026-03-01T00:00:00Z'), releasedToProductionById: null, drawingGroupLinks: [],
+    });
+    mockHistoryFindMany.mockResolvedValue([]);
+    const result = await service.history('a', VIEWER);
+    expect(result.history).toHaveLength(1);
+    expect(result.history[0]).toMatchObject({ newStatus: P.DRAWING_READY, note: 'Released from Technical' });
   });
 });
 
@@ -395,7 +465,7 @@ describe('release is required for In Production / Produced', () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.DRAWING_READY), piece('b', P.DRAWING_READY), piece('c', P.DRAWING_READY)]);
     groups({ a: [{ status: 'RELEASED_TO_PRODUCTION' }], b: [{ status: 'SUBMITTED' }] });
     const r = await service.bulkUpdateStatus(['a', 'b', 'c'], 'IN_PRODUCTION', 'Start', PRODUCER);
-    expect(r).toMatchObject({ updatedCount: 1, skippedCount: 2, message: '1 piece updated. 2 pieces skipped.' });
+    expect(r).toMatchObject({ updatedCount: 1, skippedCount: 2, message: '1 element updated. 2 elements skipped.' });
     expect(r.skipped.map((s) => s.message).sort()).toEqual(['Drawing group is not released to Production.', 'No drawing group assigned.']);
     const history = mockHistoryCreateMany.mock.calls.flatMap((c) => c[0].data as { pieceId: string }[]);
     expect(history.map((h) => h.pieceId)).toEqual(['a']);

@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * Next Action Focus — at most 5 rows. FMP-BOQ-16: Technical release work comes
- * first (confirmed pieces not generated, pieces not assigned to groups, groups
+ * first (confirmed elements not generated, pieces not assigned to groups, groups
  * with no files, submitted groups waiting approval, approved groups waiting
  * release); the existing workflow actions (FMP-UI-31) follow. Read-only: every
  * row is just an "Open" link.

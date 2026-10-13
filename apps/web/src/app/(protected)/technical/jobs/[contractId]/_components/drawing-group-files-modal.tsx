@@ -9,18 +9,23 @@ import {
   GROUP_FILE_ACCEPT,
   GROUP_FILE_CATEGORY_LABELS,
   GROUP_FILE_CATEGORY_OPTIONS,
+  GROUP_FILE_DEFAULT_CATEGORY,
   canChangeGroupFiles,
   fileCountLabel,
   formatFileSize,
   groupFilesLockedMessage,
   validateGroupUpload,
 } from '../../../_lib/drawing-group-helpers';
+import { BOQ_FILE_TYPES_TEXT } from '../../../_lib/boq-attachment-helpers';
+import { BTN_DANGER, BTN_PRIMARY, BTN_SECONDARY } from '../../../_lib/button-styles';
 
 interface Props {
   contractId: string;
   group: DrawingGroup;
   /** The viewer has a Technical write permission. */
   canWrite: boolean;
+  /** A short note shown at the top (for example the Replace Drawing hint). */
+  intro?: string | null;
   onClose: () => void;
 }
 
@@ -36,13 +41,13 @@ function formatDate(iso: string): string {
  * (for Technical writers, until the group is released) upload and remove. A file
  * never changes the group's status.
  */
-export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }: Props): React.JSX.Element {
+export function DrawingGroupFilesModal({ contractId, group, canWrite, intro = null, onClose }: Props): React.JSX.Element {
   const router = useRouter();
   const [files, setFiles] = useState<DrawingGroupFile[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [category, setCategory] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [category, setCategory] = useState<string>(GROUP_FILE_DEFAULT_CATEGORY);
+  const [picked, setPicked] = useState<File[]>([]);
   const [remarks, setRemarks] = useState('');
   const [fileInputKey, setFileInputKey] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -69,29 +74,47 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
 
   async function upload(): Promise<void> {
     if (uploading) return;
-    const problem = validateGroupUpload(file, category);
-    if (problem) {
-      setMessage({ tone: 'error', text: problem });
+    if (picked.length === 0) {
+      setMessage({ tone: 'error', text: 'Please select a file.' });
+      return;
+    }
+    // Every picked file is checked first, so one wrong type never blocks the valid ones.
+    const problems: string[] = [];
+    const valid: File[] = [];
+    for (const f of picked) {
+      const problem = validateGroupUpload(f, category);
+      if (problem) problems.push(`${f.name}: ${problem}`);
+      else valid.push(f);
+    }
+    if (valid.length === 0) {
+      setMessage({ tone: 'error', text: problems.join(' ') });
       return;
     }
     setUploading(true);
     setMessage(null);
-    const body = new FormData();
-    body.append('category', category);
-    if (remarks.trim()) body.append('remarks', remarks.trim());
-    body.append('file', file!, file!.name);
-    const result = await uploadDrawingGroupFileAction(contractId, group.id, body);
-    setUploading(false);
-    if (result.error) {
-      setMessage({ tone: 'error', text: result.error });
-      return;
+    let done = 0;
+    for (const f of valid) {
+      const body = new FormData();
+      body.append('category', category);
+      if (remarks.trim()) body.append('remarks', remarks.trim());
+      body.append('file', f, f.name);
+      const result = await uploadDrawingGroupFileAction(contractId, group.id, body);
+      if (result.error) problems.push(`${f.name}: ${result.error}`);
+      else done += 1;
     }
-    setMessage({ tone: 'ok', text: 'File uploaded.' });
-    setFile(null);
-    setRemarks('');
-    setFileInputKey((k) => k + 1);
-    setReload((n) => n + 1);
-    router.refresh(); // updates the file count on the group row
+    setUploading(false);
+    if (done > 0) {
+      setPicked([]);
+      setRemarks('');
+      setFileInputKey((k) => k + 1);
+      setReload((n) => n + 1);
+      router.refresh(); // updates the file count on the group row
+    }
+    setMessage(
+      problems.length > 0
+        ? { tone: 'error', text: [done > 0 ? `${done} ${done === 1 ? 'file' : 'files'} uploaded.` : '', ...problems].filter(Boolean).join(' ') }
+        : { tone: 'ok', text: `${done} ${done === 1 ? 'file' : 'files'} uploaded.` },
+    );
   }
 
   async function remove(f: DrawingGroupFile): Promise<void> {
@@ -126,6 +149,7 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {intro && <p className="rounded-md bg-info-light/60 px-3 py-2 text-xs text-text-secondary">{intro}</p>}
           {message && (
             <div
               role="status"
@@ -144,20 +168,20 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
                 <div>
                   <label htmlFor="gf-category" className="mb-1 block text-xs font-medium text-text-secondary">Category <span className="text-error">*</span></label>
                   <select id="gf-category" value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
-                    <option value="">Select category</option>
                     {GROUP_FILE_CATEGORY_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="gf-file" className="mb-1 block text-xs font-medium text-text-secondary">File <span className="text-error">*</span></label>
+                  <label htmlFor="gf-file" className="mb-1 block text-xs font-medium text-text-secondary">Files <span className="text-error">*</span></label>
                   <input
                     key={fileInputKey}
                     id="gf-file"
                     type="file"
                     accept={GROUP_FILE_ACCEPT}
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    multiple
+                    onChange={(e) => setPicked(Array.from(e.target.files ?? []))}
                     className="block w-full text-sm text-text-primary file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-xs file:font-medium"
                   />
                 </div>
@@ -166,13 +190,13 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
                 <label htmlFor="gf-remarks" className="mb-1 block text-xs font-medium text-text-secondary">Remarks</label>
                 <input id="gf-remarks" type="text" maxLength={1000} value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional" className={inputCls} />
               </div>
-              <p className="mt-2 text-xs text-text-muted">PDF, Word, Excel or image (PNG, JPG). Maximum 25 MB.</p>
+              <p className="mt-2 text-xs text-text-muted">{BOQ_FILE_TYPES_TEXT}</p>
               <div className="mt-2 flex justify-end">
                 <button
                   type="button"
                   onClick={() => void upload()}
                   disabled={uploading}
-                  className="inline-flex h-9 items-center rounded-md bg-accent px-4 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+                  className={BTN_PRIMARY}
                 >
                   {uploading ? 'Uploading…' : 'Upload'}
                 </button>
@@ -200,7 +224,7 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
                   <div className="flex shrink-0 items-center gap-2">
                     <a
                       href={`/technical/jobs/${contractId}/drawing-groups/${group.id}/attachments/${f.id}/download`}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+                      className={BTN_SECONDARY}
                     >
                       <Download className="size-3.5" aria-hidden="true" />
                       Download
@@ -211,7 +235,7 @@ export function DrawingGroupFilesModal({ contractId, group, canWrite, onClose }:
                         onClick={() => void remove(f)}
                         disabled={removingId === f.id}
                         aria-label={`Remove ${f.originalName}`}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+                        className={BTN_DANGER}
                       >
                         <Trash2 className="size-3.5" aria-hidden="true" />
                         Remove

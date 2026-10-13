@@ -30,4 +30,19 @@ describe('resolveTechnicalAttachmentMimeType (FMP-TECH-05)', () => {
     expect(r('a.jpg', 'image/jpeg')).toBe('image/jpeg');
     expect(r('a.dwg', 'application/acad')).toBe('application/acad');
   });
+
+  it('accepts DWG and DXF even when the browser reports a generic or empty type (FMP-TECH-28)', () => {
+    expect(r('plan.dwg', 'application/octet-stream')).toBe('application/acad');
+    expect(r('plan.DWG', '')).toBe('application/acad');
+    expect(r('plan.dxf', 'application/octet-stream')).toBe('application/dxf');
+    expect(r('plan.dxf', '')).toBe('application/dxf');
+    expect(r('plan.dxf', 'image/vnd.dxf')).toBe('image/vnd.dxf');
+  });
+
+  it('still refuses a generic type on any other extension, and a known type on a disallowed extension', () => {
+    expect(r('a.zip', 'application/octet-stream')).toBeNull();
+    expect(r('a.pdf', 'application/octet-stream')).toBeNull();
+    expect(r('a.zip', 'application/pdf')).toBeNull();
+    expect(r('noext', 'application/pdf')).toBeNull();
+  });
 });

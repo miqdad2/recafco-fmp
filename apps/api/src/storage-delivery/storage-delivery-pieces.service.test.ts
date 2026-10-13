@@ -8,6 +8,7 @@ import {
   STORAGE_DEFAULT_STATUSES,
 } from './storage-delivery-pieces.service';
 import { storageDeliveryAllowedPieceStatuses } from '../technical/boq-piece-generation';
+import { SENT_TO_STORAGE_ELEMENT_FILTER } from '../technical/boq-piece-screen';
 import type { DatabaseService } from '../database/database.service';
 import type { AuthUser } from '../common/types/auth-user';
 
@@ -67,24 +68,24 @@ describe('storage & delivery status rules', () => {
 });
 
 describe('parseStorageStatuses', () => {
-  it('defaults to Produced + In Store', () => {
-    expect(parseStorageStatuses(undefined)).toEqual([P.PRODUCED, P.IN_STORE]);
-    expect(STORAGE_DEFAULT_STATUSES).toEqual([P.PRODUCED, P.IN_STORE]);
+  it('defaults to Sent to Storage Yard + In Store', () => {
+    expect(parseStorageStatuses(undefined)).toEqual([P.SENT_TO_STORAGE, P.IN_STORE]);
+    expect(STORAGE_DEFAULT_STATUSES).toEqual([P.SENT_TO_STORAGE, P.IN_STORE]);
   });
   it('accepts its own statuses and ignores others (Drawing Ready, Erected …)', () => {
     expect(parseStorageStatuses('DELIVERED,ON_HOLD')).toEqual([P.DELIVERED, P.ON_HOLD]);
-    expect(parseStorageStatuses('DRAWING_READY,ERECTED')).toEqual([P.PRODUCED, P.IN_STORE]);
+    expect(parseStorageStatuses('DRAWING_READY,ERECTED')).toEqual([P.SENT_TO_STORAGE, P.IN_STORE]);
   });
 });
 
 describe('StorageDeliveryPiecesService.list', () => {
-  it('fetches pieces; the default filter is Produced + In Store and cancelled pieces are never listed', async () => {
+  it('fetches pieces; the default filter is Sent to Storage Yard + In Store and cancelled pieces are never listed', async () => {
     mockPieceFindMany.mockResolvedValue([{ id: 'a' }]);
     mockPieceCount.mockResolvedValue(1);
     const result = await service.list({}, VIEWER);
     expect(result).toMatchObject({ total: 1, page: 1, pageSize: 50 });
     const where = mockPieceFindMany.mock.calls[0]?.[0].where;
-    expect(where.currentStatus).toEqual({ in: [P.PRODUCED, P.IN_STORE] });
+    expect(where.currentStatus).toEqual({ in: [P.SENT_TO_STORAGE, P.IN_STORE] });
     expect(where.isCancelled).toBe(false);
     // The list carries the current location for the Location column.
     expect(mockPieceFindMany.mock.calls[0]?.[0].select.currentLocation).toBe(true);
@@ -96,10 +97,10 @@ describe('StorageDeliveryPiecesService.list', () => {
 });
 
 describe('summary', () => {
-  it('counts Ready for Store (= Produced), In Store, Delivered and Hold/Rejected', () => {
+  it('counts Ready for Store (= Sent to Storage Yard), In Store, Delivered and Hold/Rejected', () => {
     expect(
       buildStorageSummary([
-        { currentStatus: P.PRODUCED, count: 12 },
+        { currentStatus: P.SENT_TO_STORAGE, count: 12 },
         { currentStatus: P.IN_STORE, count: 5 },
         { currentStatus: P.DELIVERED, count: 3 },
         { currentStatus: P.ON_HOLD, count: 1 },
@@ -110,10 +111,10 @@ describe('summary', () => {
   });
 
   it('counts update after a status change (Produced 10 → Produced 6 + In Store 4)', () => {
-    expect(buildStorageSummary([{ currentStatus: P.PRODUCED, count: 10 }])).toMatchObject({ readyForStore: 10, inStore: 0 });
+    expect(buildStorageSummary([{ currentStatus: P.SENT_TO_STORAGE, count: 10 }])).toMatchObject({ readyForStore: 10, inStore: 0 });
     expect(
       buildStorageSummary([
-        { currentStatus: P.PRODUCED, count: 6 },
+        { currentStatus: P.SENT_TO_STORAGE, count: 6 },
         { currentStatus: P.IN_STORE, count: 4 },
       ]),
     ).toMatchObject({ readyForStore: 6, inStore: 4 });
@@ -122,7 +123,7 @@ describe('summary', () => {
   it('reads the piece table, excluding cancelled pieces; empty gives zeros', async () => {
     mockPieceGroupBy.mockResolvedValue([]);
     expect(await service.summary(VIEWER)).toEqual({ readyForStore: 0, inStore: 0, delivered: 0, onHoldOrRejected: 0 });
-    expect(mockPieceGroupBy.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+    expect(mockPieceGroupBy.mock.calls[0]?.[0].where).toEqual({ isCancelled: false, ...SENT_TO_STORAGE_ELEMENT_FILTER });
   });
 });
 
@@ -138,8 +139,8 @@ describe('contractProgress (FMP-UI-33)', () => {
 
   it('groups pieces by contract, counting each status into its own field (Hold and Rejected kept separate)', async () => {
     mockPieceFindMany.mockResolvedValue([
-      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
-      row('c1', P.PRODUCED, '2026-01-01T00:00:00Z'),
+      row('c1', P.SENT_TO_STORAGE, '2026-01-01T00:00:00Z'),
+      row('c1', P.SENT_TO_STORAGE, '2026-01-01T00:00:00Z'),
       row('c1', P.IN_STORE, '2026-01-02T00:00:00Z'),
       row('c1', P.DELIVERED, '2026-01-01T00:00:00Z'),
       row('c1', P.ON_HOLD, '2026-01-01T00:00:00Z'),
@@ -157,7 +158,7 @@ describe('contractProgress (FMP-UI-33)', () => {
   it('never queries cancelled pieces', async () => {
     mockPieceFindMany.mockResolvedValue([]);
     await service.contractProgress(VIEWER);
-    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false });
+    expect(mockPieceFindMany.mock.calls[0]?.[0].where).toEqual({ isCancelled: false, ...SENT_TO_STORAGE_ELEMENT_FILTER });
   });
 
   it('keeps separate contracts as separate entries', async () => {
@@ -234,7 +235,7 @@ describe('StorageDeliveryPiecesService status updates', () => {
   it('bulk update to In Store works and writes a history row for every piece', async () => {
     mockPieceFindMany.mockResolvedValue([piece('a', P.PRODUCED), piece('b', P.PRODUCED)]);
     const result = await service.bulkUpdateStatus(['a', 'b'], 'IN_STORE', 'Received', undefined, STOREKEEPER);
-    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Pieces updated.' });
+    expect(result).toMatchObject({ updatedCount: 2, skippedCount: 0, message: 'Elements updated.' });
     const history = mockHistoryCreateMany.mock.calls[0]?.[0].data as { oldStatus: P; newStatus: P; note: string; updatedById: string }[];
     expect(history).toHaveLength(2);
     expect(history[0]).toMatchObject({ oldStatus: P.PRODUCED, newStatus: P.IN_STORE, note: 'Received', updatedById: 'u1' });
@@ -258,7 +259,7 @@ describe('StorageDeliveryPiecesService status updates', () => {
     'cannot set %s — blocked with the simple message and nothing is written',
     async (status) => {
       const result = await service.bulkUpdateStatus(['a'], status, undefined, undefined, STOREKEEPER);
-      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update pieces to this status.' });
+      expect(result).toMatchObject({ updatedCount: 0, skippedCount: 1, message: 'You cannot update elements to this status.' });
       expect(mockPieceFindMany).not.toHaveBeenCalled();
       expect(mockHistoryCreateMany).not.toHaveBeenCalled();
     },
@@ -271,7 +272,7 @@ describe('StorageDeliveryPiecesService status updates', () => {
 
   it('even the admin override stays inside the Storage Yard & Delivery statuses', async () => {
     const result = await service.bulkUpdateStatus(['a'], 'ERECTED', undefined, undefined, ADMIN);
-    expect(result.message).toBe('You cannot update pieces to this status.');
+    expect(result.message).toBe('You cannot update elements to this status.');
   });
 
   it('a read-only user can view but cannot update', async () => {

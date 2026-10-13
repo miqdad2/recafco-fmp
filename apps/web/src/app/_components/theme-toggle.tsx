@@ -25,7 +25,7 @@ export function ThemeToggle(): React.JSX.Element {
     <div
       role="radiogroup"
       aria-label="Appearance"
-      className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-1 shadow-sm"
+      className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5 shadow-sm"
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => {
         const active = preference === value;
@@ -37,7 +37,7 @@ export function ThemeToggle(): React.JSX.Element {
             aria-checked={active}
             onClick={() => setPreference(value)}
             className={[
-              'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-nav',
+              'flex items-center h-8 gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-nav',
               active
                 ? 'bg-nav text-white'
                 : 'text-text-secondary hover:bg-surface-secondary hover:text-text-primary',

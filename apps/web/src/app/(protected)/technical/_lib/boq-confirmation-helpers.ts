@@ -46,7 +46,7 @@ export interface ConfirmationFormValues {
 export type ConfirmationFormErrors = Partial<Record<keyof ConfirmationFormValues, string>>;
 
 /**
- * Plain-language checks. Pieces are only mandatory when confirming; a draft may
+ * Plain-language checks. Elements are only mandatory when confirming; a draft may
  * leave them empty, but anything typed must still be a positive whole number.
  */
 export function validateConfirmationForm(values: ConfirmationFormValues, confirming: boolean): ConfirmationFormErrors {
@@ -56,11 +56,11 @@ export function validateConfirmationForm(values: ConfirmationFormValues, confirm
 
   const raw = values.confirmedPieces.trim();
   if (raw === '') {
-    if (confirming) errors.confirmedPieces = 'Please enter confirmed pieces.';
+    if (confirming) errors.confirmedPieces = 'Please enter confirmed elements.';
   } else if (!/^-?\d+$/.test(raw)) {
-    errors.confirmedPieces = 'Confirmed pieces must be a whole number.';
+    errors.confirmedPieces = 'Confirmed elements must be a whole number.';
   } else if (parseInt(raw, 10) <= 0) {
-    errors.confirmedPieces = 'Confirmed pieces must be more than 0.';
+    errors.confirmedPieces = 'Confirmed elements must be more than 0.';
   }
   return errors;
 }
@@ -71,9 +71,10 @@ export function validateConfirmationForm(values: ConfirmationFormValues, confirm
 
 export const BOQ_PIECE_STATUS_LABELS: Record<BoqPieceStatus, string> = {
   NOT_STARTED: 'Not Started',
-  DRAWING_READY: 'Drawing Ready',
+  DRAWING_READY: 'Elements Generated',
   IN_PRODUCTION: 'In Production',
   PRODUCED: 'Produced',
+  SENT_TO_STORAGE: 'Sent to Storage Yard',
   IN_STORE: 'In Store',
   DELIVERED: 'Delivered',
   ERECTED: 'Erected',
@@ -88,6 +89,7 @@ export const BOQ_PIECE_STATUS_CLASSES: Record<BoqPieceStatus, string> = {
   DRAWING_READY: 'bg-info-light text-info',
   IN_PRODUCTION: 'bg-warning-light text-warning',
   PRODUCED: 'bg-success-light text-success',
+  SENT_TO_STORAGE: 'bg-info-light text-info',
   IN_STORE: 'bg-success-light text-success',
   DELIVERED: 'bg-success-light text-success',
   ERECTED: 'bg-success-light text-success',
@@ -97,12 +99,13 @@ export const BOQ_PIECE_STATUS_CLASSES: Record<BoqPieceStatus, string> = {
   CANCELLED: 'bg-surface-secondary text-text-muted',
 };
 
-/** Filter chips on the View Pieces list (All first). */
+/** Filter chips on the View Elements list (All first). */
 export const BOQ_PIECE_FILTERS: { value: BoqPieceStatus | 'ALL'; label: string }[] = [
   { value: 'ALL', label: 'All' },
-  { value: 'DRAWING_READY', label: 'Drawing Ready' },
+  { value: 'DRAWING_READY', label: 'Elements Generated' },
   { value: 'IN_PRODUCTION', label: 'In Production' },
   { value: 'PRODUCED', label: 'Produced' },
+  { value: 'SENT_TO_STORAGE', label: 'Sent to Storage Yard' },
   { value: 'IN_STORE', label: 'In Store' },
   { value: 'DELIVERED', label: 'Delivered' },
   { value: 'ERECTED', label: 'Erected' },
@@ -112,15 +115,15 @@ export const BOQ_PIECE_FILTERS: { value: BoqPieceStatus | 'ALL'; label: string }
 ];
 
 const SUMMARY_ORDER: BoqPieceStatus[] = [
-  'NOT_STARTED', 'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
+  'NOT_STARTED', 'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'SENT_TO_STORAGE', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
 ];
 
-/** "Drawing Ready 45 · In Production 5" — only statuses that have pieces, in lifecycle order. */
+/** "Elements Generated 45 · In Production 5" — only statuses that have pieces, in lifecycle order. */
 export function pieceStatusSummary(counts: Partial<Record<BoqPieceStatus, number>>): { status: BoqPieceStatus; label: string; count: number }[] {
   return SUMMARY_ORDER.filter((s) => (counts[s] ?? 0) > 0).map((s) => ({ status: s, label: BOQ_PIECE_STATUS_LABELS[s], count: counts[s] ?? 0 }));
 }
 
-/** The Generate Pieces button shows only when some Confirmed drawing still has pieces to create. */
+/** The Generate Elements button shows only when some Confirmed drawing still has pieces to create. */
 export function shouldShowGeneratePieces(items: { pendingPieces: number }[]): boolean {
   return items.some((i) => i.pendingPieces > 0);
 }
@@ -129,14 +132,14 @@ export function shouldShowGeneratePieces(items: { pendingPieces: number }[]): bo
 // FMP-BOQ-05 — status update controls
 // ---------------------------------------------------------------------------
 
-/** Targets offered in "Update selected to" (Not Started is not offered: pieces start as Drawing Ready). */
+/** Targets offered in "Update selected to" (Not Started is not offered: new elements start as Elements Generated). */
 export const BOQ_PIECE_UPDATE_OPTIONS: { value: BoqPieceStatus; label: string }[] = [
-  'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
+  'DRAWING_READY', 'IN_PRODUCTION', 'PRODUCED', 'SENT_TO_STORAGE', 'IN_STORE', 'DELIVERED', 'ERECTED', 'COMPLETED', 'ON_HOLD', 'REJECTED', 'CANCELLED',
 ].map((value) => ({ value: value as BoqPieceStatus, label: BOQ_PIECE_STATUS_LABELS[value as BoqPieceStatus] }));
 
 /** Plain-language check before sending an update. */
 export function validatePieceUpdate(selectedCount: number, status: string): string | null {
-  if (selectedCount === 0) return 'Please select at least one piece.';
+  if (selectedCount === 0) return 'Please select at least one element.';
   if (status === '') return 'Please select a status.';
   return null;
 }

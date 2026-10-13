@@ -30,6 +30,8 @@ import {
   Warehouse,
   ChevronDown,
   ChevronRight,
+  Gauge,
+  ExternalLink,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
@@ -51,7 +53,15 @@ interface NavItem {
   anyPermission?: string[];
   /** Gated behind the same visibility as the Administration section (no dedicated permission exists yet). */
   adminGated?: boolean;
+  /** FMP-UI-37 — an external app, not an FMP route: rendered as a plain `<a target="_blank" rel="noopener noreferrer">`, never Next's `<Link>`, and never checked for "active" (there is no in-app route to match against). */
+  external?: boolean;
 }
+
+// FMP-UI-37 — the RECAFCO Factory Performance Dashboard runs as a fully
+// separate app (not an FMP route) — the same URL FMP-UI-36's dashboard card
+// already links to, kept as its own constant here since this file doesn't
+// share code with that card's component.
+const FACTORY_PERFORMANCE_URL = 'http://192.168.1.17:83';
 
 /** Single visibility rule for every sidebar item — the one place "can this user see this link" is decided. */
 function isNavItemVisible(item: NavItem, permissions: string[], hasAnyAdminPermission: boolean): boolean {
@@ -115,6 +125,12 @@ const MAIN_GROUPS: NavGroup[] = [
       // same CONTRACTS_MANAGEMENT gate as Technical/Erection above — no new
       // permission, no new route.
       { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar, module: 'CONTRACTS_MANAGEMENT' },
+      // FMP-UI-37 — Factory Performance Dashboard runs as a separate app
+      // (http://192.168.1.17:83), not an FMP module: no `module`/`permission`
+      // gate, so it is visible to anyone who can see this sidebar at all,
+      // per this unit's own "no permission check" requirement. `external`
+      // routes this through a plain new-tab `<a>`, never Next's `<Link>`.
+      { label: 'Factory Performance', href: FACTORY_PERFORMANCE_URL, icon: Gauge, external: true },
     ],
   },
   {
@@ -254,7 +270,10 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
 // exists in CONTRACT_ITEMS (see that array's own FMP-UI-30 note), it can no
 // longer make the Contract Management row's own `executiveContractSubActive`
 // check true either.
-const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }[] = [
+// FMP-UI-37 — `external` added alongside `href`/`icon` for the same reason
+// as `NavItem.external` above: Factory Performance is a separate app, not
+// an in-platform route, and must render as a plain new-tab `<a>`.
+const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon; external?: boolean }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
   { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
   // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
@@ -268,6 +287,11 @@ const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon }
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
   { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
   { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar },
+  // FMP-UI-37 — Factory Performance Dashboard, 13th item, after Advanced
+  // Planning. Same external app/URL as the Operations group's own entry
+  // above; no active-state check (see the render loop's `item.external`
+  // branch below).
+  { label: 'Factory Performance', href: FACTORY_PERFORMANCE_URL, icon: Gauge, external: true },
 ];
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
@@ -552,6 +576,24 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                   </Fragment>
                 );
               }
+              // FMP-UI-37 — Factory Performance is a separate app, not an FMP
+              // route: a plain new-tab anchor, never Next's `<Link>`, and
+              // never checked for "active" (no in-app route to match).
+              if (item.external) {
+                return (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-3 rounded-r-md border-l-4 border-transparent py-3.5 pl-3 pr-3 text-lg font-medium leading-snug text-text-inverse/75 transition-colors duration-150 hover:bg-nav-hover/70 hover:text-text-inverse"
+                  >
+                    <item.icon className="mt-0.5 size-6 shrink-0" aria-hidden="true" />
+                    <span className="flex-1">{item.label}</span>
+                    <ExternalLink className="mt-1 size-4 shrink-0 opacity-50" aria-hidden="true" />
+                  </a>
+                );
+              }
               const active = isExecutiveItemActive(item.href, pathname);
               return (
                 <Link
@@ -691,6 +733,24 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                   );
                 }
 
+                // FMP-UI-37 — Factory Performance is a separate app, not an
+                // FMP route: a plain new-tab anchor, never Next's `<Link>`,
+                // and never checked for "active" (no in-app route to match).
+                if (item.external) {
+                  return (
+                    <a
+                      key={item.label}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2.5 px-4 py-2 text-sm text-text-inverse/70 transition-colors hover:bg-nav-hover hover:text-text-inverse"
+                    >
+                      <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                      <span className="flex-1">{item.label}</span>
+                      <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+                    </a>
+                  );
+                }
                 const active = isActive(item.href, pathname);
                 return (
                   <Link
@@ -824,7 +884,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           every other section already size themselves from this same width,
           so nothing else needed to change. */}
       <aside
-        className="hidden md:flex w-80 shrink-0 flex-col bg-nav h-screen"
+        className="hidden md:flex w-80 shrink-0 flex-col min-h-0 h-full overflow-clip bg-nav"
         aria-label="Application navigation"
       >
         {sidebarContent}

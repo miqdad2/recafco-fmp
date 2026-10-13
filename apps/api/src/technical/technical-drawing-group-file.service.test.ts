@@ -8,7 +8,6 @@ import {
   groupAcceptsFileChanges,
   groupFileChangeBlockedMessage,
   GROUP_FILE_MAX_BYTES,
-  GROUP_FILE_TYPES,
 } from './drawing-group-files';
 import type { DatabaseService } from '../database/database.service';
 import type { DepartmentAccessService } from '../department-access/department-access.service';
@@ -56,20 +55,33 @@ beforeEach(() => {
 });
 
 describe('file rules', () => {
-  it('allows pdf, doc, docx, xls, xlsx, png, jpg, jpeg up to 25 MB', () => {
-    expect(Object.keys(GROUP_FILE_TYPES).sort()).toEqual(['.doc', '.docx', '.jpeg', '.jpg', '.pdf', '.png', '.xls', '.xlsx']);
+  it('allows PDF, TIF/TIFF, DWG, DXF, JPG/JPEG, PNG, Word and Excel up to 25 MB (FMP-TECH-28)', () => {
     expect(GROUP_FILE_MAX_BYTES).toBe(25 * 1024 * 1024);
-    expect(() => validateGroupFile({ originalname: 'a.PDF', mimetype: 'application/pdf', size: 1 })).not.toThrow();
-    expect(() => validateGroupFile({ originalname: 'a.jpeg', mimetype: 'image/jpeg', size: GROUP_FILE_MAX_BYTES })).not.toThrow();
+    const ok: [string, string][] = [
+      ['a.PDF', 'application/pdf'], ['a.jpeg', 'image/jpeg'], ['a.jpg', 'image/jpeg'], ['a.png', 'image/png'],
+      ['a.doc', 'application/msword'], ['a.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      ['a.xls', 'application/vnd.ms-excel'], ['a.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+      ['sheet.tif', 'image/tiff'], ['sheet.TIFF', 'application/octet-stream'], ['sheet.tif', ''],
+      ['plan.dwg', 'application/acad'], ['plan.dwg', 'application/octet-stream'], ['plan.DWG', ''], ['plan.dxf', 'application/dxf'], ['plan.dxf', ''],
+    ];
+    for (const [name, mime] of ok) expect(() => validateGroupFile({ originalname: name, mimetype: mime, size: 1 })).not.toThrow();
+    expect(() => validateGroupFile({ originalname: 'big.pdf', mimetype: 'application/pdf', size: GROUP_FILE_MAX_BYTES })).not.toThrow();
   });
-  it('rejects an unsupported type with the plain message (wrong extension, wrong MIME, no extension)', () => {
+  it('returns the type to store: TIFF is normalised, DWG/DXF get a CAD type even when the browser sends none', () => {
+    expect(validateGroupFile({ originalname: 'sheet.tif', mimetype: '', size: 1 })).toBe('image/tiff');
+    expect(validateGroupFile({ originalname: 'plan.dwg', mimetype: 'application/octet-stream', size: 1 })).toBe('application/acad');
+    expect(validateGroupFile({ originalname: 'plan.dxf', mimetype: '', size: 1 })).toBe('application/dxf');
+    expect(validateGroupFile({ originalname: 'a.pdf', mimetype: 'application/pdf', size: 1 })).toBe('application/pdf');
+  });
+  it('rejects an unsupported type with the friendly message (wrong extension, no extension, wrong type)', () => {
     for (const f of [
       { originalname: 'a.exe', mimetype: 'application/octet-stream', size: 1 },
-      { originalname: 'a.dwg', mimetype: 'application/acad', size: 1 },
-      { originalname: 'a.pdf', mimetype: 'image/png', size: 1 },
+      { originalname: 'a.exe', mimetype: 'application/x-msdownload', size: 1 },
       { originalname: 'noext', mimetype: 'application/pdf', size: 1 },
+      { originalname: 'a.tif', mimetype: 'application/x-msdownload', size: 1 },
+      { originalname: 'a.zip', mimetype: 'application/zip', size: 1 },
     ]) {
-      expect(() => validateGroupFile(f)).toThrow('This file type is not allowed.');
+      expect(() => validateGroupFile(f)).toThrow('This file type is not allowed. Please upload PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, or Excel.');
     }
   });
   it('rejects an oversized file', () => {
@@ -131,7 +143,7 @@ describe('upload', () => {
   });
 
   it('rejects an unsupported or oversized file before anything is stored', async () => {
-    await expect(service.upload('k1', 'g1', pdf({ originalname: 'a.exe', mimetype: 'application/x-msdownload' }), { category: 'DRAWING', remarks: undefined }, WRITER)).rejects.toThrow('This file type is not allowed.');
+    await expect(service.upload('k1', 'g1', pdf({ originalname: 'a.exe', mimetype: 'application/x-msdownload' }), { category: 'DRAWING', remarks: undefined }, WRITER)).rejects.toThrow('This file type is not allowed. Please upload PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, or Excel.');
     await expect(service.upload('k1', 'g1', pdf({ size: GROUP_FILE_MAX_BYTES + 1 }), { category: 'DRAWING', remarks: undefined }, WRITER)).rejects.toThrow('File is too large.');
     expect(mockSave).not.toHaveBeenCalled();
     expect(mockAttCreate).not.toHaveBeenCalled();

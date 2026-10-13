@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { HandCoins, Shield, ShieldCheck, Umbrella, Receipt, Landmark } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -8,6 +8,9 @@ import type { ContractParty } from '@/lib/contracts-api';
 import type { ActionResult } from '../../actions';
 import { createContractAction } from '../../actions';
 import { ContractBoqRegisterTable } from '../../_components/contract-boq-register-table';
+import { BoqFileTypesHint, makeStagedFiles } from '../../../technical/_components/boq-staged-files';
+import type { StagedBoqFile } from '../../../technical/_components/boq-staged-files';
+import { BOQ_FILE_TEXT, mapStagedFilesToSavedItems, registerFilesTotalError, splitValidBoqFiles } from '../../../technical/_lib/boq-attachment-helpers';
 import {
   InfoBox,
   ScopeOfWorkFieldset,
@@ -25,6 +28,7 @@ import {
   boqLineTotal,
   validateRegisterBoqRows,
   toBoqApiItems,
+  boqRowHasAnyValue,
 } from '../../_lib/contract-boq-helpers';
 
 interface Props {
@@ -98,6 +102,10 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
   const [otherDescription, setOtherDescription] = useState('');
   const [boqRows, setBoqRows] = useState<BoqRow[]>(() => Array.from({ length: INITIAL_BOQ_ROW_COUNT }, () => emptyBoqRow()));
   const [boqError, setBoqError] = useState<string | null>(null);
+  // FMP-BOQ-17 — optional drawing files, saved together with the contract. `itemId` is the register row id.
+  const [stagedFiles, setStagedFiles] = useState<StagedBoqFile[]>([]);
+  const [fileNotice, setFileNotice] = useState<string[]>([]);
+  const filesInputRef = useRef<HTMLInputElement>(null);
   const [basicErrors, setBasicErrors] = useState<BasicDetailsErrors>({});
   // Save Draft and Register Contract submit the same <form> to the same
   // createContractAction — there is no separate draft/register backend status
@@ -107,6 +115,31 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
   // what gets submitted. The footer note below says this plainly.
   const [clickedAction, setClickedAction] = useState<'save' | 'create' | null>(null);
 
+  // The files travel in a hidden file input (the browser can only submit files that way); the matching
+  // list says which saved BOQ item each one belongs to. Rows left empty are not saved, so a file on one is an error.
+  const savedRowIds = boqRows.filter(boqRowHasAnyValue).map((r) => r.id);
+  const fileMapping = mapStagedFilesToSavedItems(stagedFiles.map((s) => s.itemId), savedRowIds);
+
+  useEffect(() => {
+    const input = filesInputRef.current;
+    if (!input) return;
+    try {
+      const transfer = new DataTransfer();
+      stagedFiles.forEach((s) => transfer.items.add(s.file));
+      input.files = transfer.files;
+    } catch {
+      // Very old browsers cannot fill the file list; the contract still saves, without files.
+    }
+  }, [stagedFiles]);
+
+  function pickFiles(files: File[], itemId: string): void {
+    const { valid, errors } = splitValidBoqFiles(files);
+    const tooMany = registerFilesTotalError([...stagedFiles.map((s) => s.file), ...valid]);
+    setFileNotice(tooMany ? [...errors, tooMany] : errors);
+    if (valid.length > 0 && !tooMany) setStagedFiles((prev) => [...prev, ...makeStagedFiles(valid, itemId)]);
+  }
+
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
     const formData = new FormData(e.currentTarget);
     const found = validateBasicDetails({
@@ -115,7 +148,7 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
       title: String(formData.get('title') ?? ''),
     });
     setBasicErrors(found);
-    const validationError = validateRegisterBoqRows(boqRows);
+    const validationError = validateRegisterBoqRows(boqRows) ?? fileMapping.error ?? registerFilesTotalError(stagedFiles.map((s) => s.file));
     setBoqError(validationError);
     if (validationError || Object.keys(found).length > 0) {
       e.preventDefault();
@@ -198,14 +231,40 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
 
         {/* Section 6 — Contract BOQ / Items */}
         <SectionCard badge="6" title="BOQ / Items">
-          <ContractBoqRegisterTable rows={boqRows} onRowsChange={setBoqRows} formatTotal={formatKwd} />
+          <ContractBoqRegisterTable
+            rows={boqRows}
+            onRowsChange={(next) => {
+              setBoqRows(next);
+              // A removed row takes its files with it.
+              const kept = new Set(next.map((r) => r.id));
+              setStagedFiles((prev) => prev.filter((f) => kept.has(f.itemId)));
+            }}
+            formatTotal={formatKwd}
+            stagedFiles={stagedFiles}
+            onStagedFilesChange={setStagedFiles}
+            onPickFiles={(rowId, files) => pickFiles(files, rowId)}
+            disabled={isPending}
+          />
+
+          <div className="mt-2">
+            <BoqFileTypesHint />
+            {fileNotice.length > 0 && (
+              <ul role="alert" className="mt-1 space-y-1 text-sm text-error">
+                {fileNotice.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           <div className="mt-3">
-            <InfoBox variant="subtle">Contract Qty is for contract value. Piece quantity will be confirmed later from Technical drawings.</InfoBox>
+            <InfoBox variant="subtle">Contract Qty is for contract value. Piece quantity will be confirmed later from Technical drawings. {BOQ_FILE_TEXT.reference}</InfoBox>
           </div>
 
           <input type="hidden" name="contractValue" value={totalAmount > 0 ? totalAmount.toFixed(3) : ''} />
           <input type="hidden" name="currency" value={totalAmount > 0 ? 'KWD' : ''} />
+          <input ref={filesInputRef} type="file" name="boqFiles" multiple hidden tabIndex={-1} aria-hidden="true" />
+          <input type="hidden" name="boqFileItems" value={fileMapping.positions ? JSON.stringify(fileMapping.positions) : ''} />
           <input type="hidden" name="boqItems" value={boqItemsPayload.length > 0 ? JSON.stringify(boqItemsPayload) : ''} />
         </SectionCard>
 

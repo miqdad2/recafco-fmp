@@ -38,7 +38,7 @@ describe('status tiles', () => {
   it('counts each status correctly (the example from the brief)', () => {
     const i = item();
     expect(PROGRESS_TILES.map((t) => `${t.label} ${tileCount(i, t.key)}`)).toEqual([
-      'Drawing Ready 5', 'In Production 10', 'Produced 8', 'In Store 7', 'Delivered 6', 'Erected 10', 'Completed 4', 'Hold / Rejected 0',
+      'Elements Generated 5', 'In Production 10', 'Produced 8', 'In Store 7', 'Delivered 6', 'Erected 10', 'Completed 4', 'Hold / Rejected 0',
     ]);
   });
   it('Hold and Rejected share one tile', () => {

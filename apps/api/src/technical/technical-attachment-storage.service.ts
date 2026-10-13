@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, unlink, readFile, rename, access } from 'node:fs/promises';
 import { createReadStream, type ReadStream } from 'node:fs';
 import * as path from 'node:path';
 import { getApiEnv } from '../env';
@@ -40,7 +40,15 @@ export const TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES = [
   'application/x-tiff',
 ] as const;
 
-const TIFF_EXTENSION = /\.tiff?$/i;
+/** FMP-TECH-28 — one message for every Technical drawing upload that refuses a file type. */
+export const TECHNICAL_FILE_BAD_TYPE_MESSAGE = 'This file type is not allowed. Please upload PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, or Excel.';
+
+/** Browsers and Windows often report DWG/DXF as a generic type (or none at all), so the extension decides. */
+const GENERIC_MIME_TYPES: readonly string[] = ['', 'application/octet-stream'];
+const CAD_MIME_BY_EXTENSION: Record<string, string> = { '.dwg': 'application/acad', '.dxf': 'application/dxf' };
+
+const ALLOWED_EXTENSIONS: readonly string[] = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.png', '.jpg', '.jpeg', '.webp', '.tif', '.tiff', '.dwg', '.dxf'];
+const TIFF_EXTENSION =/\.tiff?$/i;
 const TIFF_MIME_TYPES: readonly string[] = ['image/tiff', 'image/tif', 'application/tiff', 'application/x-tiff'];
 
 /**
@@ -51,10 +59,14 @@ const TIFF_MIME_TYPES: readonly string[] = ['image/tiff', 'image/tif', 'applicat
  */
 export function resolveTechnicalAttachmentMimeType(file: { originalname: string; mimetype: string }): string | null {
   const mime = (file.mimetype ?? '').toLowerCase();
+  const cadMime = CAD_MIME_BY_EXTENSION[path.extname(file.originalname ?? '').toLowerCase()];
+  if (cadMime && GENERIC_MIME_TYPES.includes(mime)) return cadMime;
   if (TIFF_EXTENSION.test(file.originalname ?? '')) {
     if (TIFF_MIME_TYPES.includes(mime) || mime === '' || mime === 'application/octet-stream') return 'image/tiff';
     return null;
   }
+  // The file name must carry an allowed extension as well as an allowed type.
+  if (!ALLOWED_EXTENSIONS.includes(path.extname(file.originalname ?? '').toLowerCase())) return null;
   return (TECHNICAL_DRAWING_ATTACHMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(file.mimetype) ? file.mimetype : null;
 }
 
@@ -99,6 +111,27 @@ export class TechnicalAttachmentStorageService {
 
   createReadStream(storagePath: string): ReadStream {
     return createReadStream(this.resolveAbsolutePath(storagePath));
+  }
+
+  async readBuffer(storagePath: string): Promise<Buffer> {
+    return readFile(this.resolveAbsolutePath(storagePath));
+  }
+
+  async exists(storagePath: string): Promise<boolean> {
+    try {
+      await access(this.resolveAbsolutePath(storagePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Writes a derived file (e.g. a preview) at a known key, via a temp file + rename so a reader never sees half a file. */
+  async writeDerived(storagePath: string, buffer: Buffer): Promise<void> {
+    const target = this.resolveAbsolutePath(storagePath);
+    const temp = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temp, buffer);
+    await rename(temp, target);
   }
 
   /** Best-effort disk cleanup — deliberately never throws, matching every existing deleteFile()'s own rule: a missing/already-removed file must never fail the delete request. */

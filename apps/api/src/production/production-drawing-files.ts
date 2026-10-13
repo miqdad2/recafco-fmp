@@ -12,7 +12,8 @@ export const PRODUCTION_FILE_MESSAGES = {
   notReleased: 'Drawing files are not released to Production yet.',
   noGroup: 'No drawing group assigned.',
   fileNotFound: 'File not found.',
-  pieceNotFound: 'Piece was not found.',
+  pieceNotFound: 'Element was not found.',
+  noDrawing: 'Final drawing is required before production can start.',
 } as const;
 
 export interface PieceGroupLink {
@@ -41,5 +42,43 @@ export function toProductionDrawingGroup(links: PieceGroupLink[] | undefined): P
     calculationRef: group.calculationRef,
     groupTitle: group.groupTitle,
     fileCount: group._count.attachments,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-PROD-03 — where an element's final drawing comes from, for the Production
+// Work rows. A released drawing group with files wins (same rule as Technical's
+// coverage); otherwise the element's own files are its individual drawing.
+// ---------------------------------------------------------------------------
+
+export type ProductionDrawingSource = 'GROUP' | 'INDIVIDUAL' | 'NONE';
+
+export interface ProductionDrawingInfo {
+  source: ProductionDrawingSource;
+  /** Drawing no to show: the group's for a group drawing, the element's own otherwise. */
+  reference: string;
+  groupTitle: string | null;
+  fileCount: number;
+  hasDrawing: boolean;
+}
+
+export function buildProductionDrawingInfo(input: {
+  drawingNo: string;
+  ownFileCount: number;
+  groupLinks: PieceGroupLink[] | undefined;
+}): ProductionDrawingInfo {
+  const group = toProductionDrawingGroup(input.groupLinks);
+  if (group && group.released && group.fileCount > 0) {
+    return { source: 'GROUP', reference: group.drawingNo, groupTitle: group.groupTitle, fileCount: group.fileCount, hasDrawing: true };
+  }
+  if (input.ownFileCount > 0) {
+    return { source: 'INDIVIDUAL', reference: input.drawingNo, groupTitle: null, fileCount: input.ownFileCount, hasDrawing: true };
+  }
+  return {
+    source: 'NONE',
+    reference: group && group.released ? group.drawingNo : input.drawingNo,
+    groupTitle: group && group.released ? group.groupTitle : null,
+    fileCount: 0,
+    hasDrawing: false,
   };
 }

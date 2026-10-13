@@ -11,14 +11,18 @@ import { TechnicalDrawingGroupService } from './technical-drawing-group.service'
 import { TechnicalDrawingGroupFileController } from './technical-drawing-group-file.controller';
 import { TechnicalDrawingGroupFileService } from './technical-drawing-group-file.service';
 import { TechnicalDrawingGroupFileStorageService } from './technical-drawing-group-file-storage.service';
+import { TechnicalBoqAttachmentController } from './technical-boq-attachment.controller';
+import { TechnicalBoqAttachmentService } from './technical-boq-attachment.service';
+import { TechnicalElementDrawingController } from './technical-element-drawing.controller';
+import { TechnicalElementDrawingService } from './technical-element-drawing.service';
 import { DatabaseModule } from '../database/database.module';
 import { AuthModule } from '../auth/auth.module';
 import { DepartmentAccessModule } from '../department-access/department-access.module';
 
 @Module({
   imports: [DatabaseModule, AuthModule, DepartmentAccessModule],
-  controllers: [TechnicalController, TechnicalBoqConfirmationController, TechnicalBoqPieceController, TechnicalDrawingGroupController, TechnicalDrawingGroupFileController],
-  providers: [TechnicalService, TechnicalAttachmentStorageService, TechnicalBoqConfirmationService, TechnicalBoqPieceService, TechnicalDrawingGroupService, TechnicalDrawingGroupFileService, TechnicalDrawingGroupFileStorageService],
+  controllers: [TechnicalController, TechnicalBoqConfirmationController, TechnicalBoqPieceController, TechnicalDrawingGroupController, TechnicalDrawingGroupFileController, TechnicalBoqAttachmentController, TechnicalElementDrawingController],
+  providers: [TechnicalBoqAttachmentService, TechnicalElementDrawingService, TechnicalService, TechnicalAttachmentStorageService, TechnicalBoqConfirmationService, TechnicalBoqPieceService, TechnicalDrawingGroupService, TechnicalDrawingGroupFileService, TechnicalDrawingGroupFileStorageService],
   exports: [TechnicalService],
 })
 export class TechnicalModule {}

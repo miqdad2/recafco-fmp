@@ -2,22 +2,23 @@ import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Package, Factory, Boxes, PauseCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Package, Factory, Boxes, PauseCircle, XCircle, AlertTriangle, Truck } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
 import { productionPiecesApi } from '@/lib/production-pieces-api';
 import type { ProductionContractProgress } from '@/lib/production-pieces-api';
 import { ExecutiveModuleNav } from '../../_components/executive-module-nav';
 import { RefreshButton } from '../../technical/_components/refresh-button';
-import { BOQ_PIECE_STATUS_LABELS, BOQ_PIECE_STATUS_CLASSES } from '../../technical/_lib/boq-confirmation-helpers';
-import { ProductionContractSelector } from './_components/production-contract-selector';
+import { BOQ_PIECE_STATUS_CLASSES } from '../../technical/_lib/boq-confirmation-helpers';
+import { ProductionProjectsPanel } from './_components/production-projects-panel';
 import { DashboardKpiCard } from '../../_components/dashboard-kpi-card';
 import { DashboardNeedsAttentionPanel } from '../../_components/dashboard-needs-attention-panel';
 import {
   pickDefaultProductionContract,
-  buildOverallProductionFlow,
   buildProductionKpis,
   buildProductionNeedsAttentionRows,
   buildProductionWorkQueue,
+  formatUpdateDateTime,
+  productionUpdateStatusLabel,
 } from './_lib/production-dashboard-helpers';
 
 export const metadata: Metadata = { title: 'Production & Planning — RECAFCO FMP' };
@@ -39,7 +40,13 @@ export const dynamic = 'force-dynamic';
  * piece-status query, added to the EXISTING Piece Production screen's own
  * backend service (no new module, no Technical/BOQ file touched) — plus a
  * second new read-only query, `recentUpdates()`, for the latest real status
- * changes. No production order/batch/inventory concept was added; the old
+ * changes.
+ *
+ * FMP-PROD-01 — now a common overview for every internal user: a searchable,
+ * filterable Projects / Job Orders list, a preview of the selected project, and
+ * the Work Queue / Needs Attention / Recent Updates panels. Production only
+ * ever receives elements released from Technical (the API enforces it); status
+ * updates happen on the Production Work page, never here. No production order/batch/inventory concept was added; the old
  * order-based `/production/dashboard` page is untouched at its own route,
  * and `productionApi`/`ProductionDashboardData` (order metrics) are no
  * longer imported here at all.
@@ -64,7 +71,6 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
   const recentUpdates = (recentResult.status === 'fulfilled' ? recentResult.value : null) ?? [];
 
   const defaultContract = pickDefaultProductionContract(contracts);
-  const flow = buildOverallProductionFlow(contracts);
   const kpis = buildProductionKpis(contracts);
   const attentionRows = buildProductionNeedsAttentionRows(contracts);
   const workQueue = buildProductionWorkQueue(contracts, 5);
@@ -73,6 +79,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
     { label: 'Ready for Production', value: kpis.ready, icon: Package, tone: 'neutral' as const },
     { label: 'In Production', value: kpis.inProduction, icon: Factory, tone: 'neutral' as const },
     { label: 'Produced', value: kpis.produced, icon: Boxes, tone: 'success' as const },
+    { label: 'Sent to Storage Yard', value: kpis.sentToStorage, icon: Truck, tone: 'neutral' as const },
     { label: 'On Hold', value: kpis.onHold, icon: PauseCircle, tone: kpis.onHold > 0 ? ('warning' as const) : ('neutral' as const) },
     { label: 'Rejected', value: kpis.rejected, icon: XCircle, tone: kpis.rejected > 0 ? ('error' as const) : ('neutral' as const) },
     { label: 'Needs Attention', value: kpis.needsAttention, icon: AlertTriangle, tone: kpis.needsAttention > 0 ? ('error' as const) : ('neutral' as const) },
@@ -90,7 +97,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
           <Factory className="size-6 shrink-0 text-text-secondary" aria-hidden="true" />
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-text-primary lg:text-3xl">Production & Planning</h1>
-            <p className="mt-1 text-sm text-text-secondary">Track ready pieces, in-production pieces, and produced pieces.</p>
+            <p className="mt-1 text-sm text-text-secondary">Track elements released from Technical, production progress, holds, and completed elements.</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">
@@ -98,7 +105,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
             href="/production/pieces"
             className="inline-flex h-9 items-center rounded-lg bg-accent px-4 font-semibold text-accent-foreground shadow-sm transition hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2"
           >
-            Open Piece Production
+            Open Production Work
           </Link>
           <RefreshButton />
           <Link href="/dashboard" className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-text-secondary hover:bg-surface-secondary">
@@ -125,7 +132,7 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
       )}
 
       {/* KPI row — FMP-UI-35: now the shared DashboardKpiCard. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         {kpiCards.map((kpi) => (
           <DashboardKpiCard key={kpi.label} label={kpi.label} value={kpi.value} icon={kpi.icon} tone={kpi.tone} />
         ))}
@@ -134,56 +141,30 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
       {/* Main grid */}
       <div className="grid gap-4 lg:grid-cols-[13fr_7fr]">
         <div className="space-y-4">
-          {/* Contract/Project selector + Selected Project Production */}
-          <ProductionContractSelector contracts={contracts} defaultContractId={defaultContract?.contractId ?? null} />
+          {/* Projects / Job Orders list + Selected Project Production preview */}
+          <ProductionProjectsPanel contracts={contracts} defaultContractId={defaultContract?.contractId ?? null} />
 
-          {/* Overall Production Flow */}
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">Overall Production Flow</h2>
-            {contracts.length === 0 ? (
-              <div className="mt-2">
-                <p className="text-sm text-text-muted">No pieces ready for production yet.</p>
-                <p className="mt-0.5 text-xs text-text-muted">Pieces will appear after Technical generates drawing-confirmed pieces.</p>
-              </div>
-            ) : (
-              <div className="mt-3 grid grid-cols-3 gap-2 sm:max-w-sm">
-                <div className="rounded-lg bg-surface-secondary px-2 py-2 text-center">
-                  <p className="text-lg font-bold text-text-primary">{flow.ready}</p>
-                  <p className="text-[11px] text-text-secondary">Ready</p>
-                </div>
-                <div className="rounded-lg bg-surface-secondary px-2 py-2 text-center">
-                  <p className="text-lg font-bold text-text-primary">{flow.inProduction}</p>
-                  <p className="text-[11px] text-text-secondary">In Production</p>
-                </div>
-                <div className="rounded-lg bg-surface-secondary px-2 py-2 text-center">
-                  <p className="text-lg font-bold text-text-primary">{flow.produced}</p>
-                  <p className="text-[11px] text-text-secondary">Produced</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Production Work Queue — max 5, per this unit's own requirement. */}
+          {/* Production Work Queue — top 5 projects that most need a look. */}
           <section aria-labelledby="production-queue-heading" className="space-y-2">
             <h2 id="production-queue-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
               Production Work Queue
             </h2>
             {workQueue.length === 0 ? (
               <div className="rounded-lg border border-border bg-surface p-6 text-center text-sm text-text-muted">
-                No contracts have pieces to produce yet.
+                No elements have been released to Production yet.
               </div>
             ) : (
               <div className="overflow-hidden rounded-lg border border-border bg-surface">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-secondary">
-                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">Contract / Job Order</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-text-secondary">Job Order / Contract</th>
                       <th className="hidden px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-text-secondary sm:table-cell">Project</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Ready</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">In Prod.</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Ready Elements</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">In Production</th>
                       <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Produced</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Hold/Rej.</th>
-                      <th className="px-3 py-2" />
+                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Hold / Rejected</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-text-secondary">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -201,8 +182,8 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
                           {c.onHold + c.rejected}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <Link href={`/production/pieces?contractId=${c.contractId}`} className="text-xs font-semibold text-accent hover:underline">
-                            Open
+                          <Link href={`/production/pieces?contractId=${c.contractId}`} className="inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-accent px-3 text-xs font-semibold text-accent-foreground shadow-sm transition hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2">
+                            Open Production Work
                           </Link>
                         </td>
                       </tr>
@@ -223,14 +204,14 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
             <DashboardNeedsAttentionPanel rows={attentionRows} />
           </section>
 
-          {/* Recent Production Updates — max 5, real piece status history. */}
+          {/* Recent Production Updates — max 5, released elements only. */}
           <section aria-labelledby="production-recent-heading" className="space-y-2">
             <h2 id="production-recent-heading" className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
               Recent Production Updates
             </h2>
             {recentUpdates.length === 0 ? (
               <div className="rounded-lg border border-border bg-surface p-4 text-center text-sm text-text-muted">
-                No recent piece status updates.
+                No recent production updates.
               </div>
             ) : (
               <ul className="space-y-1.5">
@@ -239,12 +220,12 @@ export default async function ProductionExecutivePage(): Promise<React.JSX.Eleme
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-semibold text-text-primary">{u.pieceCode}</p>
                       <span className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${BOQ_PIECE_STATUS_CLASSES[u.newStatus]}`}>
-                        {BOQ_PIECE_STATUS_LABELS[u.newStatus]}
+                        {productionUpdateStatusLabel(u.newStatus)}
                       </span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-text-secondary">{u.jobOrder ?? u.referenceNumber} · {u.projectName}</p>
                     <p className="mt-0.5 text-[11px] text-text-muted">
-                      {u.createdAt.slice(0, 16).replace('T', ' ')}{u.updatedByName ? ` · ${u.updatedByName}` : ''}
+                      {formatUpdateDateTime(u.createdAt)}{u.updatedByName ? ` · Updated by ${u.updatedByName}` : ''}
                     </p>
                   </li>
                 ))}

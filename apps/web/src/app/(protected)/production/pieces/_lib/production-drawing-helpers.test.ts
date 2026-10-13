@@ -54,8 +54,8 @@ describe('optional warning (never blocks)', () => {
     expect(shouldWarnNotReleased('ON_HOLD', 2)).toBe(false);
     expect(shouldWarnNotReleased('', 2)).toBe(false);
     expect(shouldWarnNotReleased('PRODUCED', 0)).toBe(false);
-    expect(PRODUCTION_DRAWING_TEXT.warning).toBe('Some selected pieces are not released to Production and will be skipped.');
-    expect(PRODUCTION_DRAWING_TEXT.helper).toBe('Only released pieces can be marked In Production or Produced.');
+    expect(PRODUCTION_DRAWING_TEXT.warning).toBe('Some selected elements are not released to Production and will be skipped.');
+    expect(PRODUCTION_DRAWING_TEXT.helper).toBe('Only released elements can be marked In Production or Produced.');
     expect(targetNeedsRelease('ON_HOLD')).toBe(false);
     expect(targetNeedsRelease('REJECTED')).toBe(false);
     expect(targetNeedsRelease('PRODUCED')).toBe(true);

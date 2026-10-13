@@ -132,7 +132,7 @@ describe('selectedJobBoqSummary', () => {
     expect(summary.needsAttention).toBe(false);
   });
 
-  it('flags needsAttention when confirmed and generated pieces do not match', () => {
+  it('flags needsAttention when confirmed and generated elements do not match', () => {
     const items = [makeBoqItem({ confirmedPieces: 10, piecesGenerated: 4 })];
     expect(selectedJobBoqSummary(items).needsAttention).toBe(true);
   });
@@ -144,7 +144,7 @@ describe('buildTechnicalNeedsAttentionRows', () => {
       needsAttention: [], waitingApproval: 0, missingBoqConfirmation: 0, confirmedPiecesNotGenerated: 0, rejectedOrHoldPieces: 0,
     });
     expect(rows.map((r) => r.label)).toEqual([
-      'Overdue Jobs', 'Waiting Approval', 'Missing BOQ Drawing Confirmation', 'Confirmed Pieces Not Generated', 'Rejected / Hold Pieces',
+      'Overdue Jobs', 'Waiting Approval', 'Missing BOQ Drawing Confirmation', 'Confirmed Elements Not Generated', 'Rejected / Hold Elements',
     ]);
   });
 
@@ -204,7 +204,7 @@ import type { JobReleaseSummary } from '@/lib/technical-api';
 
 const rel = (over: Partial<JobReleaseSummary> = {}): JobReleaseSummary => ({
   confirmed: 50, generated: 50, assigned: 40, notAssigned: 10, filesAttachedPieces: 30, released: 25, notReleased: 15,
-  groupsTotal: 3, groupsWithFiles: 2, groupsNoFiles: 1, groupsSubmitted: 1, groupsApproved: 1, groupsNotReleased: 2, confirmedNotGenerated: 0,
+  groupsTotal: 3, groupsWithFiles: 2, groupsNoFiles: 1, groupsSubmitted: 1, groupsApproved: 1, groupsNotReleased: 2, confirmedNotGenerated: 0, individuallyCovered: 0, individuallyReleased: 0,
   ...over,
 });
 const jobRow = (id: string, order: string): TechnicalJobRow =>
@@ -214,7 +214,7 @@ describe('selected job release numbers', () => {
   it('shows assigned / not assigned and released / not released counts', () => {
     const counts = Object.fromEntries(releaseCounts(rel()).map((c) => [c.label, c.value]));
     expect(counts).toEqual({
-      'Pieces Generated': 50, 'Assigned to Groups': 40, 'Not Assigned': 10, 'Released to Production': 25, 'Not Released': 15, 'Groups with No Files': 1,
+      'Elements Generated': 50, 'Assigned to Groups': 40, 'Not Assigned': 10, 'Released to Production': 25, 'Not Released': 15, 'Groups with No Files': 1,
     });
     expect(releaseCounts(rel()).find((c) => c.label === 'Not Assigned')?.warn).toBe(true);
   });
@@ -222,9 +222,9 @@ describe('selected job release numbers', () => {
     expect(releaseFlow(rel()).map((s) => `${s.label} ${s.count}`)).toEqual(['Confirmed 50', 'Generated 50', 'Grouped 40', 'Files Attached 30', 'Released 25']);
   });
   it('explains what is missing in plain words, in order', () => {
-    expect(jobReleaseNote(rel({ generated: 0 }))).toBe('No pieces generated yet.');
+    expect(jobReleaseNote(rel({ generated: 0 }))).toBe('No elements generated yet.');
     expect(jobReleaseNote(rel({ groupsTotal: 0, assigned: 0 }))).toBe('No drawing groups created yet.');
-    expect(jobReleaseNote(rel({ released: 0 }))).toBe('No pieces released to Production yet.');
+    expect(jobReleaseNote(rel({ released: 0 }))).toBe('No elements released to Production yet.');
     expect(jobReleaseNote(rel())).toBeNull();
     expect(jobReleaseNote(undefined)).toBeNull();
     expect(RELEASE_MESSAGES.upToDate).toBe('All Technical release work is up to date.');
@@ -242,7 +242,7 @@ describe('Needs Attention (Technical release)', () => {
   it('adds pieces not assigned, groups not released and groups with no files, summed over jobs', () => {
     const rows = buildReleaseAttentionRows({ a: rel(), b: rel({ notAssigned: 5, groupsNotReleased: 1, groupsNoFiles: 2 }) });
     expect(rows).toEqual([
-      { label: 'Pieces Not Assigned', value: 15, tone: 'warning' },
+      { label: 'Elements Not Assigned', value: 15, tone: 'warning' },
       { label: 'Groups Not Released', value: 3, tone: 'warning' },
       { label: 'Groups With No Files', value: 3, tone: 'warning' },
     ]);
@@ -259,7 +259,7 @@ describe('Next Action Focus priorities', () => {
 
   it('puts not-assigned pieces before the existing workflow action', () => {
     const items = buildNextActionItems(jobs, { a: rel({ ...base, notAssigned: 12 }) }, wf);
-    expect(items.map((i) => i.text)).toEqual(['12 pieces not assigned to groups', '']);
+    expect(items.map((i) => i.text)).toEqual(['12 elements not assigned to groups', '']);
     expect(items[1]?.stage).toBe('DRAWING_RECEIVED');
   });
   it('orders: not generated, not assigned, no files, waiting approval, waiting release', () => {
@@ -273,8 +273,8 @@ describe('Next Action Focus priorities', () => {
       [],
     );
     expect(items.map((i) => i.text)).toEqual([
-      '8 confirmed pieces not generated',
-      '3 pieces not assigned to groups',
+      '8 confirmed elements not generated',
+      '3 elements not assigned to groups',
       '1 group has no files',
       '2 submitted groups waiting approval',
       '1 approved group waiting release',

@@ -570,7 +570,7 @@ export class TechnicalService {
   private async buildReleaseByContract(contractIds: string[]): Promise<Record<string, JobReleaseSummary>> {
     if (contractIds.length === 0) return {};
     const client = this.db.getClient();
-    const [confirmedRows, generatedRows, groups] = await Promise.all([
+    const [confirmedRows, generatedRows, groups, individualRows] = await Promise.all([
       client.contractBoqDrawingConfirmation.groupBy({
         by: ['contractId'],
         where: { contractId: { in: contractIds }, confirmationStatus: ContractBoqConfirmationStatus.CONFIRMED, confirmedPieces: { not: null } },
@@ -585,6 +585,16 @@ export class TechnicalService {
         where: { contractId: { in: contractIds } },
         select: { contractId: true, status: true, _count: { select: { pieces: true, attachments: true } } },
       }),
+      // FMP-TECH-27 — elements outside any group that have their own final drawing or were released on their own.
+      client.contractBoqPiece.findMany({
+        where: {
+          contractId: { in: contractIds },
+          isCancelled: false,
+          drawingGroupLinks: { none: { activeSlot: 1 } },
+          OR: [{ attachments: { some: {} } }, { releasedToProductionAt: { not: null } }],
+        },
+        select: { contractId: true, releasedToProductionAt: true, _count: { select: { attachments: true } } },
+      }),
     ]);
     const confirmed = new Map(confirmedRows.map((r) => [r.contractId, r._sum.confirmedPieces ?? 0]));
     const generated = new Map(generatedRows.map((r) => [r.contractId, r._count._all]));
@@ -594,6 +604,10 @@ export class TechnicalService {
         confirmed.get(id) ?? 0,
         generated.get(id) ?? 0,
         groups.filter((g) => g.contractId === id).map((g) => ({ status: g.status, pieceCount: g._count.pieces, fileCount: g._count.attachments })),
+        {
+          covered: individualRows.filter((p) => p.contractId === id && p._count.attachments > 0).length,
+          released: individualRows.filter((p) => p.contractId === id && p.releasedToProductionAt !== null).length,
+        },
       );
     }
     return result;

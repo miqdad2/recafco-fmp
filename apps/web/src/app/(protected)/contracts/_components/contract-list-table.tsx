@@ -1,252 +1,354 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
-import { ContractRowActions } from './contract-row-actions';
-import { ContractScheduleStatusSelect } from './contract-schedule-status-select';
-import { formatContractValue, formatScopeCompact, formatDaysRemainingDisplay } from '../_lib/contract-ui-helpers';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import { BOQ_BUTTON_CLS, ContractRowActions, OPEN_BUTTON_CLS } from './contract-row-actions';
+import { SCHEDULE_STATUS_BADGE_CLASSES, formatContractValue, formatScopeCompact, scheduleStatusLabel } from '../_lib/contract-ui-helpers';
+import {
+  attentionReasons,
+  boqBar,
+  countLabel,
+  formatShortDate,
+  matchesQuickFilter,
+  paymentBar,
+  projectStages,
+  QUICK_FILTERS,
+  statusBadge,
+  timelineInfo,
+} from '../_lib/contract-list-view-helpers';
+import type { BarInfo, QuickFilter, StageInfo } from '../_lib/contract-list-view-helpers';
+import type { ProjectProgress } from '../executive/_lib/project-overview-helpers';
 import type { Contract } from '@/lib/contracts-api';
 
 interface Props {
   contracts: Contract[];
-  permissions: string[];
-  /** Contract ids with a closeout request currently SUBMITTED/UNDER_REVIEW (CM-38's existing register, pendingOnly filter) — drives the "Review Closeout" primary action. */
-  pendingCloseoutContractIds: Set<string>;
-  /** CM-55D — real pagination context for the "Showing X to Y of Z contracts" top row. Optional: falls back to a plain "Showing N contracts" count when not supplied. */
+  /** BOQ piece progress per contract id (null = could not be loaded or nothing to track). */
+  boqProgress: Record<string, ProjectProgress | null>;
   page?: number;
   pageSize?: number;
   total?: number;
 }
 
-type ViewMode = 'simple' | 'full';
+const TONE = { neutral: 'text-text-secondary', warning: 'text-warning', error: 'text-error' } as const;
+const thCls = 'px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-text-inverse/90';
 
-function formatDate(iso: string | undefined): React.ReactNode {
-  if (!iso) return <span className="text-text-muted">—</span>;
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function formatValue(contract: Contract): React.ReactNode {
-  if (!contract.contractValue) return <span className="text-text-muted">—</span>;
-  return formatContractValue(contract.contractValue, contract.currency);
-}
-
-function DaysRemainingCell({ contract }: { contract: Contract }): React.JSX.Element {
-  const { label, overdue, dueSoon } = formatDaysRemainingDisplay(contract.forecastCompletionDate, contract.endDate);
-  if (label === '—') return <span className="text-text-muted">—</span>;
-  if (overdue) return <span className="text-error font-medium">{label}</span>;
-  if (dueSoon) return <span className="text-warning font-medium">{label}</span>;
-  return <span className="text-text-secondary">{label}</span>;
-}
-
-/** Compact progress bar + percentage — CM-55 approved-design style (blue for Progress %, green for Payment Progress %). */
-function ProgressCell({ percent, colorClass }: { percent: number | undefined; colorClass: string }): React.JSX.Element {
-  const value = percent ?? 0;
+function Bar({ info, color }: { info: BarInfo; color: string }): React.JSX.Element {
   return (
-    <div className="flex items-center gap-1.5 min-w-20">
-      <div className="h-1.5 w-12 rounded-full bg-surface-secondary overflow-hidden shrink-0">
-        <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
-      </div>
-      <span className="text-xs text-text-secondary tabular-nums">{value}%</span>
+    <div className="min-w-0">
+      <p className={`text-sm ${info.percent === null ? 'text-text-muted' : 'text-text-primary'}`}>{info.text}</p>
+      {info.percent !== null && (
+        <div className="mt-1 h-1.5 w-full max-w-32 overflow-hidden rounded-full bg-surface-secondary" role="presentation">
+          <div className={`h-full rounded-full ${color}`} style={{ width: `${info.percent}%` }} />
+        </div>
+      )}
     </div>
   );
 }
 
-/** Contract Type / Scope — CM-55C: compact "First Label +N" instead of the full comma-joined list, which was wrapping across several lines and inflating row height. Full list still reachable via `title`. */
-function ScopeCell({ contract }: { contract: Contract }): React.JSX.Element {
-  const { display, fullList } = formatScopeCompact(contract.scopeOfWork);
+function StatusCell({ contract }: { contract: Contract }): React.JSX.Element {
+  const badge = statusBadge(contract.status);
+  const reasons = attentionReasons(contract);
   return (
-    <span className="block max-w-32 truncate" title={fullList !== '—' ? fullList : undefined}>
-      {display}
-    </span>
+    <div className="flex flex-wrap items-center gap-1">
+      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+      {reasons.length > 0 && (
+        <span
+          className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning"
+          title={reasons.join(', ')}
+        >
+          Needs Attention
+        </span>
+      )}
+    </div>
   );
 }
 
-const HEADER_CLS = 'px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-text-inverse/90 whitespace-nowrap';
-const CELL_CLS = 'px-3 py-2 text-sm text-text-secondary align-middle';
-// Opaque background required on both sticky columns — a transparent/
-// hover-tinted cell would let scrolled content show through underneath it.
-// The header variants use bg-nav (matching the rest of the header row)
-// instead of bg-surface.
-const STICKY_LEFT_CLS = 'sticky left-0 z-10 bg-surface border-r border-border';
-// CM-69B — Action column widened to a reserved 180-220px band (min-w-[200px])
-// so Open + the "···" More trigger never crowd/overlap regardless of what
-// scrolled underneath; the left-edge shadow (body cell only — the header's
-// opaque bg-nav already reads as separated on its own) reinforces the
-// existing border as the real visual cue that content is scrolling beneath
-// a fixed column, not just decoration.
-const STICKY_RIGHT_CLS = 'sticky right-0 z-10 bg-surface border-l border-border min-w-[200px] shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)]';
-const STICKY_LEFT_HEADER_CLS = 'sticky left-0 z-10 bg-nav border-r border-border';
-const STICKY_RIGHT_HEADER_CLS = 'sticky right-0 z-10 bg-nav border-l border-border min-w-[200px]';
+function TimelineCell({ contract }: { contract: Contract }): React.JSX.Element {
+  const t = timelineInfo(contract);
+  if (!t.due && !t.start) return <span className="text-text-muted">—</span>;
+  return (
+    <div className="text-sm">
+      {t.due && <p className="font-semibold text-text-primary">Due {t.due}</p>}
+      {t.remaining && <p className={`text-xs font-medium ${TONE[t.remaining.tone]}`}>{t.remaining.text}</p>}
+      {t.start && <p className="text-xs text-text-muted">Start {t.start}</p>}
+    </div>
+  );
+}
 
-// CM-55 — approved-design Contract List table: dark navy header, Risk Rating
-// column removed entirely, "Physical Progress %" renamed to "Progress %"
-// and backed by real workflow-task completion (contract.progressPercent —
-// see contracts.service.ts's toListItem()), Payment Progress % and Open
-// Claims are now real (previously "Not tracked yet" placeholders), and the
-// Status column is the manager-facing schedule-status dropdown
-// (ContractScheduleStatusSelect) instead of the lifecycle badge. Full View
-// is the default per the approved design.
-// CM-55C — UX polish pass: compact row padding, truncated/nowrap text cells
-// (with `title` tooltips for the full value) so long Contract Name/Client/
-// Contract Type text no longer inflates row height, Contract ID sticky-left
-// and Action sticky-right so both stay reachable without horizontal
-// scrolling, and Open Claims/Days Remaining centered. Same columns, same
-// data, same ContractScheduleStatusSelect/ContractRowActions — visual only.
-// CM-55D — compact table-top row (real "Showing X to Y of Z contracts" count
-// on the left, the Simple/Full View toggle on the right, labeled "View:")
-// replacing the toggle-only row; Contract ID column gained a reserved
-// min-width so it never gets visually squeezed into an awkward wrap.
-export function ContractListTable({ contracts, permissions, pendingCloseoutContractIds, page, pageSize, total }: Props): React.JSX.Element {
-  const [view, setView] = useState<ViewMode>('full');
-  const full = view === 'full';
-  const canEditScheduleStatus = permissions.includes('contracts.update');
+const STAGE_BADGE: Record<StageInfo['text'], string> = {
+  Done: 'bg-success/10 text-success',
+  'In progress': 'bg-info/10 text-info',
+  'Not started': 'bg-surface-secondary text-text-muted',
+  '—': 'text-text-muted',
+};
 
-  const countLabel = (() => {
-    if (page === undefined || pageSize === undefined || total === undefined || total <= 0) {
-      return `Showing ${contracts.length} contract${contracts.length === 1 ? '' : 's'}`;
-    }
-    const from = (page - 1) * pageSize + 1;
-    const to = Math.min(from + contracts.length - 1, total);
-    return `Showing ${from} to ${to} of ${total} contracts`;
-  })();
+/** Four short rows (Technical, Production, Delivery, Erection) instead of four columns; only Done and In progress carry colour. */
+function StagesCell({ contract, progress }: { contract: Contract; progress: ProjectProgress | null }): React.JSX.Element {
+  const stages = projectStages(progress, contract.status);
+  return (
+    <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 text-xs">
+      {stages.map((st) => (
+        <div key={st.label} className="contents">
+          <dt className="text-text-secondary">{st.label}</dt>
+          <dd>
+            <span className={`inline-block rounded-full px-2 py-0.5 font-medium ${STAGE_BADGE[st.text]}`}>{st.text}</span>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function Identity({ contract }: { contract: Contract }): React.JSX.Element {
+  return (
+    <>
+      <Link
+        href={`/contracts/${contract.id}`}
+        title={contract.title}
+        className="line-clamp-2 font-semibold leading-snug text-text-primary hover:text-accent"
+      >
+        {contract.title}
+      </Link>
+      <span className="block font-mono text-[11px] text-text-muted">{contract.referenceNumber}</span>
+    </>
+  );
+}
+
+function ClientCell({ contract }: { contract: Contract }): React.JSX.Element {
+  const client = contract.firstParty?.name ?? contract.counterpartyName;
+  return (
+    <>
+      <span className="line-clamp-2 text-sm text-text-primary" title={client}>{client || '—'}</span>
+      <span className="block text-xs text-text-muted">{contract.jobOrder ? `Job Order ${contract.jobOrder}` : '—'}</span>
+    </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div>
+      <dt className="text-xs text-text-muted">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium text-text-primary">{children}</dd>
+    </div>
+  );
+}
+
+function Block({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <section className="rounded-md border border-border bg-surface p-3">
+      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">{title}</h4>
+      <dl className="space-y-2.5">{children}</dl>
+    </section>
+  );
+}
+
+const DASH = <span className="text-text-muted">—</span>;
+
+/**
+ * FMP-UI-43 — the read-only "Contract Details" card: three blocks (Contract Info,
+ * Progress Info, Key Dates), "—" for anything missing, no inputs or dropdowns.
+ * Schedule status is a plain badge here; it is changed on the contract page, not in the list.
+ */
+function Details({ contract, progress, showNav }: { contract: Contract; progress: ProjectProgress | null; showNav: boolean }): React.JSX.Element {
+  const scope = formatScopeCompact(contract.scopeOfWork);
+  const timeline = timelineInfo(contract);
+  const payment = paymentBar(contract.paymentProgressPercent);
+  const boq = boqBar(progress);
+  const claims = contract.openClaimsCount ?? 0;
+  const schedule = contract.effectiveScheduleStatus;
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      <h3 className="mb-3 text-sm font-semibold text-text-primary">Contract Details</h3>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Block title="Contract Info">
+          <Field label="Contract Type">{scope.fullList !== '—' ? scope.fullList : DASH}</Field>
+          <Field label="Contract Manager">{contract.ownerUser.displayName || DASH}</Field>
+          <Field label="Contract Value">{contract.contractValue ? formatContractValue(contract.contractValue, contract.currency) : DASH}</Field>
+          <Field label="Last Updated">{formatShortDate(contract.updatedAt) ?? DASH}</Field>
+        </Block>
+
+        <Block title="Progress Info">
+          <Field label="Schedule Status">
+            {schedule ? (
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${SCHEDULE_STATUS_BADGE_CLASSES[schedule]}`}>
+                {scheduleStatusLabel(schedule)}
+              </span>
+            ) : (
+              DASH
+            )}
+          </Field>
+          <Field label="Payment Progress">{payment.percent === null ? <span className={payment.text === '—' ? 'text-text-muted' : ''}>{payment.text}</span> : <Bar info={payment} color="bg-success" />}</Field>
+          <Field label="Open Claims">{claims}</Field>
+          <Field label="BOQ Status">{boq.text === '—' ? DASH : boq.text}</Field>
+        </Block>
+
+        <Block title="Key Dates">
+          <Field label="Start Date">{timeline.start ?? DASH}</Field>
+          <Field label="Forecast Completion">{timeline.due ?? DASH}</Field>
+          <Field label="Days Remaining">
+            {timeline.remaining ? <span className={TONE[timeline.remaining.tone]}>{timeline.remaining.text}</span> : DASH}
+          </Field>
+        </Block>
+      </div>
+
+      {showNav && (
+        <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-border pt-3">
+          <Link href={`/contracts/${contract.id}`} className={OPEN_BUTTON_CLS}>Open Contract</Link>
+          <Link href={`/contracts/${contract.id}/boq-progress`} className={BOQ_BUTTON_CLS}>Open BOQ Progress</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailsToggle({ open, onClick, id }: { open: boolean; onClick: () => void; id: string }): React.JSX.Element {
+  const Icon = open ? ChevronDown : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-controls={id}
+      className="mt-2 inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-border bg-surface-secondary px-2.5 text-xs font-medium text-text-secondary transition hover:border-border-strong hover:bg-surface hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-focus"
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+      {open ? 'Hide Details' : 'Show Details'}
+    </button>
+  );
+}
+
+/**
+ * FMP-UI-40 — the Contract List, simplified. Seven readable columns on desktop
+ * (no horizontal scrolling — columns share the width and long text wraps or
+ * truncates), one card per contract on tablets and phones, and a "Details"
+ * row for the fields that used to be extra columns (type, manager, value,
+ * dates, claims, last updated, schedule status). FMP-UI-42: the Actions column is
+ * just two buttons, Open and BOQ. FMP-UI-43: Details is a read-only information card —
+ * nothing in the list is editable.
+ */
+export function ContractListTable({ contracts, boqProgress, page, pageSize, total }: Props): React.JSX.Element {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [quick, setQuick] = useState<QuickFilter>('ALL');
+  const now = new Date();
+  const shown = contracts.filter((c) => matchesQuickFilter(c, boqProgress[c.id] ?? null, quick, now));
+  const toggle = (id: string): void => setOpenId((cur) => (cur === id ? null : id));
+
+  const actions = (c: Contract): React.JSX.Element => <ContractRowActions contractId={c.id} title={c.title} />;
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3 text-xs">
-        <span className="text-text-secondary">{countLabel}</span>
-        <div className="flex items-center gap-2">
-          <span className="text-text-muted">View:</span>
-          <div className="inline-flex rounded-md border border-border bg-surface p-0.5">
-            <button
-              type="button"
-              onClick={() => setView('simple')}
-              aria-pressed={!full}
-              className={`px-3 py-1.5 rounded ${!full ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'}`}
-            >
-              Simple
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('full')}
-              aria-pressed={full}
-              className={`px-3 py-1.5 rounded ${full ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'}`}
-            >
-              Full View
-            </button>
-          </div>
-        </div>
+      <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Quick filters">
+        {QUICK_FILTERS.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            aria-pressed={quick === chip.key}
+            onClick={() => setQuick(chip.key)}
+            className={[
+              'rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-focus',
+              quick === chip.key ? 'border-accent bg-accent text-accent-foreground' : 'border-border bg-surface text-text-secondary hover:bg-surface-secondary',
+            ].join(' ')}
+          >
+            {chip.label}
+          </button>
+        ))}
       </div>
+      <p className="mb-3 text-xs text-text-secondary">
+        {quick === 'ALL' ? countLabel(contracts.length, page, pageSize, total) : `${shown.length} of the ${contracts.length} contracts on this page match`}
+      </p>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-        <table className="min-w-full divide-y divide-border">
+      {shown.length === 0 && (
+        <div className="rounded-lg border border-border bg-surface p-8 text-center">
+          <p className="text-sm font-medium text-text-primary">No contracts found</p>
+          <p className="mt-1 text-xs text-text-muted">Try clearing filters or searching another contract.</p>
+        </div>
+      )}
+
+      {/* Desktop table */}
+      <div className={`${shown.length === 0 ? 'hidden' : 'hidden lg:block'} rounded-lg border border-border bg-surface [&_thead_th:first-child]:rounded-tl-lg [&_thead_th:last-child]:rounded-tr-lg`}>
+        <table className="w-full table-fixed">
           <thead>
             <tr className="bg-nav">
-              <th className={`${HEADER_CLS} ${STICKY_LEFT_HEADER_CLS} min-w-40`}>Contract ID</th>
-              {full && <th className={`${HEADER_CLS} hidden lg:table-cell`}>Contract No.</th>}
-              <th className={HEADER_CLS}>Contract Name</th>
-              <th className={`${HEADER_CLS} hidden md:table-cell`}>Client / Employer</th>
-              {full && <th className={`${HEADER_CLS} hidden xl:table-cell`}>Contract Type</th>}
-              <th className={`${HEADER_CLS} hidden lg:table-cell`}>Contract Manager</th>
-              {full && <th className={`${HEADER_CLS} hidden xl:table-cell`}>Start Date</th>}
-              <th className={`${HEADER_CLS} hidden sm:table-cell`}>Forecast Completion</th>
-              {full && <th className={`${HEADER_CLS} hidden lg:table-cell text-right`}>Current Value (KWD)</th>}
-              {full && <th className={`${HEADER_CLS} hidden xl:table-cell`}>Progress %</th>}
-              {full && <th className={`${HEADER_CLS} hidden xl:table-cell`}>Payment Progress %</th>}
-              {full && <th className={`${HEADER_CLS} hidden xl:table-cell text-center`}>Open Claims</th>}
-              {full && <th className={`${HEADER_CLS} hidden md:table-cell text-center`}>Days Remaining</th>}
-              <th className={HEADER_CLS}>Status</th>
-              <th className={`${HEADER_CLS} ${STICKY_RIGHT_HEADER_CLS}`}>Action</th>
+              <th className={`${thCls} w-[21%]`}>Contract / Project</th>
+              <th className={`${thCls} w-[15%]`}>Client / Job Order</th>
+              <th className={`${thCls} w-[11%]`}>Status</th>
+              <th className={`${thCls} w-[12%]`}>BOQ</th>
+              <th className={`${thCls} w-[17%]`}>Project Progress</th>
+              <th className={`${thCls} w-[12%]`}>Timeline</th>
+              <th className={`${thCls} w-[12%] text-right`}>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {contracts.map((contract) => {
-              const scheduleStatus = contract.effectiveScheduleStatus ?? 'IN_PROGRESS';
+          <tbody className="divide-y divide-border-strong/40">
+            {shown.map((c, index) => {
+              const open = openId === c.id;
               return (
-                <tr key={contract.id} className="hover:bg-surface-secondary/50 transition-colors">
-                  <td className={`${CELL_CLS} ${STICKY_LEFT_CLS} min-w-40 whitespace-nowrap`}>
-                    <Link
-                      href={`/contracts/${contract.id}`}
-                      title={contract.referenceNumber}
-                      className="font-mono text-xs font-medium text-accent hover:underline"
-                    >
-                      {contract.referenceNumber}
-                    </Link>
-                  </td>
-                  {full && (
-                    <td className={`${CELL_CLS} hidden lg:table-cell whitespace-nowrap max-w-28 truncate`} title={contract.jobOrder || contract.referenceNumber}>
-                      {contract.jobOrder || contract.referenceNumber}
+                <Fragment key={c.id}>
+                  <tr className={`align-top transition-colors hover:bg-accent/5 ${index % 2 === 1 ? 'bg-surface-secondary/40' : ''}`}>
+                    <td className="px-3 py-4 pr-4">
+                      <Identity contract={c} />
+                      <DetailsToggle open={open} onClick={() => toggle(c.id)} id={`details-${c.id}`} />
                     </td>
+                    <td className="px-3 py-4"><ClientCell contract={c} /></td>
+                    <td className="px-3 py-4"><StatusCell contract={c} /></td>
+                    <td className="px-3 py-4"><Bar info={boqBar(boqProgress[c.id] ?? null)} color="bg-info" /></td>
+                    <td className="px-3 py-4"><StagesCell contract={c} progress={boqProgress[c.id] ?? null} /></td>
+                    <td className="px-3 py-4"><TimelineCell contract={c} /></td>
+                    <td className="px-3 py-4 text-right">{actions(c)}</td>
+                  </tr>
+                  {open && (
+                    <tr id={`details-${c.id}`} className="bg-surface">
+                      <td colSpan={7} className="px-4 py-4">
+                        <Details contract={c} progress={boqProgress[c.id] ?? null} showNav />
+                      </td>
+                    </tr>
                   )}
-                  <td className={`${CELL_CLS} max-w-48 truncate`} title={contract.title}>
-                    <Link
-                      href={`/contracts/${contract.id}`}
-                      className="font-semibold text-text-primary hover:text-accent"
-                    >
-                      {contract.title}
-                    </Link>
-                  </td>
-                  <td className={`${CELL_CLS} hidden md:table-cell max-w-36 truncate`} title={contract.counterpartyName}>
-                    {contract.counterpartyName}
-                  </td>
-                  {full && (
-                    <td className={`${CELL_CLS} hidden xl:table-cell`}>
-                      <ScopeCell contract={contract} />
-                    </td>
-                  )}
-                  <td className={`${CELL_CLS} hidden lg:table-cell max-w-28 truncate`} title={contract.ownerUser.displayName}>
-                    {contract.ownerUser.displayName}
-                  </td>
-                  {full && (
-                    <td className={`${CELL_CLS} hidden xl:table-cell whitespace-nowrap`}>
-                      {formatDate(contract.startDate)}
-                    </td>
-                  )}
-                  <td className={`${CELL_CLS} hidden sm:table-cell whitespace-nowrap`}>
-                    {formatDate(contract.forecastCompletionDate)}
-                  </td>
-                  {full && (
-                    <td className={`${CELL_CLS} hidden lg:table-cell whitespace-nowrap text-right`}>
-                      {formatValue(contract)}
-                    </td>
-                  )}
-                  {full && (
-                    <td className={`${CELL_CLS} hidden xl:table-cell whitespace-nowrap`}>
-                      <ProgressCell percent={contract.progressPercent} colorClass="bg-info" />
-                    </td>
-                  )}
-                  {full && (
-                    <td className={`${CELL_CLS} hidden xl:table-cell whitespace-nowrap`}>
-                      <ProgressCell percent={contract.paymentProgressPercent} colorClass="bg-success" />
-                    </td>
-                  )}
-                  {full && (
-                    <td className={`${CELL_CLS} hidden xl:table-cell text-center whitespace-nowrap`}>
-                      {contract.openClaimsCount ?? 0}
-                    </td>
-                  )}
-                  {full && (
-                    <td className={`${CELL_CLS} hidden md:table-cell text-center whitespace-nowrap`}>
-                      <DaysRemainingCell contract={contract} />
-                    </td>
-                  )}
-                  <td className={`${CELL_CLS} whitespace-nowrap`}>
-                    <ContractScheduleStatusSelect contractId={contract.id} value={scheduleStatus} canEdit={canEditScheduleStatus} />
-                  </td>
-                  <td className={`${CELL_CLS} ${STICKY_RIGHT_CLS} whitespace-nowrap`}>
-                    <ContractRowActions
-                      contractId={contract.id}
-                      status={contract.status}
-                      version={contract.version}
-                      permissions={permissions}
-                      hasPendingCloseout={pendingCloseoutContractIds.has(contract.id)}
-                    />
-                  </td>
-                </tr>
+                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      {/* Tablet / phone cards */}
+      <ul className="space-y-3 lg:hidden">
+        {shown.map((c) => {
+          const open = openId === c.id;
+          return (
+            <li key={c.id} className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0"><Identity contract={c} /></div>
+                <StatusCell contract={c} />
+              </div>
+              <div className="mt-2"><ClientCell contract={c} /></div>
+              <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <div>
+                  <p className="mb-0.5 text-xs text-text-muted">BOQ</p>
+                  <Bar info={boqBar(boqProgress[c.id] ?? null)} color="bg-info" />
+                </div>
+                <div>
+                  <p className="mb-0.5 text-xs text-text-muted">Project Progress</p>
+                  <StagesCell contract={c} progress={boqProgress[c.id] ?? null} />
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <p className="mb-0.5 text-xs text-text-muted">Timeline</p>
+                  <TimelineCell contract={c} />
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                {actions(c)}
+                <DetailsToggle open={open} onClick={() => toggle(c.id)} id={`card-details-${c.id}`} />
+              </div>
+              {open && (
+                <div id={`card-details-${c.id}`} className="mt-3 border-t border-border pt-3">
+                  <Details contract={c} progress={boqProgress[c.id] ?? null} showNav={false} />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

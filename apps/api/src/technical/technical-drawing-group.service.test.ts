@@ -65,8 +65,8 @@ const dto = (over: Partial<SaveDrawingGroupDto> = {}): SaveDrawingGroupDto => ({
   ...over,
 });
 
-const piece = (id: string, conf = 'conf-1') => ({ id, drawingConfirmationId: conf });
-const group = (status: S, pieces = 2) => ({ id: 'g1', contractId: 'k1', boqItemId: 'item-1', drawingNo: 'HC-001', status, _count: { pieces } });
+const piece = (id: string, conf = 'conf-1', over: Record<string, unknown> = {}) => ({ id, drawingConfirmationId: conf, releasedToProductionAt: null, _count: { attachments: 0 }, ...over });
+const group = (status: S, pieces = 2, attachments = 1) => ({ id: 'g1', contractId: 'k1', boqItemId: 'item-1', drawingNo: 'HC-001', status, _count: { pieces, attachments } });
 
 let service: TechnicalDrawingGroupService;
 beforeEach(() => {
@@ -113,8 +113,8 @@ describe('drawing group rules', () => {
   });
 
   it('words the already-grouped message plainly', () => {
-    expect(piecesAlreadyGroupedMessage(1)).toBe('1 piece is already in another drawing group.');
-    expect(piecesAlreadyGroupedMessage(3)).toBe('3 pieces are already in another drawing group.');
+    expect(piecesAlreadyGroupedMessage(1)).toBe('1 element is already in another drawing group.');
+    expect(piecesAlreadyGroupedMessage(3)).toBe('3 elements are already in another drawing group.');
   });
 });
 
@@ -138,7 +138,7 @@ describe('TechnicalDrawingGroupService.create', () => {
   });
 
   it('submit needs at least one selected piece', async () => {
-    await expect(service.create('k1', dto({ action: 'SUBMIT', pieceIds: [] }), WRITER)).rejects.toThrow('Please select at least one piece.');
+    await expect(service.create('k1', dto({ action: 'SUBMIT', pieceIds: [] }), WRITER)).rejects.toThrow('Please select at least one element.');
     await expect(service.create('k1', dto({ action: 'SUBMIT', pieceIds: [] }), WRITER)).rejects.toThrow(UnprocessableEntityException);
     expect(mockGroupCreate).not.toHaveBeenCalled();
   });
@@ -161,7 +161,7 @@ describe('TechnicalDrawingGroupService.create', () => {
 
   it('a piece cannot be in two active groups', async () => {
     mockLinkFindMany.mockResolvedValue([{ pieceId: 'p2' }]);
-    await expect(service.create('k1', dto(), WRITER)).rejects.toThrow('1 piece is already in another drawing group.');
+    await expect(service.create('k1', dto(), WRITER)).rejects.toThrow('1 element is already in another drawing group.');
     await expect(service.create('k1', dto(), WRITER)).rejects.toThrow(ConflictException);
     expect(mockGroupCreate).not.toHaveBeenCalled();
     // only ACTIVE links count — a cancelled group's pieces are free again
@@ -175,7 +175,7 @@ describe('TechnicalDrawingGroupService.create', () => {
 
   it('rejects pieces that are not generated pieces of this BOQ item', async () => {
     mockPieceFindMany.mockResolvedValue([piece('p1')]); // p2 not found / cancelled / other item
-    await expect(service.create('k1', dto(), WRITER)).rejects.toThrow('Some selected pieces are not available for this BOQ item.');
+    await expect(service.create('k1', dto(), WRITER)).rejects.toThrow('Some selected elements are not available for this BOQ item.');
   });
 
   it('read-only users cannot create', async () => {
@@ -212,7 +212,7 @@ describe('status flow', () => {
 
   it('cannot submit a group with no pieces', async () => {
     mockGroupFindFirst.mockResolvedValue(group(S.DRAFT, 0));
-    await expect(service.submit('k1', 'g1', WRITER)).rejects.toThrow('Please select at least one piece.');
+    await expect(service.submit('k1', 'g1', WRITER)).rejects.toThrow('Please select at least one element.');
   });
 
   it('approves a submitted group and records who and when', async () => {
@@ -235,6 +235,18 @@ describe('status flow', () => {
     expect(data).toMatchObject({ status: S.RELEASED_TO_PRODUCTION, releasedById: 'u1' });
     expect(data.releasedAt).toBeInstanceOf(Date);
     expect(mockPieceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('a group without final drawing files cannot be released to Production', async () => {
+    mockGroupFindFirst.mockResolvedValue(group(S.APPROVED, 2, 0));
+    await expect(service.release('k1', 'g1', WRITER)).rejects.toThrow('Final drawing files are required before release to Production.');
+    expect(mockGroupUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('a group without elements cannot be released to Production', async () => {
+    mockGroupFindFirst.mockResolvedValue(group(S.APPROVED, 0, 1));
+    await expect(service.release('k1', 'g1', WRITER)).rejects.toThrow('A group needs at least one element before release to Production.');
+    expect(mockGroupUpdateMany).not.toHaveBeenCalled();
   });
 
   it('only an approved group can be released', async () => {
@@ -336,5 +348,14 @@ describe('buildJobReleaseSummary (Technical dashboard)', () => {
   });
   it('a job with nothing yet is all zeros', () => {
     expect(buildJobReleaseSummary(0, 0, [])).toMatchObject({ generated: 0, assigned: 0, groupsTotal: 0, notReleased: 0 });
+  });
+});
+
+describe('groups and individually covered elements (FMP-TECH-27)', () => {
+  it('an element with its own final drawing, or released on its own, cannot join a group', async () => {
+    mockPieceFindMany.mockResolvedValue([piece('p1'), piece('p2', 'conf-1', { _count: { attachments: 1 } })]);
+    await expect(service.create('k1', dto({ pieceIds: ['p1', 'p2'] }), WRITER)).rejects.toThrow('already have their own final drawing');
+    mockPieceFindMany.mockResolvedValue([piece('p1', 'conf-1', { releasedToProductionAt: new Date() })]);
+    await expect(service.create('k1', dto({ pieceIds: ['p1'] }), WRITER)).rejects.toThrow('already have their own final drawing');
   });
 });

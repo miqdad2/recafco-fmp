@@ -149,6 +149,8 @@ export class TechnicalDrawingGroupService {
         pieceNo: true,
         pieceCode: true,
         currentStatus: true,
+        releasedToProductionAt: true,
+        _count: { select: { attachments: true } },
         drawingGroupLinks: {
           where: { activeSlot: 1 },
           take: 1,
@@ -187,9 +189,13 @@ export class TechnicalDrawingGroupService {
     if (pieceIds.length === 0) return [];
     const pieces = await tx.contractBoqPiece.findMany({
       where: { id: { in: pieceIds }, contractId, boqItemId, isCancelled: false },
-      select: { id: true, drawingConfirmationId: true },
+      select: { id: true, drawingConfirmationId: true, releasedToProductionAt: true, _count: { select: { attachments: true } } },
     });
     if (pieces.length !== pieceIds.length) throw unprocessable('DRAWING_GROUP_PIECES_UNAVAILABLE', GROUP_MESSAGES.piecesUnavailable);
+    // FMP-TECH-27 — covered by their own final drawing, or already released on their own: not groupable.
+    if (pieces.some((p) => p.releasedToProductionAt !== null || p._count.attachments > 0)) {
+      throw unprocessable('DRAWING_GROUP_PIECES_COVERED_INDIVIDUALLY', GROUP_MESSAGES.piecesCoveredIndividually);
+    }
 
     const taken = await tx.technicalDrawingGroupPiece.findMany({
       where: { pieceId: { in: pieceIds }, activeSlot: 1, ...(excludeGroupId ? { groupId: { not: excludeGroupId } } : {}) },
@@ -310,12 +316,18 @@ export class TechnicalDrawingGroupService {
     return this.moveTo(groupId, S.SUBMITTED, { status: S.APPROVED, approvedById: actor.id, approvedAt: new Date() }, GROUP_MESSAGES.onlySubmittedApprove);
   }
 
-  /** Records the release only — no piece status changes and Production is not blocked or notified. */
+  /**
+   * Records the release only — no element status changes. FMP-TECH-24: a group can be released only
+   * when it has elements and at least one final drawing file; Production then sees its elements.
+   */
   async release(contractId: string, groupId: string, actor: AuthUser) {
     this.requireWrite(actor);
     await this.loadContract(contractId, actor);
     const group = await this.loadGroup(contractId, groupId);
     if (group.status !== S.APPROVED) throw new ConflictException({ code: 'DRAWING_GROUP_NOT_APPROVED', message: GROUP_MESSAGES.onlyApprovedRelease });
+    // FMP-TECH-24 — a group reaches Production only with its elements and its final drawing files.
+    if (group._count.pieces === 0) throw new ConflictException({ code: 'DRAWING_GROUP_NO_ELEMENTS', message: GROUP_MESSAGES.elementsRequiredForRelease });
+    if (group._count.attachments === 0) throw new ConflictException({ code: 'DRAWING_GROUP_NO_FILES', message: GROUP_MESSAGES.filesRequiredForRelease });
     return this.moveTo(groupId, S.APPROVED, { status: S.RELEASED_TO_PRODUCTION, releasedById: actor.id, releasedAt: new Date() }, GROUP_MESSAGES.onlyApprovedRelease);
   }
 

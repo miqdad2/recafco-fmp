@@ -132,7 +132,7 @@ const mockClient = {
     count: mockFdCount,
   },
   contractBoqDrawingConfirmation: { findMany: mockBoqConfirmationFindMany, groupBy: mockBoqConfirmationGroupBy },
-  contractBoqPiece: { groupBy: mockBoqPieceGroupBy },
+  contractBoqPiece: { groupBy: mockBoqPieceGroupBy, findMany: vi.fn().mockResolvedValue([]) },
   technicalDrawingGroup: { findMany: vi.fn().mockResolvedValue([]) },
 };
 

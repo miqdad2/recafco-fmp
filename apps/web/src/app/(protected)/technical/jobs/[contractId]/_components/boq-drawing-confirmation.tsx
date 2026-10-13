@@ -1,10 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, X } from 'lucide-react';
-import { pieceGroupLabel, pieceGroupFileCount } from '../../../_lib/drawing-group-helpers';
-import type { BoqConfirmationItem, BoqDrawingConfirmation as Confirmation, BoqPiece, BoqPieceStatus, BoqPieceUpdateStatus, BoqPieceHistoryEntry } from '@/lib/technical-api';
+import { CheckCircle2, FileCheck, List, Pencil, Plus, Sparkles, X } from 'lucide-react';
+import { pieceGroupFileCount } from '../../../_lib/drawing-group-helpers';
+import { technicalStepHref } from '../../../_lib/technical-step-ui';
+import { BTN_DANGER, BTN_PRIMARY, BTN_PRIMARY_SM, BTN_SECONDARY, BADGE } from '../../../_lib/button-styles';
+import { ElementDrawingModal } from './element-drawing-modal';
+import { ELEMENTS_GENERATED_MESSAGE, elementCoverageLabel, elementGroupText, elementStatusClasses, elementStatusLabel, finalDrawingMethod, itemStatusChips } from '../../../_lib/element-status-helpers';
+import type { BoqConfirmationItem, BoqDrawingConfirmation as Confirmation, DrawingGroupItem, BoqPiece, BoqPieceStatus, BoqPieceUpdateStatus, BoqPieceHistoryEntry } from '@/lib/technical-api';
 import { saveBoqConfirmationAction, cancelBoqConfirmationAction, generateBoqPiecesAction, listBoqPiecesAction, updateBoqPieceStatusAction, getBoqPieceHistoryAction } from '../../../actions';
 import {
   BOQ_CONFIRMATION_STATUS_LABELS,
@@ -14,11 +19,9 @@ import {
   formatContractQtyUnit,
   validateConfirmationForm,
   BOQ_PIECE_STATUS_LABELS,
-  BOQ_PIECE_STATUS_CLASSES,
   BOQ_PIECE_FILTERS,
   pieceUpdateOptionsFor,
   validatePieceUpdate,
-  pieceStatusSummary,
   shouldShowGeneratePieces,
 } from '../../../_lib/boq-confirmation-helpers';
 import type { ConfirmationFormErrors } from '../../../_lib/boq-confirmation-helpers';
@@ -27,14 +30,17 @@ interface Props {
   contractId: string;
   items: BoqConfirmationItem[];
   canWrite: boolean;
-  /** Piece statuses this user may set (from the API); null = unknown, so pieces stay read-only. */
+  /** Element statuses this user may set (from the API); null = unknown, so pieces stay read-only. */
   allowedPieceStatuses: BoqPieceUpdateStatus[] | null;
+  /** FMP-TECH-25 — to tell which generated elements are already released and which BOQ items use Drawing Groups. */
+  groupItems?: DrawingGroupItem[] | null;
 }
 
 type FormState =
   | { kind: 'closed' }
   | { kind: 'add'; boqItemId: string }
   | { kind: 'edit'; row: Confirmation }
+  | { kind: 'editConfirmed'; row: Confirmation; countLocked: boolean }
   | { kind: 'revise'; row: Confirmation };
 
 interface PiecesView {
@@ -44,8 +50,7 @@ interface PiecesView {
 const inputCls =
   'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
 const labelCls = 'mb-1 block text-sm font-medium text-text-primary';
-const smallBtnCls =
-  'inline-flex items-center h-8 px-3 rounded-md border border-border bg-surface text-xs font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60';
+const smallBtnCls = BTN_SECONDARY;
 
 function StatusBadge({ status }: { status: Confirmation['confirmationStatus'] }): React.JSX.Element {
   return (
@@ -61,20 +66,36 @@ function FieldError({ message }: { message: string | undefined }): React.JSX.Ele
 
 /**
  * FMP-BOQ-03 — "BOQ Drawing Confirmation" on the Technical job page. Technical
- * records, per BOQ item, which drawing confirms how many physical pieces (Nos).
+ * records, per BOQ item, which drawing confirms how many physical elements (Nos).
  * An item can have several drawings; the item total is the sum of its Confirmed
  * rows. Nothing is generated from these numbers yet.
  */
-export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPieceStatuses }: Props): React.JSX.Element {
+export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPieceStatuses, groupItems = null }: Props): React.JSX.Element {
   const [form, setForm] = useState<FormState>({ kind: 'closed' });
   const [openItems, setOpenItems] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [piecesView, setPiecesView] = useState<PiecesView | null>(null);
-  // Only the statuses this user may set; empty hides the update controls in View Pieces.
+  // Only the statuses this user may set; empty hides the update controls in View Elements.
   const updateOptions = canWrite ? pieceUpdateOptionsFor(allowedPieceStatuses) : [];
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const router = useRouter();
+  const releasedFor = (boqItemId: string): number => groupItems?.find((g) => g.boqItemId === boqItemId)?.releasedToProduction ?? 0;
+  const usesGroups = (boqItemId: string): boolean => {
+    const g = groupItems?.find((x) => x.boqItemId === boqItemId);
+    return g ? finalDrawingMethod(g) === 'groups' : false;
+  };
+  // FMP-TECH-26 — a BOQ item has at most one active confirmation; once it exists the page offers View / Edit, not Confirm again.
+  const activeConfirmation = (item: BoqConfirmationItem): Confirmation | undefined => item.confirmations.find((c) => c.confirmationStatus === 'CONFIRMED');
+  const allConfirmed = items.length > 0 && items.every((i) => activeConfirmation(i) !== undefined);
+  /** Elements already in a drawing group or past their starting status: the number of elements (and cancelling) is then locked. */
+  const usedInLaterSteps = (item: BoqConfirmationItem): boolean => {
+    const moved = Object.entries(item.statusCounts).some(([status, n]) => status !== 'DRAWING_READY' && status !== 'CANCELLED' && (n ?? 0) > 0);
+    const grouped = (groupItems?.find((g) => g.boqItemId === item.boqItemId)?.assignedToGroups ?? 0) > 0;
+    return moved || grouped;
+  };
+  const totalGenerated = items.reduce((t, i) => t + i.piecesGenerated, 0);
+  const totalWaiting = items.reduce((t, i) => t + Math.max(0, (i.statusCounts.DRAWING_READY ?? 0) - releasedFor(i.boqItemId)), 0);
 
   function toggle(id: string): void {
     setOpenItems((prev) => {
@@ -95,12 +116,13 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
       setMessage({ tone: 'error', text: result.error });
       return;
     }
-    setMessage({ tone: 'ok', text: result.message ?? 'Pieces generated successfully.' });
+    setMessage({ tone: 'ok', text: ELEMENTS_GENERATED_MESSAGE });
     router.refresh();
   }
 
   async function cancelRow(row: Confirmation): Promise<void> {
     if (busyId) return;
+    if (row.confirmationStatus === 'CONFIRMED' && !window.confirm('Cancel this confirmation? Its generated elements are cancelled too (kept for history, never deleted).')) return;
     setBusyId(row.id);
     setMessage(null);
     const result = await cancelBoqConfirmationAction(contractId, row.id);
@@ -109,7 +131,7 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
       setMessage({ tone: 'error', text: result.error });
       return;
     }
-    setMessage({ tone: 'ok', text: `Drawing ${row.drawingNo} cancelled.` });
+    setMessage({ tone: 'ok', text: `Confirmation for ${row.drawingNo} cancelled.` });
     router.refresh();
   }
 
@@ -117,9 +139,9 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
     <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="boq-confirm-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="boq-confirm-title" className="text-base font-semibold text-text-primary">BOQ Drawing Confirmation</h2>
+          <h2 id="boq-confirm-title" className="text-base font-semibold text-text-primary">Confirm Elements</h2>
           <p className="mt-0.5 text-sm text-text-secondary">
-            Confirm how many physical pieces each drawing covers. Contract Qty is for contract value only.
+            Enter how many physical elements are required for each BOQ item. Contract Qty is for contract value only.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -128,23 +150,36 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
             type="button"
             onClick={() => void generatePieces()}
             disabled={generating}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-4 text-sm font-medium text-accent hover:bg-accent/10 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
+            className={`${BTN_SECONDARY} !h-9 !text-sm`}
           >
-            {generating ? 'Generating…' : 'Generate Pieces'}
+            <Sparkles className="size-4" aria-hidden="true" />
+            {generating ? 'Generating…' : 'Generate Elements'}
           </button>
         )}
-        {canWrite && items.length > 0 && (
+        {canWrite && items.length > 0 && (allConfirmed ? (
+          <span role="status" className={`${BADGE} gap-1.5 bg-success-light !px-3 !py-1.5 !text-xs text-success`}>
+            <CheckCircle2 className="size-4" aria-hidden="true" />
+            All Elements Confirmed
+          </span>
+        ) : (
           <button
             type="button"
             onClick={() => setForm({ kind: 'add', boqItemId: '' })}
-            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-accent text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus"
+            className={BTN_PRIMARY}
           >
             <Plus className="size-4" aria-hidden="true" />
-            Add Drawing Confirmation
+            Confirm Elements
           </button>
-        )}
+        ))}
         </div>
       </div>
+
+      {totalGenerated > 0 && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-text-secondary">
+          <span>Elements Generated: <span className="font-semibold text-text-primary">{totalGenerated}</span></span>
+          <span>Waiting Final Drawing: <span className="font-semibold text-text-primary">{totalWaiting}</span></span>
+        </p>
+      )}
 
       {message && (
         <div
@@ -164,6 +199,8 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
           {items.map((item) => {
             const isOpen = openItems.has(item.boqItemId);
             const visibleRows = item.confirmations;
+            const active = activeConfirmation(item);
+            const countLocked = usedInLaterSteps(item);
             return (
               <li key={item.boqItemId} className="rounded-lg border border-border bg-surface-secondary/40 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -175,21 +212,34 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
                         <dd className="font-medium text-text-primary">{formatContractQtyUnit(item.contractQty, item.contractUnit)}</dd>
                       </div>
                       <div className="flex gap-1">
-                        <dt>Confirmed Pieces:</dt>
+                        <dt>Confirmed Elements:</dt>
                         <dd className={`font-medium ${item.confirmedPieces === null ? 'text-text-muted' : 'text-success'}`}>
                           {formatConfirmedPieces(item.confirmedPieces)}
                         </dd>
                       </div>
                       <div className="flex gap-1">
-                        <dt>Pieces Generated:</dt>
+                        <dt>Elements Generated:</dt>
                         <dd className="font-medium text-text-primary">{item.piecesGenerated}</dd>
                       </div>
                     </dl>
-                    {item.piecesGenerated > 0 && (
+                    {active && (
+                      <div className="mt-2 rounded-md border border-success/40 bg-success-light/40 px-3 py-2" aria-label="Confirmed elements">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-success">Confirmed Elements</p>
+                        <dl className="mt-1 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-text-secondary sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="flex gap-1"><dt>Drawing Reference No:</dt><dd className="font-medium text-text-primary">{active.drawingNo || '—'}</dd></div>
+                          <div className="flex gap-1"><dt>Number of Elements:</dt><dd className="font-medium text-text-primary">{active.confirmedPieces ?? '—'}</dd></div>
+                          <div className="flex gap-1"><dt>Elements Generated:</dt><dd className="font-medium text-text-primary">{item.piecesGenerated}</dd></div>
+                          <div className="flex gap-1"><dt>Status:</dt><dd className="font-medium text-text-primary">{itemStatusChips(item.statusCounts, releasedFor(item.boqItemId)).map((c) => `${c.label} ${c.count}`).join(' · ') || '—'}</dd></div>
+                          <div className="flex gap-1"><dt>Confirmed date:</dt><dd className="font-medium text-text-primary">{active.confirmedAt ? formatUpdated(active.confirmedAt) : '—'}</dd></div>
+                          <div className="flex gap-1"><dt>Confirmed by:</dt><dd className="font-medium text-text-primary">{active.confirmedByUser?.displayName ?? '—'}</dd></div>
+                        </dl>
+                      </div>
+                    )}
+                    {item.piecesGenerated > 0 && !active && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        {pieceStatusSummary(item.statusCounts).map((s) => (
-                          <span key={s.status} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${BOQ_PIECE_STATUS_CLASSES[s.status]}`}>
-                            {s.label} {s.count}
+                        {itemStatusChips(item.statusCounts, releasedFor(item.boqItemId)).map((c) => (
+                          <span key={c.key} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${c.classes}`}>
+                            {c.label} {c.count}
                           </span>
                         ))}
                         {item.needsAttention && (
@@ -201,17 +251,30 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {canWrite && (
-                      <button type="button" onClick={() => setForm({ kind: 'add', boqItemId: item.boqItemId })} className={smallBtnCls}>
-                        Add Drawing Confirmation
+                    {canWrite && !active && (
+                      <button type="button" onClick={() => setForm({ kind: 'add', boqItemId: item.boqItemId })} className={BTN_PRIMARY_SM}>
+                        <Plus className="size-3.5" aria-hidden="true" />
+                        Confirm Elements
                       </button>
                     )}
                     {item.piecesGenerated > 0 && (
-                      <button type="button" onClick={() => setPiecesView({ item })} className={smallBtnCls}>View Pieces</button>
+                      <button type="button" onClick={() => setPiecesView({ item })} className={smallBtnCls}>
+                        <List className="size-3.5" aria-hidden="true" />
+                        View Elements
+                      </button>
                     )}
-                    <button type="button" onClick={() => toggle(item.boqItemId)} aria-expanded={isOpen} className={smallBtnCls}>
-                      {isOpen ? 'Hide Confirmations' : `View Confirmations (${visibleRows.length})`}
-                    </button>
+                    {visibleRows.length > 0 && (
+                      <button type="button" onClick={() => toggle(item.boqItemId)} aria-expanded={isOpen} className={smallBtnCls}>
+                        <FileCheck className="size-3.5" aria-hidden="true" />
+                        {isOpen ? 'Hide Confirmation' : 'View Confirmation'}
+                      </button>
+                    )}
+                    {canWrite && active && (
+                      <button type="button" onClick={() => setForm({ kind: 'editConfirmed', row: active, countLocked })} className={smallBtnCls}>
+                        <Pencil className="size-3.5" aria-hidden="true" />
+                        Edit Confirmation
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -229,7 +292,7 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
                                 {row.revision ? <span className="ml-2 text-xs font-normal text-text-secondary">{row.revision}</span> : null}
                               </p>
                               <p className="text-xs text-text-secondary">
-                                {row.confirmedPieces === null ? 'Pieces not entered' : `${row.confirmedPieces} Nos`}
+                                {row.confirmedPieces === null ? 'Elements not entered' : `${row.confirmedPieces} Nos`}
                                 {row.drawingTitle ? ` · ${row.drawingTitle}` : ''}
                                 {row.sizeOrSpecification ? ` · ${row.sizeOrSpecification}` : ''}
                               </p>
@@ -241,13 +304,20 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
                                 <button type="button" onClick={() => setForm({ kind: 'edit', row })} className={smallBtnCls}>Edit</button>
                               )}
                               {canWrite && row.confirmationStatus === 'CONFIRMED' && (
-                                <button type="button" onClick={() => setForm({ kind: 'revise', row })} className={smallBtnCls}>Revise</button>
+                                <button type="button" onClick={() => setForm({ kind: 'editConfirmed', row, countLocked })} className={smallBtnCls}><Pencil className="size-3.5" aria-hidden="true" />Edit Confirmation</button>
                               )}
-                              {canWrite && (row.confirmationStatus === 'DRAFT' || row.confirmationStatus === 'CONFIRMED') && (
+                              {canWrite && row.confirmationStatus === 'DRAFT' && (
                                 <button type="button" onClick={() => void cancelRow(row)} disabled={busyId === row.id} className={smallBtnCls}>
                                   Cancel
                                 </button>
                               )}
+                              {canWrite && row.confirmationStatus === 'CONFIRMED' && (countLocked ? (
+                                <span className="text-xs text-text-muted">Cannot cancel — elements are already used in later steps</span>
+                              ) : (
+                                <button type="button" onClick={() => void cancelRow(row)} disabled={busyId === row.id} className={BTN_DANGER}>
+                                  Cancel Confirmation
+                                </button>
+                              ))}
                             </div>
                           </li>
                         ))}
@@ -265,6 +335,8 @@ export function BoqDrawingConfirmation({ contractId, items, canWrite, allowedPie
         <PiecesModal
           contractId={contractId}
           item={piecesView.item}
+          itemUsesGroups={usesGroups(piecesView.item.boqItemId)}
+          canWriteFiles={canWrite}
           updateOptions={updateOptions}
           onClose={() => setPiecesView(null)}
           onChanged={() => router.refresh()}
@@ -310,7 +382,11 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
   const [saving, setSaving] = useState<'DRAFT' | 'CONFIRM' | null>(null);
 
   const isRevise = form.kind === 'revise';
-  const title = form.kind === 'add' ? 'Add Drawing Confirmation' : isRevise ? 'Revise Drawing Confirmation' : 'Edit Drawing Confirmation';
+  const isEditConfirmed = form.kind === 'editConfirmed';
+  const countLocked = form.kind === 'editConfirmed' && form.countLocked;
+  const originalCount = row?.confirmedPieces != null ? String(row.confirmedPieces) : '';
+  const countChanged = isEditConfirmed && confirmedPieces.trim() !== originalCount;
+  const title = form.kind === 'add' ? 'Confirm Elements for BOQ Item' : isEditConfirmed ? 'Edit Element Confirmation' : isRevise ? 'Revise Drawing Confirmation' : 'Edit Drawing Confirmation';
 
   async function submit(action: 'DRAFT' | 'CONFIRM'): Promise<void> {
     if (saving) return;
@@ -321,7 +397,7 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
 
     setSaving(action);
     const result = await saveBoqConfirmationAction(contractId, {
-      mode: form.kind === 'add' ? 'create' : isRevise ? 'revise' : 'update',
+      mode: form.kind === 'add' ? 'create' : isEditConfirmed ? 'edit' : isRevise ? 'revise' : 'update',
       ...(row ? { id: row.id } : {}),
       action,
       boqItemId,
@@ -337,7 +413,28 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
       setServerError(result.error);
       return;
     }
-    onSaved(action === 'CONFIRM' ? `Drawing ${drawingNo.trim()} confirmed.` : `Drawing ${drawingNo.trim()} saved as draft.`);
+    if (action === 'DRAFT') {
+      onSaved(`Drawing ${drawingNo.trim()} saved as draft.`);
+      return;
+    }
+    // FMP-TECH-24 — generating the individual elements is the existing action, run right after a confirmation;
+    // nothing goes to Production until a drawing group with final files is released.
+    if (isEditConfirmed) {
+      onSaved(countChanged ? `Confirmation updated. Elements now: ${confirmedPieces.trim()}.` : 'Confirmation updated.');
+      return;
+    }
+    if (isRevise) {
+      onSaved(`Drawing ${drawingNo.trim()} confirmed.`);
+      return;
+    }
+    setSaving('CONFIRM');
+    const generated = await generateBoqPiecesAction(contractId);
+    setSaving(null);
+    onSaved(
+      generated.error
+        ? `Drawing ${drawingNo.trim()} confirmed. Elements could not be generated yet — use Generate Elements.`
+        : ELEMENTS_GENERATED_MESSAGE,
+    );
   }
 
   return (
@@ -357,6 +454,11 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {serverError && <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">{serverError}</div>}
+          {!isRevise && !isEditConfirmed && (
+            <p className="rounded-md bg-info-light/60 px-3 py-2 text-xs text-text-secondary">
+              Enter the number of physical elements required for this BOQ item. Elements will be generated after confirmation.
+            </p>
+          )}
           {isRevise && (
             <p className="rounded-md bg-info-light/60 px-3 py-2 text-xs text-text-secondary">
               The current confirmation is kept as Revised and replaced by this one.
@@ -367,16 +469,18 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
             <label htmlFor="bc-item" className={labelCls}>BOQ Item <span className="text-error">*</span></label>
             <select id="bc-item" value={boqItemId} onChange={(e) => setBoqItemId(e.target.value)} disabled={form.kind !== 'add'} className={inputCls}>
               <option value="">Select BOQ item</option>
-              {items.map((i) => (
-                <option key={i.boqItemId} value={i.boqItemId}>{formatBoqItemOption(i)}</option>
-              ))}
+              {items
+                .filter((i) => form.kind !== 'add' || i.boqItemId === boqItemId || !i.confirmations.some((c) => c.confirmationStatus === 'CONFIRMED'))
+                .map((i) => (
+                  <option key={i.boqItemId} value={i.boqItemId}>{formatBoqItemOption(i)}</option>
+                ))}
             </select>
             <FieldError message={errors.boqItemId} />
           </div>
 
           <div>
-            <label htmlFor="bc-drawing-no" className={labelCls}>Drawing No <span className="text-error">*</span></label>
-            <input id="bc-drawing-no" type="text" maxLength={100} value={drawingNo} onChange={(e) => setDrawingNo(e.target.value)} placeholder="Enter drawing number" className={inputCls} />
+            <label htmlFor="bc-drawing-no" className={labelCls}>Drawing Reference No <span className="text-error">*</span></label>
+            <input id="bc-drawing-no" type="text" maxLength={100} value={drawingNo} onChange={(e) => setDrawingNo(e.target.value)} placeholder="Enter drawing reference number" className={inputCls} />
             <FieldError message={errors.drawingNo} />
           </div>
 
@@ -386,7 +490,7 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
           </div>
 
           <div>
-            <label htmlFor="bc-pieces" className={labelCls}>Confirmed Pieces <span className="text-error">*</span></label>
+            <label htmlFor="bc-pieces" className={labelCls}>Number of Elements <span className="text-error">*</span></label>
             <input
               id="bc-pieces"
               type="number"
@@ -395,15 +499,24 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
               step="1"
               value={confirmedPieces}
               onChange={(e) => setConfirmedPieces(e.target.value)}
+              disabled={countLocked}
               placeholder="0"
-              className={inputCls}
+              className={`${inputCls} disabled:bg-surface-secondary disabled:text-text-muted`}
             />
-            <p className="mt-1 text-xs text-text-muted">Number of physical pieces confirmed from this drawing.</p>
+            <p className="mt-1 text-xs text-text-muted">Number of physical elements required for this BOQ item.</p>
+            {countLocked && (
+              <p className="mt-1 text-xs text-warning">This confirmation cannot be changed because elements are already used in later steps. You can still edit the text fields below.</p>
+            )}
+            {countChanged && !countLocked && (
+              <p className="mt-1 rounded-md bg-warning-light px-3 py-2 text-xs text-warning">
+                Changing the number of elements may add or remove generated elements. Continue only if this confirmation has not moved forward.
+              </p>
+            )}
             <FieldError message={errors.confirmedPieces} />
           </div>
 
           <div>
-            <label htmlFor="bc-size" className={labelCls}>Size / Specification</label>
+            <label htmlFor="bc-size" className={labelCls}>Element Type / Size / Specification</label>
             <input id="bc-size" type="text" maxLength={300} value={sizeOrSpecification} onChange={(e) => setSizeOrSpecification(e.target.value)} placeholder="Example: 6m slab, panel type A, beam 300x600" className={inputCls} />
           </div>
 
@@ -420,7 +533,7 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-border bg-surface px-5 py-3">
           <button type="button" onClick={onClose} disabled={saving !== null} className={`${smallBtnCls} h-10 px-4 text-sm`}>Cancel</button>
-          {!isRevise && (
+          {!isRevise && !isEditConfirmed && (
             <button type="button" onClick={() => void submit('DRAFT')} disabled={saving !== null} className={`${smallBtnCls} h-10 px-4 text-sm`}>
               {saving === 'DRAFT' ? 'Saving…' : 'Save Draft'}
             </button>
@@ -431,7 +544,7 @@ function ConfirmationFormModal({ contractId, items, form, onClose, onSaved }: Mo
             disabled={saving !== null}
             className="inline-flex h-10 items-center rounded-md bg-accent px-4 text-sm font-medium text-white hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-focus disabled:opacity-60"
           >
-            {saving === 'CONFIRM' ? 'Confirming…' : 'Confirm'}
+            {saving === 'CONFIRM' ? (isEditConfirmed ? 'Saving…' : 'Confirming…') : isEditConfirmed ? 'Save Changes' : 'Confirm'}
           </button>
         </div>
       </div>
@@ -448,20 +561,25 @@ function formatDateTime(iso: string): string {
 }
 
 /**
- * Pieces of one BOQ item: status filter, tick boxes, "Update selected to" + Note
- * + Update Status (only for users who can write), and a Piece History view per
+ * Elements of one BOQ item: status filter, tick boxes, "Update selected to" + Note
+ * + Update Status (only for users who can write), and a Element History view per
  * piece. Status changes are the common foundation only — they do not create any
  * Production, Delivery or Erection records.
  */
 function PiecesModal({
   contractId,
   item,
+  itemUsesGroups,
+  canWriteFiles,
   updateOptions,
   onClose,
   onChanged,
 }: {
   contractId: string;
   item: BoqConfirmationItem;
+  itemUsesGroups: boolean;
+  /** The viewer may add final drawing files (Technical write permission). */
+  canWriteFiles: boolean;
   updateOptions: { value: BoqPieceStatus; label: string }[];
   onClose: () => void;
   onChanged: () => void;
@@ -476,6 +594,7 @@ function PiecesModal({
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [drawingFor, setDrawingFor] = useState<BoqPiece | null>(null);
   const [history, setHistory] = useState<{ loading: boolean; error: string | null; entries: BoqPieceHistoryEntry[] }>({
     loading: false,
     error: null,
@@ -535,7 +654,7 @@ function PiecesModal({
       return;
     }
     // Skipped pieces are not an error, but say so plainly.
-    setUpdateMessage({ tone: result.updatedCount > 0 ? 'ok' : 'error', text: result.message ?? 'Pieces updated.' });
+    setUpdateMessage({ tone: result.updatedCount > 0 ? 'ok' : 'error', text: result.message ?? 'Elements updated.' });
     setSelected(new Set());
     setNote('');
     setHistoryFor(null);
@@ -564,7 +683,7 @@ function PiecesModal({
       <div className="my-4 flex max-h-[92vh] w-[min(96vw,900px)] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-5 py-4">
           <div className="min-w-0">
-            <h2 id="boq-pieces-title" className="text-lg font-semibold text-text-primary">Pieces</h2>
+            <h2 id="boq-pieces-title" className="text-lg font-semibold text-text-primary">Elements</h2>
             <p className="truncate text-sm text-text-secondary">{item.description}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1.5 text-text-muted hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus">
@@ -644,7 +763,7 @@ function PiecesModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
           {error && <p className="text-sm text-error">{error}</p>}
           {!error && pieces === null && <p className="py-6 text-center text-sm text-text-muted">Loading…</p>}
-          {pieces && pieces.length === 0 && <p className="py-6 text-center text-sm text-text-muted">No pieces found.</p>}
+          {pieces && pieces.length === 0 && <p className="py-6 text-center text-sm text-text-muted">No elements found.</p>}
           {pieces && pieces.length > 0 && (
             <>
               {canWrite && (
@@ -673,16 +792,29 @@ function PiecesModal({
                           {p.sizeOrSpecification ? ` · ${p.sizeOrSpecification}` : ''}
                         </p>
                         <p className="text-xs text-text-secondary">
-                          Group: {pieceGroupLabel(p)}
+                          Group: {elementGroupText(p, itemUsesGroups)}
                           {p.drawingGroupLinks?.[0] ? ` · Files: ${pieceGroupFileCount(p)}` : ''}
+                        </p>
+                        <p className="text-xs text-text-secondary">
+                          Drawing: {elementCoverageLabel(p)}
+                          {(p._count?.attachments ?? 0) > 0 ? ` · Own files: ${p._count?.attachments}` : ''}
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
                         <span>Location: {p.currentLocation || '—'}</span>
                         <span>Updated {formatUpdated(p.updatedAt)}</span>
-                        <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${BOQ_PIECE_STATUS_CLASSES[p.currentStatus]}`}>
-                          {BOQ_PIECE_STATUS_LABELS[p.currentStatus]}
+                        <span className={`inline-flex rounded-full px-2.5 py-0.5 font-medium ${elementStatusClasses(p)}`}>
+                          {elementStatusLabel(p)}
                         </span>
+                        {p.currentStatus === 'DRAWING_READY' && !p.releasedToProductionAt && !p.drawingGroupLinks?.[0] && canWriteFiles && (
+                          <button type="button" onClick={() => setDrawingFor(p)} className={smallBtnCls}>Add Individual Drawing</button>
+                        )}
+                        {(p._count?.attachments ?? 0) > 0 && (
+                          <button type="button" onClick={() => setDrawingFor(p)} className={smallBtnCls}>View Files</button>
+                        )}
+                        {p.currentStatus === 'DRAWING_READY' && !p.releasedToProductionAt && !p.drawingGroupLinks?.[0] && canWriteFiles && (
+                          <Link href={technicalStepHref(contractId, 'drawing-groups')} className={smallBtnCls}>Assign to Group</Link>
+                        )}
                         <button type="button" onClick={() => void toggleHistory(p.id)} aria-expanded={historyFor === p.id} className={smallBtnCls}>
                           History
                         </button>
@@ -691,7 +823,7 @@ function PiecesModal({
 
                     {historyFor === p.id && (
                       <div className="mt-2 rounded-md bg-surface-secondary/60 px-3 py-2">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">Piece History</p>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">Element History</p>
                         {history.loading && <p className="text-xs text-text-muted">Loading…</p>}
                         {history.error && <p className="text-xs text-error">{history.error}</p>}
                         {!history.loading && !history.error && history.entries.length === 0 && (
@@ -720,6 +852,19 @@ function PiecesModal({
           )}
         </div>
       </div>
+      {drawingFor && (
+        <ElementDrawingModal
+          contractId={contractId}
+          elements={[{ id: drawingFor.id, pieceCode: drawingFor.pieceCode }]}
+          canWrite={canWriteFiles}
+          readOnlyReason={drawingFor.drawingGroupLinks?.[0] ? 'This element is in a Drawing Group. Its final drawings are the group\'s files.' : drawingFor.releasedToProductionAt ? 'Released elements cannot be changed.' : null}
+          onClose={() => {
+            setDrawingFor(null);
+            setReload((n) => n + 1);
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }

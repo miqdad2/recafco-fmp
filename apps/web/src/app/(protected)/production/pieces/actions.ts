@@ -69,11 +69,13 @@ export async function getProductionPieceHistoryAction(pieceId: string): Promise<
 export interface ProductionDrawingFiles {
   pieceCode: string;
   contract: { referenceNumber: string; jobOrder: string | null; title: string };
+  /** FMP-PROD-03 — a released group's files, or the element's own. */
+  source: 'GROUP' | 'INDIVIDUAL';
   group: { drawingNo: string; calculationRef: string | null; groupTitle: string | null };
-  files: { id: string; originalName: string; mimeType: string; fileSize: number; category: DrawingGroupFileCategory; createdAt: string }[];
+  files: { id: string; originalName: string; mimeType: string; fileSize: number; category?: DrawingGroupFileCategory; createdAt: string }[];
 }
 
-/** Files exist here only for a piece whose group is Released to Production; otherwise the API says so in plain words. */
+/** Files exist here only for an element whose group is Released to Production, or that Technical released on its own; otherwise the API says so in plain words. */
 export async function getProductionDrawingFilesAction(pieceId: string): Promise<{ error: string | null; data: ProductionDrawingFiles | null }> {
   const result = await call<ProductionDrawingFiles>(`/production/pieces/${pieceId}/drawing-files`);
   if (result.error || !result.data) return { error: result.error ?? 'You cannot view this file.', data: null };

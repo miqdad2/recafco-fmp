@@ -310,6 +310,8 @@ model User {
   technicalDrawingGroupsCreated            TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupCreatedBy")
   technicalDrawingGroupsApproved           TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupApprovedBy")
   technicalDrawingGroupAttachmentsUploaded TechnicalDrawingGroupAttachment[] @relation("TechnicalDrawingGroupAttachmentUploadedBy")
+  contractBoqPieceAttachmentsUploaded      ContractBoqPieceAttachment[]      @relation("ContractBoqPieceAttachmentUploadedBy")
+  contractBoqItemAttachmentsUploaded       ContractBoqItemAttachment[]       @relation("ContractBoqItemAttachmentUploadedBy")
   technicalDrawingGroupsReleased           TechnicalDrawingGroup[]           @relation("TechnicalDrawingGroupReleasedBy")
   technicalFdIssuanceAttachmentsUploaded   TechnicalFdIssuanceAttachment[]   @relation("TechnicalFdIssuanceAttachmentUploadedBy")
 
@@ -1267,6 +1269,8 @@ model Contract {
   boqPieces                         ContractBoqPiece[]
   technicalDrawingGroups            TechnicalDrawingGroup[]
   technicalDrawingGroupAttachments  TechnicalDrawingGroupAttachment[]
+  boqPieceAttachments               ContractBoqPieceAttachment[]
+  boqItemAttachments                ContractBoqItemAttachment[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -1344,6 +1348,8 @@ model ContractBoqItem {
   pieces                           ContractBoqPiece[]
   technicalDrawingGroups           TechnicalDrawingGroup[]
   technicalDrawingGroupAttachments TechnicalDrawingGroupAttachment[]
+  pieceAttachments                 ContractBoqPieceAttachment[]
+  attachments                      ContractBoqItemAttachment[]
 
   @@unique([contractId, itemCode])
   @@index([contractId, sortOrder])
@@ -1405,6 +1411,7 @@ enum ContractBoqPieceStatus {
   DRAWING_READY
   IN_PRODUCTION
   PRODUCED
+  SENT_TO_STORAGE
   IN_STORE
   DELIVERED
   ERECTED
@@ -1429,6 +1436,9 @@ model ContractBoqPiece {
   currentLocation       String?                @map("current_location") @db.VarChar(200)
   remarks               String?                @db.VarChar(2000)
   isCancelled           Boolean                @default(false) @map("is_cancelled")
+  // FMP-TECH-27 — set when Technical releases an individually covered element to Production (elements in a drawing group are released through the group).
+  releasedToProductionAt DateTime?             @map("released_to_production_at") @db.Timestamptz(3)
+  releasedToProductionById String?              @map("released_to_production_by_id") @db.Uuid
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -1438,6 +1448,7 @@ model ContractBoqPiece {
 
   statusHistory     ContractBoqPieceStatusHistory[]
   drawingGroupLinks TechnicalDrawingGroupPiece[]
+  attachments       ContractBoqPieceAttachment[]
 
   @@unique([contractId, pieceCode])
   @@unique([drawingConfirmationId, pieceNo])
@@ -1535,6 +1546,41 @@ model TechnicalDrawingGroupPiece {
 // Group. Only metadata lives in the database; the file itself is on disk
 // (storage/technical-drawing-groups/{groupId}/<random name>). Files can be added
 // and removed until the group is released to Production.
+// FMP-BOQ-17 — reference drawings/files attached to a BOQ item (client initial
+// drawings at contract registration, or added later). Reference only: a file
+// here never creates pieces or changes any Technical/Production status.
+// Restrict on the BOQ item/contract so Edit Contract's replace-all BOQ cannot
+// silently drop files (its existing FK-violation guard turns that into a message).
+enum ContractBoqAttachmentSource {
+  CLIENT_INITIAL_DRAWING
+  TECHNICAL_REFERENCE
+
+  @@map("contract_boq_attachment_source")
+}
+
+model ContractBoqItemAttachment {
+  id               String                      @id @default(uuid()) @db.Uuid
+  contractId       String                      @map("contract_id") @db.Uuid
+  boqItemId        String                      @map("boq_item_id") @db.Uuid
+  fileName         String                      @map("file_name") @db.VarChar(255)
+  originalFileName String                      @map("original_file_name") @db.VarChar(255)
+  mimeType         String                      @map("mime_type") @db.VarChar(150)
+  fileSize         Int                         @map("file_size")
+  storagePath      String                      @map("storage_path") @db.VarChar(500)
+  sourceType       ContractBoqAttachmentSource @default(CLIENT_INITIAL_DRAWING) @map("source_type")
+  notes            String?                     @db.VarChar(1000)
+  uploadedByUserId String                      @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  contract       Contract        @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem        ContractBoqItem @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  uploadedByUser User            @relation("ContractBoqItemAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([contractId, boqItemId])
+  @@index([boqItemId, createdAt])
+  @@map("contract_boq_item_attachments")
+}
+
 enum TechnicalDrawingGroupFileCategory {
   DRAWING
   CALCULATION
@@ -1568,6 +1614,34 @@ model TechnicalDrawingGroupAttachment {
   @@index([groupId, createdAt])
   @@index([contractId])
   @@map("technical_drawing_group_attachments")
+}
+
+/// FMP-TECH-27 — final drawing files attached to ONE element (an element can be covered by a drawing group's files or by its own).
+model ContractBoqPieceAttachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  pieceId      String   @map("piece_id") @db.Uuid
+  contractId   String   @map("contract_id") @db.Uuid
+  boqItemId    String   @map("boq_item_id") @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(255)
+  originalName String   @map("original_name") @db.VarChar(255)
+  mimeType     String   @map("mime_type") @db.VarChar(150)
+  fileSize     Int      @map("file_size")
+  storagePath  String   @map("storage_path") @db.VarChar(500)
+  drawingRefNo String?  @map("drawing_ref_no") @db.VarChar(100)
+  revision     String?  @db.VarChar(50)
+  remarks      String?  @db.VarChar(1000)
+  uploadedById String?  @map("uploaded_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  piece          ContractBoqPiece @relation(fields: [pieceId], references: [id], onDelete: Restrict)
+  contract       Contract         @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  boqItem        ContractBoqItem  @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
+  uploadedByUser User?            @relation("ContractBoqPieceAttachmentUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([pieceId, createdAt])
+  @@index([contractId])
+  @@map("contract_boq_piece_attachments")
 }
 
 // CM-59 — Contract Production Status. Production quantities are manually

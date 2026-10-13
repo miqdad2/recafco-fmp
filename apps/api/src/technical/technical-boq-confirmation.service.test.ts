@@ -19,14 +19,19 @@ const mockConfCreate = vi.fn();
 const mockConfUpdate = vi.fn();
 const mockPieceGroupBy = vi.fn();
 const mockPieceCount = vi.fn();
-const mockPieceCreate = vi.fn(); // nothing in this service may create pieces
+const mockPieceCreate = vi.fn(); // creating elements happens only when an edit raises the number
+const mockPieceFindMany = vi.fn();
+const mockPieceUpdateMany = vi.fn();
+const mockHistoryCreateMany = vi.fn();
+const mockHistoryFindMany = vi.fn();
 
 const client = {
   contract: { findUnique: mockContractFindUnique },
   contractBoqItem: { findFirst: mockItemFindFirst, findMany: mockItemFindMany },
   contractBoqDrawingConfirmation: { findFirst: mockConfFindFirst, create: mockConfCreate, update: mockConfUpdate },
   $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(client)),
-  contractBoqPiece: { groupBy: mockPieceGroupBy, count: mockPieceCount, create: mockPieceCreate, createMany: mockPieceCreate },
+  contractBoqPiece: { groupBy: mockPieceGroupBy, count: mockPieceCount, create: mockPieceCreate, createMany: mockPieceCreate, findMany: mockPieceFindMany, updateMany: mockPieceUpdateMany },
+  contractBoqPieceStatusHistory: { createMany: mockHistoryCreateMany, findMany: mockHistoryFindMany },
 };
 const db = { getClient: () => client } as unknown as DatabaseService;
 const deptAccess = { assertCanAccessDepartment: vi.fn().mockResolvedValue(undefined) } as unknown as DepartmentAccessService;
@@ -51,6 +56,9 @@ beforeEach(() => {
   mockConfUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => ({ id: 'conf-1', ...args.data }));
   mockPieceGroupBy.mockResolvedValue([]);
   mockPieceCount.mockResolvedValue(0);
+  mockPieceFindMany.mockResolvedValue([]);
+  mockHistoryFindMany.mockResolvedValue([]);
+  mockConfFindFirst.mockResolvedValue(null);
   service = new TechnicalBoqConfirmationService(db, deptAccess);
 });
 
@@ -123,10 +131,12 @@ describe('TechnicalBoqConfirmationService.create', () => {
     await expect(service.create('c1', dto(), WRITER)).rejects.toThrow(UnprocessableEntityException);
   });
 
-  it('allows several drawings for the same BOQ item', async () => {
-    await service.create('c1', dto({ action: 'CONFIRM', drawingNo: 'HC-001', confirmedPieces: 20 }), WRITER);
-    await service.create('c1', dto({ action: 'CONFIRM', drawingNo: 'HC-002', confirmedPieces: 30 }), WRITER);
-    expect(mockConfCreate).toHaveBeenCalledTimes(2);
+  it('does not create a second confirmation for a BOQ item that is already confirmed', async () => {
+    mockConfFindFirst.mockResolvedValue({ id: 'conf-0' });
+    await expect(service.create('c1', dto({ action: 'CONFIRM', confirmedPieces: 20 }), WRITER)).rejects.toThrow(
+      'Elements are already confirmed for this BOQ item. Use Edit Confirmation if changes are needed.',
+    );
+    expect(mockConfCreate).not.toHaveBeenCalled();
   });
 
   it('needs a Technical write permission', async () => {
@@ -141,9 +151,10 @@ describe('TechnicalBoqConfirmationService.create', () => {
 
 describe('draft edit, revise and cancel', () => {
   const existing = (status: S) => ({ id: 'conf-1', boqItemId: 'item-1', confirmationStatus: status });
+  const live = (pieceNo: number, over: Record<string, unknown> = {}) => ({ id: `p${pieceNo}`, pieceNo, currentStatus: 'DRAWING_READY', drawingGroupLinks: [], ...over });
 
   it('confirms an existing draft', async () => {
-    mockConfFindFirst.mockResolvedValue(existing(S.DRAFT));
+    mockConfFindFirst.mockResolvedValueOnce(existing(S.DRAFT)).mockResolvedValueOnce(null);
     const row = (await service.updateDraft('c1', 'conf-1', dto({ action: 'CONFIRM', confirmedPieces: 12 }), WRITER)) as Record<string, unknown>;
     expect(row['confirmationStatus']).toBe(S.CONFIRMED);
   });
@@ -170,11 +181,21 @@ describe('draft edit, revise and cancel', () => {
     await expect(service.revise('c1', 'conf-1', dto({ confirmedPieces: 2.2 }), WRITER)).rejects.toThrow(/whole number/);
   });
 
-  it('does not cancel a drawing that pieces were already generated from', async () => {
+  it('does not cancel a confirmation whose elements are used in a later step', async () => {
     mockConfFindFirst.mockResolvedValue(existing(S.CONFIRMED));
-    mockPieceCount.mockResolvedValue(20);
-    await expect(service.cancel('c1', 'conf-1', WRITER)).rejects.toThrow(/already generated/);
+    mockPieceFindMany.mockResolvedValue([live(1), live(2, { drawingGroupLinks: [{ id: 'l1' }] })]);
+    await expect(service.cancel('c1', 'conf-1', WRITER)).rejects.toThrow('This confirmation cannot be cancelled because elements are already used in later steps.');
     expect(mockConfUpdate).not.toHaveBeenCalled();
+    expect(mockPieceUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('cancels an unused confirmation and keeps its elements as Cancelled (never deleted)', async () => {
+    mockConfFindFirst.mockResolvedValue(existing(S.CONFIRMED));
+    mockPieceFindMany.mockResolvedValue([live(1), live(2)]);
+    await service.cancel('c1', 'conf-1', WRITER);
+    expect(mockPieceUpdateMany.mock.calls[0]?.[0]).toMatchObject({ data: { isCancelled: true, currentStatus: 'CANCELLED' } });
+    expect(mockHistoryCreateMany.mock.calls[0]?.[0].data).toHaveLength(2);
+    expect(mockConfUpdate.mock.calls[0]?.[0].data).toEqual({ confirmationStatus: S.CANCELLED });
   });
 
   it('cancels instead of deleting, and not twice', async () => {
@@ -210,5 +231,62 @@ describe('TechnicalBoqConfirmationService.list', () => {
     // A commercial M² quantity is never turned into pieces; nothing writes anywhere.
     expect(mockConfCreate).not.toHaveBeenCalled();
     expect(mockPieceCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('TechnicalBoqConfirmationService.editConfirmed (FMP-TECH-26)', () => {
+  const confirmed = (over: Record<string, unknown> = {}) => ({ id: 'conf-1', boqItemId: 'item-1', drawingNo: 'DN-0001', sizeOrSpecification: null, confirmedPieces: 3, confirmationStatus: S.CONFIRMED, ...over });
+  const live = (pieceNo: number, over: Record<string, unknown> = {}) => ({ id: `p${pieceNo}`, pieceNo, currentStatus: 'DRAWING_READY', drawingGroupLinks: [], ...over });
+  const edit = (over: Partial<SaveBoqDrawingConfirmationDto> = {}) => dto({ action: 'CONFIRM', drawingNo: 'DN-0001', confirmedPieces: 3, ...over });
+
+  beforeEach(() => {
+    mockItemFindFirst.mockResolvedValue({ id: 'item-1', sortOrder: 1 });
+    mockConfFindFirst.mockResolvedValue(confirmed());
+    mockPieceFindMany.mockResolvedValue([live(1), live(2), live(3)]);
+  });
+
+  it('only a confirmed confirmation can be edited this way', async () => {
+    mockConfFindFirst.mockResolvedValue(confirmed({ confirmationStatus: S.DRAFT }));
+    await expect(service.editConfirmed('c1', 'conf-1', edit(), WRITER)).rejects.toThrow('Only a confirmed drawing can be edited here.');
+  });
+
+  it('changes the text in place and copies the drawing reference and specification to its elements', async () => {
+    await service.editConfirmed('c1', 'conf-1', edit({ drawingNo: 'DN-0009', sizeOrSpecification: 'Beam 300x600', revision: 'Rev A' }), WRITER);
+    expect(mockConfUpdate.mock.calls[0]?.[0].data).toMatchObject({ drawingNo: 'DN-0009', sizeOrSpecification: 'Beam 300x600', revision: 'Rev A', confirmedPieces: 3 });
+    expect(mockPieceUpdateMany.mock.calls[0]?.[0]).toEqual({ where: { drawingConfirmationId: 'conf-1' }, data: { drawingNo: 'DN-0009', sizeOrSpecification: 'Beam 300x600' } });
+    expect(mockPieceCreate).not.toHaveBeenCalled();
+  });
+
+  it('still allows text edits when the elements are already in a group or released, but not a new number', async () => {
+    mockPieceFindMany.mockResolvedValue([live(1, { drawingGroupLinks: [{ id: 'l1' }] }), live(2), live(3)]);
+    await expect(service.editConfirmed('c1', 'conf-1', edit({ confirmedPieces: 5 }), WRITER)).rejects.toThrow(
+      'This confirmation cannot be changed because elements are already used in later steps.',
+    );
+    expect(mockConfUpdate).not.toHaveBeenCalled();
+    await service.editConfirmed('c1', 'conf-1', edit({ remarks: 'Checked' }), WRITER);
+    expect(mockConfUpdate).toHaveBeenCalledTimes(1);
+    mockPieceFindMany.mockResolvedValue([live(1, { currentStatus: 'IN_PRODUCTION' }), live(2), live(3)]);
+    await expect(service.editConfirmed('c1', 'conf-1', edit({ confirmedPieces: 2 }), WRITER)).rejects.toThrow(/already used in later steps/);
+  });
+
+  it('a smaller number cancels the surplus elements (kept, with history), highest numbers first', async () => {
+    await service.editConfirmed('c1', 'conf-1', edit({ confirmedPieces: 2 }), WRITER);
+    expect(mockPieceUpdateMany.mock.calls[0]?.[0]).toMatchObject({ where: { id: { in: ['p3'] } }, data: { isCancelled: true, currentStatus: 'CANCELLED' } });
+    expect(mockHistoryCreateMany.mock.calls[0]?.[0].data[0]).toMatchObject({ pieceId: 'p3', newStatus: 'CANCELLED' });
+  });
+
+  it('a larger number adds only the missing elements with the next numbers', async () => {
+    const existingRefs = [1, 2, 3].map((n) => ({ drawingConfirmationId: 'conf-1', pieceNo: n, pieceCode: `DN-0001-00${n}` }));
+    mockPieceFindMany.mockImplementation(async (args: { select: Record<string, unknown> }) => (args.select['drawingGroupLinks'] ? [live(1), live(2), live(3)] : args.select['pieceCode'] ? existingRefs : []));
+    await service.editConfirmed('c1', 'conf-1', edit({ confirmedPieces: 5 }), WRITER);
+    const created = mockPieceCreate.mock.calls[0]?.[0].data as { pieceNo: number; pieceCode: string; currentStatus: string }[];
+    expect(created.map((p) => p.pieceNo)).toEqual([4, 5]);
+    expect(created.map((p) => p.pieceCode)).toEqual(['DN-0001-004', 'DN-0001-005']);
+    expect(created.every((p) => p.currentStatus === 'DRAWING_READY')).toBe(true);
+  });
+
+  it('needs a Technical write permission and a positive whole number', async () => {
+    await expect(service.editConfirmed('c1', 'conf-1', edit(), READER)).rejects.toThrow(ForbiddenException);
+    await expect(service.editConfirmed('c1', 'conf-1', edit({ confirmedPieces: 0 }), WRITER)).rejects.toThrow(/more than 0/);
   });
 });

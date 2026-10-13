@@ -936,7 +936,7 @@ export class ContractsService {
           if (isForeignKeyViolation(err)) {
             throw new ConflictException({
               code: 'CONTRACT_BOQ_HAS_DRAWING_CONFIRMATIONS',
-              message: 'BOQ items cannot be changed because Technical has already recorded drawing confirmations for them.',
+              message: 'BOQ items cannot be changed because Technical has already recorded drawing confirmations or drawing files for them.',
             });
           }
           throw err;

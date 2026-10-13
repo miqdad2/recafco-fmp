@@ -1,3 +1,4 @@
+import { BOQ_FILE_ACCEPT, TECHNICAL_FILE_BAD_TYPE_MESSAGE, hasAllowedDrawingExtension } from './boq-attachment-helpers';
 import type { BoqPiece, DrawingGroupFileCategory, DrawingGroupStatus, GroupablePiece } from '@/lib/technical-api';
 
 // FMP-BOQ-11 — wording, validation and piece-picker helpers for Technical
@@ -29,35 +30,52 @@ export interface GroupFormValues {
 
 export type GroupFormErrors = Partial<Record<'boqItemId' | 'drawingNo' | 'pieces', string>>;
 
-/** Plain-language checks. Pieces are only mandatory when submitting; a draft may be saved without them. */
+/** Plain-language checks. Elements are only mandatory when submitting; a draft may be saved without them. */
 export function validateGroupForm(values: GroupFormValues, submitting: boolean): GroupFormErrors {
   const errors: GroupFormErrors = {};
   if (!values.boqItemId.trim()) errors.boqItemId = 'Please select BOQ item.';
   if (!values.drawingNo.trim()) errors.drawingNo = 'Please enter drawing number.';
-  if (submitting && values.selectedCount === 0) errors.pieces = 'Please select at least one piece.';
+  if (submitting && values.selectedCount === 0) errors.pieces = 'Please select at least one element.';
   return errors;
 }
 
 /** The group a piece sits in, for lists: "HC-001 · CALC-001", or "Not assigned". */
 export function pieceGroupLabel(piece: Pick<BoqPiece, 'drawingGroupLinks'> | Pick<GroupablePiece, 'drawingGroupLinks'>): string {
   const group = piece.drawingGroupLinks?.[0]?.group;
-  if (!group) return 'Not assigned';
+  if (!group) return 'Not Assigned to Group';
   return [group.drawingNo, group.calculationRef].filter(Boolean).join(' · ');
 }
 
-/** Pieces whose code contains the search text (case-insensitive); empty search keeps all. */
+/** Elements whose code contains the search text (case-insensitive); empty search keeps all. */
 export function filterPiecesByCode<T extends { pieceCode: string }>(pieces: T[], search: string): T[] {
   const q = search.trim().toLowerCase();
   return q ? pieces.filter((p) => p.pieceCode.toLowerCase().includes(q)) : pieces;
 }
 
 /**
- * Pieces that can be ticked for this group: not in another active group. Pieces already in
+ * Elements that can be ticked for this group: not in another active group. Elements already in
  * THIS group (when editing) stay selectable.
  */
 export function isPieceSelectable(piece: GroupablePiece, editingGroupId: string | null): boolean {
+  // FMP-TECH-27 — an element with its own final drawing, or released on its own, stays individual.
+  if (hasOwnDrawing(piece)) return false;
   const current = piece.drawingGroupLinks[0]?.group;
   return !current || current.id === editingGroupId;
+}
+
+/** The element has its own final drawing files, or was released on its own. */
+export function hasOwnDrawing(piece: Pick<GroupablePiece, 'releasedToProductionAt' | '_count'>): boolean {
+  return Boolean(piece.releasedToProductionAt) || (piece._count?.attachments ?? 0) > 0;
+}
+
+/**
+ * FMP-TECH-24 — elements numbered from..to (either order) that can be ticked for this group, for "Select range 1–10".
+ * Elements already in another active group are skipped.
+ */
+export function selectableIdsInRange(pieces: GroupablePiece[], from: number, to: number, editingGroupId: string | null): string[] {
+  const low = Math.min(from, to);
+  const high = Math.max(from, to);
+  return pieces.filter((p) => p.pieceNo >= low && p.pieceNo <= high && isPieceSelectable(p, editingGroupId)).map((p) => p.id);
 }
 
 /** Toggles every selectable visible piece on or off ("Select all visible"). */
@@ -94,22 +112,23 @@ export const GROUP_FILE_CATEGORY_LABELS: Record<DrawingGroupFileCategory, string
   OTHER: 'Other',
 };
 
-export const GROUP_FILE_CATEGORY_OPTIONS = (Object.keys(GROUP_FILE_CATEGORY_LABELS) as DrawingGroupFileCategory[]).map((value) => ({
+// FMP-TECH-28 — new uploads choose Drawing (default), Calculation or Other. Older files may still carry Approval Document, which keeps its label above.
+export const GROUP_FILE_CATEGORY_OPTIONS = (['DRAWING', 'CALCULATION', 'OTHER'] as DrawingGroupFileCategory[]).map((value) => ({
   value,
   label: GROUP_FILE_CATEGORY_LABELS[value],
 }));
 
+export const GROUP_FILE_DEFAULT_CATEGORY: DrawingGroupFileCategory = 'DRAWING';
+
 export const GROUP_FILE_MAX_BYTES = 25 * 1024 * 1024;
-export const GROUP_FILE_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg';
-const ALLOWED_EXTENSIONS = GROUP_FILE_ACCEPT.split(',');
+// Same accepted drawing types as every other Technical upload (PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, Excel).
+export const GROUP_FILE_ACCEPT = BOQ_FILE_ACCEPT;
 
 /** Plain-language checks done in the browser before upload (the server checks again). Returns a message or null. */
 export function validateGroupUpload(file: { name: string; size: number } | null, category: string): string | null {
   if (!file) return 'Please select a file.';
   if (!category) return 'Please select file category.';
-  const dot = file.name.lastIndexOf('.');
-  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : '';
-  if (!ALLOWED_EXTENSIONS.includes(ext)) return 'This file type is not allowed.';
+  if (!hasAllowedDrawingExtension(file.name)) return TECHNICAL_FILE_BAD_TYPE_MESSAGE;
   if (file.size > GROUP_FILE_MAX_BYTES) return 'File is too large.';
   return null;
 }
@@ -137,7 +156,7 @@ export function fileCountLabel(count: number): string {
   return count === 1 ? '1 file' : `${count} files`;
 }
 
-/** The file count of the group a piece sits in (0 when the piece is not assigned). */
+/** The file count of the group a piece sits in (0 when the element is not assigned). */
 export function pieceGroupFileCount(piece: Pick<BoqPiece, 'drawingGroupLinks'>): number {
   return piece.drawingGroupLinks?.[0]?.group._count?.attachments ?? 0;
 }

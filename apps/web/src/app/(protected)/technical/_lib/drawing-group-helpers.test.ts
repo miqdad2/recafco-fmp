@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { BOQ_FILE_TYPES_TEXT } from './boq-attachment-helpers';
 import type { GroupablePiece } from '@/lib/technical-api';
 import {
   DRAWING_GROUP_STATUS_LABELS,
@@ -10,6 +11,9 @@ import {
   toggleVisible,
   GROUP_FILE_CATEGORY_LABELS,
   validateGroupUpload,
+  GROUP_FILE_ACCEPT,
+  GROUP_FILE_CATEGORY_OPTIONS,
+  GROUP_FILE_DEFAULT_CATEGORY,
   formatFileSize,
   canChangeGroupFiles,
   groupFilesLockedMessage,
@@ -50,17 +54,17 @@ describe('validateGroupForm', () => {
       drawingNo: 'Please enter drawing number.',
     });
   });
-  it('lets a draft be saved with no pieces but not a submit', () => {
+  it('lets a draft be saved with no elements but not a submit', () => {
     expect(validateGroupForm({ boqItemId: 'i', drawingNo: 'HC-1', selectedCount: 0 }, false)).toEqual({});
-    expect(validateGroupForm({ boqItemId: 'i', drawingNo: 'HC-1', selectedCount: 0 }, true)).toEqual({ pieces: 'Please select at least one piece.' });
+    expect(validateGroupForm({ boqItemId: 'i', drawingNo: 'HC-1', selectedCount: 0 }, true)).toEqual({ pieces: 'Please select at least one element.' });
     expect(validateGroupForm({ boqItemId: 'i', drawingNo: 'HC-1', selectedCount: 2 }, true)).toEqual({});
   });
 });
 
 describe('piece group display', () => {
-  it('shows "Not assigned" when a piece is in no group', () => {
-    expect(pieceGroupLabel({ drawingGroupLinks: [] })).toBe('Not assigned');
-    expect(pieceGroupLabel({})).toBe('Not assigned');
+  it('shows "Not Assigned to Group" when a piece is in no group', () => {
+    expect(pieceGroupLabel({ drawingGroupLinks: [] })).toBe('Not Assigned to Group');
+    expect(pieceGroupLabel({})).toBe('Not Assigned to Group');
   });
   it('shows drawing no and calculation ref of the group', () => {
     expect(pieceGroupLabel(piece('a', 'HC-001-001', { id: 'g', drawingNo: 'HC-001', calculationRef: 'CALC-001' }))).toBe('HC-001 · CALC-001');
@@ -101,13 +105,22 @@ describe('group files (FMP-BOQ-12)', () => {
     expect(validateGroupUpload(null, 'DRAWING')).toBe('Please select a file.');
     expect(validateGroupUpload({ name: 'a.pdf', size: 1 }, '')).toBe('Please select file category.');
   });
-  it('allows pdf, word, excel and images; rejects other types and big files', () => {
-    for (const name of ['a.pdf', 'a.DOCX', 'a.xls', 'a.xlsx', 'a.png', 'a.jpg', 'a.jpeg', 'a.doc']) {
+  it('allows PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word and Excel; rejects other types and big files (FMP-TECH-28)', () => {
+    for (const name of ['a.pdf', 'a.DOCX', 'a.xls', 'a.xlsx', 'a.png', 'a.jpg', 'a.jpeg', 'a.doc', 'a.tif', 'a.TIFF', 'a.dwg', 'a.DXF']) {
       expect(validateGroupUpload({ name, size: 10 }, 'DRAWING')).toBeNull();
     }
-    expect(validateGroupUpload({ name: 'a.dwg', size: 10 }, 'DRAWING')).toBe('This file type is not allowed.');
-    expect(validateGroupUpload({ name: 'noext', size: 10 }, 'DRAWING')).toBe('This file type is not allowed.');
+    const refused = 'This file type is not allowed. Please upload PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, or Excel.';
+    expect(validateGroupUpload({ name: 'a.exe', size: 10 }, 'DRAWING')).toBe(refused);
+    expect(validateGroupUpload({ name: 'noext', size: 10 }, 'DRAWING')).toBe(refused);
     expect(validateGroupUpload({ name: 'a.pdf', size: GROUP_FILE_MAX_BYTES + 1 }, 'DRAWING')).toBe('File is too large.');
+  });
+  it('uses one accepted list and one helper text everywhere a Technical drawing is uploaded', () => {
+    expect(GROUP_FILE_ACCEPT).toBe('.pdf,.tif,.tiff,.dwg,.dxf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx');
+    expect(BOQ_FILE_TYPES_TEXT).toBe('Accepted files: PDF, TIF/TIFF, DWG, DXF, JPG, PNG, Word, or Excel. Maximum 25 MB each.');
+  });
+  it('offers Drawing (default), Calculation and Other for new uploads', () => {
+    expect(GROUP_FILE_CATEGORY_OPTIONS.map((o) => o.label)).toEqual(['Drawing', 'Calculation', 'Other']);
+    expect(GROUP_FILE_DEFAULT_CATEGORY).toBe('DRAWING');
   });
   it('formats sizes', () => {
     expect(formatFileSize(512)).toBe('512 B');
@@ -133,5 +146,22 @@ describe('group files (FMP-BOQ-12)', () => {
     expect(
       pieceGroupFileCount({ drawingGroupLinks: [{ group: { id: 'g', drawingNo: 'HC-1', calculationRef: null, groupTitle: null, status: 'DRAFT', _count: { attachments: 3 } } }] }),
     ).toBe(3);
+  });
+});
+
+describe('element range selection (FMP-TECH-24)', () => {
+  const els = [
+    { id: 'a', pieceNo: 1, pieceCode: 'X-001', currentStatus: 'DRAWING_READY', drawingGroupLinks: [] },
+    { id: 'b', pieceNo: 2, pieceCode: 'X-002', currentStatus: 'DRAWING_READY', drawingGroupLinks: [{ group: { id: 'other', drawingNo: 'D', calculationRef: null, status: 'DRAFT' } }] },
+    { id: 'c', pieceNo: 3, pieceCode: 'X-003', currentStatus: 'DRAWING_READY', drawingGroupLinks: [] },
+    { id: 'd', pieceNo: 4, pieceCode: 'X-004', currentStatus: 'DRAWING_READY', drawingGroupLinks: [] },
+  ] as unknown as GroupablePiece[];
+
+  it('picks the unassigned elements in the range, in either order', async () => {
+    const { selectableIdsInRange } = await import('./drawing-group-helpers');
+    expect(selectableIdsInRange(els, 1, 3, null)).toEqual(['a', 'c']);
+    expect(selectableIdsInRange(els, 3, 1, null)).toEqual(['a', 'c']);
+    expect(selectableIdsInRange(els, 4, 9, null)).toEqual(['d']);
+    expect(selectableIdsInRange(els, 2, 2, 'other')).toEqual(['b']);
   });
 });

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, unlink, readFile, rename, access } from 'node:fs/promises';
 import { createReadStream, type ReadStream } from 'node:fs';
 import * as path from 'node:path';
 import { getApiEnv } from '../env';
@@ -41,6 +41,27 @@ export class TechnicalDrawingGroupFileStorageService {
 
   createReadStream(storagePath: string): ReadStream {
     return createReadStream(this.resolveAbsolutePath(storagePath));
+  }
+
+  async readBuffer(storagePath: string): Promise<Buffer> {
+    return readFile(this.resolveAbsolutePath(storagePath));
+  }
+
+  async exists(storagePath: string): Promise<boolean> {
+    try {
+      await access(this.resolveAbsolutePath(storagePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Writes a derived file (e.g. a TIFF preview) at a known key, via a temp file + rename so a reader never sees half a file. */
+  async writeDerived(storagePath: string, buffer: Buffer): Promise<void> {
+    const target = this.resolveAbsolutePath(storagePath);
+    const temp = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temp, buffer);
+    await rename(temp, target);
   }
 
   /** Best-effort: a missing file never fails the request. */

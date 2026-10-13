@@ -7,6 +7,7 @@ import { contractsApi } from '@/lib/contracts-api';
 import { readPaymentTermsState, validatePaymentTermsState, toPaymentTermsPayload, anyPaymentTermSelected } from './_lib/payment-terms-helpers';
 import { fetchBoqConfirmations } from '@/lib/technical-api';
 import type { BoqConfirmationItem } from '@/lib/technical-api';
+import { uploadBoqItemFile } from '../technical/_lib/boq-attachment-server';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
@@ -135,6 +136,43 @@ function readScopeOfWork(formData: FormData): Record<string, boolean | string> |
   return scopeOfWork;
 }
 
+/**
+ * FMP-BOQ-17 — uploads the files chosen on New Contract Register. `boqFiles` are the
+ * files; `boqFileItems` is a JSON list with, for each file, the 0-based position of its
+ * BOQ item among the items saved with the contract (items are saved in that order, so
+ * position + 1 is the item's S/N). Returns how many files could not be saved.
+ */
+async function uploadRegisterBoqFiles(contractId: string, formData: FormData): Promise<number> {
+  const files = formData.getAll('boqFiles').filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length === 0) return 0;
+
+  let positions: unknown;
+  try {
+    positions = JSON.parse(String(formData.get('boqFileItems') ?? '[]'));
+  } catch {
+    return files.length;
+  }
+  if (!Array.isArray(positions) || positions.length !== files.length) return files.length;
+
+  const items = await fetchBoqConfirmations(contractId);
+  if (!items) return files.length;
+  const idBySortOrder = new Map(items.map((i) => [i.sortOrder, i.boqItemId]));
+
+  let failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    const position = positions[i];
+    const boqItemId = typeof position === 'number' ? idBySortOrder.get(position + 1) : undefined;
+    const file = files[i];
+    if (!file || !boqItemId) {
+      failed += 1;
+      continue;
+    }
+    const uploaded = await uploadBoqItemFile(contractId, boqItemId, file);
+    if (uploaded.error) failed += 1;
+  }
+  return failed;
+}
+
 export async function createContractAction(
   _prev: ActionResult,
   formData: FormData,
@@ -251,7 +289,12 @@ export async function createContractAction(
   if (!result.ok) return { error: result.message ?? 'Contract could not be created.' };
 
   revalidatePath('/contracts');
+  // FMP-BOQ-17 — optional drawing files chosen on the register form. The contract
+  // is already saved at this point, so a failed upload never undoes it: the user
+  // lands on BOQ Progress with a plain notice and can add the files there.
   if (result.id) {
+    const failedFiles = await uploadRegisterBoqFiles(result.id, formData);
+    if (failedFiles > 0) redirect(`/contracts/${result.id}/boq-progress?filesNotSaved=${failedFiles}`);
     redirect(`/contracts/${result.id}`);
   }
   redirect('/contracts');
@@ -1903,6 +1946,8 @@ export interface ContractSelectorResult {
   jobOrder?: string | undefined;
   status: string;
   updatedAt: string;
+  client: string;
+  openClaims: number;
 }
 
 export async function searchContractsForDashboardAction(search: string): Promise<ContractSelectorResult[]> {
@@ -1913,6 +1958,7 @@ export async function searchContractsForDashboardAction(search: string): Promise
     );
     return result.items.map((c) => ({
       id: c.id, referenceNumber: c.referenceNumber, title: c.title, jobOrder: c.jobOrder, status: c.status, updatedAt: c.updatedAt,
+      client: c.firstParty?.name ?? c.counterpartyName, openClaims: c.openClaimsCount ?? 0,
     }));
   } catch {
     return [];

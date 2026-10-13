@@ -167,6 +167,9 @@ export class TechnicalBoqPieceService {
         currentLocation: true,
         isCancelled: true,
         updatedAt: true,
+        // FMP-TECH-27 — own final drawing files and individual release, for the coverage wording.
+        releasedToProductionAt: true,
+        _count: { select: { attachments: true } },
         // FMP-BOQ-11 — the drawing / calculation group the piece currently belongs to (none = Not assigned).
         drawingGroupLinks: {
           where: { activeSlot: 1 },
@@ -195,7 +198,7 @@ export class TechnicalBoqPieceService {
     this.requireWrite(actor);
     await this.loadContract(contractId, actor);
     if (pieceIds.length === 0) {
-      throw new UnprocessableEntityException({ code: 'BOQ_PIECES_NONE_SELECTED', message: 'Please select at least one piece.' });
+      throw new UnprocessableEntityException({ code: 'BOQ_PIECES_NONE_SELECTED', message: 'Please select at least one element.' });
     }
     // FMP-BOQ-06 — each department may only set its own statuses (contracts.manage may set any).
     return applyPieceStatusUpdate(this.db, {

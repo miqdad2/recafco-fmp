@@ -185,3 +185,79 @@ describe('Production has no way to upload, edit or delete Technical files', () =
     expect(names).toEqual(expect.arrayContaining(['drawingFiles', 'downloadDrawingFile', 'drawingFileForDownload']));
   });
 });
+
+// ---------------------------------------------------------------------------
+// FMP-PROD-03 — individual vs group drawing for Production Work rows and viewer
+// ---------------------------------------------------------------------------
+
+import { buildProductionDrawingInfo } from './production-drawing-files';
+
+const mockOwnFindMany = vi.fn();
+const mockOwnFindFirst = vi.fn();
+
+describe('buildProductionDrawingInfo', () => {
+  const released = [{ group: group(S.RELEASED_TO_PRODUCTION) }];
+
+  it('a released group with files is the Group Drawing', () => {
+    expect(buildProductionDrawingInfo({ drawingNo: 'DN-1', ownFileCount: 0, groupLinks: released })).toEqual({
+      source: 'GROUP', reference: 'HC-001', groupTitle: 'Zone A', fileCount: 2, hasDrawing: true,
+    });
+  });
+  it('the element\'s own files are the Individual Drawing', () => {
+    expect(buildProductionDrawingInfo({ drawingNo: 'DN-1', ownFileCount: 1, groupLinks: [] })).toEqual({
+      source: 'INDIVIDUAL', reference: 'DN-1', groupTitle: null, fileCount: 1, hasDrawing: true,
+    });
+  });
+  it('no files anywhere is a missing drawing', () => {
+    expect(buildProductionDrawingInfo({ drawingNo: 'DN-1', ownFileCount: 0, groupLinks: undefined })).toMatchObject({ source: 'NONE', hasDrawing: false, fileCount: 0 });
+  });
+  it('a group that is not released never counts', () => {
+    expect(buildProductionDrawingInfo({ drawingNo: 'DN-1', ownFileCount: 0, groupLinks: link(S.APPROVED) })).toMatchObject({ source: 'NONE', hasDrawing: false });
+  });
+});
+
+describe('individual element drawing files', () => {
+  const individualClient = {
+    ...client,
+    contractBoqPieceAttachment: { findMany: mockOwnFindMany, findFirst: mockOwnFindFirst },
+  };
+  const svc = (): ProductionPiecesService => new ProductionPiecesService({ getClient: () => individualClient } as unknown as DatabaseService);
+  const individualPiece = {
+    id: 'p1', pieceCode: 'DN-0001-006', drawingNo: 'DN-0001', releasedToProductionAt: new Date(),
+    contract: { referenceNumber: 'C-1', jobOrder: 'JO-1', title: 'Tower A' }, drawingGroupLinks: [],
+  };
+
+  it('lists the element\'s own files as an Individual Drawing', async () => {
+    mockPieceFindUnique.mockResolvedValue(individualPiece);
+    mockOwnFindMany.mockResolvedValue([{ id: 'f1', originalName: 'DN-0001.pdf', mimeType: 'application/pdf', fileSize: 10, createdAt: new Date() }]);
+    const result = await svc().drawingFiles('p1', VIEWER);
+    expect(result).toMatchObject({ source: 'INDIVIDUAL', group: { drawingNo: 'DN-0001', groupTitle: null } });
+    expect(mockOwnFindMany.mock.calls[0]?.[0].where).toEqual({ pieceId: 'p1' });
+    expect(mockOwnFindMany.mock.calls[0]?.[0].select.storagePath).toBeUndefined();
+  });
+
+  it('downloads only a file that belongs to this element', async () => {
+    mockPieceFindUnique.mockResolvedValue(individualPiece);
+    mockOwnFindFirst.mockResolvedValue({ storagePath: 'x/y.pdf', originalName: 'DN-0001.pdf', mimeType: 'application/pdf' });
+    expect(await svc().drawingFileForDownload('p1', 'f1', VIEWER)).toMatchObject({ source: 'INDIVIDUAL', originalName: 'DN-0001.pdf' });
+    expect(mockOwnFindFirst.mock.calls[0]?.[0].where).toEqual({ id: 'f1', pieceId: 'p1' });
+  });
+
+  it('an element that was not released on its own and has no released group exposes nothing', async () => {
+    mockPieceFindUnique.mockResolvedValue({ ...individualPiece, releasedToProductionAt: null });
+    await expect(svc().drawingFiles('p1', VIEWER)).rejects.toThrow(NotFoundException);
+    expect(mockOwnFindMany).not.toHaveBeenCalled();
+  });
+
+  it('a group drawing is served from the group, with the source reported', async () => {
+    mockPieceFindUnique.mockResolvedValue(pieceWithGroup(S.RELEASED_TO_PRODUCTION));
+    mockAttFindMany.mockResolvedValue([]);
+    expect(await svc().drawingFiles('p1', VIEWER)).toMatchObject({ source: 'GROUP' });
+  });
+
+  it('only a TIFF needs a preview', async () => {
+    mockPieceFindUnique.mockResolvedValue(individualPiece);
+    mockOwnFindFirst.mockResolvedValue({ storagePath: 'x/y.pdf', originalName: 'DN-0001.pdf', mimeType: 'application/pdf' });
+    await expect(svc().drawingFilePreview('p1', 'f1', VIEWER)).rejects.toThrow('This file does not need a preview.');
+  });
+});

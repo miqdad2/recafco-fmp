@@ -6,6 +6,7 @@ export const PIECE_UPDATE_TARGET_STATUSES = [
   'DRAWING_READY',
   'IN_PRODUCTION',
   'PRODUCED',
+  'SENT_TO_STORAGE',
   'IN_STORE',
   'DELIVERED',
   'ERECTED',
@@ -44,7 +45,7 @@ export class BulkUpdatePieceStatusDto extends UpdatePieceStatusDto {
   location?: string;
 
   @IsArray()
-  @ArrayMinSize(1, { message: 'Please select at least one piece.' })
+  @ArrayMinSize(1, { message: 'Please select at least one element.' })
   @ArrayMaxSize(MAX_BULK_PIECES)
   @ArrayUnique()
   @IsUUID('4', { each: true })

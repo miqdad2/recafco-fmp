@@ -8,6 +8,9 @@ import {
   unitLabel,
   REGISTER_UNIT_OPTIONS,
 } from '../_lib/contract-boq-helpers';
+import { BoqFilePicker, BoqStagedFilesList } from '../../technical/_components/boq-staged-files';
+import type { StagedBoqFile } from '../../technical/_components/boq-staged-files';
+import { BOQ_FILE_TEXT, filesAttachedText } from '../../technical/_lib/boq-attachment-helpers';
 
 const inputCls =
   'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent';
@@ -21,6 +24,12 @@ interface Props {
   rows: BoqRow[];
   onRowsChange: (rows: BoqRow[]) => void;
   formatTotal: (amount: number) => string;
+  /** FMP-BOQ-17/18 — files attached so far; each belongs to a row (by row id) and is listed under it. */
+  stagedFiles?: StagedBoqFile[];
+  onStagedFilesChange?: (files: StagedBoqFile[]) => void;
+  /** Files picked with a row's own Attach Drawing / File button (one or many). */
+  onPickFiles?: (rowId: string, files: File[]) => void;
+  disabled?: boolean | undefined;
 }
 
 /**
@@ -33,11 +42,12 @@ interface Props {
  * Contract Qty is the early contract/estimated quantity (stored in
  * `originalEstimatedQty`), not the final piece quantity.
  */
-export function ContractBoqRegisterTable({ rows, onRowsChange, formatTotal }: Props): React.JSX.Element {
+export function ContractBoqRegisterTable({ rows, onRowsChange, formatTotal, stagedFiles = [], onStagedFilesChange, onPickFiles, disabled }: Props): React.JSX.Element {
   function updateRow(id: string, field: keyof Omit<BoqRow, 'id'>, value: string): void {
     onRowsChange(rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   }
 
+  const rowFiles = (rowId: string): StagedBoqFile[] => stagedFiles.filter((f) => f.itemId === rowId);
   const totalAmount = rows.reduce((sum, row) => sum + boqLineTotal(row), 0);
   const canRemove = rows.length > 1;
 
@@ -142,6 +152,26 @@ export function ContractBoqRegisterTable({ rows, onRowsChange, formatTotal }: Pr
                 )}
               </div>
             </div>
+            {onPickFiles && (
+              <div className="mt-2 space-y-2 border-t border-border/60 pt-2 lg:pl-[2.25rem]">
+                <div className="flex flex-wrap items-center gap-3">
+                  <BoqFilePicker
+                    label={rowFiles(row.id).length > 0 ? BOQ_FILE_TEXT.addMore : BOQ_FILE_TEXT.attach}
+                    size="sm"
+                    disabled={disabled}
+                    onPick={(files) => onPickFiles(row.id, files)}
+                  />
+                  <span className="text-xs text-text-muted">{filesAttachedText(rowFiles(row.id).length)}</span>
+                </div>
+                {onStagedFilesChange && (
+                  <BoqStagedFilesList
+                    files={rowFiles(row.id)}
+                    onChange={(rest) => onStagedFilesChange([...stagedFiles.filter((f) => f.itemId !== row.id), ...rest])}
+                    disabled={disabled}
+                  />
+                )}
+              </div>
+            )}
           </li>
         ))}
       </ul>

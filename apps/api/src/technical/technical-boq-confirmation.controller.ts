@@ -52,6 +52,18 @@ export class TechnicalBoqConfirmationController {
     return { data: await this.service.updateDraft(contractId, id, dto, actor), meta: meta(), error: null };
   }
 
+  /** FMP-TECH-26 — edit a confirmed confirmation in place (see the service). */
+  @Post(':id/edit')
+  @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
+  async editConfirmed(
+    @Param('contractId', uuid) contractId: string,
+    @Param('id', uuid) id: string,
+    @Body() dto: SaveBoqDrawingConfirmationDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    return { data: await this.service.editConfirmed(contractId, id, dto, actor), meta: meta(), error: null };
+  }
+
   @Post(':id/revise')
   @AnyPermission('technical.update', 'contracts.update', 'contracts.workflow_update')
   async revise(

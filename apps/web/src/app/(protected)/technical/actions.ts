@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { technicalApiFetchResult } from '@/lib/technical-api';
+import { uploadBoqItemFile } from './_lib/boq-attachment-server';
 import type {
   SaveDrawingReceivedInput,
   TechnicalReceivedFrom,
@@ -31,6 +32,7 @@ import type {
   BoqPieceHistoryEntry,
   GroupablePiece,
   DrawingGroupFile,
+  ElementDrawingFile,
 } from '@/lib/technical-api';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
@@ -48,7 +50,8 @@ export async function startTechnicalWorkflowAction(contractId: string): Promise<
   const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/start`, { method: 'POST' });
   if (result.error) return { error: result.error.message };
   revalidatePath(`/technical/jobs/${contractId}`);
-  redirect(`/technical/jobs/${contractId}/workflow/drawing-received`);
+  // FMP-TECH-21 — starting Technical work stays on Technical Details (BOQ-to-Production flow); the old Drawing Received form is no longer the entry point.
+  redirect(`/technical/jobs/${contractId}`);
 }
 
 /**
@@ -700,12 +703,12 @@ export async function deleteFdAttachmentAction(contractId: string, attachmentId:
 }
 
 // ---------------------------------------------------------------------------
-// FMP-BOQ-03 — BOQ Drawing Confirmation (Technical confirms physical pieces)
+// FMP-BOQ-03 — BOQ Drawing Confirmation (Technical confirms physical elements)
 // ---------------------------------------------------------------------------
 
 export interface SaveBoqConfirmationInput {
-  /** create = new row; update = edit a draft; revise = replace a confirmed row (old one is kept as Revised). */
-  mode: 'create' | 'update' | 'revise';
+  /** create = new row; update = edit a draft; edit = change a confirmed row in place (FMP-TECH-26); revise = replace a confirmed row (old one is kept as Revised). */
+  mode: 'create' | 'update' | 'revise' | 'edit';
   id?: string;
   action: 'DRAFT' | 'CONFIRM';
   boqItemId: string;
@@ -731,7 +734,7 @@ export async function saveBoqConfirmationAction(contractId: string, input: SaveB
     ...(pieces !== '' ? { confirmedPieces: Number(pieces) } : {}),
   };
   const base = `/technical/jobs/${contractId}/boq-confirmations`;
-  const path = input.mode === 'create' ? base : input.mode === 'update' ? `${base}/${input.id}` : `${base}/${input.id}/revise`;
+  const path = input.mode === 'create' ? base : input.mode === 'update' ? `${base}/${input.id}` : input.mode === 'edit' ? `${base}/${input.id}/edit` : `${base}/${input.id}/revise`;
   const result = await technicalApiFetchResult(path, {
     method: input.mode === 'update' ? 'PATCH' : 'POST',
     body: JSON.stringify(body),
@@ -754,7 +757,7 @@ export async function cancelBoqConfirmationAction(contractId: string, id: string
 
 export interface GeneratePiecesResult {
   error: string | null;
-  /** Plain-language outcome, e.g. "Pieces generated successfully." / "Pieces are already generated." */
+  /** Plain-language outcome, e.g. "Elements generated successfully." / "Elements are already generated." */
   message?: string;
 }
 
@@ -776,7 +779,7 @@ export async function listBoqPiecesAction(
   const qs = new URLSearchParams({ boqItemId });
   if (status) qs.set('status', status);
   const result = await technicalApiFetchResult<BoqPiece[]>(`/technical/jobs/${contractId}/boq-pieces?${qs.toString()}`);
-  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  if (result.error) return { error: 'Elements could not be loaded. Please try again.', pieces: [] };
   return { error: null, pieces: result.data };
 }
 
@@ -786,7 +789,7 @@ export async function listBoqPiecesAction(
 
 export interface UpdatePieceStatusResult {
   error: string | null;
-  /** e.g. "Pieces updated." / "8 pieces updated. 2 pieces skipped." */
+  /** e.g. "Elements updated." / "8 elements updated. 2 elements skipped." */
   message?: string;
   updatedCount: number;
   skippedCount: number;
@@ -870,11 +873,11 @@ export async function listGroupablePiecesAction(
   boqItemId: string,
 ): Promise<{ error: string | null; pieces: GroupablePiece[] }> {
   const result = await technicalApiFetchResult<GroupablePiece[]>(`/technical/jobs/${contractId}/drawing-groups/pieces?boqItemId=${boqItemId}`);
-  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  if (result.error) return { error: 'Elements could not be loaded. Please try again.', pieces: [] };
   return { error: null, pieces: result.data };
 }
 
-/** The pieces one group covers (View Pieces on a group). */
+/** The pieces one group covers (View Elements on a group). */
 export async function getDrawingGroupPiecesAction(
   contractId: string,
   groupId: string,
@@ -882,7 +885,7 @@ export async function getDrawingGroupPiecesAction(
   const result = await technicalApiFetchResult<{ pieces: { id: string; pieceCode: string; currentStatus: BoqPieceStatus }[] }>(
     `/technical/jobs/${contractId}/drawing-groups/${groupId}`,
   );
-  if (result.error) return { error: 'Pieces could not be loaded. Please try again.', pieces: [] };
+  if (result.error) return { error: 'Elements could not be loaded. Please try again.', pieces: [] };
   return { error: null, pieces: result.data.pieces };
 }
 
@@ -934,4 +937,89 @@ export async function deleteDrawingGroupFileAction(contractId: string, groupId: 
   });
   if (result.error) return { error: result.error.message };
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-BOQ-17 — drawing files on a BOQ item (add later / remove). One file per
+// call so the caller can loop and report each failure in plain words.
+// ---------------------------------------------------------------------------
+
+export async function uploadBoqItemFileAction(contractId: string, boqItemId: string, file: File): Promise<ActionResult> {
+  const result = await uploadBoqItemFile(contractId, boqItemId, file);
+  if (!result.error) {
+    revalidatePath(`/technical/jobs/${contractId}`);
+    revalidatePath(`/contracts/${contractId}/boq-progress`);
+  }
+  return result;
+}
+
+export async function deleteBoqItemFileAction(contractId: string, attachmentId: string): Promise<ActionResult> {
+  const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/boq-attachments/${attachmentId}`, { method: 'DELETE' });
+  if (result.error) return { error: result.error.message };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  revalidatePath(`/contracts/${contractId}/boq-progress`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-TECH-27 — final drawing files for one element, and releasing individually covered elements.
+// One file per upload call so the caller can report each failure in plain words.
+// ---------------------------------------------------------------------------
+
+export async function listElementDrawingFilesAction(
+  contractId: string,
+  pieceId: string,
+): Promise<{ error: string | null; files: ElementDrawingFile[] }> {
+  const result = await technicalApiFetchResult<ElementDrawingFile[]>(`/technical/jobs/${contractId}/element-drawings/${pieceId}/files`);
+  if (result.error) return { error: 'Files could not be loaded. Please try again.', files: [] };
+  return { error: null, files: result.data };
+}
+
+export async function uploadElementDrawingAction(contractId: string, pieceId: string, formData: FormData): Promise<ActionResult> {
+  let token: string | undefined;
+  try {
+    token = (await cookies()).get('recafco_access')?.value;
+  } catch {
+    token = undefined;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/technical/jobs/${contractId}/element-drawings/${pieceId}/files`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      revalidatePath(`/technical/jobs/${contractId}`);
+      return { error: null };
+    }
+    let message = 'File could not be uploaded. Please try again.';
+    try {
+      const json = (await res.json()) as { error?: { message?: string } };
+      if (json.error?.message) message = json.error.message;
+    } catch {
+      // keep the friendly default
+    }
+    return { error: message };
+  } catch {
+    return { error: 'File could not be uploaded. Please try again.' };
+  }
+}
+
+export async function deleteElementDrawingFileAction(contractId: string, pieceId: string, attachmentId: string): Promise<ActionResult> {
+  const result = await technicalApiFetchResult(`/technical/jobs/${contractId}/element-drawings/${pieceId}/files/${attachmentId}`, { method: 'DELETE' });
+  if (result.error) return { error: result.error.message };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null };
+}
+
+/** Releases individually covered elements (each needs its own final drawing and no group). All-or-nothing; the reason comes back in plain words. */
+export async function releaseElementsAction(contractId: string, pieceIds: string[]): Promise<{ error: string | null; released: number }> {
+  const result = await technicalApiFetchResult<{ released: number }>(`/technical/jobs/${contractId}/element-drawings/release`, {
+    method: 'POST',
+    body: JSON.stringify({ pieceIds }),
+  });
+  if (result.error) return { error: result.error.message, released: 0 };
+  revalidatePath(`/technical/jobs/${contractId}`);
+  return { error: null, released: result.data.released };
 }

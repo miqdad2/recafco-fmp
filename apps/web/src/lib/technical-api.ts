@@ -231,6 +231,10 @@ export interface JobReleaseSummary {
   groupsApproved: number;
   groupsNotReleased: number;
   confirmedNotGenerated: number;
+  /** FMP-TECH-27 — elements outside any group with their own final drawing file. */
+  individuallyCovered: number;
+  /** Elements released to Production on their own (not through a group). */
+  individuallyReleased: number;
 }
 
 // FMP-UI-31 — mirrors TechnicalBoqAttentionSummary in
@@ -596,7 +600,7 @@ export interface BoqDrawingConfirmation {
 
 // FMP-BOQ-04 — pieces generated from CONFIRMED drawing confirmations.
 export type BoqPieceStatus =
-  | 'NOT_STARTED' | 'DRAWING_READY' | 'IN_PRODUCTION' | 'PRODUCED' | 'IN_STORE'
+  | 'NOT_STARTED' | 'DRAWING_READY' | 'IN_PRODUCTION' | 'PRODUCED' | 'SENT_TO_STORAGE' | 'IN_STORE'
   | 'DELIVERED' | 'ERECTED' | 'COMPLETED' | 'ON_HOLD' | 'REJECTED' | 'CANCELLED';
 
 export interface BoqPiece {
@@ -612,6 +616,9 @@ export interface BoqPiece {
   updatedAt: string;
   // FMP-BOQ-11 — the drawing / calculation group the piece is in right now (empty = not assigned).
   drawingGroupLinks?: { group: { id: string; drawingNo: string; calculationRef: string | null; groupTitle: string | null; status: DrawingGroupStatus; _count?: { attachments: number } } }[];
+  // FMP-TECH-27 — released on its own / its own final drawing files (individual coverage).
+  releasedToProductionAt?: string | null;
+  _count?: { attachments: number };
 }
 
 export interface BoqConfirmationItem {
@@ -703,6 +710,9 @@ export interface GroupablePiece {
   pieceCode: string;
   currentStatus: BoqPieceStatus;
   drawingGroupLinks: { group: { id: string; drawingNo: string; calculationRef: string | null; status: DrawingGroupStatus } }[];
+  /** FMP-TECH-27 — an element with its own final drawing, or released on its own, is not offered for a group. */
+  releasedToProductionAt?: string | null;
+  _count?: { attachments: number };
 }
 
 export async function fetchDrawingGroups(contractId: string): Promise<DrawingGroupItem[] | null> {
@@ -721,5 +731,86 @@ export interface DrawingGroupFile {
   category: DrawingGroupFileCategory;
   remarks: string | null;
   createdAt: string;
+  uploadedByUser: { id: string; displayName: string } | null;
+}
+
+// FMP-BOQ-17 — reference drawings/files attached to a BOQ item.
+export interface BoqItemAttachment {
+  id: string;
+  contractId: string;
+  boqItemId: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  sourceType: 'CLIENT_INITIAL_DRAWING' | 'TECHNICAL_REFERENCE';
+  notes: string | null;
+  createdAt: string;
+  uploadedByUserId: string;
+  uploadedByUser: { id: string; displayName: string };
+  boqItem: { sortOrder: number; itemCode: string | null; description: string };
+}
+
+/** null = could not be loaded (the UI shows a plain notice instead of "No files attached"). */
+export async function fetchBoqAttachments(contractId: string): Promise<BoqItemAttachment[] | null> {
+  const result = await technicalApiFetchResult<BoqItemAttachment[]>(`/technical/jobs/${contractId}/boq-attachments`);
+  return result.error ? null : result.data;
+}
+
+// FMP-TECH-27 — final drawing coverage of individual elements.
+export type ElementCoverageKind = 'GROUP' | 'INDIVIDUAL' | 'NONE';
+export type ElementReleaseKind = 'WAITING' | 'READY' | 'RELEASED';
+
+export interface ElementCoverageRow {
+  id: string;
+  boqItemId: string;
+  boqItemSortOrder: number;
+  boqItemDescription: string;
+  pieceNo: number;
+  pieceCode: string;
+  drawingNo: string;
+  currentStatus: BoqPieceStatus;
+  group: { id: string; drawingNo: string; calculationRef: string | null; groupTitle: string | null; status: DrawingGroupStatus; fileCount: number } | null;
+  individualFileCount: number;
+  releasedToProductionAt: string | null;
+  /** FMP-TECH-31 — when/by whom/how an element was released (null when not released or not recorded). */
+  releasedAt: string | null;
+  releasedByName: string | null;
+  releasedVia: 'GROUP' | 'INDIVIDUAL' | null;
+  coverage: ElementCoverageKind;
+  releaseState: ElementReleaseKind;
+}
+
+export interface ElementCoverageSummary {
+  totalElements: number;
+  coveredByGroup: number;
+  coveredIndividually: number;
+  notCovered: number;
+  readyToRelease: number;
+  released: number;
+}
+
+export interface ElementCoverageData {
+  summary: ElementCoverageSummary;
+  elements: ElementCoverageRow[];
+}
+
+/** null = could not be loaded (the pages then fall back to the group numbers they already have). */
+export async function fetchElementCoverage(contractId: string): Promise<ElementCoverageData | null> {
+  const result = await technicalApiFetchResult<ElementCoverageData>(`/technical/jobs/${contractId}/element-drawings/coverage`);
+  return result.error ? null : result.data;
+}
+
+/** A final drawing file attached to one element. */
+export interface ElementDrawingFile {
+  id: string;
+  pieceId: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  drawingRefNo: string | null;
+  revision: string | null;
+  remarks: string | null;
+  createdAt: string;
+  uploadedById: string | null;
   uploadedByUser: { id: string; displayName: string } | null;
 }
