@@ -10,7 +10,6 @@ import {
   Wrench,
   ShieldCheck,
   FileText,
-  Calculator,
   Factory,
   FileSearch,
   Settings,
@@ -263,13 +262,14 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
 // an in-platform route, and must render as a plain new-tab `<a>`.
 const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon; external?: boolean }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
-  { label: 'Estimation', href: '/executive/estimation', icon: Calculator },
+  // FMP-UI-46 — Estimation removed from the sidebar (its route and module are untouched).
   // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
   { label: 'Technical', href: '/technical', icon: Ruler },
   { label: 'Production & Planning', href: '/production/executive', icon: Factory },
   { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
-  { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
+  // FMP-UI-46 — Quality Control sits between Storage Yard & Delivery and Erection.
   { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck },
+  { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
   { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
   { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
   { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },

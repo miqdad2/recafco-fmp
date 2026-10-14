@@ -166,24 +166,11 @@ describe('display text', () => {
   });
 });
 
-describe('row actions follow existing permissions', () => {
-  const ids = (a: { key: string }[]): string[] => a.map((x) => x.key);
-
-  it('everyone gets View and BOQ, and nothing else without permissions', () => {
-    const a = rowActions({ id: 'c1', status: 'ACTIVE' }, ['contracts.read']);
-    expect(ids(a.primary)).toEqual(['view', 'boq']);
-    expect(a.primary.map((x) => x.href)).toEqual(['/contracts/c1', '/contracts/c1/boq-progress']);
-    expect(a.more).toEqual([]);
-    expect(rowActions({ id: 'c1', status: 'DRAFT' }, ['contracts.read']).more).toEqual([]);
-  });
-
-  it('contracts.update unlocks Edit (Draft only), Payments and Issues', () => {
-    expect(ids(rowActions({ id: 'c1', status: 'DRAFT' }, ['contracts.read', 'contracts.update']).more)).toEqual(['edit', 'payments', 'issues']);
-    expect(ids(rowActions({ id: 'c1', status: 'ACTIVE' }, ['contracts.read', 'contracts.update']).more)).toEqual(['payments', 'issues']);
-  });
-
-  it('Approve needs contracts.activate on a Draft', () => {
-    expect(ids(rowActions({ id: 'c1', status: 'DRAFT' }, ['contracts.read', 'contracts.activate']).more)).toEqual(['approve']);
-    expect(rowActions({ id: 'c1', status: 'ACTIVE' }, ['contracts.read', 'contracts.activate']).more).toEqual([]);
+describe('row actions (FMP-UI-47)', () => {
+  it('a row has exactly Open Contract and BOQ, on the existing routes, with tooltips', () => {
+    const a = rowActions({ id: 'c1' });
+    expect(a.map((x) => x.label)).toEqual(['Open Contract', 'BOQ']);
+    expect(a.map((x) => x.href)).toEqual(['/contracts/c1', '/contracts/c1/boq-progress']);
+    expect(a.map((x) => x.title)).toEqual(['Open full contract details', 'Open BOQ progress']);
   });
 });

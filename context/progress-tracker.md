@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** FMP-UI-45 — Factory Performance removed from sidebar (2026-10-14)
+- **Last completed:** FMP-UI-47 — Contract Management Dashboard row actions as buttons (2026-10-14)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -15184,3 +15184,11 @@ The Sent to Storage Yard status, the Send to Storage Yard action and Storage's "
 ## FMP-UI-45 — Factory Performance Removed from Sidebar (Completed 2026-10-14)
 
 Removed the "Factory Performance" external link from both sidebar lists (Operations group and the executive list) in `sidebar.tsx`, along with its URL constant and the unused `Gauge` import. The Platform Dashboard card (`factory-performance-card.tsx`, opens http://192.168.1.17:83) is untouched. The generic `external` link support in the sidebar renderer was left in place (reusable, now unused). Frontend-only; no other sidebar item changed.
+
+## FMP-UI-46 — Clean Sidebar Module Order (Completed 2026-10-14)
+
+In `sidebar.tsx`'s `EXECUTIVE_SIDEBAR_ITEMS` (the main module list): removed Estimation and moved Quality Control between Storage Yard & Delivery and Erection. Order now: Contract Management, Technical, Production & Planning, Storage Yard & Delivery, Quality Control, Erection, Safety & Compliance, Incident Management, Maintenance Management, Task Management, Advanced Planning. The other sidebar list (`MAIN_GROUPS`, Operations) never contained Estimation or Quality Control, so it needed no change. Estimation route, backend, permissions and module data are untouched; the unused `Calculator` import was removed.
+
+## FMP-UI-47 — Contract Management Dashboard Row Actions (Completed 2026-10-14)
+
+The Contracts / Projects table on `/contracts/executive` (`project-overview.tsx`) now shows only two real buttons per row: **Open Contract** (folder icon, `/contracts/:id`) and **BOQ** (list icon, `/contracts/:id/boq-progress`), with tooltips "Open full contract details" / "Open BOQ progress". They reuse the Contract List's `OPEN_BUTTON_CLS` / `BOQ_BUTTON_CLS` styles (bordered, light background, 32px, hover and focus states). "More" is removed along with its Edit / Approve / Payments / Issues links (reached from the contract page). `rowActions()` now returns just those two actions; the Contract List page (already button-based since FMP-UI-42) is unchanged. Frontend-only; no routes, permissions or backend touched.

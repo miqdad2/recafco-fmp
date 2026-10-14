@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowRight, CheckCircle2, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, FolderOpen, ListChecks, Search, X } from 'lucide-react';
+import { BOQ_BUTTON_CLS, OPEN_BUTTON_CLS } from '../../_components/contract-row-actions';
 import { searchContractsForDashboardAction, getContractBoqProgressForDashboardAction } from '../../actions';
 import { RefreshButton } from '../../../technical/_components/refresh-button';
 import {
@@ -50,7 +51,7 @@ function FlowTile({ label, value }: { label: string; value: number }): React.JSX
   );
 }
 
-export function ProjectOverview({ rows: initialRows, permissions, paymentsPending, overall }: Props): React.JSX.Element {
+export function ProjectOverview({ rows: initialRows, paymentsPending, overall }: Props): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ProjectFilter>('ALL');
   const [reason, setReason] = useState<ReasonKey | null>(null);
@@ -207,7 +208,7 @@ export function ProjectOverview({ rows: initialRows, permissions, paymentsPendin
                 <tbody>
                   {visibleRows.map((row) => {
                     const r = row.progress ? reached(row.progress) : null;
-                    const actions = rowActions(row, permissions);
+                    const actions = rowActions(row);
                     const shown = row.reasons.slice(0, 2);
                     return (
                       <tr key={row.id} className={['border-b border-border align-top last:border-b-0', selectedId === row.id ? 'bg-surface-secondary' : ''].join(' ')}>
@@ -250,20 +251,19 @@ export function ProjectOverview({ rows: initialRows, permissions, paymentsPendin
                           )}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <div className="inline-flex items-center justify-end gap-3 text-xs font-semibold">
-                            {actions.primary.map((a) => (
-                              <Link key={a.key} href={a.href} className="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-focus">{a.label}</Link>
+                          <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                            {actions.map((a) => (
+                              <Link
+                                key={a.key}
+                                href={a.href}
+                                title={a.title}
+                                aria-label={`${a.label} — ${row.title}`}
+                                className={a.key === 'boq' ? BOQ_BUTTON_CLS : OPEN_BUTTON_CLS}
+                              >
+                                {a.key === 'boq' ? <ListChecks className="size-3.5 shrink-0" aria-hidden="true" /> : <FolderOpen className="size-3.5 shrink-0" aria-hidden="true" />}
+                                {a.label}
+                              </Link>
                             ))}
-                            {actions.more.length > 0 && (
-                              <details>
-                                <summary className="cursor-pointer list-none font-medium text-text-muted hover:text-text-secondary" aria-label={`More actions for ${row.title}`}>More</summary>
-                                <div className="mt-1 flex flex-col items-end gap-1 font-normal">
-                                  {actions.more.map((a) => (
-                                    <Link key={a.key} href={a.href} className="text-text-primary hover:text-accent hover:underline">{a.label}</Link>
-                                  ))}
-                                </div>
-                              </details>
-                            )}
                           </div>
                         </td>
                       </tr>

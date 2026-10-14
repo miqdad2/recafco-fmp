@@ -268,30 +268,18 @@ export interface RowAction {
   key: string;
   label: string;
   href: string;
+  /** Tooltip. */
+  title: string;
 }
 
 /**
- * View and BOQ are for everyone who can open the page. The rest only appear when the
- * user already holds the permission the same screen needs elsewhere:
- * Edit — contracts.update, Draft only (the edit page itself refuses other statuses);
- * Approve — contracts.activate, Draft only (opens the contract, where Activate lives);
- * Payments / Issues — contracts.update.
+ * FMP-UI-47 — a dashboard row has exactly two actions, both existing routes and open to everyone who can
+ * see the page: Open Contract (full contract details) and BOQ (BOQ progress). Edit, Payments, Issues and the
+ * rest are reached from the contract page itself — there is no "More".
  */
-export function rowActions(
-  row: { id: string; status: string },
-  permissions: string[],
-): { primary: RowAction[]; more: RowAction[] } {
-  const primary: RowAction[] = [
-    { key: 'view', label: 'View', href: `/contracts/${row.id}` },
-    { key: 'boq', label: 'BOQ', href: `/contracts/${row.id}/boq-progress` },
+export function rowActions(row: { id: string }): RowAction[] {
+  return [
+    { key: 'view', label: 'Open Contract', href: `/contracts/${row.id}`, title: 'Open full contract details' },
+    { key: 'boq', label: 'BOQ', href: `/contracts/${row.id}/boq-progress`, title: 'Open BOQ progress' },
   ];
-  const more: RowAction[] = [];
-  const canUpdate = permissions.includes('contracts.update');
-  if (row.status === 'DRAFT' && canUpdate) more.push({ key: 'edit', label: 'Edit', href: `/contracts/${row.id}/edit` });
-  if (row.status === 'DRAFT' && permissions.includes('contracts.activate')) more.push({ key: 'approve', label: 'Approve', href: `/contracts/${row.id}` });
-  if (canUpdate) {
-    more.push({ key: 'payments', label: 'Payments', href: `/contracts/${row.id}/payments` });
-    more.push({ key: 'issues', label: 'Issues', href: `/contracts/${row.id}/issues` });
-  }
-  return { primary, more };
 }
