@@ -78,3 +78,35 @@ export function filterParties<T extends { name: string; contactNo: string | null
   if (!q) return parties;
   return parties.filter((p) => p.name.toLowerCase().includes(q) || (p.contactNo ?? '').toLowerCase().includes(q));
 }
+
+export interface DuplicateCheck<T> {
+  /** Same name (trimmed, case-insensitive) AND same type — the pair the API rejects as CONTRACT_PARTY_DUPLICATE. */
+  sameType: T | null;
+  /** Same name under the other type — allowed by the API, shown as information only. */
+  otherType: T | null;
+}
+
+/**
+ * FMP-PARTIES-01 — duplicate-company awareness from the full party list the page
+ * already loads (`includeInactive: true`, no pagination). Advisory only: the API
+ * remains the authority and nothing is merged, renamed or blocked here.
+ */
+export function findDuplicateParty<T extends { id: string; name: string; partyType: string }>(
+  parties: T[],
+  name: string,
+  partyType: string,
+  excludeId?: string,
+): DuplicateCheck<T> {
+  const needle = name.trim().toLowerCase();
+  const result: DuplicateCheck<T> = { sameType: null, otherType: null };
+  if (!needle) return result;
+  for (const p of parties) {
+    if (p.id === excludeId || p.name.trim().toLowerCase() !== needle) continue;
+    if (p.partyType === partyType) result.sameType ??= p;
+    else result.otherType ??= p;
+  }
+  return result;
+}
+
+/** How many companies one panel renders before "Show more" — a presentation limit only; search always runs over every loaded company. */
+export const PARTY_PANEL_PAGE_SIZE = 50;

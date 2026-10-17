@@ -42,6 +42,8 @@ interface Props {
   canManage: boolean;
   /** Overrides the default helper sentence under the section (FMP-TECH-17). */
   referenceText?: string;
+  /** Label of the button that opens the full-screen viewer (default "View"). */
+  viewLabel?: string;
 }
 
 /**
@@ -50,7 +52,7 @@ interface Props {
  * Management uses it to add client drawings later. Reference only: adding a
  * file never creates pieces or changes any status.
  */
-export function BoqItemFilesCard({ contractId, items, attachments, currentUserId, canUpload, canManage, referenceText }: Props): React.JSX.Element {
+export function BoqItemFilesCard({ contractId, items, attachments, currentUserId, canUpload, canManage, referenceText, viewLabel = 'View' }: Props): React.JSX.Element {
   const router = useRouter();
   const [errors, setErrors] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -147,7 +149,7 @@ export function BoqItemFilesCard({ contractId, items, attachments, currentUserId
                           className={BTN_SECONDARY}
                         >
                           <Eye className="size-3.5" aria-hidden="true" />
-                          View
+                          {viewLabel}
                         </button>
                         <a href={boqAttachmentDownloadHref(contractId, a.id)} className={BTN_SECONDARY}>
                           <Download className="size-3.5" aria-hidden="true" />

@@ -70,7 +70,12 @@ export default async function IncidentReportExecutivePage(): Promise<React.JSX.E
   const metricsStatus: MetricStatus = data ? 'ok' : 'unavailable';
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-6">
+    // FMP-UI-50 — widened from max-w-6xl to the shared max-w-[1600px] cap
+    // every other redesigned dashboard already uses. The Overview grid
+    // below already goes to `lg:grid-cols-5` (5 cards, one balanced row) —
+    // no grid change needed here, unlike Safety & Compliance's own 2
+    // sub-grouped 3-card rows.
+    <div className="mx-auto max-w-[1600px] space-y-6 px-5 py-6 lg:px-6">
       <ExecutiveModuleNav code="INCIDENT_REPORT" permissions={permissions} />
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm lg:p-6">

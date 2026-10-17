@@ -51,6 +51,7 @@ const ACTION_LABELS: Record<string, string> = {
   document_obligation_created: 'Document Added',
   document_obligation_updated: 'Document Updated',
   document_obligation_attachment_uploaded: 'Document Attachment Uploaded',
+  boq_item_added: 'BOQ Item Added',
   variation_created: 'Variation Added',
   variation_updated: 'Variation Updated',
   variation_attachment_uploaded: 'Variation Attachment Uploaded',
@@ -84,6 +85,7 @@ const ACTIVITY_TYPE_BY_EVENT: Record<string, ActivityType> = {
   document_obligation_created: 'OTHER',
   document_obligation_updated: 'OTHER',
   document_obligation_attachment_uploaded: 'DOCUMENT_UPLOADED',
+  boq_item_added: 'CONTRACT_UPDATED',
   variation_created: 'VARIATION_UPDATED',
   variation_updated: 'VARIATION_UPDATED',
   variation_attachment_uploaded: 'DOCUMENT_UPLOADED',
@@ -144,6 +146,7 @@ const SOURCE_BY_EVENT: Record<string, ActivitySource> = {
   document_obligation_created: 'Documents & Obligations',
   document_obligation_updated: 'Documents & Obligations',
   document_obligation_attachment_uploaded: 'Documents & Obligations',
+  boq_item_added: 'Overview',
   variation_created: 'Variations / Change Orders',
   variation_updated: 'Variations / Change Orders',
   variation_attachment_uploaded: 'Variations / Change Orders',
@@ -244,6 +247,16 @@ export function activityDetails(activity: ContractActivity): string {
     case 'variation_attachment_uploaded': {
       const file = metaStr(m, 'fileName');
       return file ? `File uploaded: ${file}` : 'File uploaded';
+    }
+    case 'boq_item_added': {
+      const no = metaStr(m, 'boqItemNo');
+      const desc = metaStr(m, 'description');
+      const qty = metaStr(m, 'contractQty');
+      const unit = metaStr(m, 'unit');
+      const price = metaStr(m, 'unitPrice');
+      const parts = [no ? `BOQ item ${no}` : 'BOQ item', desc ? `"${desc}"` : null].filter(Boolean).join(' ');
+      const detail = [qty ? `Qty ${qty}${unit ? ` ${unit}` : ''}` : null, price ? `Unit price ${price}` : null].filter(Boolean).join(', ');
+      return detail ? `${parts} added (${detail})` : `${parts} added`;
     }
     case 'variation_created': {
       const no = metaStr(m, 'variationNo');

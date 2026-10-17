@@ -8,6 +8,9 @@ import { PaymentSummaryCards } from './_components/payment-summary-cards';
 import { PaymentFilterBar } from './_components/payment-filter-bar';
 import { PaymentRegisterTable } from './_components/payment-register-table';
 import { PaymentActionsBar } from './_components/payment-actions-bar';
+import { formatShowingRange } from './_lib/payment-register-helpers';
+
+const PAGE_SIZE = 25;
 
 export const metadata: Metadata = { title: 'Contract Payments — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -49,7 +52,7 @@ export default async function ContractPaymentsPage({ searchParams }: PageProps):
   const [listRes, contractsRes, deptsRes, peopleRes, dashboardRes] = await Promise.allSettled([
     contractsApi.listPayments({
       page,
-      pageSize: 25,
+      pageSize: PAGE_SIZE,
       ...(search ? { search } : {}),
       ...(contractId ? { contractId } : {}),
       ...(company ? { company } : {}),
@@ -109,11 +112,11 @@ export default async function ContractPaymentsPage({ searchParams }: PageProps):
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract Payments</h1>
-          <p className="mt-1.5 text-sm text-text-secondary">Track payment status across all contracts.</p>
+          <p className="mt-1.5 text-sm text-text-secondary">View invoices, payments and outstanding balances across contracts.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <DashboardScopeBadge scope={scope} />
-          <PaymentActionsBar />
+          <PaymentActionsBar canCreate={canUpdate} contracts={contracts} />
         </div>
       </div>
 
@@ -152,11 +155,11 @@ export default async function ContractPaymentsPage({ searchParams }: PageProps):
         </div>
       )}
 
-      <PaymentRegisterTable payments={payments} contracts={contracts} canUpdate={canUpdate} />
+      <PaymentRegisterTable payments={payments} canUpdate={canUpdate} />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-text-secondary print:hidden">
-          <span>Showing {payments.length} of {total}</span>
+      {total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary print:hidden">
+          <span>{formatShowingRange(page, PAGE_SIZE, payments.length, total)}</span>
           <div className="flex gap-2">
             {/* FMP-PERF-02 — Link, not <a>: see issues/page.tsx's own comment. */}
             {page > 1 && (

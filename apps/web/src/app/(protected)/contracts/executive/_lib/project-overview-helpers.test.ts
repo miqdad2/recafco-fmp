@@ -19,7 +19,7 @@ import {
 import type { ProjectProgress, ProjectRow } from './project-overview-helpers';
 
 const progress = (over: Partial<ProjectProgress> = {}): ProjectProgress => ({
-  confirmed: 0, generated: 0, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: true, ...over,
+  confirmed: 0, generated: 0, released: null, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: true, ...over,
 });
 
 const row = (over: Partial<Omit<ProjectRow, 'reasons'>> = {}): ProjectRow =>
@@ -155,8 +155,8 @@ describe('display text', () => {
   it('explains an empty selected contract in one sentence', () => {
     expect(selectedProgressMessage(null)).toContain('could not be loaded');
     expect(selectedProgressMessage(progress({ hasItems: false }))).toBe('No BOQ progress found for this contract.');
-    expect(selectedProgressMessage(progress())).toBe('Technical has not confirmed drawing pieces yet.');
-    expect(selectedProgressMessage(progress({ confirmed: 2 }))).toBe('Pieces have not been generated yet.');
+    expect(selectedProgressMessage(progress())).toBe('Technical has not confirmed drawing elements yet.');
+    expect(selectedProgressMessage(progress({ confirmed: 2 }))).toBe('Elements have not been generated yet.');
     expect(selectedProgressMessage(progress({ confirmed: 2, generated: 2 }))).toBeNull();
   });
 
@@ -169,8 +169,89 @@ describe('display text', () => {
 describe('row actions (FMP-UI-47)', () => {
   it('a row has exactly Open Contract and BOQ, on the existing routes, with tooltips', () => {
     const a = rowActions({ id: 'c1' });
-    expect(a.map((x) => x.label)).toEqual(['Open Contract', 'BOQ']);
+    expect(a.map((x) => x.label)).toEqual(['Open Contract', 'BOQ Progress']);
     expect(a.map((x) => x.href)).toEqual(['/contracts/c1', '/contracts/c1/boq-progress']);
     expect(a.map((x) => x.title)).toEqual(['Open full contract details', 'Open BOQ progress']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FMP-UI-48
+// ---------------------------------------------------------------------------
+
+import { boqElementsText, hasActiveFilters, projectCountText, selectedMetrics, stageCell, statusBadgeClass } from './project-overview-helpers';
+
+describe('Selected Project Progress metrics', () => {
+  it('lists the eight stages in order, with their own wording', () => {
+    const m = selectedMetrics(progress({ confirmed: 10, released: 8, inProduction: 2, produced: 3, inStore: 1, delivered: 1, erected: 0, completed: 0, generated: 10 }));
+    expect(m.map((x) => x.label)).toEqual([
+      'Confirmed Elements', 'Released to Production', 'In Production', 'Produced', 'In Storage', 'Delivered', 'Erected', 'Completed',
+    ]);
+    expect(m.map((x) => x.value)).toEqual([10, 8, 2, 3, 1, 1, 0, 0]);
+  });
+  it('reports Released to Production as not available (null), never as 0, when release data was not loaded', () => {
+    const m = selectedMetrics(progress({ released: null }));
+    expect(m.find((x) => x.key === 'released')?.value).toBeNull();
+  });
+});
+
+describe('summarizeProgress released figure', () => {
+  const item = (technical?: { assigned: number; notAssigned: number; released: number; notReleased: number } | null) =>
+    ({
+      boqItemId: 'b', sortOrder: 1, description: 'x', contractQty: null, contractUnit: null, confirmedPieces: 4, confirmations: [], piecesGenerated: 4,
+      statusCounts: {}, pendingPieces: 0, needsAttention: false, technical,
+    }) as never;
+
+  it('is the sum of released elements when every item carries release data', () => {
+    const t = { assigned: 4, notAssigned: 0, released: 3, notReleased: 1 };
+    expect(summarizeProgress([item(t), item(t)])?.released).toBe(6);
+  });
+  it('is null when any item lacks release data (the drawing groups could not be loaded)', () => {
+    expect(summarizeProgress([item(undefined)])?.released).toBeNull();
+    expect(summarizeProgress([item({ assigned: 1, notAssigned: 0, released: 1, notReleased: 0 }), item(null)])?.released).toBeNull();
+  });
+});
+
+describe('table cells', () => {
+  it('BOQ Elements column', () => {
+    expect(boqElementsText(null)).toEqual({ primary: '—', secondary: null });
+    expect(boqElementsText(progress({ hasItems: false }))).toEqual({ primary: 'No BOQ items', secondary: null });
+    expect(boqElementsText(progress({ confirmed: 0 }))).toEqual({ primary: 'Not confirmed', secondary: null });
+    expect(boqElementsText(progress({ confirmed: 12, generated: 0 }))).toEqual({ primary: '12 confirmed', secondary: 'Not generated' });
+    expect(boqElementsText(progress({ confirmed: 12, generated: 12, completed: 3 }))).toEqual({ primary: '12 confirmed', secondary: '12 generated · 3 completed' });
+  });
+  it('stage cells name the stage', () => {
+    expect(stageCell(8, progress({ generated: 12 }), 'produced')).toBe('8 of 12 produced');
+    expect(stageCell(0, progress({ generated: 12 }), 'produced')).toBe('Not started');
+    expect(stageCell(0, progress({ generated: 0 }), 'produced')).toBe('—');
+  });
+  it('status badges are green only for Active', () => {
+    expect(statusBadgeClass('ACTIVE')).toContain('success');
+    expect(statusBadgeClass('DRAFT')).not.toContain('success');
+  });
+});
+
+describe('Reset Filters', () => {
+  it('is offered only when a search, filter or attention tile is active', () => {
+    expect(hasActiveFilters('', 'ALL', null)).toBe(false);
+    expect(hasActiveFilters('  ', 'ALL', null)).toBe(false);
+    expect(hasActiveFilters('tower', 'ALL', null)).toBe(true);
+    expect(hasActiveFilters('', 'ACTIVE', null)).toBe(true);
+    expect(hasActiveFilters('', 'ALL', 'CLAIMS')).toBe(true);
+  });
+});
+
+describe('projectCountText (FMP-UI-49)', () => {
+  const base = { shown: 20, loaded: 20, total: 134, filtersActive: false, searching: false };
+  it('separates the loaded newest contracts from the total', () => {
+    expect(projectCountText(base)).toBe('Showing the 20 newest of 134 contracts · select a row for its element progress');
+  });
+  it('is just the total when everything is loaded', () => {
+    expect(projectCountText({ ...base, loaded: 3, shown: 3, total: 3 })).toBe('3 contracts');
+    expect(projectCountText({ ...base, loaded: 1, shown: 1, total: 1 })).toBe('1 contract');
+  });
+  it('counts matches once a search or filter is active', () => {
+    expect(projectCountText({ ...base, shown: 2, filtersActive: true })).toBe('2 matching');
+    expect(projectCountText({ ...base, shown: 2, filtersActive: true, searching: true })).toBe('2 matching · searching all contracts…');
   });
 });

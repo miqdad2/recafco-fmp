@@ -29,7 +29,12 @@ export default async function MaintenanceExecutivePage(): Promise<React.JSX.Elem
   if (!permissions.includes('maintenance.read')) notFound();
 
   return (
-    <div className="mx-auto max-w-7xl space-y-2.5 px-5 py-2.5 lg:px-6">
+    // FMP-UI-50 — widened from max-w-7xl to the shared max-w-[1600px] cap
+    // every other redesigned dashboard already uses. `MaintenanceControlCenter`
+    // (shared with /maintenance/dashboard, widened to match below) has no
+    // width of its own — every internal grid/table is already fluid — so
+    // widening this one wrapper is the entire fix.
+    <div className="mx-auto max-w-[1600px] space-y-2.5 px-5 py-2.5 lg:px-6">
       <ExecutiveModuleNav code="MAINTENANCE_REQUESTS" permissions={permissions} />
       <MaintenanceControlCenter showBackLink={false} />
     </div>

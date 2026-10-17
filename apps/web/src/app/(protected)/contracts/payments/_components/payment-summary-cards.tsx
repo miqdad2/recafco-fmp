@@ -1,4 +1,4 @@
-import { FileInput, BadgeCheck, Wallet, Scale, AlertTriangle } from 'lucide-react';
+import { FileInput, Wallet, Scale, AlertTriangle } from 'lucide-react';
 import { MetricCard, type MetricStatus } from '../../../_components/metric-card';
 import type { ContractPaymentSummary } from '@/lib/contracts-api';
 import { formatContractValue } from '../../_lib/contract-ui-helpers';
@@ -11,19 +11,14 @@ export function PaymentSummaryCards({ summary }: Props): React.JSX.Element {
   const status: MetricStatus = summary ? 'ok' : 'unavailable';
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+    // Total Certified is intentionally not a card (FMP-PAY-01): it stays in each
+    // payment's details and in the CSV/print register.
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <MetricCard
         label="Total Submitted"
         value={summary ? formatContractValue(summary.totalSubmitted, 'KWD') : undefined}
         icon={FileInput}
         iconColor="text-text-secondary"
-        status={status}
-      />
-      <MetricCard
-        label="Total Certified"
-        value={summary ? formatContractValue(summary.totalCertified, 'KWD') : undefined}
-        icon={BadgeCheck}
-        iconColor="text-info"
         status={status}
       />
       <MetricCard

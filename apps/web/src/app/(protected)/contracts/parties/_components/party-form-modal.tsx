@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { ContractParty, ContractPartyType } from '@/lib/contracts-api';
 import { inputCls, labelCls } from '../../_components/contract-form-fields';
-import { PARTY_TYPE_OPTIONS, PARTY_TYPE_LABELS, validatePartyForm } from '../../_lib/contract-party-helpers';
+import { PARTY_TYPE_OPTIONS, PARTY_TYPE_LABELS, validatePartyForm, findDuplicateParty } from '../../_lib/contract-party-helpers';
 import type { PartyFormErrors } from '../../_lib/contract-party-helpers';
 import { createPartyAction, updatePartyAction } from '../actions';
 
@@ -17,6 +17,8 @@ interface Props {
   fixedType?: ContractPartyType;
   /** Quick-add: only Company Name and Contact No. */
   compact?: boolean;
+  /** Full party list (FMP-PARTIES-01) — enables the advisory duplicate-name warning. Omit to skip it. */
+  existingParties?: ContractParty[];
   onClose: () => void;
   onSaved: (party: ContractParty) => void;
 }
@@ -32,7 +34,7 @@ function FieldError({ id, message }: { id: string; message: string | undefined }
  * Contract Register. Errors appear under the field; the server message shows
  * in a banner.
  */
-export function PartyFormModal({ party, fixedType, defaultType, compact = false, onClose, onSaved }: Props): React.JSX.Element {
+export function PartyFormModal({ party, fixedType, defaultType, compact = false, existingParties, onClose, onSaved }: Props): React.JSX.Element {
   const [name, setName] = useState(party?.name ?? '');
   const [partyType, setPartyType] = useState<string>(party?.partyType ?? fixedType ?? defaultType ?? 'FIRST_PARTY');
   const [contactNo, setContactNo] = useState(party?.contactNo ?? '');
@@ -48,6 +50,7 @@ export function PartyFormModal({ party, fixedType, defaultType, compact = false,
     : fixedType === 'FIRST_PARTY'
       ? 'Add new customer'
       : 'Add Party';
+  const duplicate = existingParties ? findDuplicateParty(existingParties, name, partyType, party?.id) : null;
   const lockedDefault = party?.name === 'RECAFCO' && party.partyType === 'SECOND_PARTY';
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -126,6 +129,17 @@ export function PartyFormModal({ party, fixedType, defaultType, compact = false,
                 autoFocus
               />
               <FieldError id="party-name-error" message={errors.name} />
+              {duplicate?.sameType && (
+                <p role="status" className="mt-1 rounded-md bg-warning-light px-2.5 py-1.5 text-xs text-warning">
+                  A {PARTY_TYPE_LABELS[duplicate.sameType.partyType]} named "{duplicate.sameType.name}" already exists
+                  {duplicate.sameType.isActive ? "" : " (inactive)"}. Saving will be rejected — edit that company instead.
+                </p>
+              )}
+              {!duplicate?.sameType && duplicate?.otherType && (
+                <p role="status" className="mt-1 rounded-md bg-info-light px-2.5 py-1.5 text-xs text-info">
+                  A company with this name already exists as {PARTY_TYPE_LABELS[duplicate.otherType.partyType]}. Check it is not the same company.
+                </p>
+              )}
             </div>
 
             {!compact && (

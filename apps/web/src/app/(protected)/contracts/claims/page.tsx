@@ -8,6 +8,9 @@ import { ClaimSummaryCards } from './_components/claim-summary-cards';
 import { ClaimFilterBar } from './_components/claim-filter-bar';
 import { ClaimRegisterTable } from './_components/claim-register-table';
 import { ClaimActionsBar } from './_components/claim-actions-bar';
+import { formatShowingRange } from './_lib/claim-register-helpers';
+
+const PAGE_SIZE = 25;
 
 export const metadata: Metadata = { title: 'Claim Log — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -49,7 +52,7 @@ export default async function ContractClaimsPage({ searchParams }: PageProps): P
   const [listRes, contractsRes, deptsRes, peopleRes, dashboardRes] = await Promise.allSettled([
     contractsApi.listClaims({
       page,
-      pageSize: 25,
+      pageSize: PAGE_SIZE,
       ...(search ? { search } : {}),
       ...(contractId ? { contractId } : {}),
       ...(status ? { status } : {}),
@@ -110,12 +113,12 @@ export default async function ContractClaimsPage({ searchParams }: PageProps): P
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Claim Log</h1>
           <p className="mt-1.5 text-sm text-text-secondary">
-            Track contract claims, submitted values, approved values, deadlines and claim status across all contracts.
+            Track contract claims, approvals, outstanding amounts and time extensions.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <DashboardScopeBadge scope={scope} />
-          <ClaimActionsBar />
+          <ClaimActionsBar canCreate={canUpdate} contracts={contracts} people={people} />
         </div>
       </div>
 
@@ -154,11 +157,11 @@ export default async function ContractClaimsPage({ searchParams }: PageProps): P
         </div>
       )}
 
-      <ClaimRegisterTable claims={claims} contracts={contracts} people={people} canUpdate={canUpdate} />
+      <ClaimRegisterTable claims={claims} people={people} canUpdate={canUpdate} />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-text-secondary print:hidden">
-          <span>Showing {claims.length} of {total}</span>
+      {total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary print:hidden">
+          <span>{formatShowingRange(page, PAGE_SIZE, claims.length, total)}</span>
           <div className="flex gap-2">
             {/* FMP-PERF-02 — Link, not <a>: see issues/page.tsx's own comment. */}
             {page > 1 && (

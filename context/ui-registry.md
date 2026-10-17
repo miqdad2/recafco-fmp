@@ -1247,6 +1247,34 @@ Living document. Update after every reusable component or established visual pat
 - Purpose: The module-level Payments Register's table (client component — owns Add/Edit modal state and the Cancel action), status badge (7-state `ContractPaymentStatus` → color+label maps), 5-card `MetricCard` summary row, and GET-form filter bar (URL-search-params driven, same pattern as `contract-filter-bar.tsx`).
 - Notes: Table and filter bar both mark their interactive chrome (buttons, Action column, filter form) `print:hidden`; the page adds a `hidden print:block` header with a generated timestamp so the printed/PDF output has context the on-screen title doesn't need. Reused as-is for the per-contract read-only tab (`contracts/[id]/(workspace)/payments/page.tsx`) via `PaymentStatusBadge` — the table itself is not reused there since that view is deliberately simpler (no Add/Edit/Cancel).
 
+### Payments Register simplification (FMP-PAY-01)
+- Path: `apps/web/src/app/(protected)/contracts/payments/`
+- `_lib/payment-register-helpers.ts`: pure quick-view mapping (All / Partially Paid / Paid / Overdue to the existing `status` / `overdueOnly` params), `formatShowingRange`, `overdueLabel`, `isUnpaid`.
+- `PaymentFilterBar` (client): Search / Contract / Payment Status row, clickable quick-filter chips (`aria-pressed`, filter immediately), collapsible Advanced Filters, Clear Filters. Pattern: chips are a view over existing URL params, never a new status.
+- `PaymentRegisterTable`: 7-column fixed-layout table at md+, card list below md, full print-only register table. **Open Payment** is a bordered button with icon.
+- `PaymentDetailModal`: read-only dialog (Escape / backdrop close, focus on close button) with amounts, dates, remarks and record history; Edit only when allowed.
+- `PaymentActionsBar` now owns the Add Payment modal (`canCreate`) and the Print / Export CSV buttons.
+
+### Issue Log simplification (FMP-ISSUE-01)
+- Path: `apps/web/src/app/(protected)/contracts/issues/`
+- Same pattern as the Payments register (FMP-PAY-01): `_lib/issue-register-helpers.ts` maps quick-filter chips (All / Open / In Progress / Overdue / Resolved / Closed) onto the existing `status` / `overdueOnly` params; `IssueFilterBar` (client) has the chips, collapsible Advanced Filters and Clear Filters.
+- `IssueRegisterTable`: 6-column fixed-layout table at md+, cards below md, full print-only register. **Open Issue** bordered icon button opens `IssueDetailModal` (read-only dialog; Edit only when allowed). `IssueActionsBar` owns Add Issue (`canCreate`), Print and Export CSV.
+
+### Claim Log simplification (FMP-CLAIM-01)
+- Path: `apps/web/src/app/(protected)/contracts/claims/`
+- Same pattern as Payments / Issue Log: `_lib/claim-register-helpers.ts` maps quick-filter chips (All / Under Review / Approved / Overdue / Closed) onto the existing `status` / `overdueOnly` params and decides per claim whether Claimed / Approved show KWD or EOT days (`claimAmountCell`, never mixed). `ClaimFilterBar` (client) has chips, collapsible Advanced Filters, Clear Filters.
+- `ClaimRegisterTable`: 6-column fixed-layout table at md+, cards below md, full print-only register. **Open Claim** bordered icon button opens `ClaimDetailModal` (read-only dialog whose footer holds Edit / Settle / Close when allowed). `ClaimActionsBar` owns Add Claim (`canCreate`), Print and Export CSV.
+
+### Closeout Requests simplification (FMP-CLOSEOUT-01)
+- Path: `apps/web/src/app/(protected)/contracts/closeouts/`
+- Same pattern as Payments / Issue Log / Claim Log: `_lib/closeout-register-helpers.ts` maps quick-filter chips (All / Pending Review / Approved / Rejected / Closed) onto the existing `status` / `pendingOnly` params; `CloseoutFilterBar` (client) has chips, collapsible Advanced Filters, Clear Filters.
+- `CloseoutRegisterTable` (server component): 5-column fixed-layout table at md+, cards below md, full print-only register, and two distinct empty states (no requests yet with an informational path; no matching requests with a Clear Filters link). **Open Request** bordered icon link goes to the existing `actionUrl`. `CloseoutActionsBar` has Print and Export CSV only (no create button by design).
+
+### Contract Parties simplification (FMP-PARTIES-01)
+- Path: `apps/web/src/app/(protected)/contracts/parties/`
+- `PartyList`: shared search (icon, Clear Search), two `PartyPanel`s (Customers (First Party) | Second Parties) each with its own count and its own Add button (no global Add), company rows with name wrap, contact only when present, Active / Inactive badge, Edit (pencil) and confirmed Activate / Deactivate. Panels render 50 rows then Show more (presentation only; search covers all loaded parties).
+- `PartyFormModal` takes optional `existingParties` and shows an advisory duplicate warning via `findDuplicateParty()` (`_lib/contract-party-helpers.ts`; trimmed, case-insensitive, same type = warning, other type = info). The API stays the authority.
+
 ### contract-payment-csv.ts
 - Path: `apps/web/src/app/(protected)/contracts/_lib/contract-payment-csv.ts`
 - Purpose: `csvField()` (RFC-4180-style escaping — quotes wrap any value containing a comma/quote/newline, embedded quotes doubled), `buildPaymentsCsv()`. Extracted from the `payments/export/route.ts` Route Handler specifically so the escaping logic has unit test coverage — Route Handlers aren't otherwise tested in this codebase.
@@ -3238,3 +3266,39 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 
 - `ProductionDrawingViewer` (opens the shared `BoqFileViewer` on an element's final drawing files) and `ProductionDrawingDownload` (direct download for one file, small list for several) in `production/pieces/_components/`. Rows show View Drawing + Download Drawing as outline buttons, Start Production as the primary button, and a red "Missing Drawing" badge when no final drawing exists. Start Production confirms with a "drawing checked" checkbox.
 - `BoqFileViewer` is now source-agnostic: pass `files` (`ViewerFile`) plus either `contractId` (BOQ items) or `hrefsFor` (any other same-origin file routes).
+
+## Add BOQ Item control (FMP-CONTRACT-11)
+
+- Location: `contracts/[id]/(workspace)/boq-progress/_components/add-boq-item-control.tsx`; rules and wording in `contracts/_lib/add-boq-item-helpers.ts`.
+- Pattern: primary `+ Add BOQ Item` button beside the page heading, shown only when `canAddBoqItems(permissions, status)`; opens a modal (Description, Unit, Contract Qty, Unit Price, read-only Total, optional drawings via `BoqFilePicker`). Save disables itself while running; item is saved first, files uploaded one by one, partial success keeps the saved item and offers Retry for failed files only.
+- Related: "Elements Not Confirmed" badge on BOQ Progress rows (`elementsNotConfirmed()`), and the "BOQ total" vs contract value note (`boqTotalNote()`).
+
+## Contract dashboard patterns (FMP-UI-48)
+
+- `ProjectOverview` (`contracts/executive/_components/project-overview.tsx`): search + quick filters with **Reset Filters**, a Needs Attention tile strip (tiles are clickable only when they have something to act on), a 7-column projects table that turns into cards below `md`, row click = select (buttons/links inside a row do not select), and a compact "Selected Project Progress" panel with eight stage tiles ("Not available" instead of 0 when unknown).
+- Row action buttons reuse `OPEN_BUTTON_CLS` / `BOQ_BUTTON_CLS` from `contract-row-actions.tsx` (Open Contract, BOQ Progress).
+- `EXECUTIVE_MODULES` entries can set `hiddenFromNavigation` to stay routable but out of Previous/Next and the module switcher.
+
+## One-screen dashboard layout (FMP-UI-49)
+
+- Pattern (Contract Management dashboard): page root `flex flex-col gap-2 lg:h-full`; fixed-height rows are `shrink-0`; exactly one row is `lg:flex-1 lg:min-h-[13rem]` with `min-h-0` children whose lists `overflow-y-auto`, so the leftover height goes to the list and nothing else scrolls. Below `lg` everything stacks and `<main>` scrolls.
+- `DashboardKpiCard` `compact` prop: icon + number + label on one row. Opt-in; default look unchanged.
+- Tables that must never lose their Actions column use `table-fixed` with a `<colgroup>`; low-priority columns appear only at `2xl`.
+
+## BOQ Progress — element counts, item cards and read-only element / drawing windows (FMP-BOQ-18, BOQ Progress)
+
+- Paths: `contracts/[id]/(workspace)/boq-progress/_components/` — `boq-progress-view.tsx` (summary + list), `boq-item-card.tsx`, `boq-elements-modal.tsx`, `boq-item-drawings-modal.tsx`, `initial-boq-drawings.tsx`; counting and wording in `contracts/_lib/boq-element-progress-helpers.ts`.
+- **Two kinds of numbers, never mixed silently.** *Current* counts (the tiles on each item, In Production) say where elements are now; *reached* counts (Produced, Delivered, Erected, Completed in the top summary) say how many got to a step or beyond; *Released to Production* is a Technical decision recorded once per element. The summary carries one sentence saying so. A figure that cannot be worked out shows "—", never 0.
+- **"Released" comes from the element coverage list, not the drawing-group summary.** Grouping is optional: an element released on its own is released, and an element with no group is never a warning. Reasons are split into *Needs Attention* (amber — hold, rejected, cancelled, count mismatch, no release record) and *Next steps* (neutral — final drawing missing, waiting for release, delivery pending, erection pending), each with an element count and a button into the matching list.
+- Buttons use the shared `BTN_*` styles (secondary for View Elements / View Drawings, quiet for the small in-card buttons); status pills use `BADGE` and the existing status colours. Windows follow the existing modal shell (fixed overlay, `role="dialog"`, Escape closes) and are read-only.
+- Loading pattern: lists (elements, drawing files) load when a window or a "Show Files" button is opened; the Elements window combines the element list with the coverage rows by id so wording matches the Technical pages.
+- Collapsible section pattern: `InitialBoqDrawings` is a bordered card whose header carries the count and a Show / Hide button (`aria-expanded`); another window can open it through a `window` event (`open-initial-boq-drawings`) — used by "Open Initial BOQ Drawings" in the drawings window.
+- Reusable takeaway: when a summary is built from one module's report (here: drawing groups) and a newer rule makes another path count too (individual release), the summary silently undercounts. Prefer the per-record list that already applies the newest rule, and test the counting against a real audited record set.
+
+## Shared dashboard width cap — `max-w-[1600px]`, now on 9 dashboards (FMP-UI-50)
+
+### `max-w-[1600px]` is this platform's one wide-dashboard container width — check for it before inventing another (FMP-UI-50)
+- First established by FMP-UI-29/31/32/33/34 on Contract Management, Technical, Production & Planning, Storage Yard & Delivery, and Erection. FMP-UI-50 brought Quality Control, Safety & Compliance, Incident Management, and Maintenance Management (both its `/executive` and `/dashboard` entry points) onto the same value, replacing each one's own narrower, unrelated max-width (`max-w-5xl`/`max-w-6xl`/`max-w-7xl`) — 9 dashboards now share one number. When a new or existing module dashboard needs "use the available width," reach for this exact value first rather than picking a fresh one; a 10th dashboard at a 10th different max-width would make every future "make these consistent" pass harder, not easier.
+- Horizontal padding on the FMP-UI-50 pages is `px-5 lg:px-6` (20px/24px) rather than the earlier 5 dashboards' `px-5 lg:px-8` (20px/32px) — a deliberate split, not drift: FMP-UI-50's own ticket specified "20–24px horizontal padding" as an exact numeric requirement, which `lg:px-6` satisfies and `lg:px-8` does not. If a future unit needs to reconcile the two paddings into one, that is a choice to make deliberately (and ideally ask which one the organization actually prefers), not something to "fix" by assuming either value was a mistake.
+- Before widening ANY page's root container, read every component it renders for a width/max-width of its own (as this unit did for all 4 — `ExecutiveModuleTitle`, `ExecutiveComingSoon`, `MetricCard`, the Safety/Incident needs-attention and recent-records lists, and every component inside `MaintenanceControlCenter`). On all 9 dashboards so far, every child component has turned out to be already 100%-of-parent fluid with no cap of its own, which is WHY widening just the one root `<div>` has been sufficient each time — but that is a fact about this codebase's existing components, not a law, so it is worth re-confirming per component rather than assuming it holds for a not-yet-read one.
+- A grid of N small cards (icon + number + label, ~56–72px tall) does NOT automatically look right just because the page got wider: at a fixed column count, each card absorbs the extra width itself and can end up looking emptier than before. Safety & Compliance's 6 Overview cards were regrouped from 2 separately-labeled 3-card sub-rows into one flat `lg:grid-cols-6` row specifically to avoid this (more, narrower columns instead of fewer, wider ones) — Incident Management's existing `lg:grid-cols-5` row needed no change because it was already shaped this way. Reusable takeaway: when widening a page that contains a small-card grid, check whether the grid's own column count already scales enough to keep each card a sensible size at the new width — if not, increasing the column count (not just letting existing columns stretch) is usually the fix, even if it means flattening an existing sub-grouping.

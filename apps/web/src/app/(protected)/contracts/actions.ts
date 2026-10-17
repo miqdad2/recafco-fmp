@@ -6,7 +6,8 @@ import { revalidatePath } from 'next/cache';
 import { contractsApi } from '@/lib/contracts-api';
 import { readPaymentTermsState, validatePaymentTermsState, toPaymentTermsPayload, anyPaymentTermSelected } from './_lib/payment-terms-helpers';
 import { fetchBoqConfirmations } from '@/lib/technical-api';
-import type { BoqConfirmationItem } from '@/lib/technical-api';
+import { fetchProjectBoq } from './_lib/dashboard-boq';
+import type { ProgressSource } from './executive/_lib/project-overview-helpers';
 import { uploadBoqItemFile } from '../technical/_lib/boq-attachment-server';
 
 const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
@@ -1970,8 +1971,9 @@ export async function searchContractsForDashboardAction(search: string): Promise
 // FMP-BOQ-10). No Technical/BOQ file is touched; this only lets the
 // dashboard's client-side selector call it on demand (fetchBoqConfirmations
 // itself reads the access token via next/headers, server-side only).
-export async function getContractBoqProgressForDashboardAction(contractId: string): Promise<BoqConfirmationItem[] | null> {
-  return fetchBoqConfirmations(contractId);
+export async function getContractBoqProgressForDashboardAction(contractId: string): Promise<ProgressSource[] | null> {
+  // FMP-UI-48 — includes the Technical release numbers, like the contract's own BOQ Progress page.
+  return fetchProjectBoq(contractId);
 }
 
 // ---------------------------------------------------------------------------

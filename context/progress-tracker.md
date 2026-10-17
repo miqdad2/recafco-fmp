@@ -5,7 +5,7 @@
 - **Project:** RECAFCO Factory Management Platform
 - **Short name:** RECAFCO FMP
 - **Phase:** Platform Hardening / Deployment Ready
-- **Last completed:** FMP-UI-47 — Contract Management Dashboard row actions as buttons (2026-10-14)
+- **Last completed:** FMP-BOQ-18 (BOQ Progress) — simplified BOQ Progress and element count audit (2026-10-15)
 - **Next:** Controlled deployment to RECAFCO internal server
 - **Deployment:** RECAFCO internal company server
 - **SAP:** SAP Business One 9.3 for SAP HANA, build 9.30.150, PL 06, 64-bit
@@ -15192,3 +15192,280 @@ In `sidebar.tsx`'s `EXECUTIVE_SIDEBAR_ITEMS` (the main module list): removed Est
 ## FMP-UI-47 — Contract Management Dashboard Row Actions (Completed 2026-10-14)
 
 The Contracts / Projects table on `/contracts/executive` (`project-overview.tsx`) now shows only two real buttons per row: **Open Contract** (folder icon, `/contracts/:id`) and **BOQ** (list icon, `/contracts/:id/boq-progress`), with tooltips "Open full contract details" / "Open BOQ progress". They reuse the Contract List's `OPEN_BUTTON_CLS` / `BOQ_BUTTON_CLS` styles (bordered, light background, 32px, hover and focus states). "More" is removed along with its Edit / Approve / Payments / Issues links (reached from the contract page). `rowActions()` now returns just those two actions; the Contract List page (already button-based since FMP-UI-42) is unchanged. Frontend-only; no routes, permissions or backend touched.
+
+## FMP-CONTRACT-11 — Safely Add BOQ Items to Existing Contracts (Completed 2026-10-15)
+
+- **API:** `POST /contracts/:id/boq-items` (`contract-boq-items.controller/service`, DTO `AddContractBoqItemDto`; `@Permissions('contracts.update')`, department access enforced). Adds exactly one `ContractBoqItem` (next BOQ number = max sortOrder + 1, total = round3(qty × unit price)); never touches existing rows, elements, drawing groups, releases or attachments. Refused for CLOSED / TERMINATED / CANCELLED. Allowed for DRAFT and ACTIVE. No schema change, no migration.
+- **Duplicate protection:** per-contract `pg_advisory_xact_lock` + an identical-item check within 30 s inside one transaction (returns the existing item with `duplicate: true`), plus a client Save guard.
+- **Audit:** `ContractActivity` event `boq_item_added` (user, time, BOQ no, description, unit, qty, unit price); shown in Contract Activity as "BOQ Item Added".
+- **Web:** `+ Add BOQ Item` button on Contract → BOQ Progress (only with `contracts.update` and an open contract); modal with Item Description, Unit (M², M³, Nos, LM), Contract Qty, Unit Price, read-only Total, and optional multiple drawings through the existing BOQ file picker/validation/upload (25 MB limit). Files upload after the item is saved; if some fail, the item stays saved, the failed files are listed and Retry uploads only those (no duplicate item). New items show "Elements Not Confirmed"; Technical sees them automatically with no elements generated.
+- **Contract value:** NOT changed by adding an item (no rule invented). BOQ Progress shows "BOQ total" next to the contract value with "Adding a BOQ item does not change the contract value." when they differ.
+- **Open business questions:** (1) should adding a BOQ item to an ACTIVE contract change the contract value / require a variation or approval? (2) For DRAFT contracts the stored value is still only recalculated by Edit Contract. (3) No approval workflow was added.
+- **Verified:** API 2322/2322, web 1584/1585 (the one failure is the pre-existing `email-login-identity` login-page test, reproduced without these changes), eslint clean, API/web typecheck, web build, `prisma migrate status` up to date. Live check on temp ports 4011/3011: parallel double-save created one item, validation messages, viewer refused (403) and no button, two drawings attached, bad file rejected, existing item id/elements/contract value unchanged, new item visible to Technical with 0 elements, audit entry present. Test data and files removed.
+- **Note:** the running API on port 4000 must be restarted/redeployed for the new route.
+
+## FMP-UI-48 — Contract Management Dashboard Redesign (Completed 2026-10-15)
+
+Frontend redesign of `/contracts/executive`; no schema, permission, route or workflow change.
+
+- **Layout:** full width after the sidebar (no 1600px cap); order = header → four summary cards → Find Contract / Project (large search, quick filters, **Reset Filters** when anything is active) → Needs Attention strip → Contracts / Projects → Selected Project Progress beside Overall BOQ Element Progress.
+- **Table:** 7 columns (Contract / Project, Client / Job Order, Status with attention reasons, BOQ Elements, Production, Delivery / Erection, Actions); titles wrap to two lines, contract numbers never break. Lower-priority columns hide below `lg` / `xl`; below `md` each project is a card, so there is no horizontal scrolling. Actions are two real buttons — **Open Contract** and **BOQ Progress** (existing routes). A row click selects the project (subtle highlight + accent bar); the buttons do not trigger selection.
+- **Selected Project Progress:** project name, job order, contract no, **View BOQ Progress** button and eight tiles — Confirmed Elements, Released to Production, In Production, Produced, In Storage, Delivered, Erected, Completed — each "Not available" when it cannot be loaded (never 0). Nothing is auto-selected; before selection it is one slim instruction line.
+- **Overall BOQ Element Progress:** moved up beside the selected panel; six all-contract totals (Confirmed / Generated / Produced / Delivered / Erected / Completed Elements) with a note that stage counts are not added together and no overall percentage is shown.
+- **Needs Attention:** now a compact tile strip. A tile filters the table (or opens Payments) only when its count is above 0; zero/unavailable tiles are plain, non-clickable, and not amber.
+- **Next-module navigation:** `executive-modules.ts` now follows the approved sidebar order (Contract Management → Technical → Production & Planning → Storage Yard & Delivery → Quality Control → Erection → Safety → Incident → Maintenance → Tasks); Estimation is flagged `hiddenFromNavigation` (page and route untouched) so Contract Management shows **Next: Technical** and no module offers Estimation as Previous/Next or in the switcher.
+- **Data (read-only calls):** each project's BOQ now also loads its Technical drawing groups (`fetchProjectBoq`, same two calls as the BOQ Progress page), so Released to Production matches that page.
+- **Terminology:** Elements throughout the dashboard (internal field names unchanged).
+
+### Data consistency findings
+
+1. **Fixed (one deliberate backend line):** the dashboard API's overall `produced` counted only status PRODUCED, so elements moved to *Sent to Storage Yard* (FMP-PROD-02) vanished from Overall Produced while the per-project panel and BOQ Progress page (which count them) still showed them. `contract-dashboard.service.ts` now adds SENT_TO_STORAGE to `produced` (+ test). Easy to revert if you prefer a separate "Sent to Storage" figure.
+2. **Not fixed — scope of counts:** Needs Attention, BOQ In Progress and the table cover only the 20 newest contracts (labelled "Among the 20 newest contracts"); Active / Completed cards and Overall BOQ Element Progress cover every contract the user can see. A project found by search is loaded on demand, so it can appear in the table but not in the attention counts.
+3. **Not fixed — Released to Production:** it comes from Technical drawing-group release numbers (same as the BOQ Progress page). Elements Technical released *individually* (own final drawings, FMP-TECH-27) may not be included; Production's own screens count them. Overall BOQ Element Progress also has no Released / In Production / In Storage totals because the dashboard API does not return them — they appear per project only.
+4. **Wording:** "Produced" includes Sent to Storage Yard elements everywhere on this dashboard; "In Storage" is IN_STORE only.
+
+Not verified in a browser at 1366×768 / 1440×900 / 1920×1080 / tablet / mobile, and `next build` was not run (a build would overwrite a running dev server's `.next`); typecheck, lint and unit tests pass.
+
+## FMP-UI-49 — Contract Management Dashboard Fits One Screen (Completed 2026-10-15)
+
+Frontend layout only; search, filters, calculations, permissions, routes and data are unchanged.
+
+- **Layout:** on `lg+` the page is exactly as tall as `<main>` (`lg:h-full` flex column). Header, summary cards, search and the BOQ strip keep their height; the Contracts / Projects row takes the leftover height and the projects table and the Needs Attention list each scroll *inside their own panel*. Below `lg` (or on a very short window, via a 13rem floor on that row) the page scrolls normally. The sidebar is unchanged.
+- **Compact pieces:** `DashboardKpiCard` got an opt-in `compact` variant (icon, number and label on one row; the default look is unchanged for the other dashboards); search + quick filters share one row; "View All Contracts" (existing `/contracts`) sits in the list header; a count line separates what is shown from the total ("Showing the 20 newest of 31 contracts" / "N matching"). The table is `table-fixed` with 4 always-visible columns (project with contract no · job order · client, status, BOQ elements, actions); Production and Delivery / Erection columns appear from 2xl. Row buttons are compact (28px) and stack below 2xl.
+- **BOQ Element Progress strip:** always visible at the bottom — the overall totals, and when a project is selected a second row with that project's eight stages and its View BOQ Progress button (✕ clears the selection). Nothing is reserved for an unselected project, so there is no blank "Selected" area. Needs Attention is a compact list beside the projects.
+- **Data kept as is:** the page still loads the 20 newest contracts' BOQ data; search still queries the server (all accessible contracts); the quick filters still apply to the loaded + searched rows only (as before).
+- **Overall strip scope:** still the six totals the dashboard API supports (no Released / In Production / In Storage overall — see FMP-UI-48 findings); those three appear per project.
+
+### Measured (headless Chromium, `next build` + `next start` on temporary ports 3011/4011, signed in as the UAT manager with 31 contracts; user's 3000/4000 untouched)
+
+| Viewport | Page scrolls (nothing selected / project selected) | Project rows fully visible (nothing / selected) | Horizontal overflow |
+|---|---|---|---|
+| 1920×1080 | no / no | 8 / 7 | none |
+| 1440×900 | no / no | 5 / 4 | none |
+| 1366×768 | no / no | 3 (+ a 4th partly) / 2 | none |
+| 1280×720 | no / **yes (11–46 px)** | 2 / 1 | none |
+| 820×1180 tablet | yes (by design) | 4 | none |
+| 390×844 mobile | yes (by design, cards) | n/a | none |
+
+Also checked in the browser: search "TEST PRO 6" → 1 match (server search), Reset Filters restores all 20, a row click selects and opens the strip with the project's stages and View BOQ Progress link, Open Contract / BOQ Progress links are the existing routes, View All Contracts lands on `/contracts`. `next build`, typecheck, lint and tests pass (web: only the pre-existing login test fails).
+
+Known limits: at 1366×768 only about 3½ rows fit (the app header, module navigation and header card take ~280 px of a 768 px screen); the extra rows are one inner scroll away. 1280×720 with a project selected falls back to page scrolling.
+
+
+## FMP-BOQ-18 (BOQ Progress) — Simplify BOQ Progress and Audit Element Counts (Completed 2026-10-15)
+
+Note: the id FMP-BOQ-18 was already used on 2026-10-12 for the BOQ drawing-upload simplification above; this is a different unit with the same number.
+
+Frontend only. No API, schema, permission or workflow change; nothing in the database was written (the audit used read-only SELECTs).
+
+### Count audit (Unit A) — why "Released to Production: 0" next to "Produced: 2"
+
+Method: read the code paths (Technical release, drawing groups, Production status gate and screens, Storage, dashboard overview) and queried the dev database read-only for the two contracts that have elements past "Generated".
+
+**Confirmed correct**
+- The backend rule is consistent everywhere: an element is released when its active drawing group is Released to Production **or** Technical released it on its own (`released_to_production_at`). The Production status gate (`releaseSkipReasons`, FMP-BOQ-14/TECH-27), the Production screens (`RELEASED_ELEMENT_FILTER`) and the element coverage list (`GET element-drawings/coverage`) all use it.
+- CONTRACT-2026-000037 "TEST ITEM" (10 elements): elements 006, 007 and 008 were released individually on 2026-10-13 (04:37, 05:27, 05:27) and each has its own final drawing; production started only afterwards (006 and 007 at 06:08). So the two "Produced" elements were **legitimately released** — no invalid transition. "Produced: 2" = 007 (Produced) + 006 (Sent to Storage Yard); the committed tile/total convention counts Sent to Storage as Produced. Elements 009 and 010 have their own drawing but are not released yet. The other 5 sit in drawing group 8888, which is still Submitted (1 file).
+
+**Incorrect calculation (fixed in the page)**
+- BOQ Progress took Released / Assigned / Not Assigned / Not Released from `GET drawing-groups`, whose summary (`summarizeGroupAssignments`) only counts elements **in a drawing group**. Individually released or individually covered elements were therefore shown as "Released: 0" and as "Not Assigned: 5" / a warning — wrong, because grouping is optional. Correct figures for the example: **3 released**, 7 waiting for Technical release (5 in the submitted group + 009 + 010), 1 waiting for Production (008), nothing missing a drawing. The page now takes release and drawing state from the element coverage list.
+
+**Inconsistent legacy records (not repaired)**
+- CONTRACT-2026-000013 "Hollowcore": 10 of 140 elements are past Generated (5 In Production, 2 Produced, 2 In Store, 1 Delivered) with **no release record**. All were changed on 2026-10-07 between 05:32 and 05:35, before drawing groups existed (migration applied that day 12:09) and before the Production release rule (FMP-BOQ-14, 2026-10-08). Under the rules of that day this was allowed (elements 002–005 even went Generated → Produced directly), so these are legacy records, not a current-rule bypass. They never appear on the released-only Production screens although BOQ Progress shows them as produced. The page now lists them as "In Production or later without a Technical release record: 10 elements". No data was changed.
+
+**Unknown / unavailable**
+- Who or what produced the 10 Hollowcore elements beyond "manager" in the history (test data); whether these should be given a legacy release record is a business decision.
+- The executive dashboard's selected-project "Released to Production" (`released` in `project-overview-helpers.ts`) still reads the group-only figure, so it can differ from BOQ Progress for individually released elements. Left alone because that screen belongs to another unit in progress.
+
+**Backend corrections needing approval:** none required for this page. Optional: make `GET drawing-groups` / `summarizeGroupAssignments` count individual releases too, or add release counts to the confirmations endpoint, so other screens stop needing the coverage list. Not done.
+
+### What changed on the page
+- Header "BOQ Progress" + "Track BOQ items and individual elements from Technical through Production, Delivery and Erection."; **+ Add BOQ Item** (existing control, unchanged, same permission) on the right.
+- Eight summary cards: BOQ Items, Confirmed Elements, Released to Production, In Production, Produced, Delivered, Erected, Completed, with one sentence explaining that In Production is a current count while Produced / Delivered / Erected / Completed count elements that reached that step; "—" (never 0) when release details cannot be loaded.
+- Per BOQ item: Contract Qty, Confirmed / Generated / Released counts, **Where the elements are now** (Waiting for Technical Release, Waiting for Production, In Production, Produced, In Storage, Delivered, Erected, Completed, On Hold / Rejected), progress bar, **Needs Attention** (hold, rejected, cancelled, count mismatch, no release record) and **Next steps** (final drawing missing, waiting for Technical release, delivery pending, erection pending) — each with its element count and a button that opens the matching element list. An element without a drawing group is never flagged.
+- Buttons **View Elements** and **View Drawings** replace View Pieces / View Drawing Groups.
+- **View Elements** window: one row per element (code, department / stage, status in plain words, drawing state and group if any, last updated), filter chips with counts, code search, and an inline **History** (status changes plus the Technical release, newest first). Read-only.
+- **View Drawings** window: final drawings by drawing group and by element, files loaded on demand (group files: Download; element files: View Drawing + Download), and a button that opens Initial BOQ Drawings.
+- **Initial BOQ Drawings — N files**: collapsed by default ("Show Drawings" / "Hide Drawings"); inside, the existing per-item list with the full-screen viewer (View Drawing), Download, Add more files and Remove under the same permissions as before.
+- Terminology: Pieces → Elements on this page and its windows (database fields and API contracts unchanged).
+
+### Files
+New: `contracts/_lib/boq-element-progress-helpers.ts` (+ test, 19 tests built on the two audited contracts); `boq-progress/_components/boq-item-card.tsx`, `boq-elements-modal.tsx`, `boq-item-drawings-modal.tsx`, `initial-boq-drawings.tsx`.
+Changed: `boq-progress/page.tsx` (also loads the coverage list), `boq-progress/_components/boq-progress-view.tsx` (rewritten), `technical/_components/boq-item-files-card.tsx` (optional `viewLabel`, default unchanged).
+Untouched: Add BOQ Item control and action, all backend files, Technical release, Production / Storage / Erection logic.
+
+### Validation
+- Web typecheck, eslint (Contracts + Technical) clean; `next build` compiles.
+- Web tests: 1614 pass, 1 fails — `administration/users/__tests__/email-login-identity.test.ts` expects the login placeholder "Enter company email" but the committed form says "Enter your company email". It was already failing before this unit (neither file is modified); not touched.
+- Live check (temp API 4011 + built web 3011, Playwright, 1920×1080 / 1366×768 / 820×1100) on the real contracts: Released 3, Produced 2, Confirmed 10; 10 element rows; filter, history, drawings and initial-drawings expansion work; no "Piece(s)" wording, no "Not Assigned", no horizontal scroll, no console errors; the Hollowcore contract shows the 10 legacy records and 130 missing final drawings. Viewer accounts (`test.operator`, `test.selected`) see everything but have no Add BOQ Item, Add file or Remove buttons. Temp servers stopped; 3000 / 4000 untouched.
+- Not done: no write action was exercised (read-only unit); Add BOQ Item and file upload were left as they were, not re-tested here.
+
+---
+
+## FMP-PAY-01 — Simplify Contract Payments page (frontend only)
+
+Redesigned `/contracts/payments` for non-specialist users. No API, database, permission, calculation or CSV-format change.
+
+### Before / after
+- **Header:** subtitle now "View invoices, payments and outstanding balances across contracts."; **Add Payment** (red, `contracts.update` only) moved into the header beside **Print** and **Export CSV** (renamed from "Export Excel (CSV)"; same file).
+- **Summary:** five cards → four (Submitted, Paid, Outstanding, Overdue count + KWD). Certified total no longer a card; it stays in payment details, the print register and the CSV.
+- **Filters:** visible row is Search / Contract / Payment Status plus quick-filter chips (All, Partially Paid, Paid, Overdue). Department, Contract Manager, Company / Client, Workflow Status, Invoice and Due date ranges are in a collapsed **Advanced Filters** (auto-opens when one is active). **Clear Filters** resets everything.
+- **Table:** 15 columns / 1700px min-width → 7 columns (Invoice / Payment, Contract / Client, Submitted, Paid, Outstanding, Status, Actions), no horizontal scroll; mobile gets one card per payment. **Open Payment** button opens a new read-only detail window (all amounts incl. Certified, dates, term, client, remarks, created/updated by). Edit / Cancel stay under the same permission.
+- **Pagination:** "Showing 1–25 of N payments" from the real total, shown whenever there are results; page size stays 25 and filters are server-side.
+- **Print:** on-screen layout is not printed; print shows the full original 14-column register.
+
+### Status behaviour
+Quick filters map onto the existing params: Partially Paid → `status=PARTIALLY_PAID`, Paid → `status=PAID`, Overdue → `overdueOnly=true` (backend rule: due date passed and not Paid/Cancelled). Badges are still the stored lifecycle status; "Overdue N days" appears only when the API returns `overdueDays`; "Unpaid" is shown as a small note only when status is not Paid/Partially Paid/Cancelled, an amount is outstanding and nothing is paid.
+
+### Unresolved questions
+- **No "Unpaid" filter chip:** the API has no unpaid filter and `status` takes one value, so Submitted + Certified + Pending cannot be combined without an API change. The chip was left out rather than filtering client-side (which would break pagination). Needs an approved API change.
+- Stored status `OVERDUE` and the computed overdue rule can disagree; the chip uses the computed rule, the stored value is under Advanced → Workflow Status.
+- The old "Overdue only" checkbox is replaced by the Overdue chip; existing `?overdueOnly=true` links still work.
+- "Existing payment history": the data has no payment-event history, only created/updated by and time, which the detail window shows.
+
+### Files
+New: `payments/_lib/payment-register-helpers.ts` (+ test, 7 tests), `payments/_components/payment-detail-modal.tsx`.
+Changed: `payments/page.tsx`, `_components/payment-filter-bar.tsx` (now client), `payment-register-table.tsx`, `payment-summary-cards.tsx`, `payment-actions-bar.tsx`, plus `context/progress-tracker.md`, `context/ui-registry.md`.
+
+### Validation
+Typecheck and eslint clean; 7 new tests pass; web suite 1621 pass, 1 fail (the login-placeholder test already failing before this unit); `next build` compiles. No live/browser check was run and nothing was deployed.
+
+---
+
+## FMP-ISSUE-01 — Simplify Contract Issue Log (frontend only)
+
+Redesigned `/contracts/issues` on the same pattern as FMP-PAY-01. No API, database, permission, status-transition or overdue-calculation change; CSV format unchanged.
+
+### Before / after
+- **Header:** new subtitle "Track project issues, responsible persons and resolution progress."; **Add Issue** (red, `contracts.update` only) moved into the header beside **Print** and **Export CSV** (renamed from "Export Excel (CSV)").
+- **Summary:** six cards → four (Open, In Progress, Overdue, Closed) from the existing API summary. Total, High/Critical, Waiting and Resolved counts are still returned by the API; priority stays in rows, details and the Priority filter.
+- **Filters:** visible Search ("Search issue no, title, contract, project or client", server-side), Contract / Project, Status, plus chips All / Open / In Progress / Overdue / Resolved / Closed. Advanced Filters (collapsed; auto-opens when active): Priority, Category, Responsible Person, Department, Raised and Due date ranges, and Other Status (Waiting Response, Cancelled). Clear Filters resets all.
+- **Table:** 13 columns / 1700px minimum → 6 columns (Issue, Project / Contract, Responsible / Due Date, Priority, Status, Actions), no horizontal scroll; cards below tablet width. "Overdue by X days" only when the API reports overdue days. **Open Issue** is a bordered button opening a new read-only detail window (description, category, department, dates, resolution, remarks, created/updated by); Edit (same permission, non-terminal status) and the Close-issue action are kept.
+- **Pagination:** "Showing 1–25 of N issues" from the real total; page size 25; filtering is server-side.
+- **Print:** prints the full 12-column register, not the compact screen layout.
+
+### Notes / unresolved
+- The per-contract Issue Log tab (`contracts/[id]/(workspace)/issues`) is untouched. The shared register table's unused `fixedContractId` compact mode was removed (no other consumer).
+- No attachments or activity-history data exists on issue records in this API, so the detail window shows record history (created / updated) only.
+- Quick filter "Overdue" uses the backend rule (due date passed and not Closed / Resolved / Cancelled), so resolved or closed issues never appear overdue.
+
+### Files
+New: `issues/_lib/issue-register-helpers.ts` (+ test, 6 tests), `issues/_components/issue-detail-modal.tsx`.
+Changed: `issues/page.tsx`, `_components/issue-filter-bar.tsx` (now client), `issue-register-table.tsx`, `issue-summary-cards.tsx`, `issue-actions-bar.tsx`, `context/progress-tracker.md`, `context/ui-registry.md`.
+
+### Validation
+Typecheck and eslint clean; 6 new tests pass; web suite 1627 pass, 1 fail (the login-placeholder test already failing before this unit); `next build` compiles. No browser check was run and nothing was deployed.
+
+---
+
+## FMP-CLAIM-01 — Simplify Claim Log (frontend only)
+
+Redesigned `/contracts/claims` on the same pattern as FMP-PAY-01 / FMP-ISSUE-01. No API, database, permission, approval-workflow or calculation change; CSV format unchanged.
+
+### Before / after
+- **Header:** subtitle "Track contract claims, approvals, outstanding amounts and time extensions."; **Add Claim** (red, `contracts.update` only) moved into the header beside **Print** and **Export CSV** (renamed from "Export Excel (CSV)"); scope badge kept.
+- **Summary:** six cards → four (Open Claims, Submitted / Approved / Outstanding Value in KWD, 3 decimals). Overdue and Closed/Settled counts remain in the API summary and are reachable through the Overdue / Closed filters.
+- **Filters:** visible Search ("Search claim no, title, contract, project or client", server-side), Contract / Project, Claim Status, plus chips All / Under Review / Approved / Overdue / Closed. Advanced Filters (collapsed; auto-opens when active): Claim Type, Responsible Person, Department, Claim and Due date ranges, Other Status (Draft, Submitted, Under Negotiation, Partially Approved, Rejected, Settled, Cancelled). Clear Filters resets all.
+- **Table:** 17 columns / 2000px minimum → 6 columns (Claim / Project, Claim Type, Claimed, Approved, Status / Due Date, Actions), no horizontal scroll; cards below tablet width. Extension of Time claims show **days**, every other type shows **KWD**; the two are never mixed (an EOT-days note appears under the value of a non-EOT claim that carries days). Zero approved is shown as zero, never as a rejection. "Overdue by X days" only when the API reports it.
+- **Open Claim:** bordered icon button opening a new read-only detail window: value (submitted / approved / outstanding), EOT days (claimed / approved), client, type, department, responsible, event / claim / due / closed dates, next action, remarks, created / updated by. Edit, **Settle** and **Close** (same permission, same non-terminal-status rule, same confirm) moved into that window's footer; the three row icons are gone.
+- **Pagination:** "Showing 1–25 of N claims" from the real total; page size 25; filtering is server-side.
+- **Print:** prints the full original 16-column register.
+
+### Overdue / count review (rules unchanged)
+- **Open Claims** counts every claim whose status is not APPROVED / REJECTED / SETTLED / CLOSED / CANCELLED.
+- **Overdue** is a derived condition: due date passed and status not SETTLED / CLOSED / CANCELLED / REJECTED. APPROVED (and PARTIALLY_APPROVED) claims therefore **can be overdue without being "open"**, which is how "2 overdue, 1 open" can both be true. By design in the backend (comment: approved claims can still await payment), but it can read as inconsistent; needs a business decision if wanted otherwise.
+- Overdue Claims and Closed/Settled counts are no longer cards. The Overdue count is still returned by the API summary.
+- **Outstanding Value** total excludes REJECTED and CANCELLED claims, but each row's own outstanding (shown in details / CSV) is the raw submitted minus approved. A page of rows can therefore not sum to the card.
+- The value cards sum claim values only; EOT days are not included. They are not split by claim type (an EOT claim with a recorded value would count).
+- "Approved" counts only the stored approved value; PARTIALLY_APPROVED is not treated differently.
+
+### Unresolved
+- **No "Open" chip:** there is no stored Open status and `status` takes one value, so non-final claims cannot be filtered without an API change. Left out rather than filtering client-side (would break pagination).
+- **Supporting documents / approval history:** not on the claim record in this API, so the detail window shows record history (created / updated) only.
+
+### Files
+New: `claims/_lib/claim-register-helpers.ts` (+ test, 8 tests), `claims/_components/claim-detail-modal.tsx`.
+Changed: `claims/page.tsx`, `_components/claim-filter-bar.tsx` (now client), `claim-register-table.tsx`, `claim-summary-cards.tsx`, `claim-actions-bar.tsx`, `context/progress-tracker.md`, `context/ui-registry.md`. The unused `fixedContractId` compact mode was removed from the register table (the per-contract Claims tab has its own panel, untouched).
+
+### Validation
+Typecheck and eslint clean; 8 new tests pass; web suite 1635 pass, 1 fail (the login-placeholder test already failing before this unit); `next build` compiles. No browser check was run and nothing was deployed.
+
+---
+
+## FMP-CLOSEOUT-01 — Simplify Closeout Requests (frontend only)
+
+Redesigned `/contracts/closeouts` on the same pattern as the Payments, Issue Log and Claim Log units. No API, database, permission, closeout workflow, eligibility or approval change; CSV format unchanged; sidebar untouched.
+
+### Before / after
+- **Header:** subtitle "Review and track requests to close completed contracts."; **Print** and **Export CSV** (renamed from "Export Excel (CSV)"); scope badge kept. No global "New Closeout Request" button; requests still start from Contract Detail → Request Closeout.
+- **Summary:** seven cards → four (Total Requests, Pending Review, Approved, Closed) from the existing API summary. Pending Review is the backend's Submitted + Under Review, so a request is counted once. Rejected, Submitted and Under Review counts remain in the API summary, the filters and the list.
+- **Filters:** visible Search ("Search request no, contract no, project name or client", server-side), Contract / Project, Closeout Status, plus chips All / Pending Review / Approved / Rejected / Closed. Pending Review uses the existing `pendingOnly` parameter; Approved and Closed stay separate stored statuses. Advanced Filters (collapsed; auto-opens when active): Department, Requested By, Reviewed By, Requested / Reviewed / Approved date ranges, and Other Status (Draft, Submitted, Under Review, Cancelled). Clear Filters resets all.
+- **List:** 15 columns / 1700px minimum → 5 columns (Contract / Project, Requested By, Requested Date, Status, Actions), no horizontal scroll; cards below tablet width. Contract / Project shows project name, contract reference, and request number + client in small text. **Open Request** is a bordered icon button linking to the existing `actionUrl` (the contract's Closeout tab, where review / approval / final close live under unchanged permissions); its accessible name says whether the user will Review, Final Close or View.
+- **Empty states:** no filters → "No closeout requests yet" with the informational path "Contract List → Open Contract → Request Closeout" (plain text, not a link); filters active → "No matching requests" with a working Clear Filters button.
+- **Pagination:** "Showing 1–25 of N requests" from the real total; page size 25.
+- **Print:** prints the full original 14 data columns, including readiness counts and outstanding payment.
+
+### Workflow limitations noted (not changed)
+- The list is a read-only register: review, approval, rejection and final close happen only inside each contract's Closeout tab, so "Open Request" is a navigation, not an in-place action.
+- The list item carries no activity history, supporting-document list, review remarks or remaining-obligation detail beyond counts; those stay on the contract's Closeout tab.
+- Approved and Closed are separate statuses (Approved = ready for final close); the Closed card counts only CLOSED.
+- The status filter takes a single value, so "Pending Review" works only through the dedicated `pendingOnly` flag; it is shown as one chip and cannot be combined with a specific status (choosing a specific status clears it).
+
+### Files
+New: `closeouts/_lib/closeout-register-helpers.ts` (+ test, 6 tests).
+Changed: `closeouts/page.tsx`, `_components/closeout-filter-bar.tsx` (now client), `closeout-register-table.tsx`, `closeout-summary-cards.tsx`, `closeout-actions-bar.tsx`, `context/progress-tracker.md`, `context/ui-registry.md`.
+
+### Validation
+Typecheck and eslint clean; 6 new tests pass; web suite 1641 pass, 1 fail (the login-placeholder test already failing before this unit); `next build` compiles. No browser check was run and nothing was deployed.
+
+---
+
+## FMP-PARTIES-01 — Simplify Contract Parties (frontend only)
+
+Redesigned `/contracts/parties`. No API, database, permission, party-relationship or contract change; nothing is deleted.
+
+### Before / after
+- **Header:** subtitle "Manage customers and companies involved in contracts."; the global **+ Add Party** button is gone. **Add Customer** exists only in the Customers panel and **Add Second Party** only in the Second Parties panel (the extra "Add Party" button inside empty panels is gone too). Both shown only with `contracts.create`.
+- **Search:** wider (up to 48rem), search icon, placeholder "Search company name or contact number", **Clear Search** inside the box while searching. Case-insensitive, runs over every loaded company in both panels at once.
+- **Panels:** two columns on desktop (stack below `lg`), headings "Customers (First Party) (N)" and "Second Parties (N)" with the real counts after search.
+- **Rows:** company name wraps (no truncation); contact number only when present (no "Contact No: —"); Active (green) / Inactive (grey) badge; **Edit** with pencil icon; **Activate** / **Deactivate** now ask for confirmation (deactivate states that existing contracts are not changed). Edit / Activate / Deactivate only with `contracts.update`; view-only users see names, contacts and badges.
+- **Empty states:** "No customers added yet", "No second parties added yet", "No matching companies found" + working Clear Search.
+- **Scale:** the API returns every party (`includeInactive`, no pagination), so each panel renders 50 rows with a "Show more" button; search always covers all loaded companies.
+- **Duplicate warning:** the Add / Edit form warns, from the full loaded list (trimmed, case-insensitive), when the same name already exists with the same type (saving would be rejected, mentions if inactive) and informs when it exists under the other type. Advisory only; the New Contract quick-add form does not pass the list, so it shows no warning.
+
+### Risks and findings (nothing changed)
+- **Duplicates:** the API already rejects same name + same type (case-insensitive, `CONTRACT_PARTY_DUPLICATE`) on create and rename. Same name under both types is allowed. There is no database unique constraint, so two simultaneous saves could in theory both pass; a unique index would be a follow-up needing approval. The page-load list can be stale if someone else adds a company meanwhile; the server check still protects.
+- **Deactivation:** only sets `isActive`; no contracts, BOQ, Technical or Production records are touched. New contracts cannot select an inactive Customer or Second Party (API rejects it). **Risk:** the default Second Party RECAFCO can be deactivated; Create Contract without an explicit second party then fails with "Please select Second Party." until it is re-activated. Only rename / retype of RECAFCO is blocked by the API.
+- A party's type cannot change once used in a contract (API rule). Edit Contract still edits the free-text customer name and does not update the party link (see FMP-CONTRACT-01).
+
+### Files
+Changed: `contracts/parties/page.tsx`, `parties/_components/party-list.tsx`, `parties/_components/party-form-modal.tsx` (optional `existingParties`), `contracts/_lib/contract-party-helpers.ts` (+ test, 3 new tests), `context/progress-tracker.md`, `context/ui-registry.md`.
+
+### Validation
+Typecheck and eslint clean; web suite 1644 pass, 1 fail (the login-placeholder test already failing before this unit); `next build` compiles. No browser check was run and nothing was deployed.
+
+## FMP-UI-50 — Full-Width Dashboard Layout Consistency (Completed 2026-10-17)
+
+Frontend layout-only, across 5 page files for the 4 narrow-centered module dashboards (Quality Control, Safety & Compliance, Incident Management, Maintenance Management — Maintenance has 2 entry points sharing one component, so both were widened to stay in sync). No backend, schema, permission, route, or data-calculation change; MMS integration, Safety/Incident business rules, and every other module untouched.
+
+### Files changed
+- `apps/web/src/app/(protected)/executive/qaqc/page.tsx`
+- `apps/web/src/app/(protected)/safety-compliance/executive/page.tsx`
+- `apps/web/src/app/(protected)/incidents/executive/page.tsx`
+- `apps/web/src/app/(protected)/maintenance/executive/page.tsx`
+- `apps/web/src/app/(protected)/maintenance/dashboard/page.tsx`
+
+### Before → after
+- **Shared width fix (all 5 files):** each page's own narrow root-container max-width (`max-w-5xl` QA/QC, `max-w-6xl` Safety & Incident, `max-w-7xl` Maintenance ×2) replaced with `max-w-[1600px]` — the exact cap Contract Management/Technical/Production & Planning/Storage Yard & Delivery/Erection already share (FMP-UI-29/31/32/33/34), per this unit's own "prefer existing shared layout utilities" instruction, rather than inventing a new value. Horizontal padding kept at `px-5` (20px) base / `lg:px-6` (24px), inside this unit's own requested 20–24px range (the 5 sibling dashboards above use `lg:px-8`/32px — not matched here, since this unit's own numeric spec takes precedence over that precedent). Sidebar, fixed header, and every nav control (`ExecutiveModuleNav`, Previous/Next/Switch Module, Back to Platform Dashboard) are untouched — all live outside these page-root `<div>`s.
+- **Quality Control:** only the container width changed. `ExecutiveModuleTitle` and `ExecutiveComingSoon` (the placeholder message panel) were already 100% of their parent's width with no max-width of their own — confirmed by reading both before changing anything — so widening the one root `<div>` is the entire fix; the header and placeholder panel now span the same wider area automatically. Setup-pending status/message, both unchanged verbatim; no fake inspection data, no new buttons.
+- **Safety & Compliance:** container widened, plus the 6 Overview cards (Scheduled / In Progress / Completed Inspections, Open / Critical / Overdue Findings) were flattened from 2 separately-labeled 3-card sub-rows ("Inspections" / "Findings" sub-headings) into one `grid-cols-1 sm:grid-cols-2 lg:grid-cols-6` row — at the new, wider container, 2 rows of 3 would have stretched each small icon+number+label card far wider than its content needs (this unit's own "avoid excessively large empty cards"); one row of 6 narrower cards uses the width instead, and now matches Incident Management's own Overview shape. Same 6 metrics, same order, same hrefs/icons/colors — only the 2 grouping sub-headings are gone. Needs Attention and Latest Safety Records (both already full-width flex-wrap row lists with no max-width of their own) automatically get more breathing room from the wider container; neither component needed a code change. No inspection/finding/corrective-action workflow touched.
+- **Incident Management:** container widened only — its Overview grid was already `lg:grid-cols-5` (one balanced row of 5), so no grid change was needed, unlike Safety's 2 sub-grouped rows. Needs Attention / Recent Incidents lists are likewise already full-width with no internal change required. No incident status/permission/workflow touched.
+- **Maintenance Management:** both `/maintenance/executive` and `/maintenance/dashboard` (both render the shared `MaintenanceControlCenter`) widened in lock-step so neither entry point is left behind. Read every component inside `MaintenanceControlCenter` (KPI grids, `MmsManagerAttention`, `MmsRecentTable`, `MmsModulesSummary`, `MmsQuickActions`) before changing anything — none has a max-width or fixed-width wrapper of its own; `MmsManagerAttention`'s title/detail text is already `min-w-0 flex-1 truncate` and `MmsRecentTable`'s "Request / Work Order" column is already the one non-`w-*` (flexible) column in its `table-fixed` layout, so both automatically gain more room for their text from the wider page alone — no component-level change needed for "more room for issue descriptions" / "table readability." MMS integration endpoints, API keys, auto-refresh interval, response mapping, calculations, and every link to the live MMS system are all untouched; FMP stays read-only for MMS data.
+
+### Module navigation
+Previous/Next/Switch Module, Back to Platform Dashboard, and each page's own primary actions (+ New Safety Inspection, + Report Incident, Open Maintenance Management System, etc.) are all unchanged controls, now simply rendered inside a wider container — no duplicate navigation added, approved module order untouched.
+
+### Validation
+- Lint clean, web typecheck clean, `next build` compiles (all 5 routes present).
+- Web test suite: 1644 passed / 1 failed — the failing test (`administration/users/__tests__/email-login-identity.test.ts`, checking the login form's Email-vs-Username label wording) is in a file this unit never touched (`login/_components/login-form.tsx`, confirmed unmodified via `git status`) and was already failing before this unit started (the immediately preceding progress-tracker entry, FMP-PARTIES-01, already documents this same pre-existing failure) — unrelated to this unit's scope, not fixed here.
+- `git status` confirms exactly the 5 files above changed — no sidebar, shell, backend, or schema file touched; `prisma migrate status` clean (no migration added).
+- Not checked in a live browser at 1366×768 / 1440×900 / 1920×1080 as the ticket's own Section 7 asks — every child component inside all 4 dashboards was read and confirmed to have no width constraint of its own before relying on the shared container fix alone, and the production build statically compiles every route, but an actual rendered screenshot at each viewport was not taken from this environment.

@@ -8,6 +8,9 @@ import { IssueSummaryCards } from './_components/issue-summary-cards';
 import { IssueFilterBar } from './_components/issue-filter-bar';
 import { IssueRegisterTable } from './_components/issue-register-table';
 import { IssueActionsBar } from './_components/issue-actions-bar';
+import { formatShowingRange } from './_lib/issue-register-helpers';
+
+const PAGE_SIZE = 25;
 
 export const metadata: Metadata = { title: 'Contract Issue Log — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -50,7 +53,7 @@ export default async function ContractIssuesPage({ searchParams }: PageProps): P
   const [listRes, contractsRes, deptsRes, peopleRes, dashboardRes] = await Promise.allSettled([
     contractsApi.listIssues({
       page,
-      pageSize: 25,
+      pageSize: PAGE_SIZE,
       ...(search ? { search } : {}),
       ...(contractId ? { contractId } : {}),
       ...(status ? { status } : {}),
@@ -112,12 +115,12 @@ export default async function ContractIssuesPage({ searchParams }: PageProps): P
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract Issue Log</h1>
           <p className="mt-1.5 text-sm text-text-secondary">
-            Track open issues, responsibilities, due dates and closure status across all contracts.
+            Track project issues, responsible persons and resolution progress.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <DashboardScopeBadge scope={scope} />
-          <IssueActionsBar />
+          <IssueActionsBar canCreate={canUpdate} contracts={contracts} people={people} />
         </div>
       </div>
 
@@ -157,11 +160,11 @@ export default async function ContractIssuesPage({ searchParams }: PageProps): P
         </div>
       )}
 
-      <IssueRegisterTable issues={issues} contracts={contracts} people={people} canUpdate={canUpdate} />
+      <IssueRegisterTable issues={issues} people={people} canUpdate={canUpdate} />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-text-secondary print:hidden">
-          <span>Showing {issues.length} of {total}</span>
+      {total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary print:hidden">
+          <span>{formatShowingRange(page, PAGE_SIZE, issues.length, total)}</span>
           <div className="flex gap-2">
             {/* FMP-PERF-02 — Link, not <a>: these are same-page query-string
                 pagination links, and a plain <a> was forcing a full browser

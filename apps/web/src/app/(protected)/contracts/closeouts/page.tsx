@@ -8,6 +8,9 @@ import { CloseoutSummaryCards } from './_components/closeout-summary-cards';
 import { CloseoutFilterBar } from './_components/closeout-filter-bar';
 import { CloseoutRegisterTable } from './_components/closeout-register-table';
 import { CloseoutActionsBar } from './_components/closeout-actions-bar';
+import { formatShowingRange } from './_lib/closeout-register-helpers';
+
+const PAGE_SIZE = 25;
 
 export const metadata: Metadata = { title: 'Closeout Requests — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -52,7 +55,7 @@ export default async function ContractCloseoutsPage({ searchParams }: PageProps)
   const [listRes, contractsRes, deptsRes, peopleRes, dashboardRes] = await Promise.allSettled([
     contractsApi.listCloseouts({
       page,
-      pageSize: 25,
+      pageSize: PAGE_SIZE,
       ...(search ? { search } : {}),
       ...(contractId ? { contractId } : {}),
       ...(status ? { status } : {}),
@@ -114,12 +117,9 @@ export default async function ContractCloseoutsPage({ searchParams }: PageProps)
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Closeout Requests</h1>
-          <p className="mt-1.5 text-sm text-text-secondary max-w-2xl">
-            Review contract closeout requests, readiness risks, approval status and final closure actions across
-            all contracts.
-          </p>
+          <p className="mt-1.5 text-sm text-text-secondary">Review and track requests to close completed contracts.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <DashboardScopeBadge scope={scope} />
           <CloseoutActionsBar />
         </div>
@@ -162,11 +162,11 @@ export default async function ContractCloseoutsPage({ searchParams }: PageProps)
         </div>
       )}
 
-      <CloseoutRegisterTable items={items} canClose={canClose} />
+      <CloseoutRegisterTable items={items} canClose={canClose} hasActiveFilters={hasActiveFilters} />
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-text-secondary print:hidden">
-          <span>Showing {items.length} of {total}</span>
+      {total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary print:hidden">
+          <span>{formatShowingRange(page, PAGE_SIZE, items.length, total)}</span>
           <div className="flex gap-2">
             {/* FMP-PERF-02 — Link, not <a>: see issues/page.tsx's own comment. */}
             {page > 1 && (

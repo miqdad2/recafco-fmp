@@ -1,5 +1,9 @@
 import type { BoqConfirmationItem } from '@/lib/technical-api';
 import { contractTotals } from '../../_lib/boq-progress-helpers';
+import type { TechnicalRelease } from '../../_lib/boq-progress-helpers';
+
+/** A BOQ item as the dashboard reads it: the BOQ confirmation, plus the Technical release numbers when they could be loaded. */
+export type ProgressSource = BoqConfirmationItem & { technical?: TechnicalRelease | null };
 
 // ---------------------------------------------------------------------------
 // FMP-UI-38 — pure helpers for the common Contract Management overview
@@ -8,10 +12,12 @@ import { contractTotals } from '../../_lib/boq-progress-helpers';
 // invented, nothing is written, and no permission rule lives here.
 // ---------------------------------------------------------------------------
 
-/** Piece counts for one contract, summed over its BOQ items. */
+/** Element counts for one contract, summed over its BOQ items. */
 export interface ProjectProgress {
   confirmed: number;
   generated: number;
+  /** Elements Technical released to Production; null = the BOQ progress did not carry release data, so nothing is claimed. */
+  released: number | null;
   /** Pieces currently in each status (not cumulative). */
   inProduction: number;
   produced: number;
@@ -26,13 +32,15 @@ export interface ProjectProgress {
 }
 
 /** null = the BOQ could not be loaded, so nothing is claimed. */
-export function summarizeProgress(items: BoqConfirmationItem[] | null): ProjectProgress | null {
+export function summarizeProgress(items: ProgressSource[] | null): ProjectProgress | null {
   if (items === null) return null;
   const totals = contractTotals(items);
   const sum = (key: 'IN_PRODUCTION' | 'IN_STORE'): number => items.reduce((n, i) => n + (i.statusCounts[key] ?? 0), 0);
   return {
     confirmed: totals.confirmedPieces,
     generated: totals.piecesGenerated,
+    // Only claimed when the release numbers were actually loaded for these items.
+    released: items.length > 0 && items.every((i) => i.technical) ? totals.releasedToProduction : null,
     inProduction: sum('IN_PRODUCTION'),
     produced: totals.produced,
     inStore: sum('IN_STORE'),
@@ -234,13 +242,14 @@ export function stageText(done: number, p: ProjectProgress | null): string {
 }
 
 export function sumProgress(rows: ProjectRow[]): ProjectProgress {
-  const zero: ProjectProgress = { confirmed: 0, generated: 0, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: false };
+  const zero: ProjectProgress = { confirmed: 0, generated: 0, released: null, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: false };
   return rows.reduce<ProjectProgress>((acc, r) => {
     const p = r.progress;
     if (!p) return acc;
     return {
       confirmed: acc.confirmed + p.confirmed,
       generated: acc.generated + p.generated,
+      released: p.released === null ? acc.released : (acc.released ?? 0) + p.released,
       inProduction: acc.inProduction + p.inProduction,
       produced: acc.produced + p.produced,
       inStore: acc.inStore + p.inStore,
@@ -253,13 +262,66 @@ export function sumProgress(rows: ProjectRow[]): ProjectProgress {
   }, zero);
 }
 
-/** One plain message when the selected contract has no pieces to show yet, else null. */
+/** One plain message when the selected contract has no elements to show yet, else null. */
 export function selectedProgressMessage(p: ProjectProgress | null): string | null {
   if (p === null) return 'BOQ progress could not be loaded for this contract.';
   if (!p.hasItems) return 'No BOQ progress found for this contract.';
-  if (p.confirmed === 0) return 'Technical has not confirmed drawing pieces yet.';
-  if (p.generated === 0) return 'Pieces have not been generated yet.';
+  if (p.confirmed === 0) return 'Technical has not confirmed drawing elements yet.';
+  if (p.generated === 0) return 'Elements have not been generated yet.';
   return null;
+}
+
+// --- FMP-UI-48: Selected Project Progress + table cells -----------------------
+
+export interface ProgressMetric {
+  key: string;
+  label: string;
+  /** null = not available (shown as "Not available", never as 0). */
+  value: number | null;
+}
+
+/**
+ * The Selected Project Progress tiles. Every figure is the number of elements CURRENTLY at that stage (the
+ * same figures as the project's BOQ Progress page) — they describe different stages of the same elements,
+ * so they are never added together.
+ */
+export function selectedMetrics(p: ProjectProgress): ProgressMetric[] {
+  return [
+    { key: 'confirmed', label: 'Confirmed Elements', value: p.confirmed },
+    { key: 'released', label: 'Released to Production', value: p.released },
+    { key: 'inProduction', label: 'In Production', value: p.inProduction },
+    { key: 'produced', label: 'Produced', value: p.produced },
+    { key: 'inStore', label: 'In Storage', value: p.inStore },
+    { key: 'delivered', label: 'Delivered', value: p.delivered },
+    { key: 'erected', label: 'Erected', value: p.erected },
+    { key: 'completed', label: 'Completed', value: p.completed },
+  ];
+}
+
+/** Two short lines for the BOQ Elements column. */
+export function boqElementsText(p: ProjectProgress | null): { primary: string; secondary: string | null } {
+  if (p === null) return { primary: '—', secondary: null };
+  if (!p.hasItems) return { primary: 'No BOQ items', secondary: null };
+  if (p.confirmed === 0) return { primary: 'Not confirmed', secondary: null };
+  if (p.generated === 0) return { primary: `${p.confirmed} confirmed`, secondary: 'Not generated' };
+  return { primary: `${p.confirmed} confirmed`, secondary: `${p.generated} generated · ${p.completed} completed` };
+}
+
+/** "8 of 12 produced" for a stage column (cumulative: elements that reached that stage or went beyond it). */
+export function stageCell(done: number, p: ProjectProgress | null, word: string): string {
+  const text = stageText(done, p);
+  return text.includes(' of ') ? `${text} ${word}` : text;
+}
+
+export function hasActiveFilters(query: string, filter: ProjectFilter, reason: ReasonKey | null): boolean {
+  return query.trim() !== '' || filter !== 'ALL' || reason !== null;
+}
+
+/** Badge colours for a contract status (green = healthy / finished, neutral otherwise). */
+export function statusBadgeClass(status: string): string {
+  if (status === 'ACTIVE') return 'border-success/30 bg-success-light text-success';
+  if (status === 'CANCELLED' || status === 'TERMINATED') return 'border-border bg-surface-secondary text-text-muted';
+  return 'border-border bg-surface-secondary text-text-secondary';
 }
 
 // --- Row actions (permission gates reuse the contract list's existing rules) ---
@@ -280,6 +342,17 @@ export interface RowAction {
 export function rowActions(row: { id: string }): RowAction[] {
   return [
     { key: 'view', label: 'Open Contract', href: `/contracts/${row.id}`, title: 'Open full contract details' },
-    { key: 'boq', label: 'BOQ', href: `/contracts/${row.id}/boq-progress`, title: 'Open BOQ progress' },
+    { key: 'boq', label: 'BOQ Progress', href: `/contracts/${row.id}/boq-progress`, title: 'Open BOQ progress' },
   ];
+}
+
+/**
+ * FMP-UI-49 — says how many contracts the list shows, and never mixes "shown" with "total": without a search
+ * or filter it names the newest contracts loaded and how many exist; with one it counts the matches.
+ */
+export function projectCountText(input: { shown: number; loaded: number; total: number; filtersActive: boolean; searching: boolean }): string {
+  const { shown, loaded, total, filtersActive, searching } = input;
+  if (filtersActive) return `${shown} matching${searching ? ' · searching all contracts…' : ''}`;
+  if (total > loaded) return `Showing the ${loaded} newest of ${total} contracts · select a row for its element progress`;
+  return `${total} ${total === 1 ? 'contract' : 'contracts'}`;
 }

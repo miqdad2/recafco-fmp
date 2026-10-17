@@ -98,7 +98,9 @@ export default async function SafetyComplianceExecutivePage(): Promise<React.JSX
   const metricsStatus: MetricStatus = data ? 'ok' : 'unavailable';
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-5 py-6 lg:px-6">
+    // FMP-UI-50 — widened from max-w-6xl to the shared max-w-[1600px] cap
+    // every other redesigned dashboard already uses.
+    <div className="mx-auto max-w-[1600px] space-y-6 px-5 py-6 lg:px-6">
       <ExecutiveModuleNav code="SAFETY_COMPLIANCE" permissions={permissions} />
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm lg:p-6">
@@ -134,43 +136,44 @@ export default async function SafetyComplianceExecutivePage(): Promise<React.JSX
         </div>
       )}
 
+      {/* FMP-UI-50 — flattened from 2 separately-labeled 3-card sub-rows
+          (Inspections / Findings) into one balanced 6-card row, matching
+          Incident Management's own Overview section shape exactly. At the
+          old max-w-6xl, 2 rows of 3 kept each card a sensible size; at the
+          new, wider container, 2 rows of 3 would have stretched each card
+          far wider than its small icon+number+label content needs ("avoid
+          excessively large empty cards," this unit's own instruction) —
+          6 narrower columns in one row uses the extra width instead of
+          each card absorbing it. Same 6 metrics, same order (Inspections
+          then Findings), same hrefs/icons/colors — only the grouping
+          sub-headings are gone. */}
       <section>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">Overview</h2>
-        <div className="space-y-3">
-          <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">Inspections</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <MetricCard
-                label="Scheduled Inspections" value={data?.metrics.scheduledInspections} icon={ClipboardCheck} iconColor="text-info"
-                href="/safety-compliance?status=SCHEDULED" status={metricsStatus} dense
-              />
-              <MetricCard
-                label="In Progress" value={data?.metrics.inProgressInspections} icon={Clock} iconColor="text-warning"
-                href="/safety-compliance?status=IN_PROGRESS" status={metricsStatus} dense
-              />
-              <MetricCard
-                label="Completed Inspections" value={data?.metrics.completedInspections} icon={CheckCircle2} iconColor="text-success"
-                href="/safety-compliance?status=COMPLETED" status={metricsStatus} dense
-              />
-            </div>
-          </div>
-          <div>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mb-1.5">Findings</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <MetricCard
-                label="Open Findings" value={data?.metrics.openFindings} icon={AlertTriangle} iconColor="text-accent"
-                href="/safety-compliance" status={metricsStatus} dense
-              />
-              <MetricCard
-                label="Critical Findings" value={data?.metrics.criticalFindings} icon={AlertOctagon} iconColor="text-danger"
-                href="/safety-compliance" status={metricsStatus} dense
-              />
-              <MetricCard
-                label="Overdue Findings" value={data?.metrics.overdueFindings} icon={CalendarClock} iconColor="text-warning"
-                href="/safety-compliance" status={metricsStatus} dense
-              />
-            </div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <MetricCard
+            label="Scheduled Inspections" value={data?.metrics.scheduledInspections} icon={ClipboardCheck} iconColor="text-info"
+            href="/safety-compliance?status=SCHEDULED" status={metricsStatus} dense
+          />
+          <MetricCard
+            label="In Progress" value={data?.metrics.inProgressInspections} icon={Clock} iconColor="text-warning"
+            href="/safety-compliance?status=IN_PROGRESS" status={metricsStatus} dense
+          />
+          <MetricCard
+            label="Completed Inspections" value={data?.metrics.completedInspections} icon={CheckCircle2} iconColor="text-success"
+            href="/safety-compliance?status=COMPLETED" status={metricsStatus} dense
+          />
+          <MetricCard
+            label="Open Findings" value={data?.metrics.openFindings} icon={AlertTriangle} iconColor="text-accent"
+            href="/safety-compliance" status={metricsStatus} dense
+          />
+          <MetricCard
+            label="Critical Findings" value={data?.metrics.criticalFindings} icon={AlertOctagon} iconColor="text-danger"
+            href="/safety-compliance" status={metricsStatus} dense
+          />
+          <MetricCard
+            label="Overdue Findings" value={data?.metrics.overdueFindings} icon={CalendarClock} iconColor="text-warning"
+            href="/safety-compliance" status={metricsStatus} dense
+          />
         </div>
       </section>
 

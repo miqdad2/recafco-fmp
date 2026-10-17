@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  findDuplicateParty,
   pickDefaultSecondPartyId,
   validateBasicDetails,
   validatePartyForm,
@@ -76,5 +77,28 @@ describe('filterParties', () => {
   it('keeps everything for an empty query and nothing for no match', () => {
     expect(filterParties(list, '  ')).toHaveLength(2);
     expect(filterParties(list, 'zzz')).toHaveLength(0);
+  });
+});
+
+describe('findDuplicateParty', () => {
+  const parties = [
+    { id: '1', name: 'Al Ahli Co', partyType: 'FIRST_PARTY' },
+    { id: '2', name: 'RECAFCO', partyType: 'SECOND_PARTY' },
+    { id: '3', name: 'Gulf Steel', partyType: 'SECOND_PARTY' },
+  ];
+
+  it('matches the same name and type, ignoring case and surrounding spaces', () => {
+    expect(findDuplicateParty(parties, '  al ahli CO ', 'FIRST_PARTY').sameType?.id).toBe('1');
+  });
+
+  it('reports a same-name company of the other type separately', () => {
+    const r = findDuplicateParty(parties, 'Gulf Steel', 'FIRST_PARTY');
+    expect(r.sameType).toBeNull();
+    expect(r.otherType?.id).toBe('3');
+  });
+
+  it('ignores the record being edited and empty names', () => {
+    expect(findDuplicateParty(parties, 'Al Ahli Co', 'FIRST_PARTY', '1').sameType).toBeNull();
+    expect(findDuplicateParty(parties, '   ', 'FIRST_PARTY')).toEqual({ sameType: null, otherType: null });
   });
 });

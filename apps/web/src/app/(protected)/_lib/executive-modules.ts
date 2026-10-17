@@ -25,6 +25,8 @@ export interface ExecutiveModuleMeta {
   accent: ModuleAccent;
   /** Real permission-based visibility check for this module — never a role code. Used to filter the module-switcher chips and Previous/Next to only what the current viewer can actually open. */
   isVisible: (permissions: string[]) => boolean;
+  /** FMP-UI-48 — kept so the page still works (breadcrumb, direct URL), but left out of Previous/Next and the module switcher. */
+  hiddenFromNavigation?: boolean;
 }
 
 function permissionGate(permission: string): (permissions: string[]) => boolean {
@@ -67,22 +69,24 @@ function permissionGate(permission: string): (permissions: string[]) => boolean 
  */
 export const EXECUTIVE_MODULES: ExecutiveModuleMeta[] = [
   { code: 'CONTRACTS_MANAGEMENT', title: 'Contract Management', landingHref: '/contracts/executive', icon: FileText, accent: 'contracts', isVisible: permissionGate('contracts.read') },
-  { code: 'ESTIMATION', title: 'Estimation', landingHref: '/executive/estimation', icon: Calculator, accent: 'estimation', isVisible: isExecutiveManagerOrAdminAccess },
   // FMP-TECH-01 — repointed from /contracts/technical to the new Technical module (see that route's own history for why).
   { code: 'TECHNICAL', title: 'Technical', landingHref: '/technical', icon: Ruler, accent: 'technical', isVisible: (permissions) => permissions.includes('technical.read') || permissions.includes('contracts.read') },
+  // FMP-UI-48 — order follows the approved sidebar (FMP-UI-46): Contract, Technical, Production, Storage, Quality Control, Erection, Safety, Incident, Maintenance, Tasks.
+  { code: 'PRODUCTION_DASHBOARD', title: 'Production & Planning', landingHref: '/production/executive', icon: Factory, accent: 'production', isVisible: permissionGate('production.read') },
+  { code: 'STORAGE_DELIVERY', title: 'Storage Yard & Delivery', landingHref: '/executive/storage-delivery', icon: Warehouse, accent: 'storage', isVisible: isExecutiveManagerOrAdminAccess },
+  { code: 'QA_QC', title: 'Quality Control', landingHref: '/executive/qaqc', icon: BadgeCheck, accent: 'qaqc', isVisible: isExecutiveManagerOrAdminAccess },
   { code: 'ERECTION', title: 'Erection', landingHref: '/contracts/erection-executive', icon: HardHat, accent: 'erection', isVisible: permissionGate('contracts.read') },
   { code: 'SAFETY_COMPLIANCE', title: 'Safety & Compliance', landingHref: '/safety-compliance/executive', icon: ShieldCheck, accent: 'safety', isVisible: permissionGate('safety.read') },
   { code: 'INCIDENT_REPORT', title: 'Incident Management', landingHref: '/incidents/executive', icon: AlertTriangle, accent: 'incident', isVisible: permissionGate('incidents.read') },
-  { code: 'PRODUCTION_DASHBOARD', title: 'Production & Planning', landingHref: '/production/executive', icon: Factory, accent: 'production', isVisible: permissionGate('production.read') },
   { code: 'MAINTENANCE_REQUESTS', title: 'Maintenance Management', landingHref: '/maintenance/executive', icon: Wrench, accent: 'maintenance', isVisible: permissionGate('maintenance.read') },
-  { code: 'STORAGE_DELIVERY', title: 'Storage Yard & Delivery', landingHref: '/executive/storage-delivery', icon: Warehouse, accent: 'storage', isVisible: isExecutiveManagerOrAdminAccess },
-  { code: 'QA_QC', title: 'Quality Control', landingHref: '/executive/qaqc', icon: BadgeCheck, accent: 'qaqc', isVisible: isExecutiveManagerOrAdminAccess },
   { code: 'FACTORY_TASKS', title: 'Task Management', landingHref: '/factory-tasks/executive', icon: ClipboardList, accent: 'tasks', isVisible: permissionGate('tasks.read') },
+  // FMP-UI-48 — Estimation was removed from the sidebar (FMP-UI-46); its page stays, but it is no longer a Previous/Next or switcher target.
+  { code: 'ESTIMATION', title: 'Estimation', landingHref: '/executive/estimation', icon: Calculator, accent: 'estimation', isVisible: isExecutiveManagerOrAdminAccess, hiddenFromNavigation: true },
 ];
 
 /** FMP-UI-07 (nav access pass) — the module-switcher chips and Previous/Next must only ever offer modules the viewer actually holds real access to, matching PlatformDashboardService's own per-card gating exactly. An Executive Manager holds all 6 underlying permissions (plus Estimation, QA/QC, and Storage & Delivery via isExecutiveManagerOrAdminAccess), so sees all 11; a single-module viewer sees only their own. */
 export function getVisibleModules(permissions: string[]): ExecutiveModuleMeta[] {
-  return EXECUTIVE_MODULES.filter((m) => m.isVisible(permissions));
+  return EXECUTIVE_MODULES.filter((m) => !m.hiddenFromNavigation && m.isVisible(permissions));
 }
 
 export interface ModuleNeighbors {

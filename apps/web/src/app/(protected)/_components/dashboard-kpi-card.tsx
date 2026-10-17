@@ -10,6 +10,8 @@ interface DashboardKpiCardProps {
   tone?: DashboardKpiTone;
   /** Optional small line under the label, e.g. what the number covers. */
   hint?: string;
+  /** FMP-UI-49 — icon, number and label on one row (about half the height) for dashboards that must fit one screen. */
+  compact?: boolean;
 }
 
 const ICON_TONE: Record<DashboardKpiTone, string> = {
@@ -35,7 +37,19 @@ const VALUE_TONE: Record<DashboardKpiTone, string> = {
  * styles, matching the 4 dashboards that already agreed on it rather than
  * the 1 that didn't.
  */
-export function DashboardKpiCard({ label, value, icon: Icon, tone = 'neutral', hint }: DashboardKpiCardProps): React.JSX.Element {
+export function DashboardKpiCard({ label, value, icon: Icon, tone = 'neutral', hint, compact = false }: DashboardKpiCardProps): React.JSX.Element {
+  if (compact) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+        <Icon className={`size-5 shrink-0 ${ICON_TONE[tone]}`} aria-hidden="true" />
+        <p className={`text-2xl font-bold leading-none ${VALUE_TONE[tone]}`}>{value ?? '—'}</p>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium text-text-secondary">{label}</p>
+          {hint && <p className="truncate text-[11px] text-text-muted" title={hint}>{hint}</p>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl border border-border bg-surface p-3 shadow-sm">
       <Icon className={`mb-1.5 size-4 ${ICON_TONE[tone]}`} aria-hidden="true" />

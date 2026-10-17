@@ -24,7 +24,7 @@ import type { ProjectProgress } from '../executive/_lib/project-overview-helpers
 
 const NOW = new Date('2026-12-01T09:00:00Z');
 const progress = (over: Partial<ProjectProgress> = {}): ProjectProgress => ({
-  confirmed: 0, generated: 0, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: true, ...over,
+  confirmed: 0, generated: 0, released: null, inProduction: 0, produced: 0, inStore: 0, delivered: 0, erected: 0, completed: 0, needsReview: 0, hasItems: true, ...over,
 });
 const contract = (over: Record<string, unknown> = {}) => ({
   status: 'ACTIVE', openClaimsCount: 0, effectiveScheduleStatus: 'ON_TRACK', startDate: '2026-01-10', forecastCompletionDate: '2026-12-26', endDate: undefined, ...over,

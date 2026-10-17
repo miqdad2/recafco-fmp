@@ -1100,7 +1100,8 @@ export class ContractDashboardService {
     return {
       confirmedPieces,
       piecesGenerated,
-      produced: statusCounts.PRODUCED ?? 0,
+      // FMP-UI-48 — Sent to Storage Yard elements are still produced elements (FMP-PROD-02 added that status).
+      produced: (statusCounts.PRODUCED ?? 0) + (statusCounts.SENT_TO_STORAGE ?? 0),
       delivered: statusCounts.DELIVERED ?? 0,
       erected: statusCounts.ERECTED ?? 0,
       completed: statusCounts.COMPLETED ?? 0,

@@ -753,6 +753,19 @@ describe('ContractDashboardService.getDashboard', () => {
     expect(boqOverview.erected).toBe(0);
   });
 
+  it('boqOverview.produced also counts elements already sent to Storage Yard', async () => {
+    mockContractFindMany.mockResolvedValue([makeContract()]);
+    mockBoqPieceGroupBy.mockResolvedValue([
+      { currentStatus: 'PRODUCED', isCancelled: false, _count: { _all: 5 } },
+      { currentStatus: 'SENT_TO_STORAGE', isCancelled: false, _count: { _all: 4 } },
+    ]);
+
+    const result = await service.getDashboard(ACTOR_MANAGER);
+
+    expect(result.manager!.boqOverview.produced).toBe(9);
+    expect(result.manager!.boqOverview.piecesGenerated).toBe(9);
+  });
+
   it('boqOverview.itemsNeedingReview counts BOQ items whose generated pieces differ from confirmed pieces', async () => {
     mockContractFindMany.mockResolvedValue([makeContract()]);
     // item-a: confirmed 10, generated 10 -> matches, not counted.

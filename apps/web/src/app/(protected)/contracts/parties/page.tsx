@@ -34,9 +34,7 @@ export default async function ContractPartiesPage(): Promise<React.JSX.Element> 
           header={
             <div>
               <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract Parties</h1>
-              <p className="mt-1.5 text-sm text-text-secondary max-w-2xl">
-                Add companies used as Customer (First Party) or Second Party in contracts.
-              </p>
+              <p className="mt-1.5 text-sm text-text-secondary">Manage customers and companies involved in contracts.</p>
             </div>
           }
           parties={parties}

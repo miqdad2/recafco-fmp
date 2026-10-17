@@ -37,6 +37,8 @@ import { ErectionChecklistAttachmentStorageService } from './erection-checklist-
 import { ContractErectionWorkflowAssignmentService } from './contract-erection-workflow-assignment.service';
 import { ErectionMethodStatementAttachmentStorageService } from './erection-method-statement-attachment-storage.service';
 import { ContractsController } from './contracts.controller';
+import { ContractBoqItemsController } from './contract-boq-items.controller';
+import { ContractBoqItemsService } from './contract-boq-items.service';
 import { ContractPartiesController } from './contract-parties.controller';
 import { ContractPartiesService } from './contract-parties.service';
 
@@ -46,6 +48,7 @@ import { ContractPartiesService } from './contract-parties.service';
     ContractsRefService,
     ContractsService,
     ContractPartiesService,
+    ContractBoqItemsService,
     ContractPaymentsService,
     ContractBoqProductionService,
     ContractVariationsService,
@@ -79,7 +82,7 @@ import { ContractPartiesService } from './contract-parties.service';
     ErectionChecklistAttachmentStorageService,
     ContractErectionWorkflowAssignmentService,
   ],
-  controllers: [ContractPartiesController, ContractsController],
+  controllers: [ContractPartiesController, ContractBoqItemsController, ContractsController],
   exports: [ContractsService, ContractDashboardService, ContractErectionDashboardService],
 })
 export class ContractsModule {}

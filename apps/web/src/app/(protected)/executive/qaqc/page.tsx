@@ -38,7 +38,16 @@ export default async function QaQcExecutivePage(): Promise<React.JSX.Element> {
   if (!isExecutiveManagerOrAdminAccess(permissions)) notFound();
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 px-5 py-6 lg:px-6">
+    // FMP-UI-50 — widened from max-w-5xl (narrow, centered, large unused side
+    // margins on a normal desktop) to the same max-w-[1600px] cap already
+    // used by every other redesigned dashboard (Contract Management,
+    // Technical, Production & Planning, Storage Yard & Delivery, Erection —
+    // FMP-UI-29/31/32/33/34), per this unit's own "prefer existing shared
+    // layout utilities" instruction. `ExecutiveModuleTitle`/`ExecutiveComingSoon`
+    // below have no width of their own (both are 100% of their parent), so
+    // widening this one container is the entire fix — no changes needed in
+    // either child component.
+    <div className="mx-auto max-w-[1600px] space-y-6 px-5 py-6 lg:px-6">
       <ExecutiveModuleNav code="QA_QC" permissions={permissions} />
 
       <ExecutiveModuleTitle
