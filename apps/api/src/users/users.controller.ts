@@ -262,6 +262,7 @@ export class UsersController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<null>> {
     await this.usersService.findOne(id);
+    await this.usersService.assertNotManagementOnlyAccount(id);
     const moduleId = module as ModuleIdentifier;
     await this.departmentAccess.setUserModuleAccess(
       id,

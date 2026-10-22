@@ -16,11 +16,13 @@ import { ErectionModule } from './erection/erection.module';
 import { PlatformModule } from './platform/platform.module';
 import { TechnicalModule } from './technical/technical.module';
 import { MmsIntegrationModule } from './mms-integration/mms-integration.module';
+import { ManagementIntelligenceModule } from './management-intelligence/management-intelligence.module';
+import { SalesModule } from './sales/sales.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLogMiddleware } from './common/middleware/request-log.middleware';
 
 @Module({
-  imports: [HealthModule, AuthModule, OrganizationsModule, UsersModule, RolesModule, DepartmentAccessModule, IncidentsModule, FactoryTasksModule, MaintenanceModule, SafetyModule, ContractsModule, ProductionModule, StorageDeliveryModule, ErectionModule, PlatformModule, TechnicalModule, MmsIntegrationModule],
+  imports: [HealthModule, AuthModule, OrganizationsModule, UsersModule, RolesModule, DepartmentAccessModule, IncidentsModule, FactoryTasksModule, MaintenanceModule, SafetyModule, ContractsModule, ProductionModule, StorageDeliveryModule, ErectionModule, PlatformModule, TechnicalModule, MmsIntegrationModule, ManagementIntelligenceModule, SalesModule],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

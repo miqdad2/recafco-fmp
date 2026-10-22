@@ -4,6 +4,7 @@ import {
   isExecutiveManagerAccess,
   type ModuleCode,
 } from './module-visibility';
+import { MANAGEMENT_HOME_PATH, isManagementOnlyAccess } from '../../../lib/management-access';
 
 /**
  * FMP-ACCESS-01 — the one place that decides what *kind* of experience a user gets:
@@ -74,6 +75,9 @@ export const MODULE_LANDING_PATH: Record<Exclude<ModuleCode, 'ADMINISTRATION'>, 
 
 /** Where `/dashboard` should send this user: their own module dashboard (Single Module) or stay on the Control Center. */
 export function getLandingPath(permissions: string[], fullPlatformAccess = false): string {
+  // FMP-MIC-01 — an account holding only management_intelligence.* permissions lands on the
+  // Management Intelligence Center. Any operational permission keeps the existing rules below.
+  if (isManagementOnlyAccess(permissions, fullPlatformAccess)) return MANAGEMENT_HOME_PATH;
   const info = deriveAccessMode(permissions, fullPlatformAccess);
   if (info.mode === 'SINGLE_MODULE' && info.primaryModule) return MODULE_LANDING_PATH[info.primaryModule];
   return '/dashboard';

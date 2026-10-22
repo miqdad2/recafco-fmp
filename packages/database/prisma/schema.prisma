@@ -194,13 +194,19 @@ model User {
   incidentAttachmentsUploaded IncidentAttachment[]    @relation("IncidentAttachmentUploadedBy")
   taskAttachmentsUploaded     FactoryTaskAttachment[] @relation("TaskAttachmentUploadedBy")
 
-  factoryTasksCreated     FactoryTask[]        @relation("TaskCreatedBy")
-  factoryTasksRequestedBy FactoryTask[]        @relation("TaskRequestedBy")
-  factoryTasksAssigned    FactoryTask[]        @relation("TaskAssignedTo")
-  factoryTasksCompleted   FactoryTask[]        @relation("TaskCompletedBy")
-  factoryTasksClosed      FactoryTask[]        @relation("TaskClosedBy")
-  factoryTasksBlocked     FactoryTask[]        @relation("TaskBlockedBy")
-  factoryTaskComments     FactoryTaskComment[] @relation("TaskCommentAuthor")
+  factoryTasksCreated       FactoryTask[]        @relation("TaskCreatedBy")
+  salesEnquiriesCreated     SalesEnquiry[]       @relation("SalesEnquiryCreatedBy")
+  salesEnquiriesAssigned    SalesEnquiry[]       @relation("SalesEnquiryAssignedTo")
+  salesActivitiesRecorded   SalesActivity[]      @relation("SalesActivityRecordedBy")
+  salesFollowUpsResponsible SalesFollowUp[]      @relation("SalesFollowUpResponsible")
+  salesFollowUpsCompleted   SalesFollowUp[]      @relation("SalesFollowUpCompletedBy")
+  salesFollowUpsCreated     SalesFollowUp[]      @relation("SalesFollowUpCreatedBy")
+  factoryTasksRequestedBy   FactoryTask[]        @relation("TaskRequestedBy")
+  factoryTasksAssigned      FactoryTask[]        @relation("TaskAssignedTo")
+  factoryTasksCompleted     FactoryTask[]        @relation("TaskCompletedBy")
+  factoryTasksClosed        FactoryTask[]        @relation("TaskClosedBy")
+  factoryTasksBlocked       FactoryTask[]        @relation("TaskBlockedBy")
+  factoryTaskComments       FactoryTaskComment[] @relation("TaskCommentAuthor")
 
   maintenanceRequestsCreated     MaintenanceRequest[]        @relation("MRCreatedBy")
   maintenanceRequestsRequestedBy MaintenanceRequest[]        @relation("MRRequestedBy")
@@ -1424,23 +1430,23 @@ enum ContractBoqPieceStatus {
 }
 
 model ContractBoqPiece {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  contractId            String                 @map("contract_id") @db.Uuid
-  boqItemId             String                 @map("boq_item_id") @db.Uuid
-  drawingConfirmationId String                 @map("drawing_confirmation_id") @db.Uuid
-  pieceNo               Int                    @map("piece_no")
-  pieceCode             String                 @map("piece_code") @db.VarChar(150)
-  currentStatus         ContractBoqPieceStatus @default(DRAWING_READY) @map("current_status")
-  drawingNo             String                 @map("drawing_no") @db.VarChar(100)
-  sizeOrSpecification   String?                @map("size_or_specification") @db.VarChar(300)
-  currentLocation       String?                @map("current_location") @db.VarChar(200)
-  remarks               String?                @db.VarChar(2000)
-  isCancelled           Boolean                @default(false) @map("is_cancelled")
+  id                       String                 @id @default(uuid()) @db.Uuid
+  contractId               String                 @map("contract_id") @db.Uuid
+  boqItemId                String                 @map("boq_item_id") @db.Uuid
+  drawingConfirmationId    String                 @map("drawing_confirmation_id") @db.Uuid
+  pieceNo                  Int                    @map("piece_no")
+  pieceCode                String                 @map("piece_code") @db.VarChar(150)
+  currentStatus            ContractBoqPieceStatus @default(DRAWING_READY) @map("current_status")
+  drawingNo                String                 @map("drawing_no") @db.VarChar(100)
+  sizeOrSpecification      String?                @map("size_or_specification") @db.VarChar(300)
+  currentLocation          String?                @map("current_location") @db.VarChar(200)
+  remarks                  String?                @db.VarChar(2000)
+  isCancelled              Boolean                @default(false) @map("is_cancelled")
   // FMP-TECH-27 — set when Technical releases an individually covered element to Production (elements in a drawing group are released through the group).
-  releasedToProductionAt DateTime?             @map("released_to_production_at") @db.Timestamptz(3)
-  releasedToProductionById String?              @map("released_to_production_by_id") @db.Uuid
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  releasedToProductionAt   DateTime?              @map("released_to_production_at") @db.Timestamptz(3)
+  releasedToProductionById String?                @map("released_to_production_by_id") @db.Uuid
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   contract            Contract                       @relation(fields: [contractId], references: [id], onDelete: Restrict)
   boqItem             ContractBoqItem                @relation(fields: [boqItemId], references: [id], onDelete: Restrict)
@@ -3998,4 +4004,136 @@ model ContractErectionWorkflowAssignment {
 
   @@index([assignedToUserId])
   @@map("contract_erection_workflow_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// Sales & Enquiries Foundation (FMP-SALES-01)
+//
+// Additive only. An enquiry is a possible NEW project: estimatedValue is a rough
+// KWD estimate (nullable - never treated as 0), awardedValue is the actual value
+// when Won. Neither is a contract value and nothing here links to Contract
+// Management. Dates are calendar dates (Kuwait, UTC+3) stored as DATE.
+// ---------------------------------------------------------------------------
+
+enum SalesEnquiryStatus {
+  NEW_ENQUIRY
+  CONTACTED
+  MEETING_DONE
+  QUOTATION_SENT
+  FOLLOW_UP
+  WON
+  LOST
+}
+
+enum SalesActivityType {
+  OFFICE_MEETING
+  PHONE_CALL
+  EMAIL
+  CLIENT_VISIT
+  FOLLOW_UP
+  QUOTATION_UPDATE
+  STATUS_CHANGE
+  NOTE
+  ENQUIRY_UPDATED
+}
+
+enum SalesFollowUpStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model SalesSequence {
+  year    Int @id
+  lastSeq Int @default(0) @map("last_seq")
+
+  @@map("sales_sequences")
+}
+
+model SalesEnquiry {
+  id                   String             @id @default(uuid()) @db.Uuid
+  enquiryNumber        String             @unique @map("enquiry_number") @db.VarChar(20)
+  companyName          String             @map("company_name") @db.VarChar(200)
+  contactPerson        String?            @map("contact_person") @db.VarChar(200)
+  contactNumber        String?            @map("contact_number") @db.VarChar(50)
+  email                String?            @db.VarChar(254)
+  enquiryDate          DateTime           @map("enquiry_date") @db.Date
+  source               String?            @db.VarChar(100)
+  projectName          String?            @map("project_name") @db.VarChar(300)
+  projectLocation      String?            @map("project_location") @db.VarChar(300)
+  scopeOfWork          String             @map("scope_of_work") @db.Text
+  typeOfWork           String?            @map("type_of_work") @db.VarChar(100)
+  estimatedValue       Decimal?           @map("estimated_value") @db.Decimal(15, 3)
+  estimatedValueSource String?            @map("estimated_value_source") @db.VarChar(200)
+  currency             String             @default("KWD") @db.VarChar(3)
+  status               SalesEnquiryStatus @default(NEW_ENQUIRY)
+  assignedToUserId     String?            @map("assigned_to_user_id") @db.Uuid
+  nextFollowUpDate     DateTime?          @map("next_follow_up_date") @db.Date
+  remarks              String?            @db.Text
+  additionalNotes      String?            @map("additional_notes") @db.Text
+  expectedStartDate    DateTime?          @map("expected_start_date") @db.Date
+  expectedAwardDate    DateTime?          @map("expected_award_date") @db.Date
+  lostReason           String?            @map("lost_reason") @db.VarChar(1000)
+  awardedValue         Decimal?           @map("awarded_value") @db.Decimal(15, 3)
+  wonDate              DateTime?          @map("won_date") @db.Date
+  lostDate             DateTime?          @map("lost_date") @db.Date
+  createdByUserId      String             @map("created_by_user_id") @db.Uuid
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser  User            @relation("SalesEnquiryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignedToUser User?           @relation("SalesEnquiryAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  activities     SalesActivity[]
+  followUps      SalesFollowUp[]
+
+  @@index([status, enquiryDate(sort: Desc)])
+  @@index([enquiryDate])
+  @@index([wonDate])
+  @@index([nextFollowUpDate])
+  @@index([companyName])
+  @@index([contactNumber])
+  @@index([createdByUserId])
+  @@map("sales_enquiries")
+}
+
+model SalesActivity {
+  id               String            @id @default(uuid()) @db.Uuid
+  enquiryId        String            @map("enquiry_id") @db.Uuid
+  type             SalesActivityType
+  activityDate     DateTime          @map("activity_date") @db.Date
+  notes            String?           @db.Text
+  metadata         Json?             @db.JsonB
+  recordedByUserId String            @map("recorded_by_user_id") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  enquiry        SalesEnquiry @relation(fields: [enquiryId], references: [id], onDelete: Restrict)
+  recordedByUser User         @relation("SalesActivityRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([enquiryId, createdAt(sort: Desc)])
+  @@map("sales_activities")
+}
+
+model SalesFollowUp {
+  id                String              @id @default(uuid()) @db.Uuid
+  enquiryId         String              @map("enquiry_id") @db.Uuid
+  followUpDate      DateTime            @map("follow_up_date") @db.Date
+  notes             String?             @db.VarChar(2000)
+  responsibleUserId String?             @map("responsible_user_id") @db.Uuid
+  status            SalesFollowUpStatus @default(PENDING)
+  completedAt       DateTime?           @map("completed_at") @db.Timestamptz(3)
+  completedByUserId String?             @map("completed_by_user_id") @db.Uuid
+  completionNotes   String?             @map("completion_notes") @db.VarChar(2000)
+  rescheduledFromId String?             @map("rescheduled_from_id") @db.Uuid
+  createdByUserId   String              @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  enquiry         SalesEnquiry @relation(fields: [enquiryId], references: [id], onDelete: Restrict)
+  responsibleUser User?        @relation("SalesFollowUpResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  completedByUser User?        @relation("SalesFollowUpCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  createdByUser   User         @relation("SalesFollowUpCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([status, followUpDate])
+  @@index([enquiryId, status])
+  @@map("sales_follow_ups")
 }

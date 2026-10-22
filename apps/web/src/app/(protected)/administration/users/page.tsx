@@ -301,7 +301,7 @@ function RoleBadge({ code, name }: { code: string; name: string }): React.JSX.El
     <span
       className={[
         'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
-        elevated ? 'bg-accent/10 text-accent' : 'text-text-muted',
+        elevated ? 'bg-accent/10 text-accent' : code === 'MANAGEMENT_INTELLIGENCE_VIEWER' ? 'bg-info-light text-info' : 'text-text-muted',
       ].join(' ')}
     >
       {name}

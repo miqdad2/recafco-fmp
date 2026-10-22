@@ -5,7 +5,9 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { usersApi } from '@/lib/users-api';
 import type { ModuleIdentifier, DepartmentAccessScope } from '@/lib/users-api';
+import { rolesApi } from '@/lib/roles-api';
 import type { UserFormState } from './_components/user-form';
+import { MANAGEMENT_ROLE_CODE } from './_components/account-type';
 
 async function getToken(): Promise<string> {
   const store = await cookies();
@@ -56,6 +58,37 @@ export async function createUserWithAccessAction(
 
   if (!displayName) return { fieldErrors: { displayName: ['Full name is required'] } };
   if (!email) return { fieldErrors: { email: ['Email is required'] } };
+
+  // FMP-MIC-01C — Management Intelligence Viewer. The role is resolved HERE by its fixed code; a
+  // roleId, department, module scope or Full Platform value sent in the form is ignored, so a
+  // tampered request cannot turn a management account into an operational one. The API then
+  // re-validates the role and blocks Full Platform / module access for it.
+  if (formData.get('accountType')?.toString() === 'MANAGEMENT') {
+    const roles = await rolesApi.list(accessToken);
+    if (!roles.ok) return { error: 'Could not load roles to create the Management Intelligence account. Please try again.' };
+    const managementRole = roles.data.find((r) => r.code === MANAGEMENT_ROLE_CODE && r.isActive);
+    if (!managementRole) {
+      return { error: 'The Management Intelligence Viewer role is not available. Apply the latest database migration first.' };
+    }
+    const created = await usersApi.create(accessToken, {
+      displayName,
+      email,
+      roleId: managementRole.id,
+      ...(employeeNumberRaw ? { employeeNumber: employeeNumberRaw } : {}),
+    });
+    if (!created.ok) {
+      if (created.code === 'VALIDATION_ERROR' && created.fieldErrors) return { fieldErrors: created.fieldErrors };
+      return { error: created.message };
+    }
+    return {
+      created: {
+        id: created.data.user.id,
+        email: created.data.user.email ?? email,
+        displayName: created.data.user.displayName,
+        tempPassword: created.data.tempPassword,
+      },
+    };
+  }
 
   const payload = {
     displayName,

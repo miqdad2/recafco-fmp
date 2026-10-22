@@ -73,9 +73,15 @@ export type {
   TechnicalApprovalAttachment,
   TechnicalFdIssuance,
   TechnicalFdIssuanceAttachment,
+  SalesEnquiry,
+  SalesActivity,
+  SalesFollowUp,
 } from './generated/prisma/client';
 export {
   Prisma,
+  SalesEnquiryStatus,
+  SalesActivityType,
+  SalesFollowUpStatus,
   IncidentSeverity,
   IncidentStatus,
   IncidentActionStatus,

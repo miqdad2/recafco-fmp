@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useState, useMemo, useEffect } from 'react';
-import { Check, AlertTriangle } from 'lucide-react';
+import { Check, AlertTriangle, Briefcase, BarChart3 } from 'lucide-react';
 import type { OrgEntity, LocationEntity } from '@/lib/organizations-api';
 import type { RoleSummary, PermissionSummary } from '@/lib/roles-api';
 import type { ModuleIdentifier, DepartmentAccessScope } from '@/lib/users-api';
@@ -29,6 +29,13 @@ import {
   shouldSendFullPlatformFlag,
   wizardVisibleModules,
 } from './access-mode-config';
+import {
+  ACCOUNT_TYPE_OPTIONS,
+  DEFAULT_ACCOUNT_TYPE,
+  MANAGEMENT_REVIEW_ROWS,
+  wizardStepsFor,
+  type AccountType,
+} from './account-type';
 import type { CreateWithAccessState } from '../actions';
 
 export type { AccessTemplate } from './access-template';
@@ -166,6 +173,7 @@ const ROLE_HINTS: Record<string, string> = {
   VIEWER: 'Read-only across modules',
   ADMIN: 'Platform Admin',
   SUPER_ADMIN: 'Full unrestricted access',
+  MANAGEMENT_INTELLIGENCE_VIEWER: 'Management Intelligence Center only — read-only, no operational access',
 };
 
 function roleOptionLabel(role: RoleWithPerms): string {
@@ -175,21 +183,18 @@ function roleOptionLabel(role: RoleWithPerms): string {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const WIZARD_STEPS = ['Account', 'Organization', 'Access Template', 'Module Access', 'Review & Create'] as const;
-
-function StepIndicator({ current }: { current: number }): React.JSX.Element {
+function StepIndicator({ steps, current }: { steps: { key: string; label: string }[]; current: number }): React.JSX.Element {
+  // Wraps instead of scrolling; below md only the active label is shown so five steps never overflow.
   return (
-    <ol className="flex items-center gap-1 sm:gap-2 mb-6 overflow-x-auto pb-1">
-      {WIZARD_STEPS.map((label, i) => {
+    <ol className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-2" aria-label="Progress">
+      {steps.map(({ key, label }, i) => {
         const state = i < current ? 'done' : i === current ? 'active' : 'upcoming';
         return (
-          <li key={label} className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <li key={key} className="flex items-center gap-1.5 sm:gap-2" aria-current={state === 'active' ? 'step' : undefined}>
             <span
               className={[
                 'flex items-center justify-center size-6 rounded-full text-[11px] font-semibold shrink-0',
-                state === 'done' ? 'bg-accent text-accent-foreground' : '',
-                state === 'active' ? 'bg-accent text-accent-foreground' : '',
-                state === 'upcoming' ? 'bg-surface-secondary text-text-muted border border-border' : '',
+                state === 'upcoming' ? 'bg-surface-secondary text-text-muted border border-border' : 'bg-accent text-accent-foreground',
               ].join(' ')}
               aria-hidden="true"
             >
@@ -197,15 +202,14 @@ function StepIndicator({ current }: { current: number }): React.JSX.Element {
             </span>
             <span
               className={[
-                'text-xs whitespace-nowrap',
+                'text-xs',
+                state === 'active' ? 'inline' : 'sr-only md:not-sr-only md:inline',
                 state === 'upcoming' ? 'text-text-muted' : 'text-text-primary font-medium',
               ].join(' ')}
             >
               {label}
             </span>
-            {i < WIZARD_STEPS.length - 1 && (
-              <span className="w-4 sm:w-8 h-px bg-border shrink-0" aria-hidden="true" />
-            )}
+            {i < steps.length - 1 && <span className="h-px w-3 bg-border md:w-6" aria-hidden="true" />}
           </li>
         );
       })}
@@ -280,6 +284,11 @@ export function NewUserWizard({
   const [state, formAction, isPending] = useActionState(action, null);
   const [step, setStep] = useState(0);
 
+  // Account Access (FMP-MIC-01C) — decides which steps exist; operational is the default.
+  const [accountType, setAccountType] = useState<AccountType>(DEFAULT_ACCOUNT_TYPE);
+  const isManagement = accountType === 'MANAGEMENT';
+  const steps = wizardStepsFor(accountType);
+
   // Step 1 — Account
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -313,6 +322,27 @@ export function NewUserWizard({
   }
   function handleModuleDeptIdsChange(mod: ModuleIdentifier, deptIds: string[]): void {
     setModuleDeptIds((prev) => ({ ...prev, [mod]: deptIds }));
+  }
+
+  /** Clears every operational selection so nothing chosen earlier can ride along with a management account. */
+  function resetOperationalSelections(): void {
+    setDepartmentId('');
+    setSelectedPlantId('');
+    setLocationId('');
+    setTemplate('MODULE_STAFF');
+    setTargetModule('');
+    setAccessMode(TEMPLATE_SUGGESTIONS['MODULE_STAFF'].mode);
+    setMultiModules([]);
+    setSelectedRoleId('');
+    setModuleScopes({});
+    setModuleDeptIds({});
+  }
+
+  function handleAccountTypeChange(next: AccountType): void {
+    if (next === accountType) return;
+    resetOperationalSelections();
+    setAccountType(next);
+    setStep(0);
   }
 
   const activeRoles = roles.filter((r) => r.isActive);
@@ -452,10 +482,17 @@ export function NewUserWizard({
     canGrantFullPlatform: canManageAll,
     roleAlreadyFullPlatform,
   });
-  const stepCanProceed = [canProceedFromAccount, true, canProceedFromTemplate, true, true];
+  const stepCanProceed: Record<string, boolean> = {
+    account: canProceedFromAccount,
+    organization: true,
+    template: canProceedFromTemplate,
+    modules: true,
+    review: true,
+  };
+  const stepKey = steps[step]?.key ?? 'account';
 
   function goNext(): void {
-    setStep((s) => Math.min(s + 1, WIZARD_STEPS.length - 1));
+    setStep((s) => Math.min(s + 1, steps.length - 1));
   }
   function goBack(): void {
     setStep((s) => Math.max(s - 1, 0));
@@ -576,15 +613,15 @@ export function NewUserWizard({
 
   return (
     <div className="max-w-3xl mx-auto rounded-lg border border-border bg-surface p-6 sm:p-8">
-      <StepIndicator current={step} />
+      <StepIndicator steps={steps} current={step} />
 
-      {preselectedModule && (
+      {!isManagement && preselectedModule && (
         <p className="mb-5 rounded-md bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
           Creating a user for {preselectedModuleLabel ?? wizardModuleLabel(preselectedModule)}. The module is already
           selected in Access Template below — change it there if needed.
         </p>
       )}
-      {!preselectedModule && preselectedTemplate === 'EXECUTIVE_MANAGER' && (
+      {!isManagement && !preselectedModule && preselectedTemplate === 'EXECUTIVE_MANAGER' && (
         <p className="mb-5 rounded-md bg-accent/10 px-3 py-2 text-xs font-medium text-accent">
           Creating an Executive Manager user. The access template is already selected below — change it there if
           needed.
@@ -603,7 +640,41 @@ export function NewUserWizard({
         )}
 
         {/* Step 1 — Account */}
-        <div className={step === 0 ? 'space-y-4' : 'hidden'}>
+        <div className={stepKey === 'account' ? 'space-y-4' : 'hidden'}>
+          <fieldset>
+            <legend className="mb-2 text-sm font-semibold text-text-primary">Account Access</legend>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {ACCOUNT_TYPE_OPTIONS.map((opt) => {
+                const selected = accountType === opt.value;
+                const Icon = opt.value === 'MANAGEMENT' ? BarChart3 : Briefcase;
+                return (
+                  <label
+                    key={opt.value}
+                    className={`relative flex cursor-pointer items-start gap-3 rounded-lg border-2 p-4 transition-colors focus-within:ring-2 focus-within:ring-focus ${
+                      selected ? 'border-accent bg-accent-light' : 'border-border bg-surface hover:border-border-strong'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="accountType"
+                      value={opt.value}
+                      checked={selected}
+                      onChange={() => handleAccountTypeChange(opt.value)}
+                      className="sr-only"
+                    />
+                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${selected ? 'bg-accent text-accent-foreground' : 'bg-surface-secondary text-text-secondary'}`}>
+                      <Icon className="size-5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-text-primary">{opt.label}</span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-text-secondary">{opt.description}</span>
+                    </span>
+                    {selected && <Check className="size-5 shrink-0 text-accent" aria-hidden="true" />}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
           <div>
             <label htmlFor="displayName" className="block text-sm font-medium text-text-primary mb-1">
               Full Name <span aria-hidden="true" className="text-error">*</span>
@@ -653,8 +724,12 @@ export function NewUserWizard({
           </div>
         </div>
 
+        {/* Steps 2–4 exist only for operational accounts. They are not rendered for a management account,
+            so none of their fields (department, role, module scopes, Full Platform flag) can be submitted. */}
+        {!isManagement && (
+        <>
         {/* Step 2 — Organization */}
-        <div className={step === 1 ? 'space-y-4' : 'hidden'}>
+        <div className={stepKey === 'organization' ? 'space-y-4' : 'hidden'}>
           <p className="text-xs text-text-muted bg-info-light border border-info/20 rounded-md px-3 py-2">
             Primary department is the user&rsquo;s default department. Module access controls which department
             records they can see.
@@ -755,7 +830,7 @@ export function NewUserWizard({
         </div>
 
         {/* Step 3 — Access Template + Role */}
-        <div className={step === 2 ? 'space-y-5' : 'hidden'}>
+        <div className={stepKey === 'template' ? 'space-y-5' : 'hidden'}>
           <div>
             <h3 className="text-sm font-semibold text-text-primary mb-3">Access Template</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1042,7 +1117,7 @@ export function NewUserWizard({
         </div>
 
         {/* Step 4 — Module Access */}
-        <div className={step === 3 ? 'space-y-3' : 'hidden'}>
+        <div className={stepKey === 'modules' ? 'space-y-3' : 'hidden'}>
           <p className="text-xs text-text-muted bg-info-light border border-info/20 rounded-md px-3 py-2">
             Module Access controls data visibility, not action permissions.
           </p>
@@ -1068,8 +1143,35 @@ export function NewUserWizard({
           {sendFullPlatformFlag && <input type="hidden" name="fullPlatformAccess" value="true" />}
         </div>
 
-        {/* Step 5 — Review & Create */}
-        <div className={step === 4 ? 'space-y-4' : 'hidden'}>
+        </>
+        )}
+
+        {/* Review & Create */}
+        <div className={stepKey === 'review' ? 'space-y-4' : 'hidden'}>
+          {isManagement ? (
+            <div className="rounded-md border border-border bg-surface-secondary/40">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-text-muted">Full Name</dt>
+                  <dd className="mt-0.5 break-words text-text-primary">{displayName || '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">Login Email</dt>
+                  <dd className="mt-0.5 break-words text-text-primary">{email || '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">Employee Number</dt>
+                  <dd className="mt-0.5 text-text-primary">{employeeNumber || '—'}</dd>
+                </div>
+                {MANAGEMENT_REVIEW_ROWS.map((row) => (
+                  <div key={row.label}>
+                    <dt className="text-xs text-text-muted">{row.label}</dt>
+                    <dd className="mt-0.5 text-text-primary">{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ) : (
           <div className="rounded-md border border-border bg-surface-secondary/40 divide-y divide-border">
             <dl className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div>
@@ -1138,7 +1240,9 @@ export function NewUserWizard({
             </div>
           </div>
 
-          {warnings.length > 0 && (
+          )}
+
+          {!isManagement && warnings.length > 0 && (
             <div className="space-y-2">
               {warnings.map((w) => (
                 <div
@@ -1174,17 +1278,19 @@ export function NewUserWizard({
             >
               Cancel
             </a>
-            {step < WIZARD_STEPS.length - 1 ? (
+            {step < steps.length - 1 ? (
               <button
+                key="next-step"
                 type="button"
                 onClick={goNext}
-                disabled={!stepCanProceed[step]}
+                disabled={!stepCanProceed[stepKey]}
                 className="h-10 px-5 rounded-md bg-accent text-accent-foreground text-sm font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-focus"
               >
                 Next
               </button>
             ) : (
               <button
+                key="create-user"
                 type="submit"
                 disabled={isPending}
                 className="h-10 px-5 rounded-md bg-accent text-accent-foreground text-sm font-medium hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-focus"

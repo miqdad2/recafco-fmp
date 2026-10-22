@@ -1,58 +1,45 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import {
-  FileText,
-  Calculator,
-  Ruler,
-  HardHat,
-  BadgeCheck,
-  Warehouse,
-  ShieldCheck,
-  AlertTriangle,
-  Factory,
-  Wrench,
-  ClipboardList,
-} from 'lucide-react';
+import { FileText, Ruler, HardHat, Warehouse, Factory, Gauge, Handshake, Lock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { authApi } from '@/lib/auth-api';
 import { platformApi } from '@/lib/platform-api';
+import { salesApi } from '@/lib/sales-api';
 import type { PlatformModuleCode } from '@/lib/platform-api';
 import { getLandingPath } from '../_lib/access-mode';
-import { ExecutiveModuleCard, type ModuleAccent } from './_components/executive-module-card';
-import { FactoryPerformanceCard } from './_components/factory-performance-card';
+import { ControlCenterCard } from './_components/control-center-card';
+import { ACCENT_PALETTE } from '../_lib/module-accent';
+import type { CardColor } from './_components/control-center-card';
+import { selectControlCenterCards, CARD_CTA, FACTORY_PERFORMANCE_CARD, SALES_ENQUIRIES_CARD } from './_lib/control-center-cards';
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
-const CARD_ICONS: Record<PlatformModuleCode, LucideIcon> = {
+const CARD_ICONS: Partial<Record<PlatformModuleCode, LucideIcon>> = {
   CONTRACTS_MANAGEMENT: FileText,
-  ESTIMATION: Calculator,
   TECHNICAL: Ruler,
-  ERECTION: HardHat,
-  QA_QC: BadgeCheck,
-  STORAGE_DELIVERY: Warehouse,
-  SAFETY_COMPLIANCE: ShieldCheck,
-  INCIDENT_REPORT: AlertTriangle,
   PRODUCTION_DASHBOARD: Factory,
-  MAINTENANCE_REQUESTS: Wrench,
-  FACTORY_TASKS: ClipboardList,
+  STORAGE_DELIVERY: Warehouse,
+  ERECTION: HardHat,
 };
 
-// FMP-UI-03 — soft, module-specific accent per card (see executive-module-card.tsx's own ACCENT_CLASSES).
-const CARD_ACCENTS: Record<PlatformModuleCode, ModuleAccent> = {
-  CONTRACTS_MANAGEMENT: 'contracts',
-  ESTIMATION: 'estimation',
-  TECHNICAL: 'technical',
-  ERECTION: 'erection',
-  QA_QC: 'qaqc',
-  STORAGE_DELIVERY: 'storage',
-  SAFETY_COMPLIANCE: 'safety',
-  INCIDENT_REPORT: 'incident',
-  PRODUCTION_DASHBOARD: 'production',
-  MAINTENANCE_REQUESTS: 'maintenance',
-  FACTORY_TASKS: 'tasks',
+// FMP-UI-37 — stable module colours (the shared accent palette; Factory Performance and Sales are not platform modules, so theirs are local).
+const CARD_COLORS: Partial<Record<PlatformModuleCode, CardColor>> = {
+  CONTRACTS_MANAGEMENT: ACCENT_PALETTE.contracts, // royal / deep blue
+  TECHNICAL: ACCENT_PALETTE.technical, // indigo
+  PRODUCTION_DASHBOARD: ACCENT_PALETTE.production, // violet
+  STORAGE_DELIVERY: { base: '#46608f', light: '#edf1f8' }, // slate blue
+  ERECTION: { base: '#c2410c', light: '#fff4ed' }, // burnt orange
 };
+const FACTORY_PERFORMANCE_COLOR: CardColor = { base: '#0b2545', light: '#eaf1fb' };
+const SALES_COLOR: CardColor = { base: '#c62828', light: '#fdecec' }; // RECAFCO red
+
+/**
+ * FMP-UI-36 — the existing, working Factory Performance destination (a separate application, opened in a
+ * new tab). Unchanged from the previous card; it is not a permission-gated platform module.
+ */
+const FACTORY_PERFORMANCE_URL = 'http://192.168.1.17:83';
 
 export default async function ExecutiveDashboardPage(): Promise<React.JSX.Element> {
   const store = await cookies();
@@ -77,173 +64,92 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
     loadError = true;
   }
 
-  const cards = dashboard?.cards ?? [];
+  // FMP-UI-36 — only the five retained modules, in the approved order. Which of them a user gets is still
+  // decided by the API (existing per-module read permissions); nothing is granted by being shown here.
+  const cards = selectControlCenterCards(dashboard?.cards ?? []);
+
+  // FMP-SALES-01/01A — the Sales & Enquiries card is ALWAYS shown (so the Control Center keeps its seven
+  // cards), but its figures are fetched and its button is active only for users who hold sales.read (the
+  // Sales API checks it again). Without it the card is an "Access Restricted" notice: nothing is fetched,
+  // no figures are shown and there is no link. If the figures cannot be loaded the tiles read "Not
+  // available", never 0.
+  const hasSales = permissions.includes('sales.read');
+  const salesRes = hasSales ? await salesApi.dashboard() : null;
+  const salesMetrics = [
+    { label: 'Enquiries This Month', value: salesRes?.data ? salesRes.data.enquiriesThisMonth : null },
+    { label: 'Follow-ups Due', value: salesRes?.data ? salesRes.data.followUpsDue : null },
+    { label: 'Active Enquiries', value: salesRes?.data ? salesRes.data.openEnquiries : null },
+    { label: 'Confirmed Projects', value: salesRes?.data ? salesRes.data.projectsWon : null },
+  ];
 
   return (
-    // FMP-UI-04B — the large hero card (title/subtitle/welcome-and-meta strip)
-    // was removed entirely and the title moved to TopHeader.
-    // FMP-UI-14 — moved the title back OUT of TopHeader (which should only
-    // carry user name/role + Sign out, per this unit's own brief) and into
-    // a proper hero heading here instead, above the grid — a senior
-    // manager's landing screen reads more "intentional platform," not
-    // borrowed header chrome. Kept genuinely compact (no separate hero
-    // card/border/background — just a heading + the same instruction line
-    // this page already had, now living together) specifically so it
-    // doesn't reopen the "too much empty space" problem FMP-UI-04B/09B
-    // already solved: it's the first child of the same `flex-1
-    // justify-center` block as the grid, so it's centered together WITH
-    // the cards rather than adding a fixed block above the centered area.
-    // FMP-UI-04C — top padding reduced (pt-3/pt-4, was p-5/p-6 on every side)
-    // so the grid starts closer to the header now that there's no hero card
-    // to separate from — side/bottom padding kept for breathing room.
-    // FMP-UI-09B — padding trimmed slightly further (pt-3/pb-5 → pt-2/pb-3 at
-    // base, lg:pt-4/lg:pb-6 → lg:pt-3/lg:pb-4) to give the grid a bit more of
-    // the available height, and the whole thing is now `min-h-full` with the
-    // grid centered inside a `flex-1 justify-center` wrapper — `<main>` in
-    // AppShell is already the real scroll container, so this page's own root
-    // can safely claim "at least all of it" without breaking mobile's normal
-    // scrolling (min-h, not h, so content taller than one screen still grows
-    // and scrolls exactly as before). Centering means any extra vertical
-    // room on a tall 1080p desktop screen is split evenly above and below
-    // the whole title+grid block instead of collecting as one large gap
-    // underneath it. FMP-UI-14 trimmed the top padding by one more notch
-    // (pt-2→pt-1, lg:pt-3→lg:pt-2) to reclaim a little of the room the new
-    // heading needs.
-    // FMP-UI-23B — trimmed once more (pt-1→pt-0.5/pb-3→pb-2 at base,
-    // lg:pt-2→lg:pt-1/lg:pb-4→lg:pb-3), and the hero→grid gap eased
-    // space-y-2→space-y-1.5, as part of fitting 11 cards (3 rows) into a
-    // normal 1920x1080 viewport with no page scroll — see the title
-    // block's own FMP-UI-23B note below for the matching size reduction.
-    // FMP-UI-23D — outer top/bottom padding left exactly as FMP-UI-23B set
-    // it (still compact, per this unit's own "keep top spacing compact"
-    // requirement); only the INNER hero→grid gap changed — see below.
-    <div className="mx-auto flex min-h-full max-w-7xl flex-col px-5 pt-0.5 pb-2 lg:px-6 lg:pt-1 lg:pb-3">
-      {/* FMP-UI-23D — `space-y-1.5` (a bare 6px, "cramped"/"cards feel
-          attached to the heading" per this unit's own brief) replaced with
-          a real flex `gap-6 lg:gap-8` (24px→32px, this unit's own
-          recommended range) applied via CSS `gap` rather than `space-y`'s
-          margin-top-on-siblings trick — `gap` applies uniformly between
-          EVERY pair of adjacent children (heading→error-banner,
-          heading→grid, or banner→grid on the rare error/empty path),
-          so the heading never touches whatever renders below it, in any
-          state. */}
-      <div className="flex flex-1 flex-col justify-center gap-6 lg:gap-8">
-        {/* FMP-UI-14 — the main dashboard hero title, replacing the one that
-            used to live in TopHeader. Always shown (even on an error/empty
-            state, same as any page's own title would be).
-            FMP-UI-15 — added a "Factory Operations Control Center" tagline
-            (same small-caps treatment the login page uses for its own
-            tagline) plus a helper line and an executive summary chip strip
-            below it.
-            FMP-UI-15B — removed the helper line ("Select a module to view
-            status...") and the entire summary chip strip (Modules /
-            Executive View / Updated Today / Total Contracts / Erection
-            Contracts / Overdue Tasks) per direct feedback that they read as
-            clutter — the module cards below already explain what's
-            available, and the sidebar already provides navigation, so
-            neither was adding information a manager didn't already have.
-            Title + tagline are the whole hero now. The parent's own
-            `space-y-3`→`space-y-2` (hero → grid gap) also tightened now
-            that the hero is shorter, so the cards sit closer to the title
-            instead of the centered block just leaving more blank space
-            above/below evenly.
-            FMP-UI-23B — title eased text-3xl/lg:text-4xl → text-2xl/lg:text-3xl
-            and the subtitle gap mt-1.5 → mt-1, freeing vertical room for
-            the now-3-row (11-card) grid below without page scroll.
-            FMP-UI-23C — the "RECAFCO Factory Management Platform" title AND
-            its small-caps tagline are both gone; the sidebar already carries
-            the RECAFCO FMP brand (logo + name), so repeating the full
-            product name here read as redundant. "Factory Operations Control
-            Center" is now the ONLY heading, promoted from a small uppercase
-            caption to the page's one large, bold, centered `<h1>`
-            (`text-2xl sm:text-3xl lg:text-5xl font-extrabold`) — bigger than
-            the OLD title ever was despite being the only line now, so this
-            is a net height REDUCTION versus the two-line title+tagline block
-            it replaces (a single bigger line is shorter than a big line plus
-            a subtitle line), which is why it doesn't push the card grid down
-            even at the largest `lg:text-5xl` size.
-            FMP-UI-23D — sized up one more step at the smaller breakpoints
-            (`text-2xl`→`text-3xl`, `sm:text-3xl`→`sm:text-4xl`) per this
-            unit's own recommended `text-3xl sm:text-4xl lg:text-5xl`;
-            `lg:text-5xl` itself is UNCHANGED (already at this unit's own
-            "if it still fits well" ceiling) — so the no-scroll-critical
-            desktop breakpoint gets zero extra height from the heading
-            itself, only from the larger hero→grid gap below. */}
-        <h1 className="text-center text-3xl font-extrabold tracking-tight text-text-primary sm:text-4xl lg:text-5xl">
-          Factory Operations Control Center
-        </h1>
+    // FMP-UI-36 — uses the full content width (no narrow centered container). Columns: 1 (mobile),
+    // 2 (md/tablet), 3 (xl, e.g. 1366px), 4 (2xl, e.g. 1920px: 4 + 3). No fixed widths, so no horizontal scroll.
+    <div className="mx-auto w-full max-w-[1760px] px-5 py-6 lg:px-8 lg:py-8">
+      <h1 className="mb-8 text-3xl font-extrabold tracking-tight text-text-primary lg:text-4xl">Factory Operations Control Center</h1>
 
-        {loadError && (
-          <div className="rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
-            Dashboard data unavailable. The API may be offline — please try again shortly.
-          </div>
-        )}
-
-        {!loadError && cards.length === 0 && (
-          <div className="rounded-lg border border-border bg-surface p-10 text-center">
-            <p className="text-base text-text-secondary">
-              You do not have access to any platform modules yet. Contact your administrator to request access.
-            </p>
-          </div>
-        )}
-
-        {/* FMP-UI-04 — grid's default `align-items: stretch` makes every card
-            in a row match the row's tallest card, so each
-            ExecutiveModuleCard's own `mt-auto` button lands at the same
-            height across the row regardless of description length.
-            FMP-UI-10 — widened to 5 columns on large desktop (was 4) for 10
-            cards (exactly 2 rows), with an added 3-column step for medium
-            desktop between the existing 2-column tablet step and the
-            5-column large-desktop step.
-            FMP-UI-23 — eased large-desktop back to 4 columns (was 5) now
-            that Estimation makes 11 cards: 5 columns would leave an
-            orphaned single card on its own row (5+5+1); 4 columns gives a
-            cleaner 3-row spread (4+4+3) without narrowing any card enough
-            to risk "Storage Yard & Delivery"/"Production & Planning"
-            wrapping awkwardly. Still 1 (mobile) → 2 (md, tablet) → 3 (lg,
-            medium desktop) → 4 (xl, large desktop).
-            FMP-UI-23B — gap eased gap-3 → gap-2.5 (a small additional
-            contribution to fitting 3 rows of compacted cards without page
-            scroll, on top of this component's own per-card size pass).
-            FMP-UI-24 — standardized grid:
-            - `auto-rows-fr`: every ROW is the same height, so all 11 cards
-              are equal height (row-stretch alone only equalized cards
-              within one row). Each card's own content zone is `flex-1`, so
-              the extra height goes into its tiles, not a gap above the button.
-            - Columns are `auto-fill` with a minimum card width (17.5rem
-              from `lg` up; 14rem below it, so a tablet with the sidebar
-              open still gets 2 per row) instead of fixed column counts: the sidebar makes the real content width
-              much narrower than the viewport, so `xl:grid-cols-4` could
-              squeeze 4 cards into ~230px each. Now it is 4 per row when
-              there is room for four 280px cards (the max-w-7xl container
-              fits exactly 4, never 5), 3 or 2 on narrower widths, 1 on
-              mobile — and a card is never narrower than its own content
-              needs. The last row's 3 cards keep the same column width.
-            - One uniform `gap-3.5` (was 2.5) in both directions. */}
-        <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] gap-3.5 lg:grid-cols-[repeat(auto-fill,minmax(17.5rem,1fr))]">
-          {cards.map((card) => (
-            <ExecutiveModuleCard
-              key={card.code}
-              title={card.title}
-              description={card.description}
-              href={card.route}
-              icon={CARD_ICONS[card.code]}
-              metrics={card.metrics}
-              accent={CARD_ACCENTS[card.code]}
-            />
-          ))}
-          {/* FMP-UI-36 — the Factory Performance Dashboard is a separate app,
-              not a permission-gated platform module, so it is not part of
-              `cards` (no API/permission change, per this unit's own
-              requirement). FACTORY_TASKS ("Task Management") is always the
-              LAST card `platform-dashboard.service.ts` pushes when a user
-              has `tasks.read`, so rendering this immediately after the
-              `cards.map` loop places it right after Task Management for
-              every normal user; it still renders even for the rare actor
-              without `tasks.read`, per this unit's own "no permission check"
-              requirement. */}
-          <FactoryPerformanceCard />
+      {loadError && (
+        <div role="alert" className="mt-6 rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">
+          Dashboard data unavailable. The API may be offline — please try again shortly.
         </div>
+      )}
+
+      {!loadError && cards.length === 0 && !hasSales && (
+        <div className="mt-6 rounded-lg border border-border bg-surface p-6 text-base text-text-secondary">
+          You do not have access to any platform modules yet. Contact your administrator to request access.
+        </div>
+      )}
+
+      <div className="grid auto-rows-fr grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {cards.map((card) => (
+          <ControlCenterCard
+            key={card.code}
+            title={card.displayTitle}
+            description={card.displayDescription}
+            href={card.route}
+            icon={CARD_ICONS[card.code] ?? FileText}
+            metrics={card.metrics}
+            cta={CARD_CTA[card.code]}
+            color={CARD_COLORS[card.code] ?? ACCENT_PALETTE.contracts}
+          />
+        ))}
+
+        {/* Separate application, not a platform module: always shown (as before), opens in a new tab, no invented figures. */}
+        <ControlCenterCard
+          title={FACTORY_PERFORMANCE_CARD.title}
+          description={FACTORY_PERFORMANCE_CARD.description}
+          href={FACTORY_PERFORMANCE_URL}
+          external
+          icon={Gauge}
+          badge="External"
+          cta={CARD_CTA.FACTORY_PERFORMANCE}
+          color={FACTORY_PERFORMANCE_COLOR}
+          note={{ heading: 'Figures open separately', text: 'Factory performance figures are shown in the separate Factory Performance dashboard.' }}
+        />
+
+        {/* FMP-SALES-01A - always the seventh card: live for sales.read, otherwise a restricted notice (no data, no link). */}
+        {hasSales ? (
+          <ControlCenterCard
+            title={SALES_ENQUIRIES_CARD.title}
+            description={SALES_ENQUIRIES_CARD.description}
+            href="/sales"
+            icon={Handshake}
+            metrics={salesMetrics}
+            cta={CARD_CTA.SALES_ENQUIRIES}
+            color={SALES_COLOR}
+          />
+        ) : (
+          <ControlCenterCard
+            title={SALES_ENQUIRIES_CARD.title}
+            description={SALES_ENQUIRIES_CARD.description}
+            icon={Handshake}
+            noteIcon={Lock}
+            badge="Access Restricted"
+            note={{ heading: 'Access Restricted', text: 'Sales information is confidential. Ask your administrator if you need access.' }}
+            footer="Access Restricted"
+            color={SALES_COLOR}
+          />
+        )}
       </div>
     </div>
   );

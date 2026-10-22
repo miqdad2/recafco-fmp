@@ -25,6 +25,10 @@ function generateTempPassword(): string {
   return '123';
 }
 
+/** FMP-MIC-01C — the Management Intelligence account type: one role, one permission, nothing operational. */
+export const MANAGEMENT_ROLE_CODE = 'MANAGEMENT_INTELLIGENCE_VIEWER';
+const MANAGEMENT_PERMISSION_PREFIX = 'management_intelligence.';
+
 const USER_SELECT = {
   id: true,
   username: true,
@@ -287,6 +291,7 @@ export class UsersService {
   async setFullPlatformAccess(id: string, value: boolean, actor: AuthUser): Promise<UserSummary> {
     const existing = await this.findOneOrThrow(id, actor);
     if (existing.fullPlatformAccess === value) return toSummary(existing);
+    if (value) await this.assertNotManagementOnlyAccount(id);
     const updated = await this.db.getClient().$transaction(async (tx) => {
       const u = await tx.user.update({ where: { id }, data: { fullPlatformAccess: value }, select: USER_SELECT });
       await tx.securityAuditEvent.create({
@@ -723,7 +728,7 @@ export class UsersService {
 
     const role = await this.db.getClient().role.findUnique({
       where: { id: requestedRoleId },
-      select: { id: true, code: true, isActive: true },
+      select: { id: true, code: true, isActive: true, permissions: { select: { permission: { select: { code: true } } } } },
     });
     if (!role) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Role not found' });
@@ -738,7 +743,32 @@ export class UsersService {
       });
     }
 
+    // The Management Intelligence account type must stay isolated: refuse to create an account on this
+    // role if it has ever been given anything beyond management_intelligence.* (data drift or tampering).
+    if (role.code === MANAGEMENT_ROLE_CODE) {
+      const codes = (role.permissions ?? []).map((rp) => rp.permission.code);
+      if (codes.length === 0 || !codes.every((c) => c.startsWith(MANAGEMENT_PERMISSION_PREFIX))) {
+        throw new UnprocessableEntityException({
+          code: 'MANAGEMENT_ROLE_NOT_ISOLATED',
+          message: 'The Management Intelligence Viewer role must hold only management_intelligence permissions.',
+        });
+      }
+    }
+
     return role.id;
+  }
+
+  /** FMP-MIC-01C — a management-only account can never be given Full Platform Access or operational module access. */
+  async assertNotManagementOnlyAccount(userId: string): Promise<void> {
+    const user = await this.db
+      .getClient()
+      .user.findUnique({ where: { id: userId }, select: { role: { select: { code: true } } } });
+    if (user?.role.code === MANAGEMENT_ROLE_CODE) {
+      throw new UnprocessableEntityException({
+        code: 'MANAGEMENT_ONLY_ACCOUNT',
+        message: 'Management Intelligence accounts cannot be given Full Platform Access or operational module access.',
+      });
+    }
   }
 
   private async assertNotLastActiveSuperAdmin(excludeId: string, action: string): Promise<void> {

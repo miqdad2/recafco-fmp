@@ -15469,3 +15469,113 @@ Previous/Next/Switch Module, Back to Platform Dashboard, and each page's own pri
 - Web test suite: 1644 passed / 1 failed — the failing test (`administration/users/__tests__/email-login-identity.test.ts`, checking the login form's Email-vs-Username label wording) is in a file this unit never touched (`login/_components/login-form.tsx`, confirmed unmodified via `git status`) and was already failing before this unit started (the immediately preceding progress-tracker entry, FMP-PARTIES-01, already documents this same pre-existing failure) — unrelated to this unit's scope, not fixed here.
 - `git status` confirms exactly the 5 files above changed — no sidebar, shell, backend, or schema file touched; `prisma migrate status` clean (no migration added).
 - Not checked in a live browser at 1366×768 / 1440×900 / 1920×1080 as the ticket's own Section 7 asks — every child component inside all 4 dashboards was read and confirmed to have no width constraint of its own before relying on the shared container fix alone, and the production build statically compiles every route, but an actual rendered screenshot at each viewport was not taken from this environment.
+
+## FMP-MIC-01 - Isolated Management Intelligence Center (2026-10-21, local only, not deployed)
+
+Foundation only: access isolation, navigation, home page and connection-pending module pages. No Factory Management API is called and no figure is shown.
+
+### Authentication and access
+- **Same login.** No `/management/login`, no second identity table. Users sign in at `/login`; `loginAction` -> `/welcome` -> `/` -> `/dashboard` is unchanged.
+- **Permission** `management_intelligence.read`; **role** `MANAGEMENT_INTELLIGENCE_VIEWER` holds only that permission. Migration `20261021000000_add_management_intelligence_access` (additive, idempotent: 1 permission, 1 role, 1 role-permission; changes nothing existing). **Not applied to any database yet** - run `pnpm db:migrate:deploy` locally when ready. No role (including SUPER_ADMIN/ADMIN) receives the permission automatically.
+- **Provisioning:** Administration > Users > New User > Access Template "Custom" > role "Management Intelligence Viewer". Existing username/password setup and first-login password change apply. Do not tick Full Platform Access.
+- **Management-only** = every effective permission starts with `management_intelligence.` and no Full Platform Access flag (`apps/web/src/lib/management-access.ts`).
+- **Landing rule** (`getLandingPath`): management-only -> `/management/intelligence`; everyone else unchanged (single-module -> module dashboard, otherwise Control Center). A user with both management and operational permissions keeps their operational landing; the management permission never overrides it, and such a user reaches the Center by URL only (no link added to the operational sidebar - follow-up if wanted).
+- **Isolation:** `(protected)/layout.tsx` redirects a management-only user to the Center for every operational route (direct URL, refresh, restored session); the Center layout redirects users without the permission to `/dashboard`. Backend: `GET /management-intelligence/status` requires `management_intelligence.read` (class-level `@Permissions`, `PermissionGuard`); the SUPER_ADMIN role code and operational permissions do not substitute. Existing operational endpoints still require their own permissions, which the new role does not hold.
+
+### New routes
+`/management/intelligence` (home / Executive Overview hub) and `/management/intelligence/[module]` for `executive-overview`, `projects-engineering`, `production-casting`, `stock-delivery`, `erection`, `daily-performance`, `resources-costs`, `targets-achievement`, `delays-follow-up`, `data-quality`. API: `GET /management-intelligence/status` (static NOT_CONFIGURED).
+
+### Files
+New: the migration above; `apps/api/src/management-intelligence/*` (module, controller, service, test); `apps/web/src/lib/management-access.ts` (+ test); `apps/web/src/app/management/intelligence/**` (layout, page, `[module]/page.tsx`, `_components`, `_lib` + test); `docs/management-intelligence.md`.
+Changed: `apps/api/src/app.module.ts`, `(protected)/layout.tsx`, `(protected)/_lib/access-mode.ts` (`getLandingPath`), `new-user-wizard.tsx` (role hint only), `context/progress-tracker.md`, `context/ui-registry.md`.
+
+### Validation
+Web and API typecheck clean; eslint clean on touched files; API suite 2328/2328; web suite 1663 pass, 1 fail (the login-placeholder test in `email-login-identity.test.ts`, failing before this unit); `next build` compiles and lists the two new routes. New tests: 5 API authorization, plus web access/landing/module tests. **Not done:** migration not applied, no seeded management user, no live browser run (login landing, 1366/1440/1920/tablet/mobile widths, sign-out, reload) - these need the migration and a test user first.
+
+### Pending before live data
+Approved server-side read-only credential for Factory Management (192.168.0.12:8080) for `GET /api/operations/summary`, `/api/projects/{id}/dashboard`, `/api/management/report`; then a server-side client in the API plus real KPI/chart pages. See `docs/management-intelligence.md`.
+
+## FMP-MIC-01C - Simplified New User creation for Management Intelligence accounts (2026-10-21, local only, not committed or deployed)
+
+### What changed
+- **Account Access choice** at the top of wizard step 1: "FMP Operational User" (default, unchanged five-step flow) or "Management Intelligence Viewer" (two steps: Account & Access, Review & Create). Pure step/summary definitions live in `_components/account-type.ts`.
+- **Branching is real, not cosmetic:** for a management account the Organization, Access Template and Module Access steps are not rendered, so `roleId`, department, module scopes and the Full Platform flag are never in the submitted form. Switching type calls `resetOperationalSelections()` so nothing chosen earlier can ride along; switching also returns to step 1.
+- **Server action** (`createUserWithAccessAction`): when `accountType=MANAGEMENT` it ignores every role/department/scope/Full Platform field, looks the role up by code `MANAGEMENT_INTELLIGENCE_VIEWER` itself, and calls the existing `usersApi.create` only (no module-access or platform-access calls). Username, temporary password, must-change-password and audit all come from the existing `UsersService.create`.
+- **API enforcement** (`users.service.ts`, `users.controller.ts`): creating on the management role requires the role to hold only `management_intelligence.*` permissions (else 422 `MANAGEMENT_ROLE_NOT_ISOLATED`); `PUT /administration/users/:id/platform-access` with true and `PUT .../module-access/:module` are refused for a management-only account (422 `MANAGEMENT_ONLY_ACCOUNT`). Existing permission checks unchanged; no new endpoint.
+- **Users list:** the role badge for Management Intelligence Viewer is blue so these accounts stand out; they are not shown as Full Platform.
+- **Wizard fixes:** the step indicator no longer scrolls horizontally (wraps; below `md` only the active label shows). The Next / Create User buttons now have distinct keys: with a shared element React flipped the button to `type=submit` during the same click, which submitted the form when Next was pressed on the last step before Review.
+
+### Verification
+- API 2334/2334 (6 new isolation tests); web 1671 pass, 1 fail (the login-placeholder test that was already failing); typecheck and eslint clean; `next build` compiles.
+- Browser check of the wizard (temporary preview page, since removed; no real user created) at 1366, 1920, 768 and 390 px: no horizontal overflow; management flow shows 2 steps and submits no `roleId` / `fullPlatformAccess`; switching back restores 5 steps. Screenshots in the session scratchpad.
+- Migration `20261021000000_add_management_intelligence_access` already shows as applied on the local `recafco_fmp_dev` database (`prisma migrate status`: up to date); nothing was applied by this unit.
+- Not done: creating a real management user and logging in through `/login` (needs an admin session on the dev database; landing/logout logic is covered by the MIC-01 tests).
+
+### Files
+New: `_components/account-type.ts`, `__tests__/account-type.test.ts`, `apps/api/src/users/users.management-account.test.ts`.
+Changed: `new-user-wizard.tsx`, `actions.ts`, `administration/users/page.tsx` (badge colour), `apps/api/src/users/users.service.ts`, `users.controller.ts`, `context/ui-registry.md`, `docs/management-intelligence.md`.
+
+## FMP-CONTRACT-DETAIL-01 — Contract Detail tabs reorganized by department
+
+- Contract Detail now shows 13 tabs: Overview, Technical, Production & Planning, Delivery, Erection, Variations / Change Orders, Claims, Risk Assessment, Documents & Obligations, Issue Log, Attachments, Activity / Audit History, Closeout.
+- Removed from the tab bar only: Schedule, Payments, Production Status, BOQ Progress, Workflow & Team Tasks. Their routes, pages, data and APIs are untouched (deep links work); `alsoActiveFor` keeps Technical highlighted on `/boq-progress`, Production & Planning on `/production`, Erection on `/workflow/erection/*`.
+- New read-only tabs (`/technical`, `/production-planning`, `/delivery`, `/erection` under the contract): counts from the existing `boq-confirmations`, `element-drawings/coverage` and `boq-attachments` endpoints, scoped to the one contract. Gate: `contracts.read`; the button to the existing department screen needs that screen's own read permission. No update actions, no new endpoints, tables or migrations.
+- Unsupported (shown as "—" with a reason): Erection "In Erection" (no such element status) and "Hold / Rejected" (not stored per department). Delivery "Ready for Delivery" equals "In Store" (no separate status).
+- Tab bar now wraps at every width (no horizontal scroll).
+- Files: `contracts/_lib/contract-workspace-tabs.ts`, `contract-department-helpers.ts`, `_components/contract-workspace-tabs.tsx`, `contract-department-panel.tsx`, four new pages, two test files. Pre-existing unrelated failure: `email-login-identity.test.ts` (login placeholder).
+
+## FMP-UI-36 — Factory Operations Control Center redesign
+
+- `/dashboard` now shows exactly seven cards: Contract Management, Technical, Production & Planning, Delivery, Erection, Factory Performance, Sales & Enquiries.
+- Removed from this homepage only: Estimation, Safety & Compliance, Incident Management, Maintenance Management, Task Management, Quality Control. Their routes, pages, services and permissions are untouched; the API (`PlatformDashboardService`) is unchanged and still decides which cards a user gets.
+- "Storage Yard & Delivery" is displayed as "Delivery" (title and description only); it still opens the existing route from the API.
+- Factory Performance keeps its existing external destination (opens in a new tab) and shows no figures; the old label-only metric tiles were dropped.
+- Sales & Enquiries is a non-clickable "Setup Pending" card (no counts, no button). Full module: FMP-SALES-01.
+- Order/titles/descriptions: `dashboard/_lib/control-center-cards.ts`. Card: `dashboard/_components/control-center-card.tsx` (replaces `executive-module-card.tsx` and `factory-performance-card.tsx`, now deleted). Tests: `control-center-cards.test.ts`.
+- Pre-existing unrelated failing test: `email-login-identity.test.ts` (login placeholder).
+
+## FMP-UI-37 — Control Center cards restyled (module-themed)
+
+- Same seven cards, order, titles, routes, badges and metric logic as FMP-UI-36; only the look changed: white card with a 1px module-colour border, pastel icon chip, tinted 2x2 KPI tiles, dashed tinted Setup Pending/External panel, full-width module-colour "Open Dashboard" button, uppercase status badge top-right, subtle hover lift.
+- Colours: Contract navy, Technical indigo, Production purple, Delivery slate (from `_lib/module-accent.ts`), Erection amber, Factory Performance deep blue `#0b2545`, Sales rose `#be123c` (local to `dashboard/page.tsx`).
+- Files: `dashboard/_components/control-center-card.tsx` (new required `color` prop), `dashboard/page.tsx` (colour map, container max width 1760px), `dashboard/_lib/control-center-cards.test.ts`.
+
+## FMP-UI-38 — Control Center premium polish and module-specific buttons
+
+- Same seven cards, order, routes, permissions and data. Buttons now read: Open Contract Management, Open Technical, Open Production, Open Delivery, Open Erection, Open Factory Performance (external icon, new tab). Sales & Enquiries has no button: a dashed "Setup Pending" footer instead.
+- Card: `p-5`, larger icon chip (size-11), title gets the room beside a compact 10px badge, description fixed to a 2-line area, KPI tiles `min-h-20` with `text-3xl` numbers and 13px labels; setup panels carry a small module icon. Button text wraps instead of truncating.
+- Colours: Contract royal blue, Technical indigo, Production violet, Delivery slate blue `#46608f`, Erection burnt orange `#c2410c`, Factory Performance navy, Sales RECAFCO red `#c62828`.
+- Display-only metric wording (`METRIC_DISPLAY_LABELS`, e.g. "SD / Calc." -> "Pending Calculations"); values and order untouched.
+- Badge stays computed: Live only when at least one real metric value exists; Delivery still shows Setup Pending with its working link.
+- Files: `dashboard/_components/control-center-card.tsx`, `dashboard/page.tsx`, `dashboard/_lib/control-center-cards.ts` + test.
+
+## FMP-SALES-01 — Sales & Enquiries foundation
+
+- New module, additive migration `20261022000000_add_sales_enquiries_foundation` (4 tables, 3 enums, `sales.*` permissions, roles SALES_MANAGER / SALES_VIEWER, SUPER_ADMIN granted). Applied to the LOCAL dev database only; not applied anywhere else.
+- API `apps/api/src/sales/` (controller, service, pure rules in `sales.logic.ts`, DTOs): enquiries CRUD (no delete), status changes (Lost needs a reason; Won records awarded value/date, never overwrites the estimate), activities, follow-ups (complete/reschedule keep history), dashboard, monthly report. Kuwait-time dates.
+- Web `(protected)/sales/`: dashboard, All Enquiries (search + status + month, server pagination), New Client Enquiry (single page, 3 sections), Enquiry Detail, Edit, Follow-ups. Own nav bar; not in the sidebar. Control Center Sales card is now real and shown only with `sales.read`.
+- Conversion = cohort rate (created in month and now Won / created in month); N/A when none created. See `docs/sales-enquiries.md`.
+- Tests: API 2379+ (sales: logic, service with mocked DB, controller authorization, DTO validation); web format/guard tests; live checks against local PostgreSQL and a headless browser run (temporary test users and rows removed afterwards).
+- Not included: attachments, export, on-screen reassignment, reminders, Contract linking.
+
+## FMP-SALES-01A — Sales card always visible; Access Restricted state
+
+- Root cause: the Control Center rendered the Sales card only when the user held `sales.read`; `EXECUTIVE_MANAGER` (75 permissions) and `ADMIN` hold none of the five Sales codes, so the card was omitted and only six cards showed.
+- Fix (UI only): the Sales card is always shown as the seventh card. With `sales.read`: real figures + Open Sales & Enquiries (-> /sales). Without it: "Access Restricted" badge, lock panel and footer, no link, no figures, and the Sales API is not called. `ControlCenterCard` gained `noteIcon`. No permission, role, route or Sales data changed.
+- Verified live (temporary users, removed afterwards): Executive Manager sees seven cards in order, same height, Sales restricted, zero /sales requests, API 403 on every Sales route and not-found on every /sales page; SALES_VIEWER (+ Full Platform Access) sees Sales live and cannot create/edit (403); SALES_MANAGER creates and edits; unauthenticated 401; no horizontal overflow at 1920/1366/768/390.
+- Decision needed: one role per user, so SALES_VIEWER replaces the Executive Manager role (see docs/sales-enquiries.md). Workaround today: SALES_VIEWER + Full Platform Access (read-only everywhere). A combined "Executive Manager + Sales Viewer" role is not created.
+- Files: `dashboard/page.tsx`, `dashboard/_components/control-center-card.tsx`, `dashboard/_lib/control-center-cards.test.ts`, `docs/sales-enquiries.md`.
+
+## FMP-SALES-01B — Sales visible to operational roles, editable by management only
+
+- Additive migration `20261023000000_grant_sales_visibility_to_operational_roles` (INSERT ... ON CONFLICT DO NOTHING into role_permissions; +13 rows, applied to LOCAL dev DB only): `sales.read` + `sales.reports.read` to ADMIN, VIEWER, CONTRACT_MANAGER, CONTRACT_MANAGEMENT_USER; all five Sales codes to EXECUTIVE_MANAGER (SUPER_ADMIN already had them). Excluded on purpose: MANAGEMENT_INTELLIGENCE_VIEWER, CONTRACT_STAFF, TECHNICAL_MANAGER/STAFF. SALES_MANAGER/SALES_VIEWER unchanged; no user, role or Sales row touched. Executive Manager keeps its 75 other permissions.
+- API guards unchanged (they already used sales.read / create / update / manage / reports.read). UI: read-only visitors get one friendly line in the Sales layout; all write controls were already permission-gated and are not rendered for them.
+- Verified live with 9 temporary role users (removed afterwards): permissions per role, reads 200, every write 403 for read-only/no-access roles with the record unchanged, no DELETE route, writers can create/edit/status/note/follow-up/reschedule/complete/reassign, Management Intelligence account stays isolated, Control Center shows the live Sales card as the 7th card for Executive Manager, Viewer, Admin, Super Admin (Contract Manager lands on its own module dashboard by design).
+- Tests: `apps/api/src/sales/sales-access-migration.test.ts` pins the migration. Files: migration, `sales/layout.tsx`, that test, docs.
+
+## FMP-SALES-01C — Sales UX simplification (plain wording, popup entry)
+
+- Wording only, no schema change: Won -> Confirmed, Lost -> Not Proceeding, Meeting Done/Contacted -> Under Discussion, FOLLOW_UP -> Follow-up Needed, NEW_ENQUIRY -> New; "Awarded value/date" -> "Confirmed value/date"; dashboard labels Enquiries This Month, Follow-ups Due, Active Enquiries, Estimated Project Value, Confirmed Projects, Conversion This Month (also on the Control Center Sales card). Six statuses offered in the picker and as filter pills.
+- `+ New Client Enquiry` is now a popup (`sales/_components/new-enquiry-modal.tsx`, native `<dialog>`) with seven fields; save closes it and refreshes the page; server action `createEnquiryQuickAction`. The dashboard was simplified (six figures, Follow-ups to Do, Recent Enquiries, one slim status line; the trend chart and status bars were removed) with larger type.
+- API: only the `status` list filter accepts a comma list, plus plainer error wording. Permissions untouched (create/edit still need sales.create/update; viewers see no New button).
+- Verified live (temporary users, removed afterwards).

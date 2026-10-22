@@ -260,22 +260,26 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
 // FMP-UI-37 — `external` added alongside `href`/`icon` for the same reason
 // as `NavItem.external` above: Factory Performance is a separate app, not
 // an in-platform route, and must render as a plain new-tab `<a>`.
-const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon; external?: boolean }[] = [
+// Sidebar simplification — every item except Contract Management carries `hidden: true` and is
+// filtered out of the rendered list (EXECUTIVE_VISIBLE_ITEMS). Navigation-only: routes, pages and
+// permissions are untouched, and removing a flag restores the item.
+const EXECUTIVE_SIDEBAR_ITEMS: { label: string; href: string; icon: LucideIcon; external?: boolean; hidden?: boolean }[] = [
   { label: 'Contract Management', href: '/contracts/executive', icon: FileText },
   // FMP-UI-46 — Estimation removed from the sidebar (its route and module are untouched).
   // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
-  { label: 'Technical', href: '/technical', icon: Ruler },
-  { label: 'Production & Planning', href: '/production/executive', icon: Factory },
-  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse },
+  { label: 'Technical', href: '/technical', icon: Ruler, hidden: true },
+  { label: 'Production & Planning', href: '/production/executive', icon: Factory, hidden: true },
+  { label: 'Storage Yard & Delivery', href: '/executive/storage-delivery', icon: Warehouse, hidden: true },
   // FMP-UI-46 — Quality Control sits between Storage Yard & Delivery and Erection.
-  { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck },
-  { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat },
-  { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck },
-  { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle },
-  { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench },
-  { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList },
-  { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar },
+  { label: 'Quality Control', href: '/executive/qaqc', icon: BadgeCheck, hidden: true },
+  { label: 'Erection', href: '/contracts/erection-executive', icon: HardHat, hidden: true },
+  { label: 'Safety & Compliance', href: '/safety-compliance/executive', icon: ShieldCheck, hidden: true },
+  { label: 'Incident Management', href: '/incidents/executive', icon: AlertTriangle, hidden: true },
+  { label: 'Maintenance Management', href: '/maintenance/executive', icon: Wrench, hidden: true },
+  { label: 'Task Management', href: '/factory-tasks/executive', icon: ClipboardList, hidden: true },
+  { label: 'Advanced Planning', href: '/contracts/schedule', icon: Calendar, hidden: true },
 ];
+const EXECUTIVE_VISIBLE_ITEMS = EXECUTIVE_SIDEBAR_ITEMS.filter((item) => !item.hidden);
 
 /** Fixed module-level slugs directly under /contracts — anything else (an id, /new, /schedule sub-routes, etc.) belongs to Contract List's active state, not a sibling summary page. */
 const CONTRACT_TOP_LEVEL_SLUGS = ['dashboard', 'schedule', 'workflow', 'payments', 'issues', 'claims', 'closeouts', 'parties', 'erection-dashboard', 'technical', 'executive', 'erection-executive'];
@@ -419,15 +423,6 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
     item.href ? isExecutiveContractSubItemActive(item.href, pathname) : false,
   );
 
-  // FMP-UI-27 — open state for that submenu. Starts open when the current page
-  // is a submenu route, and re-opens whenever the user navigates into one. A
-  // manual collapse is kept until the next entry, so the chevron always shows
-  // the real state.
-  const [executiveContractsOpen, setExecutiveContractsOpen] = useState(executiveContractSubActive);
-  useEffect(() => {
-    if (executiveContractSubActive) setExecutiveContractsOpen(true);
-  }, [executiveContractSubActive]);
-
   // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:
   // no duplicate top-level Dashboard link, and Contract Management becomes its own
   // top-level section instead of a nested group under Operations.
@@ -498,39 +493,19 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           // Administration section (Executive Manager holds no admin
           // permission, so hasAnyAdminPermission is already false for them).
           <div className="px-2 space-y-1.5">
-            {EXECUTIVE_SIDEBAR_ITEMS.map((item) => {
+            {EXECUTIVE_VISIBLE_ITEMS.map((item) => {
               // FMP-UI-27 — the Contract Management row is a disclosure button,
               // not a link: it toggles its submenu and shows a chevron. Its
               // own dashboard is reached through the submenu's Dashboard item.
               if (item.href === '/contracts/executive') {
-                const cmActive = executiveContractSubActive || isExecutiveItemActive(item.href, pathname);
-                const cmOpen = executiveContractsOpen && executiveContractSubItems.length > 0;
                 return (
                   <Fragment key={item.label}>
-                    <button
-                      type="button"
-                      onClick={() => setExecutiveContractsOpen((v) => !v)}
-                      aria-expanded={cmOpen}
-                      aria-controls="executive-contracts-nav-items"
-                      aria-current={cmActive ? 'page' : undefined}
-                      className={[
-                        // FMP-UI-29 — text-base→text-lg, icon size-5→size-6, per
-                        // direct "increase the font size more" feedback.
-                        'flex w-full items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-left text-lg leading-snug transition-colors duration-150',
-                        cmActive
-                          ? 'border-accent bg-nav-active font-semibold text-text-inverse'
-                          : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
-                      ].join(' ')}
-                    >
+                    {/* Static section title — no longer a disclosure button; its links below are always visible. */}
+                    <div className="flex w-full items-center gap-3 border-l-4 border-transparent py-3.5 pl-3 pr-3 text-lg font-semibold leading-snug text-text-inverse">
                       <item.icon className="size-6 shrink-0" aria-hidden="true" />
                       <span className="flex-1">{item.label}</span>
-                      {cmOpen ? (
-                        <ChevronDown className="size-5 shrink-0" aria-hidden="true" />
-                      ) : (
-                        <ChevronRight className="size-5 shrink-0" aria-hidden="true" />
-                      )}
-                    </button>
-                    {cmOpen && (
+                    </div>
+                    {(
                       <div id="executive-contracts-nav-items" className="ml-6 mb-1 space-y-0.5 border-l border-nav-hover pl-1">
                         {executiveContractSubItems.map((sub) => {
                           if (!sub.href) return null;

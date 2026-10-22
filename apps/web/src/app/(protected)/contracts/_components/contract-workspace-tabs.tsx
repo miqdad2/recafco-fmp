@@ -1,38 +1,35 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutGrid,
-  Wallet,
   Factory,
+  Ruler,
+  Warehouse,
+  HardHat,
   FileText,
   Paperclip,
   CheckCircle2,
   History,
-  CalendarDays,
-  ListChecks,
   MessageSquareWarning,
   GitBranch,
   HandCoins,
   ShieldAlert,
-  Boxes,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { WORKSPACE_TABS, isWorkspaceTabActive, workspaceTabHref } from '../_lib/contract-workspace-tabs';
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   overview: LayoutGrid,
-  schedule: CalendarDays,
-  payments: Wallet,
-  production: Factory,
-  'boq-progress': Boxes,
+  technical: Ruler,
+  'production-planning': Factory,
+  delivery: Warehouse,
+  erection: HardHat,
   variations: GitBranch,
   claims: HandCoins,
   risks: ShieldAlert,
   documents: FileText,
-  workflow: ListChecks,
   issues: MessageSquareWarning,
   attachments: Paperclip,
   activity: History,
@@ -44,21 +41,12 @@ interface Props {
 }
 
 /**
- * Contract workspace tab bar. CM-66C removed the "More" dropdown so no tab is
- * ever hidden — that still holds. FMP-CONTRACT-09B: a single simple row of
- * the same 14 tabs in the original order (no group labels or dividers) inside
- * one soft container. Desktop: tabs wrap cleanly onto a second row if needed.
- * Small screens: one horizontally scrollable row (scrolling stays inside this
- * container, never the page) with the active tab scrolled into view.
+ * Contract workspace tab bar. FMP-CONTRACT-DETAIL-01: a single flat row of the 13
+ * department-ordered tabs (no group labels or dividers) inside one soft container.
+ * Tabs wrap onto extra rows at every width, so the page never scrolls sideways.
  */
 export function ContractWorkspaceTabs({ contractId }: Props): React.JSX.Element {
   const pathname = usePathname();
-  const activeRef = useRef<HTMLAnchorElement>(null);
-
-  useEffect(() => {
-    // Keep the active tab visible when the row is scrolled (small screens).
-    activeRef.current?.scrollIntoView({ block: 'nearest', inline: 'center' });
-  }, [pathname]);
 
   function tabClassName(active: boolean): string {
     return [
@@ -73,7 +61,7 @@ export function ContractWorkspaceTabs({ contractId }: Props): React.JSX.Element 
     <div className="-mx-6 lg:-mx-8 px-6 lg:px-8">
       <nav
         aria-label="Contract workspace sections"
-        className="flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain rounded-lg bg-surface-secondary p-1.5 lg:flex-wrap lg:overflow-x-visible"
+        className="flex max-w-full flex-wrap items-center gap-1 rounded-lg bg-surface-secondary p-1.5"
       >
         {WORKSPACE_TABS.map((tab) => {
           const href = workspaceTabHref(contractId, tab);
@@ -83,7 +71,6 @@ export function ContractWorkspaceTabs({ contractId }: Props): React.JSX.Element 
             <Link
               key={tab.key}
               href={href}
-              ref={active ? activeRef : undefined}
               aria-current={active ? 'page' : undefined}
               className={tabClassName(active)}
             >
