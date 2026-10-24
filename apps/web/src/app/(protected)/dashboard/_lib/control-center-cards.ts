@@ -16,6 +16,12 @@ export const CONTROL_CENTER_API_CARDS: { code: PlatformModuleCode; title: string
   { code: 'ERECTION', title: 'Erection', description: 'Site erection activities and completed elements.' },
 ];
 
+/**
+ * The existing, working Factory Performance destination (a separate application, opened in a new tab). Shared by the
+ * Control Center card and the sidebar item so they can never point at different places. Not a permission-gated module.
+ */
+export const FACTORY_PERFORMANCE_URL = 'http://192.168.1.17:83';
+
 export const FACTORY_PERFORMANCE_CARD = {
   title: 'Factory Performance',
   description: 'Factory output, production capacity and delivery trends.',

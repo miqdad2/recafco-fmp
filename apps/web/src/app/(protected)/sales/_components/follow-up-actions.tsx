@@ -30,9 +30,13 @@ interface Props {
   today: string;
   /** Smaller buttons for list rows. */
   compact?: boolean;
+  /** Wording of the main button (the dashboard calls it Record Follow-up). */
+  completeLabel?: string;
+  /** Hide Reschedule (the dashboard card offers just Record Follow-up). */
+  allowReschedule?: boolean;
 }
 
-export function FollowUpActions({ followUpId, enquiryId, today, compact }: Props): React.JSX.Element {
+export function FollowUpActions({ followUpId, enquiryId, today, compact, completeLabel = 'Mark Completed', allowReschedule = true }: Props): React.JSX.Element {
   const [open, setOpen] = useState<'complete' | 'reschedule' | null>(null);
   const [doneState, doneAction] = useActionState<SalesFormState, FormData>(completeFollowUpAction.bind(null, followUpId, enquiryId), IDLE);
   const [moveState, moveAction] = useActionState<SalesFormState, FormData>(rescheduleFollowUpAction.bind(null, followUpId, enquiryId), IDLE);
@@ -40,26 +44,26 @@ export function FollowUpActions({ followUpId, enquiryId, today, compact }: Props
   useEffect(() => {
     if (doneState.ok || moveState.ok) router.refresh();
   }, [doneState, moveState, router]);
-  const size = compact ? 'min-h-11 px-4 py-2 text-sm' : '';
+  const size = compact ? 'min-h-12 px-4 py-2 text-base' : '';
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => setOpen(open === 'complete' ? null : 'complete')} aria-expanded={open === 'complete'}
           className={`${BTN_PRIMARY} ${size} !bg-green-700`}>
-          <CheckCircle2 className="size-5" aria-hidden="true" /> Mark Completed
+          <CheckCircle2 className="size-5" aria-hidden="true" /> {completeLabel}
         </button>
-        <button type="button" onClick={() => setOpen(open === 'reschedule' ? null : 'reschedule')} aria-expanded={open === 'reschedule'}
+        {allowReschedule && <button type="button" onClick={() => setOpen(open === 'reschedule' ? null : 'reschedule')} aria-expanded={open === 'reschedule'}
           className={`${BTN_SECONDARY} ${size}`}>
           <CalendarClock className="size-5" aria-hidden="true" /> Reschedule
-        </button>
+        </button>}
       </div>
 
       {open === 'complete' && (
         <form action={doneAction} className="space-y-3 rounded-lg border border-border bg-surface p-4">
           <FormMessage error={doneState.error} />
           <Field id={`done-${followUpId}`} label="What happened? (optional)" errors={doneState.fieldErrors['completionNotes']}>
-            <input id={`done-${followUpId}`} name="completionNotes" type="text" maxLength={2000} className={INPUT_CLASS} />
+            <input id={`done-${followUpId}`} name="completionNotes" type="text" maxLength={2000} defaultValue={doneState.values['completionNotes'] ?? ''} className={INPUT_CLASS} />
           </Field>
           <Submit label="Confirm — Mark Completed" />
         </form>

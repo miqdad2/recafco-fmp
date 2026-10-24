@@ -109,13 +109,19 @@ export const ApiEnvSchema = z
     MMS_INTEGRATION_KEY: z.string().optional(),
     MMS_QUERY_TIMEOUT_MS: z.string().optional(),
     MMS_LIVE_REFRESH_SECONDS: z.string().optional(),
+    // FMP-OPS-02 — development-only Operations demonstration. Refused outright in production.
+    OPERATIONS_DEMO_ENABLED: z.string().optional(),
   })
   .transform((raw) => {
     const origins = parseCorsOrigins(raw.CORS_ALLOWED_ORIGINS, raw.NODE_ENV);
     if (raw.NODE_ENV === 'production' && origins.includes('*')) {
       throw new Error('Wildcard CORS origin (*) is not permitted in production');
     }
+    if (raw.NODE_ENV === 'production' && raw.OPERATIONS_DEMO_ENABLED === 'true') {
+      throw new Error('OPERATIONS_DEMO_ENABLED must not be set in production');
+    }
     return {
+      operationsDemoEnabled: raw.NODE_ENV !== 'production' && raw.OPERATIONS_DEMO_ENABLED === 'true',
       nodeEnv: raw.NODE_ENV,
       port: parsePortString(raw.API_PORT, 4000),
       logLevel: raw.LOG_LEVEL,

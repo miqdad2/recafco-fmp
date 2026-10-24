@@ -149,3 +149,11 @@ export function dueText(bucket: FollowUpBucket, date: string, today: string): st
   if (bucket === 'UPCOMING') return `In ${days}`;
   return '';
 }
+
+/** Name of a status filter value ('open', 'FOLLOW_UP', 'MEETING_DONE,CONTACTED', …) for messages. */
+export function statusFilterLabel(filter: string): string {
+  if (!filter) return 'All';
+  if (filter === 'open') return 'Active';
+  const first = filter.split(',')[0] as SalesStatus;
+  return STATUS_LABELS[first] ?? 'selected';
+}

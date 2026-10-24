@@ -1,30 +1,20 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { ContractTransitions } from '../../_components/contract-transitions';
 import { ContractClosureAction } from '../../_components/contract-closure-action';
 import { ContractOverviewSummaryCard } from '../../_components/contract-overview-summary-card';
-import { ContractOverviewProgressCard } from '../../_components/contract-overview-progress-card';
 import { ContractOverviewValueCard, ContractOverviewFinancialCard } from '../../_components/contract-overview-value-financial-cards';
 import { ContractOverviewScopeCard, ContractOverviewPaymentTermsCard } from '../../_components/contract-overview-checklist-cards';
 import { ContractOverviewAttentionCard } from '../../_components/contract-overview-attention-card';
-import {
-  ContractOverviewPaymentStatementCard,
-  ContractOverviewProductionCard,
-  ContractOverviewDocumentsCard,
-} from '../../_components/contract-overview-bottom-summary-cards';
+import { ContractOverviewPaymentStatementCard, ContractOverviewDocumentsCard } from '../../_components/contract-overview-bottom-summary-cards';
 import { InfoBox } from '../../_components/contract-form-fields';
+import { OperationsProgressSummaryCard } from '../../_components/operations-progress-summary-card';
+import { operationsApi } from '../../../../../lib/operations-api';
 import { contractsApi } from '../../../../../lib/contracts-api';
 import { getUserPermissions } from '../../_lib/get-user-permissions';
 import { ContractEditDetailsAction } from '../../_components/contract-edit-details-action';
 import { canEditBasicDetails } from '../../_lib/contract-basic-details-helpers';
 import { getVisibleContractTransitions, getClosureAction, formatDaysRemainingDisplay } from '../../_lib/contract-ui-helpers';
-import {
-  computeTeamProgress,
-  computeOverallProgress,
-  computeProductionTaskSummary,
-  computePaymentProgressPercent,
-  buildAttentionItems,
-} from '../../_lib/contract-overview-helpers';
+import { computePaymentProgressPercent, buildAttentionItems } from '../../_lib/contract-overview-helpers';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -56,7 +46,7 @@ function toNum(value: string | undefined): number {
 export default async function ContractOverviewTab({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
 
-  const [permissionsRes, contractRes, workflowSummaryRes, paymentsRes, closeoutChecksRes, closeoutRequestsRes] =
+  const [permissionsRes, contractRes, workflowSummaryRes, paymentsRes, closeoutChecksRes, closeoutRequestsRes, operationsRes] =
     await Promise.allSettled([
       getUserPermissions(),
       contractsApi.get(id),
@@ -64,6 +54,8 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
       contractsApi.listPayments({ contractId: id, pageSize: 1 }),
       contractsApi.getCloseoutChecks(id),
       contractsApi.listCloseoutRequests(id),
+      // FMP-OPS-01 — accepted local data only; a failure here must never affect the rest of the Overview.
+      operationsApi.contractProgress(id),
     ]);
 
   if (contractRes.status === 'rejected') notFound();
@@ -75,18 +67,12 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
   const closeoutChecks = closeoutChecksRes.status === 'fulfilled' ? closeoutChecksRes.value : null;
   const closeoutRequests = closeoutRequestsRes.status === 'fulfilled' ? closeoutRequestsRes.value : [];
   const latestCloseoutRequest = closeoutRequests[0] ?? null;
+  const operationsView = operationsRes.status === 'fulfilled' ? operationsRes.value : null;
 
   const visibleTransitions = getVisibleContractTransitions(contract.status, permissions);
   const closureAction = getClosureAction(contract.status, permissions, latestCloseoutRequest?.status ?? null);
   const hasActions = visibleTransitions.activate || visibleTransitions.terminate
     || closureAction.showRequestCloseout || closureAction.pendingStatus !== null || closureAction.showCloseContract;
-
-  // Section 2 / Section 9 — real per-team workflow progress.
-  const technical = computeTeamProgress(workflowTasks, 'TECHNICAL');
-  const production = computeTeamProgress(workflowTasks, 'PRODUCTION');
-  const erection = computeTeamProgress(workflowTasks, 'ERECTION');
-  const overall = computeOverallProgress(workflowTasks);
-  const productionTaskSummary = computeProductionTaskSummary(workflowTasks);
 
   // Section 4 / Section 8 — real manual Contract Management payments.
   const paymentSummary = paymentsList?.summary ?? {
@@ -120,20 +106,6 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
         contract={contract}
         actions={
           <>
-            {/* FMP-TECH-01 — entry point into the real Technical module for
-                this contract's own job order, per that unit's own "From
-                Contract detail/workflow area, provide entry point: Open
-                Technical Workflow" requirement. Always shown (not gated by
-                hasActions, which only covers lifecycle/closeout buttons) —
-                every viewer who can reach this page already has
-                contracts.read, the same permission Technical itself is
-                gated on. */}
-            <Link
-              href={`/technical/jobs/${contract.id}`}
-              className="inline-flex items-center rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text-secondary hover:bg-surface-secondary"
-            >
-              Open Technical Workflow
-            </Link>
             {/* FMP-CONTRACT-03 — safe basic-details edit; secondary style, kept out of the destructive actions. */}
             {canEditBasicDetails(contract.status, permissions) && <ContractEditDetailsAction contract={contract} />}
             {hasActions && (
@@ -157,8 +129,9 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ContractOverviewProgressCard technical={technical} production={production} erection={erection} overall={overall} />
+      <OperationsProgressSummaryCard contractId={contract.id} view={operationsView} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ContractOverviewValueCard contract={contract} />
         <ContractOverviewFinancialCard
           contractId={contract.id}
@@ -178,7 +151,7 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
         <ContractOverviewAttentionCard items={attentionItems} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ContractOverviewPaymentStatementCard
           contractId={contract.id}
           data={{
@@ -189,7 +162,6 @@ export default async function ContractOverviewTab({ params }: PageProps): Promis
             overdueValue: paymentSummary.overdueValue,
           }}
         />
-        <ContractOverviewProductionCard contractId={contract.id} summary={productionTaskSummary} />
         <ContractOverviewDocumentsCard contractId={contract.id} totalAttachments={workflowTaskAttachments + closeoutAttachments} />
       </div>
 

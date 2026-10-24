@@ -1,11 +1,14 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { CalendarClock, ClipboardList, FolderOpen, Banknote, Trophy, Percent, ArrowRight } from 'lucide-react';
+import { CalendarClock, FolderOpen, FilePlus2, Banknote, Trophy, Percent, ArrowRight, AlertTriangle, Clock, Info } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { salesApi } from '@/lib/sales-api';
+import type { SalesFollowUpListItem } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../contracts/_lib/get-user-permissions';
-import { STATUS_LABELS, STATUS_ORDER, STATUS_FILTER_VALUE, dueText, foldStatusCounts, formatDate, formatKwd, formatMonth, formatRate } from './_lib/sales-format';
-import { BucketBadge, EmptyState, Section, StatusBadge } from './_components/sales-ui';
+import { dueText, formatDate, formatKwd, formatMonth, formatRate } from './_lib/sales-format';
+import { BTN_SECONDARY, BucketBadge, ContactLine, Section } from './_components/sales-ui';
+import { RecentEnquiries } from './_components/recent-enquiries';
+import { FollowUpActions } from './_components/follow-up-actions';
 import { NewEnquiryButton } from './_components/new-enquiry-modal';
 
 export const metadata: Metadata = { title: 'Sales & Enquiries — RECAFCO FMP' };
@@ -14,17 +17,49 @@ export const dynamic = 'force-dynamic';
 interface Kpi {
   label: string;
   value: string;
-  caption?: string | undefined;
+  caption: string;
   icon: LucideIcon;
   /** Tailwind classes for the card tint / icon chip. */
   tone: string;
   chip: string;
+  /** Only set where an existing list shows exactly the records the figure counts. */
   href?: string | undefined;
+  hrefLabel?: string | undefined;
+}
+
+const NEW_BUTTON =
+  'inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-accent px-7 py-3 text-xl font-bold text-white shadow-md transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
+
+function FollowUpRow({ f, today, canUpdate, actions }: { f: SalesFollowUpListItem; today: string; canUpdate: boolean; actions: boolean }): React.JSX.Element {
+  const overdue = f.bucket === 'OVERDUE';
+  return (
+    <li className={`rounded-xl border border-l-8 bg-surface p-5 ${overdue ? 'border-red-200 border-l-red-600 bg-red-50/40' : f.bucket === 'TODAY' ? 'border-amber-200 border-l-amber-500 bg-amber-50/40' : 'border-blue-200 border-l-blue-500'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="min-w-0 break-words text-2xl font-bold leading-snug text-text-primary">{f.enquiry.companyName}</p>
+        <div className="flex items-center gap-2">
+          {overdue && <AlertTriangle className="size-6 text-red-700" aria-hidden="true" />}
+          <BucketBadge bucket={f.bucket} />
+        </div>
+      </div>
+      {f.enquiry.scopeOfWork && <p className="mt-1 line-clamp-2 break-words text-lg text-text-primary">{f.enquiry.scopeOfWork}</p>}
+      <div className="mt-2"><ContactLine person={f.enquiry.contactPerson} number={f.enquiry.contactNumber} /></div>
+      <p className="mt-2 text-lg text-text-primary">
+        <span className="font-semibold">Follow-up date:</span> {formatDate(f.followUpDate)}
+        <span className={`ml-2 font-semibold ${overdue ? 'text-red-700' : f.bucket === 'TODAY' ? 'text-amber-800' : 'text-text-secondary'}`}>({dueText(f.bucket, f.followUpDate, today)})</span>
+      </p>
+      {f.notes && <p className="mt-1 line-clamp-2 break-words text-base text-text-secondary">Note: {f.notes}</p>}
+      <div className="mt-4 flex flex-wrap items-start gap-3">
+        <Link href={`/sales/enquiries/${f.enquiry.id}`} className={BTN_SECONDARY}>Open Enquiry</Link>
+        {actions && canUpdate && <FollowUpActions followUpId={f.id} enquiryId={f.enquiry.id} today={today} compact completeLabel="Record Follow-up" allowReschedule={false} />}
+      </div>
+    </li>
+  );
 }
 
 /**
- * FMP-SALES-01C — the Sales dashboard, kept deliberately simple for a manager in a meeting: six plain
- * figures, the follow-ups that need attention, the latest enquiries, and one slim line of status counts.
+ * FMP-SALES-02 — the Sales dashboard for a senior manager who records enquiries personally: four plain figures,
+ * today's follow-ups (overdue first), the latest enquiries beside their status filter, and a small monthly results
+ * strip. Metric definitions are unchanged; only presentation, wording and which records are shown are new.
  */
 export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
   const [{ permissions }, res] = await Promise.all([getCurrentUserContext(), salesApi.dashboard()]);
@@ -38,47 +73,55 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
   }
   const d = res.data;
   const canCreate = permissions.includes('sales.create');
+  const canUpdate = permissions.includes('sales.update');
   const monthName = formatMonth(d.month);
   const estimated = formatKwd(d.potentialValue);
-  const counts = foldStatusCounts(d.statusCounts);
-  const anyStatus = STATUS_ORDER.some((s) => counts[s] > 0);
+  const due = d.followUpsNeedingAttention;
+  // Changes whenever anything shown here changes, so the client-side Recent Enquiries list reloads itself.
+  const signature = JSON.stringify([d.recentEnquiries.map((e) => [e.id, e.status, e.nextFollowUpDate, e.updatedAt]), d.openEnquiries, d.followUpsDue, d.enquiriesThisMonth]);
 
   const kpis: Kpi[] = [
-    { label: 'Enquiries This Month', value: String(d.enquiriesThisMonth), caption: monthName, icon: ClipboardList, tone: 'border-blue-200 bg-blue-50/60', chip: 'bg-blue-100 text-blue-700', href: `/sales/enquiries?month=${d.month}` },
+    {
+      label: 'Active Enquiries',
+      value: String(d.openEnquiries),
+      caption: 'Enquiries still in progress.',
+      icon: FolderOpen,
+      tone: 'border-blue-200 bg-blue-50/60',
+      chip: 'bg-blue-100 text-blue-800',
+      href: '/sales/enquiries?status=open',
+      hrefLabel: 'View Active Enquiries',
+    },
     {
       label: 'Follow-ups Due',
       value: String(d.followUpsDue),
-      caption: d.followUpsDue === 0 ? 'Nothing due today' : d.followUpsOverdue > 0 ? `${d.followUpsOverdue} overdue` : 'Due today',
+      caption: d.followUpsDue === 0 ? 'None overdue or due today' : `${d.followUpsOverdue} overdue · ${d.followUpsDueToday} due today`,
       icon: CalendarClock,
       tone: d.followUpsOverdue > 0 ? 'border-red-300 bg-red-50/60' : 'border-amber-300 bg-amber-50/60',
-      chip: d.followUpsOverdue > 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800',
+      chip: d.followUpsOverdue > 0 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-900',
       href: '/sales/follow-ups',
+      hrefLabel: 'View Follow-ups',
     },
-    { label: 'Active Enquiries', value: String(d.openEnquiries), caption: 'Still being discussed', icon: FolderOpen, tone: 'border-blue-200 bg-blue-50/60', chip: 'bg-blue-100 text-blue-700', href: '/sales/enquiries?status=open' },
     {
-      label: 'Estimated Project Value',
-      value: estimated ?? '—',
+      label: 'New Enquiries This Month',
+      value: String(d.enquiriesThisMonth),
+      caption: `Received in ${monthName}`,
+      icon: FilePlus2,
+      tone: 'border-sky-200 bg-sky-50/60',
+      chip: 'bg-sky-100 text-sky-800',
+      href: `/sales/enquiries?month=${d.month}`,
+      hrefLabel: 'View This Month’s Enquiries',
+    },
+    {
+      label: 'Estimated Value of Active Enquiries — KWD',
+      value: estimated ? estimated.replace(/^KWD\s/, '') : '—',
       caption: d.openWithoutEstimate > 0
-        ? `${d.openWithoutEstimate} ${d.openWithoutEstimate === 1 ? 'enquiry has' : 'enquiries have'} no estimate yet`
-        : estimated ? 'Active enquiries' : 'No estimates entered yet',
+        ? `${d.openWithoutEstimate} active ${d.openWithoutEstimate === 1 ? 'enquiry has' : 'enquiries have'} no estimate and ${d.openWithoutEstimate === 1 ? 'is' : 'are'} not counted`
+        : estimated ? 'Active enquiries only' : 'No estimates entered yet',
       icon: Banknote,
       tone: 'border-purple-200 bg-purple-50/60',
-      chip: 'bg-purple-100 text-purple-700',
+      chip: 'bg-purple-100 text-purple-800',
     },
-    { label: 'Confirmed Projects', value: String(d.projectsWon), caption: `Confirmed in ${monthName}`, icon: Trophy, tone: 'border-green-300 bg-green-50/60', chip: 'bg-green-100 text-green-700', href: '/sales/enquiries?status=WON' },
   ];
-  if (d.conversion) {
-    kpis.push({
-      label: 'Conversion This Month',
-      value: formatRate(d.conversion.rate),
-      caption: d.conversion.rate === null
-        ? `No enquiries in ${monthName} yet`
-        : `${d.conversion.won} of ${d.conversion.created} enquiries from ${monthName} confirmed`,
-      icon: Percent,
-      tone: 'border-green-300 bg-green-50/60',
-      chip: 'bg-green-100 text-green-700',
-    });
-  }
 
   return (
     <div className="space-y-8">
@@ -87,26 +130,31 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
           <h1 className="text-4xl font-extrabold tracking-tight text-text-primary">Sales &amp; Enquiries</h1>
           <p className="mt-1 text-xl text-text-secondary">Client meetings, new opportunities and follow-ups.</p>
         </div>
-        {canCreate && <NewEnquiryButton className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-accent px-7 py-3 text-xl font-bold text-white shadow-md transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2" />}
+        {canCreate && <NewEnquiryButton className={NEW_BUTTON} />}
       </div>
 
-      <section aria-label="Key figures" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section aria-label="Key figures" className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         {kpis.map((k) => {
           const body = (
-            <div className="flex items-start gap-4">
-              <span className={`flex size-14 shrink-0 items-center justify-center rounded-xl ${k.chip}`}>
-                <k.icon className="size-7" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="text-lg font-semibold text-text-secondary">{k.label}</p>
-                <p className="break-words text-4xl font-extrabold tabular-nums leading-tight text-text-primary">{k.value}</p>
-                {k.caption && <p className="text-base leading-snug text-text-secondary">{k.caption}</p>}
+            <>
+              <div className="flex items-center gap-3">
+                <span className={`flex size-12 shrink-0 items-center justify-center rounded-xl ${k.chip}`}>
+                  <k.icon className="size-6" aria-hidden="true" />
+                </span>
+                <p className="text-lg font-semibold leading-snug text-text-primary">{k.label}</p>
               </div>
-            </div>
+              <p className="mt-2 break-words text-4xl font-extrabold tabular-nums leading-tight text-text-primary">{k.value}</p>
+              <p className="mt-1 text-base leading-snug text-text-secondary">{k.caption}</p>
+              {k.href && (
+                <p className="mt-2 inline-flex items-center gap-1 text-base font-semibold text-accent">
+                  {k.hrefLabel} <ArrowRight className="size-4" aria-hidden="true" />
+                </p>
+              )}
+            </>
           );
-          const cls = `block rounded-xl border p-5 shadow-sm transition ${k.tone}`;
+          const cls = `block rounded-xl border px-5 py-4 shadow-sm transition ${k.tone}`;
           return k.href ? (
-            <Link key={k.label} href={k.href} className={`${cls} hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-focus`}>{body}</Link>
+            <Link key={k.label} href={k.href} className={`${cls} hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2`}>{body}</Link>
           ) : (
             <div key={k.label} className={cls}>{body}</div>
           );
@@ -115,78 +163,86 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Section
-          title="Follow-ups to Do"
-          aside={<Link href="/sales/follow-ups" className="inline-flex items-center gap-1 text-lg font-semibold text-accent hover:underline">See all <ArrowRight className="size-5" aria-hidden="true" /></Link>}
+          title="Today’s Follow-ups"
+          aside={<Link href="/sales/follow-ups" className="inline-flex min-h-12 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">View Follow-ups <ArrowRight className="size-5" aria-hidden="true" /></Link>}
         >
-          {d.followUpsNeedingAttention.length === 0 ? (
-            <p className="rounded-lg bg-green-50 px-5 py-6 text-lg font-medium text-green-800">All up to date. Nothing is overdue or due today.</p>
+          {due.length > 0 ? (
+            <>
+              <ul className="space-y-4">
+                {due.map((f) => <FollowUpRow key={f.id} f={f} today={d.today} canUpdate={canUpdate} actions />)}
+              </ul>
+              {d.followUpsDue > due.length && (
+                <p className="mt-3 text-base text-text-secondary">Showing {due.length} of {d.followUpsDue}. <Link href="/sales/follow-ups" className="font-semibold text-accent hover:underline">View Follow-ups</Link></p>
+              )}
+            </>
           ) : (
-            <ul className="space-y-3">
-              {d.followUpsNeedingAttention.map((f) => (
-                <li key={f.id} className={`rounded-xl border-l-8 bg-surface-secondary/50 p-4 ${f.bucket === 'OVERDUE' ? 'border-red-500' : 'border-amber-500'}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="break-words text-xl font-bold text-text-primary">{f.enquiry.companyName}</p>
-                      <p className="text-base text-text-secondary">{[f.enquiry.contactPerson, f.enquiry.contactNumber].filter(Boolean).join(' · ') || 'No contact saved'}</p>
-                      {f.notes && <p className="mt-1 line-clamp-2 text-base text-text-primary">{f.notes}</p>}
-                    </div>
-                    <div className="text-right">
-                      <BucketBadge bucket={f.bucket} />
-                      <p className="mt-1 text-base font-semibold text-text-primary">{formatDate(f.followUpDate)}</p>
-                      <p className="text-sm text-text-secondary">{dueText(f.bucket, f.followUpDate, d.today)}</p>
-                    </div>
-                  </div>
-                  <Link href={`/sales/enquiries/${f.enquiry.id}`} className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-border-strong bg-surface px-5 text-base font-semibold hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus">
-                    Open Enquiry
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-4">
+              <p className="flex items-start gap-3 rounded-lg border border-border bg-surface-secondary/60 px-5 py-4 text-lg font-medium text-text-primary">
+                <Clock className="mt-0.5 size-6 shrink-0 text-text-secondary" aria-hidden="true" />
+                No follow-ups are overdue or due today.
+              </p>
+              {d.upcomingFollowUps.length > 0 && (
+                <div>
+                  <h3 className="mb-3 text-xl font-bold text-text-primary">Next upcoming follow-ups</h3>
+                  <ul className="space-y-4">
+                    {d.upcomingFollowUps.map((f) => <FollowUpRow key={f.id} f={f} today={d.today} canUpdate={canUpdate} actions={false} />)}
+                  </ul>
+                  {d.upcomingFollowUpCount > d.upcomingFollowUps.length && (
+                    <p className="mt-3 text-base text-text-secondary">Showing {d.upcomingFollowUps.length} of {d.upcomingFollowUpCount} scheduled. <Link href="/sales/follow-ups" className="font-semibold text-accent hover:underline">View Follow-ups</Link></p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {d.activeWithoutFollowUp > 0 && (
+            <p className="mt-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-lg text-amber-950">
+              <Info className="mt-0.5 size-6 shrink-0 text-amber-800" aria-hidden="true" />
+              <span>
+                <span className="font-semibold">{d.activeWithoutFollowUp} active {d.activeWithoutFollowUp === 1 ? 'enquiry has' : 'enquiries have'} no next follow-up date.</span>{' '}
+                <Link href="/sales/enquiries?status=open" className="font-semibold underline">Review active enquiries</Link>
+              </span>
+            </p>
           )}
         </Section>
 
-        <Section
-          title="Recent Enquiries"
-          aside={<Link href="/sales/enquiries" className="inline-flex items-center gap-1 text-lg font-semibold text-accent hover:underline">See all <ArrowRight className="size-5" aria-hidden="true" /></Link>}
-        >
-          {d.recentEnquiries.length === 0 ? (
-            <EmptyState
-              title="No enquiries yet"
-              text="When a client visits, click “+ New Client Enquiry” and save their details. It takes less than a minute."
-              actionNode={canCreate ? <NewEnquiryButton className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-accent px-7 py-3 text-xl font-bold text-white shadow-md transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2" /> : undefined}
-            />
-          ) : (
-            <ul className="divide-y divide-border">
-              {d.recentEnquiries.map((e) => (
-                <li key={e.id}>
-                  <Link href={`/sales/enquiries/${e.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg px-2 py-3 hover:bg-surface-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                    <div className="min-w-0">
-                      <p className="break-words text-xl font-bold text-text-primary">{e.companyName}</p>
-                      <p className="text-base text-text-secondary">{formatDate(e.enquiryDate)}{e.projectName ? ` · ${e.projectName}` : ''}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-base font-semibold text-purple-800">{formatKwd(e.estimatedValue) ?? 'Not estimated yet'}</span>
-                      <StatusBadge status={e.status} />
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+        <Section title="Recent Enquiries">
+          <RecentEnquiries
+            initial={d.recentEnquiries}
+            initialTotal={Object.values(d.statusCounts).reduce((n, c) => n + c, 0)}
+            signature={signature}
+            canCreate={canCreate}
+            canUpdate={canUpdate}
+            today={d.today}
+            newButtonClass={NEW_BUTTON}
+          />
         </Section>
       </div>
 
-      {anyStatus && (
-        <nav aria-label="Enquiries by status" className="flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-lg font-semibold text-text-secondary">By status:</span>
-          {STATUS_ORDER.map((s) => (
-            <Link key={s} href={`/sales/enquiries?status=${STATUS_FILTER_VALUE[s]}`} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-strong bg-surface px-4 text-base font-medium text-text-primary hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus">
-              {STATUS_LABELS[s]}
-              <span className="rounded-full bg-surface-secondary px-2 text-base font-bold tabular-nums">{counts[s]}</span>
-            </Link>
-          ))}
-        </nav>
-      )}
+      <section aria-labelledby="monthly-results" className="rounded-xl border border-green-200 bg-green-50/40 p-4 sm:p-5">
+        <h2 id="monthly-results" className="text-xl font-bold text-text-primary">Monthly Results <span className="font-medium text-text-secondary">— {monthName}</span></h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="flex items-center gap-4 rounded-lg border border-green-300 bg-surface px-4 py-3">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-800"><Trophy className="size-6" aria-hidden="true" /></span>
+            <div>
+              <p className="text-lg font-semibold text-text-primary">Confirmed Projects</p>
+              <p className="text-3xl font-extrabold tabular-nums text-text-primary">{d.projectsWon}</p>
+              <p className="text-base text-text-secondary">Confirmed in {monthName}</p>
+            </div>
+          </div>
+          {d.conversion && (
+            <div className="flex items-center gap-4 rounded-lg border border-green-300 bg-surface px-4 py-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-800"><Percent className="size-6" aria-hidden="true" /></span>
+              <div>
+                <p className="text-lg font-semibold text-text-primary">Conversion This Month</p>
+                <p className="text-3xl font-extrabold tabular-nums text-text-primary">{formatRate(d.conversion.rate)}</p>
+                <p className="text-base text-text-secondary">
+                  {d.conversion.rate === null ? `No enquiries in ${monthName} yet` : `${d.conversion.won} of ${d.conversion.created} enquiries from ${monthName} confirmed`}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

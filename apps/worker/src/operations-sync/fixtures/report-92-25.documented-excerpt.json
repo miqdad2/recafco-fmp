@@ -1,0 +1,18 @@
+{
+  "_fixture": "FIXTURE ONLY — the documented excerpt from RECAFCO-92-25-API-reference.txt (verified by the source owner 21 Oct 2026). The real response has additional fields that FMP has NOT seen; this file is never live data.",
+  "project": {
+    "id": "shapoorji-2025-92",
+    "code": "92/25",
+    "project_type": "PC",
+    "name": "Shapoorji · New Sabah Hospital"
+  },
+  "totals": {
+    "total": 2727,
+    "issued": 2727,
+    "produced": 2219,
+    "delivered": 1610,
+    "installed": 1482,
+    "pending_inputs": 1966
+  },
+  "generated_at": "2026-10-21T10:25:00+00:00"
+}

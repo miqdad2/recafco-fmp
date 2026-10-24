@@ -405,6 +405,7 @@ export class SalesService {
 
     return this.db.getClient().$transaction(async (tx) => {
       const before = await this.findOrThrow(tx, id);
+      if (dto.expectedStatus && before.status !== dto.expectedStatus) throw this.invalid('SALES_STATUS_CONFLICT', 'The enquiry was just changed by someone else. Please refresh and try again.');
       if (before.status === dto.status) throw this.invalid('SALES_STATUS_UNCHANGED', 'The enquiry already has this status');
 
       const data: Prisma.SalesEnquiryUncheckedUpdateInput = { status: dto.status };
@@ -610,7 +611,8 @@ export class SalesService {
     const canReport = actor.permissions.includes('sales.reports.read');
     const open: Prisma.SalesEnquiryWhereInput = { status: { notIn: CLOSED } };
 
-    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report] = await Promise.all([
+    const followUpEnquiry = { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, scopeOfWork: true } } as const;
+    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp] = await Promise.all([
       client.salesEnquiry.count({ where: { enquiryDate: { gte: start, lt: endExclusive } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { lt: dateOnly(today) } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: dateOnly(today) } }),
@@ -623,7 +625,7 @@ export class SalesService {
         where: { status: SalesFollowUpStatus.PENDING, followUpDate: { lte: dateOnly(today) } },
         include: {
           responsibleUser: USER_REF, completedByUser: USER_REF,
-          enquiry: { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true } },
+          enquiry: followUpEnquiry,
         },
         orderBy: { followUpDate: 'asc' },
         take: 6,
@@ -631,6 +633,14 @@ export class SalesService {
       client.salesEnquiry.findMany({ include: ENQUIRY_INCLUDE, orderBy: [{ enquiryDate: 'desc' }, { createdAt: 'desc' }], take: 6 }),
       client.salesEnquiry.findMany({ where: { enquiryDate: { gte: trendStart, lt: endExclusive } }, select: { enquiryDate: true } }),
       canReport ? this.monthlyReport(month) : Promise.resolve(null),
+      client.salesFollowUp.findMany({
+        where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) }, enquiry: open },
+        include: { responsibleUser: USER_REF, completedByUser: USER_REF, enquiry: followUpEnquiry },
+        orderBy: { followUpDate: 'asc' },
+        take: 5,
+      }),
+      client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) }, enquiry: open } }),
+      client.salesEnquiry.count({ where: { ...open, followUps: { none: { status: SalesFollowUpStatus.PENDING } } } }),
     ]);
 
     const trendCounts = new Map<string, number>(months.map((m) => [m, 0]));
@@ -657,6 +667,9 @@ export class SalesService {
       conversion: report ? { rate: report.cohortConversionRate, created: report.enquiriesCreated, won: report.cohortWon } : null,
       statusCounts,
       followUpsNeedingAttention: attention.map((f) => ({ ...toFollowUpView(f, today), enquiry: { ...f.enquiry } })),
+      upcomingFollowUps: upcoming.map((f) => ({ ...toFollowUpView(f, today), enquiry: { ...f.enquiry } })),
+      upcomingFollowUpCount: upcomingCount,
+      activeWithoutFollowUp: noFollowUp,
       recentEnquiries: recent.map(toEnquiryView),
       monthlyTrend: months.map((m) => ({ month: m, count: trendCounts.get(m) ?? 0 })),
     };
@@ -693,7 +706,7 @@ export interface FollowUpView {
 }
 
 export interface FollowUpListItem extends FollowUpView {
-  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesEnquiryStatus };
+  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesEnquiryStatus; /** Dashboard only. */ scopeOfWork?: string };
 }
 
 type FollowUpRow = Prisma.SalesFollowUpGetPayload<{ include: { responsibleUser: typeof USER_REF; completedByUser: typeof USER_REF } }>;
@@ -742,6 +755,11 @@ export interface SalesDashboard {
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
   followUpsNeedingAttention: FollowUpListItem[];
+  /** Next pending follow-ups after today (dashboard shows them when nothing is overdue or due today). */
+  upcomingFollowUps: FollowUpListItem[];
+  upcomingFollowUpCount: number;
+  /** Active enquiries with no pending follow-up date at all (distinct from "nothing due"). */
+  activeWithoutFollowUp: number;
   recentEnquiries: EnquiryView[];
   monthlyTrend: { month: string; count: number }[];
 }

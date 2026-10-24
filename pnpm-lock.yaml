@@ -148,9 +148,15 @@ importers:
       '@recafco/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@recafco/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@recafco/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@recafco/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

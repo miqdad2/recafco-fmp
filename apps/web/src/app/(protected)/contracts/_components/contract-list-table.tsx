@@ -3,28 +3,30 @@
 import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { BOQ_BUTTON_CLS, ContractRowActions, OPEN_BUTTON_CLS } from './contract-row-actions';
+import { ContractRowActions, OPEN_BUTTON_CLS } from './contract-row-actions';
 import { SCHEDULE_STATUS_BADGE_CLASSES, formatContractValue, formatScopeCompact, scheduleStatusLabel } from '../_lib/contract-ui-helpers';
 import {
   attentionReasons,
-  boqBar,
   countLabel,
   formatShortDate,
   matchesQuickFilter,
   paymentBar,
-  projectStages,
   QUICK_FILTERS,
   statusBadge,
   timelineInfo,
 } from '../_lib/contract-list-view-helpers';
-import type { BarInfo, QuickFilter, StageInfo } from '../_lib/contract-list-view-helpers';
-import type { ProjectProgress } from '../executive/_lib/project-overview-helpers';
+import type { BarInfo, QuickFilter } from '../_lib/contract-list-view-helpers';
 import type { Contract } from '@/lib/contracts-api';
+import type { ProgressSummary } from '@/lib/operations-api';
+import { OperationsListCell } from './operations-list-cell';
 
 interface Props {
   contracts: Contract[];
-  /** BOQ piece progress per contract id (null = could not be loaded or nothing to track). */
-  boqProgress: Record<string, ProjectProgress | null>;
+  /**
+   * Operational progress per contract id, from the Operations system via FMP's shared resolver (the same accepted
+   * snapshots the Overview and tabs use). A contract missing from the map could not be loaded.
+   */
+  operations: Record<string, ProgressSummary | undefined>;
   page?: number;
   pageSize?: number;
   total?: number;
@@ -73,30 +75,6 @@ function TimelineCell({ contract }: { contract: Contract }): React.JSX.Element {
       {t.remaining && <p className={`text-xs font-medium ${TONE[t.remaining.tone]}`}>{t.remaining.text}</p>}
       {t.start && <p className="text-xs text-text-muted">Start {t.start}</p>}
     </div>
-  );
-}
-
-const STAGE_BADGE: Record<StageInfo['text'], string> = {
-  Done: 'bg-success/10 text-success',
-  'In progress': 'bg-info/10 text-info',
-  'Not started': 'bg-surface-secondary text-text-muted',
-  '—': 'text-text-muted',
-};
-
-/** Four short rows (Technical, Production, Delivery, Erection) instead of four columns; only Done and In progress carry colour. */
-function StagesCell({ contract, progress }: { contract: Contract; progress: ProjectProgress | null }): React.JSX.Element {
-  const stages = projectStages(progress, contract.status);
-  return (
-    <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 text-xs">
-      {stages.map((st) => (
-        <div key={st.label} className="contents">
-          <dt className="text-text-secondary">{st.label}</dt>
-          <dd>
-            <span className={`inline-block rounded-full px-2 py-0.5 font-medium ${STAGE_BADGE[st.text]}`}>{st.text}</span>
-          </dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
@@ -150,11 +128,10 @@ const DASH = <span className="text-text-muted">—</span>;
  * Progress Info, Key Dates), "—" for anything missing, no inputs or dropdowns.
  * Schedule status is a plain badge here; it is changed on the contract page, not in the list.
  */
-function Details({ contract, progress, showNav }: { contract: Contract; progress: ProjectProgress | null; showNav: boolean }): React.JSX.Element {
+function Details({ contract, showNav }: { contract: Contract; showNav: boolean }): React.JSX.Element {
   const scope = formatScopeCompact(contract.scopeOfWork);
   const timeline = timelineInfo(contract);
   const payment = paymentBar(contract.paymentProgressPercent);
-  const boq = boqBar(progress);
   const claims = contract.openClaimsCount ?? 0;
   const schedule = contract.effectiveScheduleStatus;
 
@@ -181,7 +158,6 @@ function Details({ contract, progress, showNav }: { contract: Contract; progress
           </Field>
           <Field label="Payment Progress">{payment.percent === null ? <span className={payment.text === '—' ? 'text-text-muted' : ''}>{payment.text}</span> : <Bar info={payment} color="bg-success" />}</Field>
           <Field label="Open Claims">{claims}</Field>
-          <Field label="BOQ Status">{boq.text === '—' ? DASH : boq.text}</Field>
         </Block>
 
         <Block title="Key Dates">
@@ -196,7 +172,6 @@ function Details({ contract, progress, showNav }: { contract: Contract; progress
       {showNav && (
         <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-border pt-3">
           <Link href={`/contracts/${contract.id}`} className={OPEN_BUTTON_CLS}>Open Contract</Link>
-          <Link href={`/contracts/${contract.id}/boq-progress`} className={BOQ_BUTTON_CLS}>Open BOQ Progress</Link>
         </div>
       )}
     </div>
@@ -228,11 +203,11 @@ function DetailsToggle({ open, onClick, id }: { open: boolean; onClick: () => vo
  * just two buttons, Open and BOQ. FMP-UI-43: Details is a read-only information card —
  * nothing in the list is editable.
  */
-export function ContractListTable({ contracts, boqProgress, page, pageSize, total }: Props): React.JSX.Element {
+export function ContractListTable({ contracts, operations, page, pageSize, total }: Props): React.JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
   const [quick, setQuick] = useState<QuickFilter>('ALL');
   const now = new Date();
-  const shown = contracts.filter((c) => matchesQuickFilter(c, boqProgress[c.id] ?? null, quick, now));
+  const shown = contracts.filter((c) => matchesQuickFilter(c, null, quick, now));
   const toggle = (id: string): void => setOpenId((cur) => (cur === id ? null : id));
 
   const actions = (c: Contract): React.JSX.Element => <ContractRowActions contractId={c.id} title={c.title} />;
@@ -271,13 +246,12 @@ export function ContractListTable({ contracts, boqProgress, page, pageSize, tota
         <table className="w-full table-fixed">
           <thead>
             <tr className="bg-nav">
-              <th className={`${thCls} w-[21%]`}>Contract / Project</th>
-              <th className={`${thCls} w-[15%]`}>Client / Job Order</th>
-              <th className={`${thCls} w-[11%]`}>Status</th>
-              <th className={`${thCls} w-[12%]`}>BOQ</th>
-              <th className={`${thCls} w-[17%]`}>Project Progress</th>
+              <th className={`${thCls} w-[23%]`}>Contract / Project</th>
+              <th className={`${thCls} w-[16%]`}>Client / Job Order</th>
+              <th className={`${thCls} w-[12%]`}>Status</th>
+              <th className={`${thCls} w-[27%]`}>Project Progress</th>
               <th className={`${thCls} w-[12%]`}>Timeline</th>
-              <th className={`${thCls} w-[12%] text-right`}>Actions</th>
+              <th className={`${thCls} w-[10%] text-right`}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border-strong/40">
@@ -292,15 +266,14 @@ export function ContractListTable({ contracts, boqProgress, page, pageSize, tota
                     </td>
                     <td className="px-3 py-4"><ClientCell contract={c} /></td>
                     <td className="px-3 py-4"><StatusCell contract={c} /></td>
-                    <td className="px-3 py-4"><Bar info={boqBar(boqProgress[c.id] ?? null)} color="bg-info" /></td>
-                    <td className="px-3 py-4"><StagesCell contract={c} progress={boqProgress[c.id] ?? null} /></td>
+                    <td className="px-3 py-4"><OperationsListCell summary={operations[c.id] ?? null} /></td>
                     <td className="px-3 py-4"><TimelineCell contract={c} /></td>
                     <td className="px-3 py-4 text-right">{actions(c)}</td>
                   </tr>
                   {open && (
                     <tr id={`details-${c.id}`} className="bg-surface">
-                      <td colSpan={7} className="px-4 py-4">
-                        <Details contract={c} progress={boqProgress[c.id] ?? null} showNav />
+                      <td colSpan={6} className="px-4 py-4">
+                        <Details contract={c} showNav />
                       </td>
                     </tr>
                   )}
@@ -322,16 +295,12 @@ export function ContractListTable({ contracts, boqProgress, page, pageSize, tota
                 <StatusCell contract={c} />
               </div>
               <div className="mt-2"><ClientCell contract={c} /></div>
-              <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
-                <div>
-                  <p className="mb-0.5 text-xs text-text-muted">BOQ</p>
-                  <Bar info={boqBar(boqProgress[c.id] ?? null)} color="bg-info" />
-                </div>
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <p className="mb-0.5 text-xs text-text-muted">Project Progress</p>
-                  <StagesCell contract={c} progress={boqProgress[c.id] ?? null} />
+                  <OperationsListCell summary={operations[c.id] ?? null} />
                 </div>
-                <div className="col-span-2 sm:col-span-1">
+                <div>
                   <p className="mb-0.5 text-xs text-text-muted">Timeline</p>
                   <TimelineCell contract={c} />
                 </div>
@@ -342,7 +311,7 @@ export function ContractListTable({ contracts, boqProgress, page, pageSize, tota
               </div>
               {open && (
                 <div id={`card-details-${c.id}`} className="mt-3 border-t border-border pt-3">
-                  <Details contract={c} progress={boqProgress[c.id] ?? null} showNav={false} />
+                  <Details contract={c} showNav={false} />
                 </div>
               )}
             </li>

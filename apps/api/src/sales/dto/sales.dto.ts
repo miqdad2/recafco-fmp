@@ -20,7 +20,7 @@ const MONEY = /^\d{1,12}(\.\d{1,3})?$/;
 const MONEY_MSG = 'must be a positive amount with up to 3 decimals';
 
 export class CreateEnquiryDto {
-  @IsString() @IsNotEmpty({ message: 'Company / Client Name is required' }) @MaxLength(200) @Transform(trim)
+  @IsString() @IsNotEmpty({ message: 'Company/Client Name is required' }) @MaxLength(200) @Transform(trim)
   companyName!: string;
 
   @IsString() @IsNotEmpty({ message: 'Scope of Work is required' }) @MaxLength(10000) @Transform(trim)
@@ -62,7 +62,7 @@ export class CreateEnquiryDto {
 
 /** Edit: every field optional; a blank optional field clears it. Company and scope can change but never become empty. */
 export class UpdateEnquiryDto {
-  @IsOptional() @IsString() @IsNotEmpty({ message: 'Company / Client Name is required' }) @MaxLength(200) @Transform(trim) companyName?: string;
+  @IsOptional() @IsString() @IsNotEmpty({ message: 'Company/Client Name is required' }) @MaxLength(200) @Transform(trim) companyName?: string;
   @IsOptional() @IsString() @IsNotEmpty({ message: 'Scope of Work is required' }) @MaxLength(10000) @Transform(trim) scopeOfWork?: string;
   @IsOptional() @IsString() @MaxLength(200) @Transform(blankToNull) contactPerson?: string | null;
   @IsOptional() @IsString() @MaxLength(50) @Transform(blankToNull) contactNumber?: string | null;
@@ -103,6 +103,9 @@ export class UpdateEnquiryDto {
 
 export class ChangeStatusDto {
   @IsEnum(SalesEnquiryStatus) status!: SalesEnquiryStatus;
+
+  /** The status the user was looking at; when given and no longer current, the change is refused (someone else changed it). */
+  @IsOptional() @IsEnum(SalesEnquiryStatus) expectedStatus?: SalesEnquiryStatus;
 
   /** Required for Not Proceeding (Lost). */
   @IsOptional() @IsString() @MaxLength(1000) @Transform(blankToNull) reason?: string | null;

@@ -215,8 +215,6 @@ export const QUICK_FILTERS: { key: QuickFilter; label: string }[] = [
   { key: 'ALL', label: 'All' },
   { key: 'ACTIVE', label: 'Active' },
   { key: 'ATTENTION', label: 'Needs Attention' },
-  { key: 'BOQ_NOT_CONFIRMED', label: 'BOQ Not Confirmed' },
-  { key: 'PRODUCTION_NOT_STARTED', label: 'Production Not Started' },
   { key: 'DUE_SOON', label: 'Due Soon' },
   { key: 'OVERDUE', label: 'Overdue' },
   { key: 'COMPLETED', label: 'Completed' },
@@ -242,7 +240,8 @@ export function matchesQuickFilter(
     }
     case 'OVERDUE': return timelineInfo(c, now).remaining?.tone === 'error';
     case 'COMPLETED':
-      return c.status === 'CLOSED' || (!!progress && progress.generated > 0 && progress.completed >= progress.generated);
+      // Commercial status only. Operational completion is not inferred from piece counts (nor from old local workflow data).
+      return c.status === 'CLOSED';
   }
 }
 

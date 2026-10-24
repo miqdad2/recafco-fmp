@@ -54,7 +54,35 @@ All environment variables are loaded from `.env` at the repo root.
 | `NODE_ENV` | Yes | Runtime environment | `production` |
 | `DATABASE_URL` | Yes | Same PostgreSQL URL as the API | same as API |
 
-The worker is not yet active (BullMQ/Redis integration pending). These variables are reserved.
+The BullMQ/Redis queue is not active. Since FMP-OPS-01 the worker runs the read-only **Operations synchronization** (PostgreSQL-backed; no Redis needed). All variables below are optional; with none set the worker makes no external call and reports the connection as not configured.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPERATIONS_SYNC_ENABLED` | `false` | Only the literal `true` enables live calls to the source |
+| `OPERATIONS_SOURCE_BASE_URL` | `https://management.recafco.online` | Source host |
+| `OPERATIONS_SOURCE_USERNAME` / `OPERATIONS_SOURCE_PASSWORD` | — | Dedicated read-only integration account (secret) |
+| `OPERATIONS_SYNC_POLL_INTERVAL_SECONDS` | `60` | Per-project poll; minimum 15 |
+| `OPERATIONS_SYNC_REQUEST_TIMEOUT_MS` | `15000` | Per request |
+| `OPERATIONS_SYNC_MAX_RESPONSE_BYTES` | `2000000` | Larger responses are discarded |
+| `OPERATIONS_SYNC_CONCURRENCY` | `2` | Max 4 |
+| `OPERATIONS_SYNC_MAX_BACKOFF_SECONDS` | `900` | Retry backoff cap |
+| `OPERATIONS_SOURCE_AUTH_MODE` | `password` | `password` (dedicated account) or `demo` (the source's demo sign-in, which depends on its demo access). Any other value is a startup error; there is no fallback between modes |
+| `OPERATIONS_SOURCE_DEMO_FACTORY` / `_ROLE` / `_WORKSPACE` | `precast` / `manager` / `existing` | Demo sign-in payload |
+| `OPERATIONS_DISCOVERY_ENABLED` | `false` | Read the source project list and link unique job-order + factory matches |
+| `OPERATIONS_DISCOVERY_INTERVAL_SECONDS` | `900` | Minimum 300 |
+| `OPERATIONS_EXCLUDED_PROJECT_IDS` | `project_b29b21f0f3fb` | Comma list of test projects to exclude (in addition to `is_training`); empty clears it |
+| `OPERATIONS_PROJECT_LIST_MAX_BYTES` | `5000000` | Larger lists are discarded |
+| `OPERATIONS_SYNC_STAGGER_MS` | `300` | Delay between starting concurrent progress requests |
+
+See [operations-integration.md](operations-integration.md).
+
+---
+
+## Development-only Operations demonstration (FMP-OPS-02)
+
+| Variable | Where | Description |
+|----------|-------|-------------|
+| `OPERATIONS_DEMO_ENABLED` | root `.env` (API) **and** `apps/web/.env.local` (web) | `true` enables the isolated demonstration contract, fixture snapshots and `/dev/operations-demo`. **Never set on the company server:** the API refuses to start in production with it set, and demo routes/data/controls are hidden in production regardless. |
 
 ---
 

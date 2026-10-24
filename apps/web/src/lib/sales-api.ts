@@ -72,7 +72,7 @@ export interface SalesFollowUp {
 }
 
 export interface SalesFollowUpListItem extends SalesFollowUp {
-  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesStatus };
+  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesStatus; scopeOfWork?: string };
 }
 
 export interface SalesDashboard {
@@ -90,6 +90,9 @@ export interface SalesDashboard {
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
   followUpsNeedingAttention: SalesFollowUpListItem[];
+  upcomingFollowUps: SalesFollowUpListItem[];
+  upcomingFollowUpCount: number;
+  activeWithoutFollowUp: number;
   recentEnquiries: SalesEnquiry[];
   monthlyTrend: { month: string; count: number }[];
 }

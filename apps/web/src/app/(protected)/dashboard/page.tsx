@@ -11,7 +11,7 @@ import { getLandingPath } from '../_lib/access-mode';
 import { ControlCenterCard } from './_components/control-center-card';
 import { ACCENT_PALETTE } from '../_lib/module-accent';
 import type { CardColor } from './_components/control-center-card';
-import { selectControlCenterCards, CARD_CTA, FACTORY_PERFORMANCE_CARD, SALES_ENQUIRIES_CARD } from './_lib/control-center-cards';
+import { selectControlCenterCards, CARD_CTA, FACTORY_PERFORMANCE_CARD, FACTORY_PERFORMANCE_URL, SALES_ENQUIRIES_CARD } from './_lib/control-center-cards';
 
 export const metadata: Metadata = { title: 'Dashboard — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -35,11 +35,6 @@ const CARD_COLORS: Partial<Record<PlatformModuleCode, CardColor>> = {
 const FACTORY_PERFORMANCE_COLOR: CardColor = { base: '#0b2545', light: '#eaf1fb' };
 const SALES_COLOR: CardColor = { base: '#c62828', light: '#fdecec' }; // RECAFCO red
 
-/**
- * FMP-UI-36 — the existing, working Factory Performance destination (a separate application, opened in a
- * new tab). Unchanged from the previous card; it is not a permission-gated platform module.
- */
-const FACTORY_PERFORMANCE_URL = 'http://192.168.1.17:83';
 
 export default async function ExecutiveDashboardPage(): Promise<React.JSX.Element> {
   const store = await cookies();

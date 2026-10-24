@@ -59,8 +59,43 @@ describe('Sales formatting', () => {
   });
 
   it('dashboard uses the approved plain labels', () => {
+    const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx');
+    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Projects', 'Conversion This Month', 'Today’s Follow-ups', 'Record Follow-up', 'Open Enquiry', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
+    expect(page).not.toContain('Not yet Confirmed or Not Proceeding');
+    expect(page).not.toContain('See all');
+    expect(page).not.toContain('opens All Enquiries with that filter');
+    expect(page).not.toContain('Follow-ups to Do');
+  });
+
+  it('dashboard shows four primary cards; only cards with an accurate list are links', () => {
     const page = read('../page.tsx');
-    for (const l of ['Enquiries This Month', 'Follow-ups Due', 'Active Enquiries', 'Estimated Project Value', 'Confirmed Projects', 'Conversion This Month']) expect(page).toContain(l);
+    const kpis = page.slice(page.indexOf('const kpis'), page.indexOf('return (', page.indexOf('const kpis')));
+    expect(kpis.match(/label: '/g)?.length).toBe(4);
+    expect(kpis.match(/href: /g)?.length).toBe(3); // the estimated-value card has no matching list
+    expect(page).toContain('canUpdate && <FollowUpActions');
+  });
+
+  it('dashboard Recent Enquiries filter loads matching records on the server and applies immediately (no Show button)', () => {
+    const c = read('../_components/recent-enquiries.tsx');
+    expect(c).toContain('loadRecentEnquiriesAction');
+    expect(c).toContain('onChange={(e) => choose(e.target.value)}');
+    expect(c).not.toContain('>Show<');
+    expect(read('../actions.ts')).toContain("pageSize: '6'");
+  });
+
+  it('inline status control: editors only, nothing saved by selecting, confirmation for Confirmed/Not Proceeding, stale-status protection', () => {
+    const c = read('../_components/enquiry-status-control.tsx');
+    expect(c).toContain('if (!canEdit) return <StatusBadge');
+    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Confirm status change', 'It does not create a contract']) expect(c).toContain(l);
+    expect(read('../actions.ts')).toContain('expectedStatus');
+    for (const f of ['../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../_components/recent-enquiries.tsx']) expect(read(f)).toContain('EnquiryStatusControl');
+    expect(read('../enquiries/page.tsx')).toContain("permissions.includes('sales.update')");
+  });
+
+  it('status filter offers All, Active, Follow-up Needed and More Statuses with every existing status', () => {
+    const ui = read('../_components/sales-ui.tsx');
+    for (const l of ['All', 'Active', 'More Statuses', 'STATUS_ORDER.map']) expect(ui).toContain(l);
+    expect(ui).toContain("value: 'open'");
   });
 });
 
@@ -86,9 +121,10 @@ describe('Sales area guards', () => {
     for (const line of exports) expect(line).toMatch(/^export async function /);
   });
 
-  it('Sales is not added to the main sidebar, and there is no export route', () => {
+  it('Sales appears in the sidebar only as the sales.read-gated sibling under Contract Management, and there is no export route', () => {
     const sidebar = fs.readFileSync(path.resolve(__dirname, '../../_components/sidebar.tsx'), 'utf8');
-    expect(sidebar).not.toMatch(/\/sales/);
+    expect(sidebar).toContain("permissions.includes('sales.read')");
+    expect(sidebar.match(/href="\/sales"/g)?.length).toBe(2);
     const files: string[] = [];
     const walk = (dir: string): void => {
       for (const f of fs.readdirSync(dir, { withFileTypes: true })) {

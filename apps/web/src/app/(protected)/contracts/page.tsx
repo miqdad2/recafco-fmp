@@ -7,9 +7,8 @@ import { ContractFilterBar } from './_components/contract-filter-bar';
 import { ContractListTable } from './_components/contract-list-table';
 import { contractsApi } from '../../../lib/contracts-api';
 import { getUserPermissions } from './_lib/get-user-permissions';
-import { fetchBoqConfirmations } from '@/lib/technical-api';
-import { summarizeProgress } from './executive/_lib/project-overview-helpers';
-import type { ProjectProgress } from './executive/_lib/project-overview-helpers';
+import { operationsApi, type ProgressSummary } from '@/lib/operations-api';
+import { OperationsLiveRefresh } from './_components/operations-live-refresh';
 import { countNeedingAttention, isDateWindowFilter, matchesDueWindow, statusApiValue } from './_lib/contract-list-view-helpers';
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
@@ -88,13 +87,15 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
     contracts = inWindow.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   }
 
-  // FMP-UI-40 — one read-only BOQ progress fetch per contract on this page (max 25, in parallel).
-  // A cancelled contract has nothing left to track.
-  const boqResults = await Promise.all(contracts.map((c) => (c.status === 'CANCELLED' ? Promise.resolve(null) : fetchBoqConfirmations(c.id))));
-  const boqProgress: Record<string, ProjectProgress | null> = {};
-  contracts.forEach((c, i) => {
-    boqProgress[c.id] = summarizeProgress(boqResults[i] ?? null);
-  });
+  // FMP-OPS-02 — ONE call for the whole page from the shared Operations resolver (accepted local snapshots; the
+  // source system is never contacted and the old local workflow figures are not used). A failure here must not
+  // affect the list: the cells then say progress is unavailable.
+  let operations: Record<string, ProgressSummary | undefined> = {};
+  try {
+    operations = await operationsApi.monitoring(contracts.map((c) => c.id));
+  } catch {
+    operations = {};
+  }
   const needsAttention = countNeedingAttention(contracts);
 
   function buildHref(overrides: Record<string, string | undefined>): string {
@@ -141,6 +142,12 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
             <LayoutDashboard className="size-3.5 shrink-0" aria-hidden="true" />
             Open Dashboard
           </Link>
+          <Link
+            href="/contracts/operations-links"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-md border border-border bg-surface text-text-primary text-sm font-medium hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            Operations Links
+          </Link>
           <button
             type="button"
             disabled
@@ -185,9 +192,11 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
         </div>
       ) : (
         <>
+          {/* FMP-OPS-02 — the list follows the accepted snapshots without a manual reload (reads FMP only). */}
+          <OperationsLiveRefresh contractIds={contracts.map((c) => c.id)} />
           <ContractListTable
             contracts={contracts}
-            boqProgress={boqProgress}
+            operations={operations}
             page={page}
             pageSize={PAGE_SIZE}
             total={total}

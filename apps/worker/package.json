@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@recafco/config": "workspace:*",
-    "@recafco/observability": "workspace:*"
+    "@recafco/observability": "workspace:*",
+    "@recafco/database": "workspace:*",
+    "@recafco/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

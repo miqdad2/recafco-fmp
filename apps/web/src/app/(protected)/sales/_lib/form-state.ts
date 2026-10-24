@@ -12,3 +12,21 @@ export interface SalesFormState {
 }
 
 export const EMPTY_FORM_STATE: SalesFormState = { error: null, fieldErrors: {}, values: {}, ok: null };
+
+/** FMP-SALES-03 — result of loading the dashboard's Recent Enquiries for one status filter. */
+export interface RecentEnquiriesResult {
+  items: import('@/lib/sales-api').SalesEnquiry[];
+  /** All enquiries matching the filter (not just the ones returned). */
+  total: number;
+  error: string | null;
+}
+
+/** FMP-SALES-04 — result of changing one enquiry's status from the inline control. */
+export interface StatusChangeResult {
+  ok: boolean;
+  /** Plain message when not saved. */
+  error: string | null;
+  fieldErrors: Record<string, string[]>;
+  /** The enquiry was changed by someone else meanwhile: the page must be refreshed before retrying. */
+  conflict: boolean;
+}

@@ -52,7 +52,7 @@ function QuickForm({ onClose, onSaved }: FormProps): React.JSX.Element {
     <form key={key} action={action} noValidate className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5 sm:px-8">
         <FormMessage error={state.error} />
-        <Field id="q-company" label="Company / Client Name" required errors={err('companyName')}>
+        <Field id="q-company" label="Company/Client Name" required errors={err('companyName')}>
           <input
             id="q-company" name="companyName" type="text" autoFocus defaultValue={v('companyName')} maxLength={200} autoComplete="off"
             aria-required="true" aria-invalid={!!err('companyName')} aria-describedby={err('companyName') ? 'q-company-error' : undefined}
@@ -90,7 +90,7 @@ function QuickForm({ onClose, onSaved }: FormProps): React.JSX.Element {
             <input id="q-next" name="nextFollowUpDate" type="date" defaultValue={v('nextFollowUpDate')} className={`${INPUT_CLASS} h-14 text-lg`} />
           </Field>
         </div>
-        <Field id="q-notes" label="Meeting Notes / Remarks" errors={err('remarks')}>
+        <Field id="q-notes" label="Meeting Notes" errors={err('remarks')}>
           <textarea id="q-notes" name="remarks" rows={3} defaultValue={v('remarks')} maxLength={5000} className={`${INPUT_CLASS} resize-y text-lg`} />
         </Field>
       </div>

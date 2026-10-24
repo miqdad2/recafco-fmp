@@ -158,6 +158,13 @@ describe('status changes', () => {
     await expect(service.changeStatus('e1', { status: SalesEnquiryStatus.CONTACTED }, ACTOR)).rejects.toThrow(/changed by someone else/);
   });
 
+  it('a stale expectedStatus (someone else changed it) is refused before anything is written', async () => {
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.QUOTATION_SENT }));
+    await expect(service.changeStatus('e1', { status: SalesEnquiryStatus.FOLLOW_UP, expectedStatus: SalesEnquiryStatus.NEW_ENQUIRY }, ACTOR)).rejects.toThrow(/changed by someone else/);
+    expect(tx.salesActivity.create).not.toHaveBeenCalled();
+    await expect(service.changeStatus('e1', { status: SalesEnquiryStatus.FOLLOW_UP, expectedStatus: SalesEnquiryStatus.QUOTATION_SENT }, ACTOR)).resolves.toBeDefined();
+  });
+
   it('re-opening a Won enquiry clears the outcome but keeps it in the history entry', async () => {
     tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.WON, wonDate: new Date('2026-10-01T00:00:00Z'), awardedValue: new Prisma.Decimal('5000.000') }));
     await service.changeStatus('e1', { status: SalesEnquiryStatus.FOLLOW_UP }, ACTOR);

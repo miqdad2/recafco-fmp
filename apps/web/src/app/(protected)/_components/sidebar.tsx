@@ -30,12 +30,15 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Gauge,
+  Handshake,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
 import type { LucideIcon } from 'lucide-react';
 import { canSeeModule, isContractStaffOnlyAccess, isErectionDashboardMonitorOnly } from '../_lib/module-visibility';
-import { contractRelatedLinks, deriveAccessMode, getSidebarLayout, MODULE_DISPLAY_NAMES } from '../_lib/access-mode';
+import { FACTORY_PERFORMANCE_CARD, FACTORY_PERFORMANCE_URL, SALES_ENQUIRIES_CARD } from '../dashboard/_lib/control-center-cards';
+import { contractMonitoringRelatedLinks, deriveAccessMode, getSidebarLayout, MODULE_DISPLAY_NAMES } from '../_lib/access-mode';
 import type { ModuleCode } from '../_lib/module-visibility';
 
 interface NavItem {
@@ -76,16 +79,38 @@ interface NavGroup {
 // Contract Management dropdown itself. They render first in this array so
 // they appear immediately after that dropdown (see the group-rendering loop
 // below, which renders the dropdown before this array's items).
-// FMP-ACCESS-01 — permission-gated workflow links, shared by the Operations group (multi-module /
-// full-platform users) and the Contract Management "Related Workflows" block (Single Module).
-const STORAGE_DELIVERY_ITEM: NavItem = {
-  // FMP-BOQ-08 — Storage Yard & Delivery has its own permission (no module code); first screen = Piece Delivery.
-  label: 'Storage Yard & Delivery', href: '/storage-delivery/pieces', icon: Warehouse, permission: 'storage_delivery.read',
-};
-const PIECE_ERECTION_ITEM: NavItem = {
-  // FMP-BOQ-09 — Erection piece screen; needs erection.read (the existing Erection dashboard link is unchanged).
-  label: 'Piece Erection', href: '/erection/pieces', icon: HardHat, permission: 'erection.read',
-};
+/**
+ * Factory Performance and Sales & Enquiries sit directly under the Contract Management submenu as its SIBLINGS: same
+ * left edge, icon size and weight as the Contract Management row, outside the indented submenu and its connecting line.
+ * Destinations and gates are the Control Center cards': Factory Performance is the separate application (new tab,
+ * not permission-gated); Sales & Enquiries is /sales and appears only for users holding sales.read.
+ */
+function SiblingNavLinks({ showSales, pathname, onClose }: { showSales: boolean; pathname: string; onClose: () => void }): React.JSX.Element {
+  const base = 'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors';
+  const idle = 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse';
+  const salesActive = pathname === '/sales' || pathname.startsWith('/sales/');
+  return (
+    <div data-nav-siblings="contract-management" className="mt-0.5">
+      <a href={FACTORY_PERFORMANCE_URL} target="_blank" rel="noopener noreferrer" className={`${base} ${idle}`}>
+        <Gauge className="size-4 shrink-0" aria-hidden="true" />
+        <span className="flex-1 text-left">{FACTORY_PERFORMANCE_CARD.title}</span>
+        <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
+        <span className="sr-only">(opens in a new tab)</span>
+      </a>
+      {showSales && (
+        <Link
+          href="/sales"
+          onClick={onClose}
+          aria-current={salesActive ? 'page' : undefined}
+          className={[base, salesActive ? 'bg-nav-active text-text-inverse font-medium' : idle].join(' ')}
+        >
+          <Handshake className="size-4 shrink-0" aria-hidden="true" />
+          {SALES_ENQUIRIES_CARD.title}
+        </Link>
+      )}
+    </div>
+  );
+}
 
 const MAIN_GROUPS: NavGroup[] = [
   {
@@ -98,17 +123,11 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: 'Operations',
     items: [
-      // FMP-TECH-01 — repointed to the new Technical module (was /contracts/technical).
-      // FMP-ACCESS-02 — technical.read OR the older contracts.read (Contract Managers keep this link).
-      { label: 'Technical', href: '/technical', icon: Ruler, anyPermission: ['technical.read', 'contracts.read'] },
-      { label: 'Erection', href: '/contracts/erection-dashboard', icon: HardHat, module: 'CONTRACTS_MANAGEMENT' },
+      // FMP-OPS-02 — Technical, Erection, Production & Planning, Storage Yard & Delivery and Piece Erection moved to the
+      // separate "Previous Internal Workflow" area below (same routes and permissions; nothing deleted).
       { label: 'Safety & Compliance', href: '/safety-compliance/dashboard', icon: ShieldCheck, module: 'SAFETY_COMPLIANCE' },
       // FMP-UI-23 — renamed from "Incident Report"; module code/href unchanged.
       { label: 'Incident Management', href: '/incidents/dashboard', icon: AlertTriangle, module: 'INCIDENT_REPORT' },
-      // FMP-UI-23 — renamed from "Production Planning"; module code/href unchanged.
-      { label: 'Production & Planning', href: '/production/dashboard', icon: Factory, module: 'PRODUCTION_DASHBOARD' },
-      STORAGE_DELIVERY_ITEM,
-      PIECE_ERECTION_ITEM,
       { label: 'Maintenance Management', href: '/maintenance/dashboard', icon: Wrench, module: 'MAINTENANCE_REQUESTS' },
       { label: 'Task Management', href: '/factory-tasks/dashboard', icon: ClipboardList, module: 'FACTORY_TASKS' },
       // FMP-UI-30 — Advanced Planning promoted to its own main-sidebar item
@@ -120,6 +139,8 @@ const MAIN_GROUPS: NavGroup[] = [
       // FMP-UI-45 — Factory Performance is no longer in the sidebar (its Platform Dashboard card still opens it).
     ],
   },
+  // FMP-NAV-02 — "Previous Internal Workflow" is no longer listed in any sidebar. The /previous-workflow page, the old
+  // routes and their permissions are untouched; authorized users still open them directly.
   {
     label: 'Governance',
     items: [
@@ -435,7 +456,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
   const contractManagementOnly = sidebarLayout === 'CONTRACT_SINGLE_MODULE';
   const singleModuleLabel = singleModule && accessInfo.primaryModule ? MODULE_DISPLAY_NAMES[accessInfo.primaryModule] : null;
   // Contract Management → Related Workflows: Technical, Erection, Advanced Planning plus any permission-gated workflow links this user holds.
-  const relatedWorkflowItems = contractRelatedLinks(user.permissions).map((l) => ({
+  const relatedWorkflowItems = contractMonitoringRelatedLinks(user.permissions).map((l) => ({
     label: l.label,
     href: l.href,
     icon: RELATED_WORKFLOW_ICONS[l.label] ?? Ruler,
@@ -530,6 +551,36 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                           );
                         })}
                       </div>
+                    )}
+                    {/* Siblings of the Contract Management title (not inside the indented submenu / its vertical line). */}
+                    <a
+                      href={FACTORY_PERFORMANCE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-nav-sibling="factory-performance"
+                      className="flex items-center gap-3 rounded-r-md border-l-4 border-transparent py-3.5 pl-3 pr-3 text-lg font-medium leading-snug text-text-inverse/75 transition-colors duration-150 hover:bg-nav-hover/70 hover:text-text-inverse"
+                    >
+                      <Gauge className="size-6 shrink-0" aria-hidden="true" />
+                      <span className="flex-1">{FACTORY_PERFORMANCE_CARD.title}</span>
+                      <ExternalLink className="size-4 shrink-0 opacity-50" aria-hidden="true" />
+                      <span className="sr-only">(opens in a new tab)</span>
+                    </a>
+                    {user.permissions.includes('sales.read') && (
+                      <Link
+                        href="/sales"
+                        onClick={onClose}
+                        data-nav-sibling="sales"
+                        aria-current={pathname === '/sales' || pathname.startsWith('/sales/') ? 'page' : undefined}
+                        className={[
+                          'flex items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
+                          pathname === '/sales' || pathname.startsWith('/sales/')
+                            ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                            : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
+                        ].join(' ')}
+                      >
+                        <Handshake className="size-6 shrink-0" aria-hidden="true" />
+                        {SALES_ENQUIRIES_CARD.title}
+                      </Link>
                     )}
                   </Fragment>
                 );
@@ -668,6 +719,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                   )}
                 </div>
               )}
+              {showContractsHere && <SiblingNavLinks showSales={user.permissions.includes('sales.read')} pathname={pathname} onClose={onClose} />}
 
               {/* FMP-ACCESS-02 — a Single Module user's module is already the section heading, so its one link reads "Dashboard". */}
               {(singleModule && group.label === 'Operations'
@@ -759,10 +811,13 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </Link>
               );
             })}
+            <SiblingNavLinks showSales={user.permissions.includes('sales.read')} pathname={pathname} onClose={onClose} />
             {/* FMP-ACCESS-01 — Technical/Erection/Advanced Planning (and any permission-gated workflow links) are the Contract Management workflow: shown under their own "Related Workflows" heading so they no longer read as extra modules. Every link and gate is unchanged. */}
-            <p className="px-4 mb-1 mt-4 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
+            {relatedWorkflowItems.length > 0 && (
+              <p className="px-4 mb-1 mt-4 text-[10px] font-semibold uppercase tracking-widest text-text-inverse/40">
               Related Workflows
             </p>
+            )}
             {relatedWorkflowItems.map((item) => {
               const active = isActive(item.href, pathname);
               return (

@@ -121,6 +121,33 @@ export function contractRelatedLinks(permissions: string[]): { label: string; hr
   }));
 }
 
+/**
+ * FMP-OPS-02 — the old operational workflow (Technical, Production & Planning, Storage Yard & Delivery, Erection,
+ * Piece Erection) is no longer part of normal contract monitoring. It lives in a separate "Previous Internal
+ * Workflow" area. These are the workflow links that moved there; nothing was deleted and every route and
+ * permission is unchanged.
+ */
+export const PREVIOUS_WORKFLOW_LINK_LABELS: readonly string[] = ['Technical', 'Production & Planning', 'Storage Yard & Delivery', 'Erection', 'Piece Erection'];
+
+/**
+ * Who may open the Previous Internal Workflow area: administrators and people who actually WORK in the old
+ * workflow (they hold one of its existing write permissions). Read-only monitoring roles and the Contract Manager
+ * do not see it, and holding a read permission alone is not enough. The routes behind it keep their own gates.
+ */
+export const PREVIOUS_WORKFLOW_PERMISSIONS: readonly string[] = [
+  'technical.update', 'technical.manage', 'production.update', 'production.manage', 'storage_delivery.update', 'erection.update',
+  'users.assign_role', 'roles.update',
+];
+
+export function canAccessPreviousWorkflow(permissions: string[]): boolean {
+  return PREVIOUS_WORKFLOW_PERMISSIONS.some((p) => permissions.includes(p));
+}
+
+/** Related Workflows links for the monitoring sidebar: the old operational workflow links are left out (they moved). */
+export function contractMonitoringRelatedLinks(permissions: string[]): { label: string; href: string }[] {
+  return contractRelatedLinks(permissions).filter((l) => !PREVIOUS_WORKFLOW_LINK_LABELS.includes(l.label));
+}
+
 /** Names shown on the user-creation and Edit User screens (the always-on Contract Management workflow trio). */
 export function relatedWorkflowsFor(module: ModuleCode | null): string[] {
   return module === 'CONTRACTS_MANAGEMENT'

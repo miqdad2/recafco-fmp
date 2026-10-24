@@ -6,8 +6,9 @@ import { salesApi } from '@/lib/sales-api';
 import type { SalesActivity, SalesStatus } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../../contracts/_lib/get-user-permissions';
 import { ACTIVITY_LABELS, STATUS_LABELS, dueText, formatDate, formatKwd, NOT_ESTIMATED } from '../../_lib/sales-format';
-import { BTN_SECONDARY, BucketBadge, FormMessage, Section, StatusBadge } from '../../_components/sales-ui';
+import { BTN_SECONDARY, BucketBadge, FormMessage, Section } from '../../_components/sales-ui';
 import { EnquiryActions } from '../../_components/enquiry-actions';
+import { EnquiryStatusControl } from '../../_components/enquiry-status-control';
 import { FollowUpActions } from '../../_components/follow-up-actions';
 
 export const metadata: Metadata = { title: 'Enquiry — Sales & Enquiries — RECAFCO FMP' };
@@ -87,7 +88,7 @@ export default async function EnquiryDetailPage({
           <div className="min-w-0">
             <p className="text-base font-semibold text-text-secondary">{e.enquiryNumber} · registered {formatDate(e.enquiryDate)}</p>
             <h1 className="mt-1 break-words text-4xl font-extrabold tracking-tight text-text-primary">{e.companyName}</h1>
-            <div className="mt-3"><StatusBadge status={e.status} /></div>
+            <div className="mt-3"><EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} /></div>
           </div>
           {canUpdate && (
             <Link href={`/sales/enquiries/${e.id}/edit`} className={BTN_SECONDARY}>

@@ -2,8 +2,9 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { salesFetch } from '@/lib/sales-api';
-import type { SalesFormState } from './_lib/form-state';
+import { salesApi, salesFetch } from '@/lib/sales-api';
+import type { RecentEnquiriesResult, SalesFormState, StatusChangeResult } from './_lib/form-state';
+import { STATUS_FILTER_VALUE } from './_lib/sales-format';
 
 // ---------------------------------------------------------------------------
 // FMP-SALES-01 — server actions. Each one only forwards to the Sales API, which enforces the
@@ -164,4 +165,49 @@ export async function rescheduleFollowUpAction(followUpId: string, enquiryId: st
   });
   if (res.error) return failure(values, res.error);
   return { error: null, fieldErrors: {}, values: {}, ok: 'Follow-up moved to the new date.' };
+}
+
+/** The dashboard's Recent Enquiries for one status filter: the newest few, plus the true match count. Read-only; the API enforces sales.read and the same filter logic as All Enquiries. */
+export async function loadRecentEnquiriesAction(status: string): Promise<RecentEnquiriesResult> {
+  const allowed = new Set(['', 'open', ...Object.values(STATUS_FILTER_VALUE)]);
+  if (!allowed.has(status)) return { items: [], total: 0, error: 'Unknown filter.' };
+  const qs = new URLSearchParams({ page: '1', pageSize: '6' });
+  if (status) qs.set('status', status);
+  const res = await salesApi.enquiries(qs);
+  if (res.error) return { items: [], total: 0, error: 'The enquiries could not be loaded.' };
+  return { items: res.data.items, total: res.data.pagination.total, error: null };
+}
+
+/**
+ * FMP-SALES-04 — inline status change (the same API call and rules as the Update Status panel: Not Proceeding needs a
+ * reason, Confirmed takes an optional value/date, history is written by the API). The status the user saw is sent so a
+ * change made by someone else in the meantime is refused instead of overwritten.
+ */
+export async function changeEnquiryStatusAction(
+  id: string,
+  input: { status: string; expectedStatus: string; reason?: string; awardedValue?: string; wonDate?: string },
+): Promise<StatusChangeResult> {
+  const reason = (input.reason ?? '').trim();
+  const awarded = (input.awardedValue ?? '').trim().replace(/,/g, '');
+  if (!/^[A-Z_]+$/.test(input.status) || !/^[A-Z_]+$/.test(input.expectedStatus)) return { ok: false, error: 'Please choose a status.', fieldErrors: {}, conflict: false };
+  if (input.status === 'LOST' && !reason) return { ok: false, error: null, fieldErrors: { reason: ['Please give a short reason why it is not proceeding.'] }, conflict: false };
+  if (awarded && !/^d{1,12}(.d{1,3})?$/.test(awarded)) {
+    return { ok: false, error: null, fieldErrors: { awardedValue: ['Enter an amount in KWD, for example 85000 or 85000.500.'] }, conflict: false };
+  }
+  const body: Record<string, string> = { status: input.status, expectedStatus: input.expectedStatus, reason };
+  if (input.status === 'WON') {
+    body['awardedValue'] = awarded;
+    body['wonDate'] = (input.wonDate ?? '').trim();
+  }
+  const res = await salesFetch(`/sales/enquiries/${id}/status`, { method: 'POST', body: JSON.stringify(body) });
+  if (res.error) {
+    const conflict = res.error.code === 'SALES_STATUS_CONFLICT' || res.error.code === 'SALES_STATUS_UNCHANGED';
+    return {
+      ok: false,
+      error: res.error.status === 403 ? 'You do not have permission to change the status.' : conflict ? 'This enquiry was just changed by someone else.' : res.error.message,
+      fieldErrors: res.error.fields ?? {},
+      conflict,
+    };
+  }
+  return { ok: true, error: null, fieldErrors: {}, conflict: false };
 }

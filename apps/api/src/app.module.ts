@@ -18,11 +18,14 @@ import { TechnicalModule } from './technical/technical.module';
 import { MmsIntegrationModule } from './mms-integration/mms-integration.module';
 import { ManagementIntelligenceModule } from './management-intelligence/management-intelligence.module';
 import { SalesModule } from './sales/sales.module';
+import { OperationsSourceModule } from './operations-source/operations-source.module';
+import { OperationsDemoModule } from './operations-source/demo/operations-demo.module';
+import { operationsDemoAllowed } from './operations-source/demo-guard';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { RequestLogMiddleware } from './common/middleware/request-log.middleware';
 
 @Module({
-  imports: [HealthModule, AuthModule, OrganizationsModule, UsersModule, RolesModule, DepartmentAccessModule, IncidentsModule, FactoryTasksModule, MaintenanceModule, SafetyModule, ContractsModule, ProductionModule, StorageDeliveryModule, ErectionModule, PlatformModule, TechnicalModule, MmsIntegrationModule, ManagementIntelligenceModule, SalesModule],
+  imports: [HealthModule, AuthModule, OrganizationsModule, UsersModule, RolesModule, DepartmentAccessModule, IncidentsModule, FactoryTasksModule, MaintenanceModule, SafetyModule, ContractsModule, ProductionModule, StorageDeliveryModule, ErectionModule, PlatformModule, TechnicalModule, MmsIntegrationModule, ManagementIntelligenceModule, SalesModule, OperationsSourceModule, ...(operationsDemoAllowed() ? [OperationsDemoModule] : [])],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

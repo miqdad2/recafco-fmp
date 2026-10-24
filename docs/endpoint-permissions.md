@@ -265,6 +265,23 @@ Auth endpoints are public or require only a valid JWT (no specific permission co
 
 ---
 
+## Operations integration (FMP-OPS-01)
+
+No route calls the external system; the worker is the only caller.
+
+| Endpoint | Permission |
+|---|---|
+| `GET /contracts/:contractId/operations-progress` (+ `/history`) | `contracts.read` (+ contract department scope) |
+| `POST /contracts/:contractId/operations-progress/refresh` | `contracts.read` (queues a background check only) |
+| `GET /operations-source/projects`, `GET /operations-source/status` | `contracts.read` |
+| `POST /operations-source/projects` | `contracts.operations_link` |
+| `PUT /operations-source/projects/:id/link`, `POST /operations-source/projects/:id/unlink` | `contracts.operations_link` (+ contract department scope) |
+| `PUT /operations-source/factory-mappings`, `DELETE /operations-source/factory-mappings/:id` | `contracts.operations_link` |
+
+Link changes are audited in `operations_project_link_events` and the contract's activity log; unlinking keeps stored snapshots.
+
+---
+
 ## Append-only invariant
 
 The following resource types have **no DELETE endpoints** by design:

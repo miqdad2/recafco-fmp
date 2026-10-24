@@ -156,8 +156,8 @@ describe('Days Remaining filter', () => {
 });
 
 describe('quick filters', () => {
-  it('lists the eight requested chips', () => {
-    expect(QUICK_FILTERS.map((q) => q.label)).toEqual(['All', 'Active', 'Needs Attention', 'BOQ Not Confirmed', 'Production Not Started', 'Due Soon', 'Overdue', 'Completed']);
+  it('lists the six chips that do not depend on the old internal workflow', () => {
+    expect(QUICK_FILTERS.map((q) => q.label)).toEqual(['All', 'Active', 'Needs Attention', 'Due Soon', 'Overdue', 'Completed']);
   });
 
   it('matches each chip from existing data', () => {
@@ -166,17 +166,13 @@ describe('quick filters', () => {
     expect(matchesQuickFilter(c, null, 'ACTIVE', NOW)).toBe(true);
     expect(matchesQuickFilter(contract({ status: 'DRAFT' }), null, 'ACTIVE', NOW)).toBe(false);
     expect(matchesQuickFilter(contract({ openClaimsCount: 1 }), null, 'ATTENTION', NOW)).toBe(true);
-    expect(matchesQuickFilter(c, progress(), 'BOQ_NOT_CONFIRMED', NOW)).toBe(true);
-    expect(matchesQuickFilter(c, progress({ confirmed: 3, generated: 3 }), 'BOQ_NOT_CONFIRMED', NOW)).toBe(false);
-    expect(matchesQuickFilter(c, progress({ confirmed: 3, generated: 3 }), 'PRODUCTION_NOT_STARTED', NOW)).toBe(true);
-    expect(matchesQuickFilter(c, progress({ confirmed: 3, generated: 3, inProduction: 1 }), 'PRODUCTION_NOT_STARTED', NOW)).toBe(false);
     expect(matchesQuickFilter(c, null, 'DUE_SOON', NOW)).toBe(true);
     expect(matchesQuickFilter(contract({ forecastCompletionDate: '2027-06-01' }), null, 'DUE_SOON', NOW)).toBe(false);
     expect(matchesQuickFilter(contract({ forecastCompletionDate: '2026-11-01' }), null, 'OVERDUE', NOW)).toBe(true);
     expect(matchesQuickFilter(c, null, 'OVERDUE', NOW)).toBe(false);
-    expect(matchesQuickFilter(c, progress({ confirmed: 2, generated: 2, completed: 2 }), 'COMPLETED', NOW)).toBe(true);
+    // Completed is a commercial status only: old local piece progress no longer counts as completion.
+    expect(matchesQuickFilter(c, progress({ confirmed: 2, generated: 2, completed: 2 }), 'COMPLETED', NOW)).toBe(false);
     expect(matchesQuickFilter(contract({ status: 'CLOSED' }), null, 'COMPLETED', NOW)).toBe(true);
-    expect(matchesQuickFilter(c, progress({ confirmed: 2, generated: 2, completed: 1 }), 'COMPLETED', NOW)).toBe(false);
   });
 });
 

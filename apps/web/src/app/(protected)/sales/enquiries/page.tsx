@@ -3,9 +3,10 @@ import type { Metadata } from 'next';
 import { Search } from 'lucide-react';
 import { salesApi } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../contracts/_lib/get-user-permissions';
-import { STATUS_LABELS, STATUS_ORDER, STATUS_FILTER_VALUE, formatDate, formatKwd, NOT_ESTIMATED } from '../_lib/sales-format';
+import { statusFilterLabel, formatDate, formatKwd, NOT_ESTIMATED } from '../_lib/sales-format';
 import { NewEnquiryButton } from '../_components/new-enquiry-modal';
-import { BTN_PRIMARY, BTN_SECONDARY, BucketBadge, EmptyState, INPUT_CLASS, StatusBadge } from '../_components/sales-ui';
+import { EnquiryStatusControl } from '../_components/enquiry-status-control';
+import { BTN_PRIMARY, BTN_SECONDARY, BucketBadge, EmptyState, INPUT_CLASS, StatusBadge, StatusFilter } from '../_components/sales-ui';
 
 export const metadata: Metadata = { title: 'All Enquiries — Sales & Enquiries — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
@@ -37,13 +38,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
 
   const [{ permissions }, res] = await Promise.all([getCurrentUserContext(), salesApi.enquiries(qs)]);
   const canCreate = permissions.includes('sales.create');
+  const canUpdate = permissions.includes('sales.update');
   const filtered = Boolean(search || status || month);
-
-  const pills: { key: string; label: string }[] = [
-    { key: '', label: 'All' },
-    { key: 'open', label: 'Active' },
-    ...STATUS_ORDER.map((s) => ({ key: STATUS_FILTER_VALUE[s], label: STATUS_LABELS[s] })),
-  ];
 
   return (
     <div className="space-y-5">
@@ -69,19 +65,7 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
         {filtered && <Link href="/sales/enquiries" className={BTN_SECONDARY}>Clear</Link>}
       </form>
 
-      <nav aria-label="Filter by status" className="flex flex-wrap gap-2">
-        {pills.map((p) => {
-          const active = status === p.key;
-          return (
-            <Link key={p.key || 'all'} href={href(search, p.key, month)} aria-current={active ? 'true' : undefined}
-              className={`inline-flex min-h-10 items-center rounded-full border px-4 text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-focus ${
-                active ? 'border-text-primary bg-text-primary text-white' : 'border-border-strong bg-surface text-text-secondary hover:bg-surface-secondary'
-              }`}>
-              {p.label}
-            </Link>
-          );
-        })}
-      </nav>
+      <StatusFilter status={status} search={search} month={month} />
 
       {res.error ? (
         <div role="alert" className="rounded-xl border border-error bg-error-light px-5 py-4 text-base text-error">The enquiries could not be loaded. Please refresh the page.</div>
@@ -95,7 +79,7 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
       ) : (
         <>
           <div className="@container space-y-3">
-          <div className="hidden grid-cols-[8.5rem_1.5fr_1.3fr_11rem_9.5rem_11rem_8.5rem] gap-4 px-5 text-sm font-semibold uppercase tracking-wide text-text-secondary @6xl:grid" aria-hidden="true">
+          <div className="hidden grid-cols-[8.5rem_1.5fr_1.3fr_11rem_16rem_11rem_8.5rem] gap-4 px-5 text-sm font-semibold uppercase tracking-wide text-text-secondary @6xl:grid" aria-hidden="true">
             <span>Enquiry No.</span><span>Company / Client</span><span>Project</span><span>Estimated Value</span><span>Status</span><span>Next Follow-up</span><span />
           </div>
           <ul className="space-y-3">
@@ -103,7 +87,7 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
               const overdue = e.nextFollowUpDate !== null && e.nextFollowUpDate < res.data.today && e.status !== 'WON' && e.status !== 'LOST';
               const dueToday = e.nextFollowUpDate === res.data.today && e.status !== 'WON' && e.status !== 'LOST';
               return (
-                <li key={e.id} className="grid items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface p-5 shadow-sm sm:grid-cols-2 @6xl:grid-cols-[8.5rem_1.5fr_1.3fr_11rem_9.5rem_11rem_8.5rem]">
+                <li key={e.id} className="grid items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface p-5 shadow-sm sm:grid-cols-2 @6xl:grid-cols-[8.5rem_1.5fr_1.3fr_11rem_16rem_11rem_8.5rem]">
                   <p className="text-sm font-semibold text-text-secondary"><span className="@6xl:hidden">Enquiry No. </span>{e.enquiryNumber}</p>
                   <div className="min-w-0 sm:col-span-2 @6xl:col-span-1">
                     <p className="break-words text-lg font-bold text-text-primary">{e.companyName}</p>
@@ -111,7 +95,13 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
                   </div>
                   <div className="min-w-0 break-words text-base text-text-primary"><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Project</span>{e.projectName ?? <span className="text-text-muted">—</span>}</div>
                   <div className={`text-base font-semibold ${e.estimatedValue ? 'text-purple-800' : 'text-text-muted'}`}><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Estimated value</span>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</div>
-                  <div><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Status</span><StatusBadge status={e.status} /></div>
+                  <div>
+                    {canUpdate ? (
+                      <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit today={res.data.today} filter={status} filterLabel={statusFilterLabel(status)} />
+                    ) : (
+                      <><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Status</span><StatusBadge status={e.status} /></>
+                    )}
+                  </div>
                   <div>
                     <span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Next follow-up</span>
                     {e.nextFollowUpDate ? (

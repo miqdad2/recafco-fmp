@@ -47,7 +47,8 @@ describe('Control Center cards (FMP-UI-36)', () => {
     const page = read('../page.tsx');
     expect(page.indexOf('cards.map')).toBeLessThan(page.indexOf('FACTORY_PERFORMANCE_CARD.title'));
     expect(page.indexOf('FACTORY_PERFORMANCE_CARD.title')).toBeLessThan(page.indexOf('SALES_ENQUIRIES_CARD.title'));
-    expect(page).toContain("'http://192.168.1.17:83'");
+    expect(page).toContain('FACTORY_PERFORMANCE_URL');
+    expect(fs.readFileSync(path.resolve(__dirname, 'control-center-cards.ts'), 'utf8')).toContain("'http://192.168.1.17:83'");
     expect(page).toContain("href=\"/sales\"");
     expect(page).toContain("hasSales ? (");
     expect(page).toContain("Access Restricted");

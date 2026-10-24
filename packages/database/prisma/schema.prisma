@@ -65,6 +65,7 @@ model Plant {
   contracts           Contract[]
   productionLines     ProductionLine[]
   productionOrders    ProductionOrder[]
+  operationsFactoryMapping OperationsFactoryMapping?
 
   @@map("plants")
 }
@@ -1277,6 +1278,8 @@ model Contract {
   technicalDrawingGroupAttachments  TechnicalDrawingGroupAttachment[]
   boqPieceAttachments               ContractBoqPieceAttachment[]
   boqItemAttachments                ContractBoqItemAttachment[]
+  // FMP-OPS-01 — at most one confirmed external Operations project link.
+  operationsSourceProject           OperationsSourceProject?
 
   @@index([status, createdAt(sort: Desc)])
   @@index([ownerUserId, status])
@@ -4136,4 +4139,234 @@ model SalesFollowUp {
   @@index([status, followUpDate])
   @@index([enquiryId, status])
   @@map("sales_follow_ups")
+}
+
+// ---------------------------------------------------------------------------
+// FMP-OPS-01 — read-only integration with the external RECAFCO Operations
+// system. Everything here is EXTERNAL data plus the link/sync bookkeeping:
+// nothing in this block is FMP-owned contract information, and FMP never writes
+// back to the source. No passwords or session cookies are ever stored.
+// ---------------------------------------------------------------------------
+
+enum OperationsLinkMethod {
+  MANUAL
+  AUTOMATIC
+}
+
+enum OperationsSnapshotOrigin {
+  LIVE
+  FIXTURE
+}
+
+enum OperationsSyncOutcome {
+  ACCEPTED
+  UNCHANGED
+  REJECTED_OLDER
+  REJECTED_INVALID
+  AUTH_FAILED
+  FORBIDDEN
+  NOT_FOUND
+  RATE_LIMITED
+  TIMEOUT
+  NETWORK_ERROR
+  SOURCE_ERROR
+}
+
+enum OperationsConnectionState {
+  NOT_CONFIGURED
+  OK
+  DEGRADED
+  AUTH_FAILED
+  PAUSED
+}
+
+enum OperationsLinkAction {
+  REGISTERED
+  LINKED
+  RELINKED
+  UNLINKED
+  AUTO_LINKED
+  SYNC_DISABLED
+  SYNC_ENABLED
+}
+
+// A source project known to FMP, keyed by the source's stable project id. The
+// job order / factory / name are what the source last reported (display and
+// matching evidence only; a source rename never breaks a confirmed link).
+model OperationsSourceProject {
+  id                       String                 @id @default(uuid()) @db.Uuid
+  sourceProjectId          String                 @unique @map("source_project_id") @db.VarChar(200)
+  sourceCode               String?                @map("source_code") @db.VarChar(100)
+  jobOrderNormalized       String?                @map("job_order_normalized") @db.VarChar(100)
+  factoryCode              String?                @map("factory_code") @db.VarChar(20)
+  sourceName               String?                @map("source_name") @db.VarChar(300)
+  identityVerifiedAt       DateTime?              @map("identity_verified_at") @db.Timestamptz(3)
+  contractId               String?                @unique @map("contract_id") @db.Uuid
+  linkMethod               OperationsLinkMethod?  @map("link_method")
+  linkedAt                 DateTime?              @map("linked_at") @db.Timestamptz(3)
+  linkedByUserId           String?                @map("linked_by_user_id") @db.Uuid
+  linkedByName             String?                @map("linked_by_name") @db.VarChar(200)
+  syncEnabled              Boolean                @default(true) @map("sync_enabled")
+  currentSnapshotId        String?                @map("current_snapshot_id") @db.Uuid
+  // Newest source generated_at ACCEPTED (even when content was unchanged): the ordering guard.
+  lastGeneratedAt          DateTime?              @map("last_generated_at") @db.Timestamptz(3)
+  // FMP-OPS-03 — discovery from the source project list. Never deletes or unlinks anything: a project missing from
+  // one response only gets missing_from_list_since. excluded_reason keeps training/test projects out of linking and sync.
+  sourceIsTraining         Boolean?               @map("source_is_training")
+  excludedReason           String?                @map("excluded_reason") @db.VarChar(40)
+  firstListedAt            DateTime?              @map("first_listed_at") @db.Timestamptz(3)
+  lastListedAt             DateTime?              @map("last_listed_at") @db.Timestamptz(3)
+  missingFromListSince     DateTime?              @map("missing_from_list_since") @db.Timestamptz(3)
+  lastAttemptAt            DateTime?              @map("last_attempt_at") @db.Timestamptz(3)
+  lastSuccessAt            DateTime?              @map("last_success_at") @db.Timestamptz(3)
+  lastOutcome              OperationsSyncOutcome? @map("last_outcome")
+  lastErrorMessage         String?                @map("last_error_message") @db.VarChar(500)
+  consecutiveFailures      Int                    @default(0) @map("consecutive_failures")
+  nextAttemptAt            DateTime?              @map("next_attempt_at") @db.Timestamptz(3)
+  refreshRequestedAt       DateTime?              @map("refresh_requested_at") @db.Timestamptz(3)
+  refreshRequestedByUserId String?                @map("refresh_requested_by_user_id") @db.Uuid
+  leaseUntil               DateTime?              @map("lease_until") @db.Timestamptz(3)
+  leaseOwner               String?                @map("lease_owner") @db.VarChar(100)
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  contract   Contract?                    @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  snapshots  OperationsProgressSnapshot[]
+  runs       OperationsSyncRun[]
+  linkEvents OperationsProjectLinkEvent[]
+
+  @@index([syncEnabled, nextAttemptAt])
+  @@index([jobOrderNormalized, factoryCode])
+  @@index([excludedReason])
+  @@map("operations_source_projects")
+}
+
+// One row per ACCEPTED change of content (an unchanged poll updates
+// last_success_at on the project, not this table). Holds only the agreed
+// useful fields plus provenance — never credentials, cookies or raw bodies.
+model OperationsProgressSnapshot {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  projectId          String                   @map("project_id") @db.Uuid
+  origin             OperationsSnapshotOrigin @default(LIVE)
+  retrievedAt        DateTime                 @map("retrieved_at") @db.Timestamptz(3)
+  generatedAt        DateTime                 @map("generated_at") @db.Timestamptz(3)
+  sourceCode         String?                  @map("source_code") @db.VarChar(100)
+  sourceFactory      String?                  @map("source_factory") @db.VarChar(20)
+  sourceName         String?                  @map("source_name") @db.VarChar(300)
+  total              Int
+  issued             Int
+  produced           Int
+  delivered          Int
+  installed          Int
+  pendingInputs      Int                      @map("pending_inputs")
+  reviewRequiredFlag Boolean?                 @map("review_required_flag")
+  reviewRequiredRaw  Json?                    @map("review_required_raw") @db.JsonB
+  sourceNotes        Json                     @default("[]") @map("source_notes") @db.JsonB
+  groupBy            String                   @default("building") @map("group_by") @db.VarChar(40)
+  columns            String                   @db.VarChar(200)
+  contentHash        String                   @map("content_hash") @db.VarChar(64)
+  previousSnapshotId String?                  @map("previous_snapshot_id") @db.Uuid
+  changes            Json                     @default("[]") @db.JsonB
+  flags              Json                     @default("[]") @db.JsonB
+  httpStatus         Int?                     @map("http_status")
+  durationMs         Int?                     @map("duration_ms")
+  responseBytes      Int?                     @map("response_bytes")
+  unrecognisedKeys   Json                     @default("[]") @map("unrecognised_keys") @db.JsonB
+  historicalPresent  Boolean                  @default(false) @map("historical_present")
+  // FMP-OPS-03 — richer report. Only supplied-and-valid figures are stored; null/absent = "not supplied by source".
+  measures           Json?                    @db.JsonB
+  breakdown          Json?                    @db.JsonB
+  historical         Json?                    @db.JsonB
+  reviewNotes        Json                     @default("[]") @map("review_notes") @db.JsonB
+  conflictMarksCount Int?                     @map("conflict_marks_count")
+  conflictMarksRaw   Json?                    @map("conflict_marks_raw") @db.JsonB
+  // How the worker signed in when this snapshot was retrieved ('password' | 'demo'). 'demo' depends on the source's demo access.
+  authMode           String?                  @map("auth_mode") @db.VarChar(20)
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  project OperationsSourceProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, generatedAt(sort: Desc)])
+  @@index([projectId, retrievedAt(sort: Desc)])
+  @@map("operations_progress_snapshots")
+}
+
+// Every synchronization attempt, for investigating failures. Messages are
+// sanitised (no URLs with credentials, no cookies). Pruned by the worker.
+model OperationsSyncRun {
+  id         String                @id @default(uuid()) @db.Uuid
+  projectId  String                @map("project_id") @db.Uuid
+  trigger    String                @db.VarChar(30)
+  startedAt  DateTime              @map("started_at") @db.Timestamptz(3)
+  finishedAt DateTime?             @map("finished_at") @db.Timestamptz(3)
+  outcome    OperationsSyncOutcome
+  httpStatus Int?                  @map("http_status")
+  durationMs Int?                  @map("duration_ms")
+  message    String?               @db.VarChar(500)
+
+  project OperationsSourceProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, startedAt(sort: Desc)])
+  @@index([startedAt])
+  @@map("operations_sync_runs")
+}
+
+// Singleton row (id = 'default') describing the source connection as the
+// worker last saw it. The API reads it so screens never wait on the source.
+model OperationsSourceStatus {
+  id                  String                    @id @db.VarChar(20)
+  connectionState     OperationsConnectionState @default(NOT_CONFIGURED) @map("connection_state")
+  circuitOpenUntil    DateTime?                 @map("circuit_open_until") @db.Timestamptz(3)
+  consecutiveFailures Int                       @default(0) @map("consecutive_failures")
+  lastLoginAt         DateTime?                 @map("last_login_at") @db.Timestamptz(3)
+  lastMessage         String?                   @map("last_message") @db.VarChar(500)
+  workerHeartbeatAt   DateTime?                 @map("worker_heartbeat_at") @db.Timestamptz(3)
+  pollIntervalSeconds Int?                      @map("poll_interval_seconds")
+  // FMP-OPS-03 — how the worker signs in ('password' | 'demo') and the project-discovery state.
+  authMode                  String?   @map("auth_mode") @db.VarChar(20)
+  discoveryEnabled          Boolean   @default(false) @map("discovery_enabled")
+  lastDiscoveryAt           DateTime? @map("last_discovery_at") @db.Timestamptz(3)
+  lastDiscoveryOutcome      String?   @map("last_discovery_outcome") @db.VarChar(30)
+  lastDiscoveryMessage      String?   @map("last_discovery_message") @db.VarChar(500)
+  lastDiscoveryProjectCount Int?      @map("last_discovery_project_count")
+  nextDiscoveryAt           DateTime? @map("next_discovery_at") @db.Timestamptz(3)
+  discoveryLeaseUntil       DateTime? @map("discovery_lease_until") @db.Timestamptz(3)
+  updatedAt           DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("operations_source_status")
+}
+
+// Explicit factory code (source "PC"/"HC") -> FMP plant. Automatic linking
+// needs this: a contract's factory is its plant, and codes alone are not
+// guaranteed to be equal between the two systems.
+model OperationsFactoryMapping {
+  id              String   @id @default(uuid()) @db.Uuid
+  factoryCode     String   @unique @map("factory_code") @db.VarChar(20)
+  plantId         String   @unique @map("plant_id") @db.Uuid
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@map("operations_factory_mappings")
+}
+
+// Audit trail of link changes. actor has no FK (deactivating a user must not
+// corrupt history), mirroring ContractActivity.
+model OperationsProjectLinkEvent {
+  id                 String               @id @default(uuid()) @db.Uuid
+  projectId          String               @map("project_id") @db.Uuid
+  action             OperationsLinkAction
+  previousContractId String?              @map("previous_contract_id") @db.Uuid
+  newContractId      String?              @map("new_contract_id") @db.Uuid
+  actorUserId        String?              @map("actor_user_id") @db.Uuid
+  actorName          String?              @map("actor_name") @db.VarChar(200)
+  reason             String?              @db.VarChar(500)
+  details            Json?                @db.JsonB
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  project OperationsSourceProject @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("operations_project_link_events")
 }
