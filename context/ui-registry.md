@@ -3384,3 +3384,11 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 ### EnquiryStatusControl (FMP-SALES-04)
 
 `sales/_components/enquiry-status-control.tsx`. Inline status dropdown (labelled, 48px, visible arrow) with Save Status / Cancel, confirmation dialog for Confirmed / Not Proceeding, "Status updated" / "Not saved" messages and a "no longer matches the filter" notice with Update list. Props: enquiry identity, `status`, `canEdit` (viewers get `StatusBadge`), `filter`/`filterLabel` of the surrounding list.
+
+### AddActivityButton + LatestActivity (FMP-SALES-05)
+
+`sales/_components/add-activity-button.tsx`, `LatestActivity` in `sales-ui.tsx`. One popup for adding an enquiry activity (date, free text, optional next follow-up), reused on the enquiry page, All Enquiries and the dashboard cards; `LatestActivity` is the two-line preview on rows/cards.
+
+### Sales Activities dashboard density (FMP-SALES-06)
+
+`SalesNav inline` lives in the dashboard heading row; `DashboardClock` (Kuwait-date refresh); preview counts limited with `xl:[@media(max-height:…)]:hidden` tiers; `EnquiryStatusControl compact` shows "Current Status" + a "Change Status…" selector in one row.

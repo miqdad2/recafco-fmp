@@ -154,3 +154,16 @@ body {
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
 }
+
+/* FMP-SALES-07 — dense dashboard previews: when even one full card does not fit the window, useFittedCount sets
+   data-dense on the list and these low-value lines (scope, latest activity, "no contact") are left out; the enquiry page has them all. */
+ul[data-dense="true"] .dense-hide { display: none; }
+ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
+/* sales-dense rev2 */
+/* r3 */
+/* r4 */
+/* r5 */
+/* r6 */
+/* r7 */
+/* r8 */
+/* r9 */

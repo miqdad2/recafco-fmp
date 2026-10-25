@@ -6,9 +6,11 @@ import { getCurrentUserContext } from '../../contracts/_lib/get-user-permissions
 import { statusFilterLabel, formatDate, formatKwd, NOT_ESTIMATED } from '../_lib/sales-format';
 import { NewEnquiryButton } from '../_components/new-enquiry-modal';
 import { EnquiryStatusControl } from '../_components/enquiry-status-control';
-import { BTN_PRIMARY, BTN_SECONDARY, BucketBadge, EmptyState, INPUT_CLASS, StatusBadge, StatusFilter } from '../_components/sales-ui';
+import { AddActivityButton } from '../_components/add-activity-button';
+import { LatestActivity } from '../_components/sales-ui';
+import { BTN_NEUTRAL, BucketBadge, CurrentStatus, EmptyState, INPUT_CLASS, OpenEnquiryLink, StatusFilter } from '../_components/sales-ui';
 
-export const metadata: Metadata = { title: 'All Enquiries — Sales & Enquiries — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'All Enquiries — Sales Activities — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 type Params = Record<string, string | string[] | undefined>;
@@ -40,13 +42,13 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
   const canCreate = permissions.includes('sales.create');
   const canUpdate = permissions.includes('sales.update');
   const filtered = Boolean(search || status || month);
+  // The enquiry page's "Back to All Enquiries" returns to exactly this search, filter and page.
+  const hereQuery = href(search, status, month, page).split('?')[1] ?? '';
+  const backParam = hereQuery ? `?back=${encodeURIComponent(hereQuery)}` : '';
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-4xl font-extrabold tracking-tight text-text-primary">All Enquiries</h1>
-        {canCreate && <NewEnquiryButton />}
-      </div>
+    <div className="space-y-4">
+      <h1 className="text-3xl font-extrabold tracking-tight text-text-primary">All Enquiries</h1>
 
       <form method="get" action="/sales/enquiries" className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm">
         {status && <input type="hidden" name="status" value={status} />}
@@ -61,8 +63,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
           <label htmlFor="month" className="mb-1.5 block text-base font-semibold text-text-primary">Month</label>
           <input id="month" name="month" type="month" defaultValue={month} className={INPUT_CLASS} />
         </div>
-        <button type="submit" className={BTN_PRIMARY}>Search</button>
-        {filtered && <Link href="/sales/enquiries" className={BTN_SECONDARY}>Clear</Link>}
+        <button type="submit" className={BTN_NEUTRAL}><Search className="size-5" aria-hidden="true" /> Search</button>
+        {filtered && <Link href="/sales/enquiries" className={BTN_NEUTRAL}>Clear</Link>}
       </form>
 
       <StatusFilter status={status} search={search} month={month} />
@@ -79,41 +81,38 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
       ) : (
         <>
           <div className="@container space-y-3">
-          <div className="hidden grid-cols-[8.5rem_1.5fr_1.3fr_11rem_16rem_11rem_8.5rem] gap-4 px-5 text-sm font-semibold uppercase tracking-wide text-text-secondary @6xl:grid" aria-hidden="true">
-            <span>Enquiry No.</span><span>Company / Client</span><span>Project</span><span>Estimated Value</span><span>Status</span><span>Next Follow-up</span><span />
+          <div className="hidden grid-cols-[8.5rem_1.5fr_1.3fr_11rem_11rem_13rem_20rem] gap-4 px-5 text-base font-semibold uppercase tracking-wide text-text-secondary @6xl:grid" aria-hidden="true">
+            <span>Enquiry No.</span><span>Company / Client</span><span>Project</span><span>Estimated Value</span><span>Next Follow-up</span><span>Status</span><span>Actions</span>
           </div>
           <ul className="space-y-3">
             {res.data.items.map((e) => {
               const overdue = e.nextFollowUpDate !== null && e.nextFollowUpDate < res.data.today && e.status !== 'WON' && e.status !== 'LOST';
               const dueToday = e.nextFollowUpDate === res.data.today && e.status !== 'WON' && e.status !== 'LOST';
               return (
-                <li key={e.id} className="grid items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface p-5 shadow-sm sm:grid-cols-2 @6xl:grid-cols-[8.5rem_1.5fr_1.3fr_11rem_16rem_11rem_8.5rem]">
-                  <p className="text-sm font-semibold text-text-secondary"><span className="@6xl:hidden">Enquiry No. </span>{e.enquiryNumber}</p>
+                <li key={e.id} className="grid items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface p-5 shadow-sm sm:grid-cols-2 @6xl:grid-cols-[8.5rem_1.5fr_1.3fr_11rem_11rem_13rem_20rem]">
+                  <p className="text-base font-semibold text-text-secondary"><span className="@6xl:hidden">Enquiry No. </span>{e.enquiryNumber}</p>
                   <div className="min-w-0 sm:col-span-2 @6xl:col-span-1">
-                    <p className="break-words text-lg font-bold text-text-primary">{e.companyName}</p>
-                    {(e.contactPerson || e.contactNumber) && <p className="text-sm text-text-secondary">{[e.contactPerson, e.contactNumber].filter(Boolean).join(' · ')}</p>}
+                    <p className="break-words text-xl font-bold text-text-primary">{e.companyName}</p>
+                    {(e.contactPerson || e.contactNumber) && <p className="text-base text-text-secondary">{[e.contactPerson, e.contactNumber].filter(Boolean).join(' · ')}</p>}
+                    <LatestActivity activity={e.latestActivity ?? null} />
                   </div>
-                  <div className="min-w-0 break-words text-base text-text-primary"><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Project</span>{e.projectName ?? <span className="text-text-muted">—</span>}</div>
-                  <div className={`text-base font-semibold ${e.estimatedValue ? 'text-purple-800' : 'text-text-muted'}`}><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Estimated value</span>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</div>
+                  <div className="min-w-0 break-words text-lg text-text-primary"><span className="block text-base font-semibold text-text-secondary @6xl:hidden">Project</span>{e.projectName ?? <span className="text-text-muted">—</span>}</div>
+                  <div className={`text-lg font-semibold ${e.estimatedValue ? 'text-purple-800' : 'text-text-secondary'}`}><span className="block text-base font-semibold text-text-secondary @6xl:hidden">Estimated value</span>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</div>
                   <div>
-                    {canUpdate ? (
-                      <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit today={res.data.today} filter={status} filterLabel={statusFilterLabel(status)} />
-                    ) : (
-                      <><span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Status</span><StatusBadge status={e.status} /></>
-                    )}
-                  </div>
-                  <div>
-                    <span className="block text-xs font-semibold text-text-secondary @6xl:hidden">Next follow-up</span>
+                    <span className="block text-base font-semibold text-text-secondary @6xl:hidden">Next follow-up</span>
                     {e.nextFollowUpDate ? (
                       <>
-                        <p className="text-base text-text-primary">{formatDate(e.nextFollowUpDate)}</p>
+                        <p className="text-lg text-text-primary">{formatDate(e.nextFollowUpDate)}</p>
                         {(overdue || dueToday) && <BucketBadge bucket={overdue ? 'OVERDUE' : 'TODAY'} />}
                       </>
                     ) : <span className="text-text-muted">—</span>}
                   </div>
-                  <Link href={`/sales/enquiries/${e.id}`} aria-label={`Open enquiry ${e.enquiryNumber}, ${e.companyName}`} className={`${BTN_SECONDARY} !min-h-11 justify-self-start @6xl:justify-self-end`}>
-                    Open Enquiry
-                  </Link>
+                  <div><CurrentStatus status={e.status} /></div>
+                  <div className="flex flex-wrap items-center gap-2 @6xl:justify-self-start">
+                    <OpenEnquiryLink href={`/sales/enquiries/${e.id}${backParam}`} companyName={e.companyName} />
+                    {canUpdate && <AddActivityButton enquiryId={e.id} companyName={e.companyName} today={res.data.today} />}
+                    <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={res.data.today} filter={status} filterLabel={statusFilterLabel(status)} />
+                  </div>
                 </li>
               );
             })}
@@ -124,8 +123,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
               {res.data.pagination.total} {res.data.pagination.total === 1 ? 'enquiry' : 'enquiries'} · page {res.data.pagination.page} of {res.data.pagination.totalPages}
             </p>
             <div className="flex gap-2">
-              {page > 1 && <Link href={href(search, status, month, page - 1)} className={BTN_SECONDARY}>Previous</Link>}
-              {page < res.data.pagination.totalPages && <Link href={href(search, status, month, page + 1)} className={BTN_SECONDARY}>Next</Link>}
+              {page > 1 && <Link href={href(search, status, month, page - 1)} className={BTN_NEUTRAL}>Previous</Link>}
+              {page < res.data.pagination.totalPages && <Link href={href(search, status, month, page + 1)} className={BTN_NEUTRAL}>Next</Link>}
             </div>
           </div>
         </>

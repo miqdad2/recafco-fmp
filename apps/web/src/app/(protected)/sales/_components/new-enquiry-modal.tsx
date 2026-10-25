@@ -4,10 +4,10 @@ import Link from 'next/link';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormStatus } from 'react-dom';
-import { CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, Plus, X } from 'lucide-react';
 import type { SalesFormState } from '../_lib/form-state';
 import { createEnquiryQuickAction } from '../actions';
-import { BTN_PRIMARY, BTN_SECONDARY, Field, FormMessage, INPUT_CLASS } from './sales-ui';
+import { BTN_ADD, BTN_NEUTRAL, Field, FormMessage, INPUT_CLASS } from './sales-ui';
 
 /**
  * FMP-SALES-01C — "+ New Client Enquiry" as a centered popup, so a manager can save a client's details
@@ -21,7 +21,7 @@ const IDLE: SalesFormState = { error: null, fieldErrors: {}, values: {}, ok: nul
 function SaveButton(): React.JSX.Element {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" disabled={pending} className={`${BTN_PRIMARY} min-w-44 text-lg`}>
+    <button type="submit" disabled={pending} className={`${BTN_ADD} min-w-44`}>
       {pending ? 'Saving…' : 'Save Enquiry'}
     </button>
   );
@@ -95,7 +95,7 @@ function QuickForm({ onClose, onSaved }: FormProps): React.JSX.Element {
         </Field>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border bg-surface-secondary/40 px-6 py-4 sm:px-8">
-        <button type="button" onClick={onClose} className={`${BTN_SECONDARY} min-w-32 text-lg`}>Cancel</button>
+        <button type="button" onClick={onClose} className={`${BTN_NEUTRAL} min-w-32`}>Cancel</button>
         <SaveButton />
       </div>
     </form>
@@ -118,7 +118,7 @@ function keepFocusInside(e: React.KeyboardEvent<HTMLDialogElement>): void {
   }
 }
 
-export function NewEnquiryButton({ label = '+ New Client Enquiry', className = BTN_PRIMARY }: { label?: string; className?: string }): React.JSX.Element {
+export function NewEnquiryButton({ label = 'New Client Enquiry', className = BTN_ADD }: { label?: string; className?: string }): React.JSX.Element {
   const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -151,7 +151,7 @@ export function NewEnquiryButton({ label = '+ New Client Enquiry', className = B
   return (
     <>
       <button type="button" onClick={show} className={className} aria-haspopup="dialog">
-        {label}
+        <Plus className="size-5 shrink-0" aria-hidden="true" /> {label}
       </button>
 
       <dialog

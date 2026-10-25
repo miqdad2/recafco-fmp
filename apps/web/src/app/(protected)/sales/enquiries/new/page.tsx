@@ -4,7 +4,7 @@ import { getCurrentUserContext } from '../../../contracts/_lib/get-user-permissi
 import { EnquiryForm } from '../../_components/enquiry-form';
 import { createEnquiryAction } from '../../actions';
 
-export const metadata: Metadata = { title: 'New Client Enquiry — Sales & Enquiries — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'New Client Enquiry — Sales Activities — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 export default async function NewEnquiryPage(): Promise<React.JSX.Element> {

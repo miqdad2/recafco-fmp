@@ -5,7 +5,7 @@ import { getCurrentUserContext } from '../../../../contracts/_lib/get-user-permi
 import { EnquiryForm } from '../../../_components/enquiry-form';
 import { updateEnquiryAction } from '../../../actions';
 
-export const metadata: Metadata = { title: 'Edit Enquiry — Sales & Enquiries — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Edit Enquiry — Sales Activities — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { salesApi, salesFetch } from '@/lib/sales-api';
-import type { RecentEnquiriesResult, SalesFormState, StatusChangeResult } from './_lib/form-state';
+import type { ActivityResult, RecentEnquiriesResult, SalesFormState, StatusChangeResult } from './_lib/form-state';
 import { STATUS_FILTER_VALUE } from './_lib/sales-format';
 
 // ---------------------------------------------------------------------------
@@ -103,38 +103,6 @@ export async function updateEnquiryAction(id: string, _prev: SalesFormState, for
   redirect(`/sales/enquiries/${id}?updated=1`);
 }
 
-export async function changeStatusAction(id: string, _prev: SalesFormState, formData: FormData): Promise<SalesFormState> {
-  const values = readValues(formData);
-  const status = text(values, 'status');
-  if (!status) return { error: 'Please choose a status.', fieldErrors: {}, values, ok: null };
-  if (status === 'LOST' && !text(values, 'reason')) {
-    return { error: null, fieldErrors: { reason: ['Please give a short reason why it is not proceeding.'] }, values, ok: null };
-  }
-  const awarded = text(values, 'awardedValue').replace(/,/g, '');
-  if (awarded && !/^\d{1,12}(\.\d{1,3})?$/.test(awarded)) {
-    return { error: null, fieldErrors: { awardedValue: ['Enter an amount in KWD, for example 85000 or 85000.500.'] }, values, ok: null };
-  }
-  const body: Record<string, string> = { status, reason: text(values, 'reason') };
-  if (status === 'WON') {
-    body['awardedValue'] = awarded;
-    body['wonDate'] = text(values, 'wonDate');
-  }
-  const res = await salesFetch(`/sales/enquiries/${id}/status`, { method: 'POST', body: JSON.stringify(body) });
-  if (res.error) return failure(values, res.error);
-  return { error: null, fieldErrors: {}, values: {}, ok: 'Status updated.' };
-}
-
-export async function addActivityAction(id: string, _prev: SalesFormState, formData: FormData): Promise<SalesFormState> {
-  const values = readValues(formData);
-  if (!text(values, 'notes')) return { error: null, fieldErrors: { notes: ['Please write a short note.'] }, values, ok: null };
-  const res = await salesFetch(`/sales/enquiries/${id}/activities`, {
-    method: 'POST',
-    body: JSON.stringify({ type: text(values, 'type'), activityDate: text(values, 'activityDate'), notes: text(values, 'notes') }),
-  });
-  if (res.error) return failure(values, res.error);
-  return { error: null, fieldErrors: {}, values: {}, ok: 'Saved.' };
-}
-
 export async function addFollowUpAction(id: string, _prev: SalesFormState, formData: FormData): Promise<SalesFormState> {
   const values = readValues(formData);
   if (!text(values, 'followUpDate')) return { error: null, fieldErrors: { followUpDate: ['Please choose a date.'] }, values, ok: null };
@@ -171,7 +139,7 @@ export async function rescheduleFollowUpAction(followUpId: string, enquiryId: st
 export async function loadRecentEnquiriesAction(status: string): Promise<RecentEnquiriesResult> {
   const allowed = new Set(['', 'open', ...Object.values(STATUS_FILTER_VALUE)]);
   if (!allowed.has(status)) return { items: [], total: 0, error: 'Unknown filter.' };
-  const qs = new URLSearchParams({ page: '1', pageSize: '6' });
+  const qs = new URLSearchParams({ page: '1', pageSize: '8' });
   if (status) qs.set('status', status);
   const res = await salesApi.enquiries(qs);
   if (res.error) return { items: [], total: 0, error: 'The enquiries could not be loaded.' };
@@ -179,7 +147,7 @@ export async function loadRecentEnquiriesAction(status: string): Promise<RecentE
 }
 
 /**
- * FMP-SALES-04 — inline status change (the same API call and rules as the Update Status panel: Not Proceeding needs a
+ * FMP-SALES-04 — inline status change (the one status editor (its former panel on the enquiry page was removed): Not Proceeding needs a
  * reason, Confirmed takes an optional value/date, history is written by the API). The status the user saw is sent so a
  * change made by someone else in the meantime is refused instead of overwritten.
  */
@@ -210,4 +178,27 @@ export async function changeEnquiryStatusAction(
     };
   }
   return { ok: true, error: null, fieldErrors: {}, conflict: false };
+}
+
+/**
+ * FMP-SALES-05 — "+ Add Activity". One call: the date, what happened, and an optional next follow-up (the API saves them
+ * together). requestId makes a retry harmless. The API enforces sales.update and re-validates everything.
+ */
+export async function addActivityEntryAction(
+  enquiryId: string,
+  input: { activityDate: string; notes: string; nextFollowUpDate?: string; requestId: string },
+): Promise<ActivityResult> {
+  const notes = input.notes.trim();
+  if (!notes) return { ok: false, error: null, fieldErrors: { notes: ['Please describe what happened.'] } };
+  const body: Record<string, string> = { activityDate: input.activityDate, notes, requestId: input.requestId };
+  if (input.nextFollowUpDate) body['nextFollowUpDate'] = input.nextFollowUpDate;
+  const res = await salesFetch(`/sales/enquiries/${enquiryId}/activities`, { method: 'POST', body: JSON.stringify(body) });
+  if (!res.error) return { ok: true, error: null, fieldErrors: {} };
+  const e = res.error;
+  if (e.status === 403) return { ok: false, error: 'You do not have permission to add activities.', fieldErrors: {} };
+  if (e.code === 'SALES_ACTIVITY_IN_FUTURE') return { ok: false, error: null, fieldErrors: { activityDate: [e.message] } };
+  if (e.code === 'SALES_FOLLOW_UP_IN_PAST') return { ok: false, error: null, fieldErrors: { nextFollowUpDate: [e.message] } };
+  const fields = e.fields ?? {};
+  if (Object.keys(fields).length > 0) return { ok: false, error: null, fieldErrors: fields };
+  return { ok: false, error: e.status === 404 ? 'This enquiry could not be found.' : e.message, fieldErrors: {} };
 }

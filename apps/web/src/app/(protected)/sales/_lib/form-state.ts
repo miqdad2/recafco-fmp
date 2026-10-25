@@ -30,3 +30,10 @@ export interface StatusChangeResult {
   /** The enquiry was changed by someone else meanwhile: the page must be refreshed before retrying. */
   conflict: boolean;
 }
+
+/** FMP-SALES-05 — result of adding an activity. */
+export interface ActivityResult {
+  ok: boolean;
+  error: string | null;
+  fieldErrors: Record<string, string[]>;
+}

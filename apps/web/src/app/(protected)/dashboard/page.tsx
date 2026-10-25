@@ -63,7 +63,7 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
   // decided by the API (existing per-module read permissions); nothing is granted by being shown here.
   const cards = selectControlCenterCards(dashboard?.cards ?? []);
 
-  // FMP-SALES-01/01A — the Sales & Enquiries card is ALWAYS shown (so the Control Center keeps its seven
+  // FMP-SALES-01/01A — the Sales Activities card is ALWAYS shown (so the Control Center keeps its seven
   // cards), but its figures are fetched and its button is active only for users who hold sales.read (the
   // Sales API checks it again). Without it the card is an "Access Restricted" notice: nothing is fetched,
   // no figures are shown and there is no link. If the figures cannot be loaded the tiles read "Not

@@ -1,4 +1,4 @@
-# Sales & Enquiries (FMP-SALES-01)
+# Sales Activities (formerly "Sales & Enquiries") (FMP-SALES-01)
 
 Lets a senior manager record who visited or contacted RECAFCO, what they need, the rough project value in KWD, the status of the enquiry, and when to follow up. It uses the normal FMP login. It does not read or write Contract Management.
 

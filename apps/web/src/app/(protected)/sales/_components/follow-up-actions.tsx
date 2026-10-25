@@ -6,7 +6,7 @@ import { useFormStatus } from 'react-dom';
 import { CheckCircle2, CalendarClock } from 'lucide-react';
 import type { SalesFormState } from '../_lib/form-state';
 import { completeFollowUpAction, rescheduleFollowUpAction } from '../actions';
-import { BTN_PRIMARY, BTN_SECONDARY, Field, FormMessage, INPUT_CLASS } from './sales-ui';
+import { BTN_DONE, BTN_NEUTRAL, BTN_STATUS, Field, FormMessage, INPUT_CLASS } from './sales-ui';
 
 /**
  * FMP-SALES-01 — Mark Completed / Reschedule for one pending follow-up. Completing keeps the record
@@ -15,7 +15,7 @@ import { BTN_PRIMARY, BTN_SECONDARY, Field, FormMessage, INPUT_CLASS } from './s
  */
 const IDLE: SalesFormState = { error: null, fieldErrors: {}, values: {}, ok: null };
 
-function Submit({ label, className = BTN_PRIMARY }: { label: string; className?: string }): React.JSX.Element {
+function Submit({ label, className = BTN_DONE }: { label: string; className?: string }): React.JSX.Element {
   const { pending } = useFormStatus();
   return (
     <button type="submit" disabled={pending} className={className}>
@@ -30,9 +30,9 @@ interface Props {
   today: string;
   /** Smaller buttons for list rows. */
   compact?: boolean;
-  /** Wording of the main button (the dashboard calls it Record Follow-up). */
+  /** Wording of the main button (same label everywhere). */
   completeLabel?: string;
-  /** Hide Reschedule (the dashboard card offers just Record Follow-up). */
+  /** Hide Reschedule (the dashboard card offers just Mark Completed). */
   allowReschedule?: boolean;
 }
 
@@ -44,17 +44,17 @@ export function FollowUpActions({ followUpId, enquiryId, today, compact, complet
   useEffect(() => {
     if (doneState.ok || moveState.ok) router.refresh();
   }, [doneState, moveState, router]);
-  const size = compact ? 'min-h-12 px-4 py-2 text-base' : '';
+  void compact; // one size for every button (48px); the prop is kept so existing call sites stay valid
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => setOpen(open === 'complete' ? null : 'complete')} aria-expanded={open === 'complete'}
-          className={`${BTN_PRIMARY} ${size} !bg-green-700`}>
+          className={BTN_DONE}>
           <CheckCircle2 className="size-5" aria-hidden="true" /> {completeLabel}
         </button>
         {allowReschedule && <button type="button" onClick={() => setOpen(open === 'reschedule' ? null : 'reschedule')} aria-expanded={open === 'reschedule'}
-          className={`${BTN_SECONDARY} ${size}`}>
+          className={BTN_STATUS}>
           <CalendarClock className="size-5" aria-hidden="true" /> Reschedule
         </button>}
       </div>
@@ -65,7 +65,7 @@ export function FollowUpActions({ followUpId, enquiryId, today, compact, complet
           <Field id={`done-${followUpId}`} label="What happened? (optional)" errors={doneState.fieldErrors['completionNotes']}>
             <input id={`done-${followUpId}`} name="completionNotes" type="text" maxLength={2000} defaultValue={doneState.values['completionNotes'] ?? ''} className={INPUT_CLASS} />
           </Field>
-          <Submit label="Confirm — Mark Completed" />
+          <div className="flex flex-wrap gap-2"><Submit label="Confirm — Mark Completed" /><button type="button" onClick={() => setOpen(null)} className={BTN_NEUTRAL}>Cancel</button></div>
         </form>
       )}
       {open === 'reschedule' && (
@@ -74,7 +74,7 @@ export function FollowUpActions({ followUpId, enquiryId, today, compact, complet
           <Field id={`move-${followUpId}`} label="New date" required errors={moveState.fieldErrors['followUpDate']}>
             <input id={`move-${followUpId}`} name="followUpDate" type="date" min={today} defaultValue={moveState.values['followUpDate'] ?? ''} className={INPUT_CLASS} />
           </Field>
-          <Submit label="Confirm — Move Follow-up" />
+          <div className="flex flex-wrap gap-2"><Submit label="Confirm — Move Follow-up" className={BTN_STATUS} /><button type="button" onClick={() => setOpen(null)} className={BTN_NEUTRAL}>Cancel</button></div>
         </form>
       )}
     </div>

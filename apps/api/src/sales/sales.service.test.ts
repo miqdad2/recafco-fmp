@@ -12,14 +12,17 @@ import { dateKey } from './sales.logic';
 
 const tx = {
   salesEnquiry: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-  salesActivity: { create: vi.fn() },
+  salesActivity: { create: vi.fn(), findFirst: vi.fn() },
   salesFollowUp: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   securityAuditEvent: { create: vi.fn() },
   user: { findUnique: vi.fn() },
   $queryRaw: vi.fn(),
+  $executeRaw: vi.fn(),
 };
 const client = {
-  salesEnquiry: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn() },
+  salesEnquiry: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), aggregate: vi.fn(), groupBy: vi.fn() },
+  salesFollowUp: { count: vi.fn(), findMany: vi.fn() },
+  salesActivity: { findMany: vi.fn() },
   $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)),
 };
 const service = new SalesService({ getClient: () => client } as unknown as DatabaseService);
@@ -53,6 +56,94 @@ beforeEach(() => {
   tx.salesFollowUp.findMany.mockResolvedValue([]);
 });
 afterEach(() => vi.useRealTimers());
+
+describe('dashboard reporting month (Asia/Kuwait)', () => {
+  const REPORTER: AuthUser = { ...ACTOR, permissions: [...ACTOR.permissions, 'sales.reports.read'] };
+  beforeEach(() => {
+    client.salesEnquiry.count.mockResolvedValue(0);
+    client.salesEnquiry.aggregate.mockResolvedValue({ _count: 0, _sum: { estimatedValue: null, awardedValue: null } });
+    client.salesEnquiry.groupBy.mockResolvedValue([]);
+    client.salesEnquiry.findMany.mockResolvedValue([]);
+    client.salesFollowUp.count.mockResolvedValue(0);
+    client.salesFollowUp.findMany.mockResolvedValue([]);
+    client.salesActivity.findMany.mockResolvedValue([]);
+  });
+  const monthCountWheres = (): Array<{ gte: Date; lt: Date }> =>
+    client.salesEnquiry.count.mock.calls.map((c) => (c[0] as { where?: { enquiryDate?: { gte: Date; lt: Date } } }).where?.enquiryDate).filter((x): x is { gte: Date; lt: Date } => !!x);
+
+  it.each([
+    ['2026-10-24T09:00:00Z', '2026-10-24', '2026-10', '2026-10-01', '2026-11-01'],
+    ['2026-12-31T20:59:59Z', '2026-12-31', '2026-12', '2026-12-01', '2027-01-01'], // 23:59:59 in Kuwait: still December
+    ['2026-12-31T21:00:00Z', '2027-01-01', '2027-01', '2027-01-01', '2027-02-01'], // midnight in Kuwait: January 2027
+    ['2027-01-31T21:00:00Z', '2027-02-01', '2027-02', '2027-02-01', '2027-03-01'],
+    ['2028-02-29T10:00:00Z', '2028-02-29', '2028-02', '2028-02-01', '2028-03-01'], // leap day
+  ])('at %s the dashboard reports Kuwait %s: month %s, figures queried for %s .. %s', async (utc, today, month, from, to) => {
+    vi.setSystemTime(new Date(utc));
+    const d = await service.dashboard(REPORTER);
+    expect(d.today).toBe(today);
+    expect(d.month).toBe(month);
+    const wheres = monthCountWheres();
+    expect(wheres.length).toBeGreaterThan(0);
+    for (const w of wheres) {
+      expect(dateKey(w.gte)).toBe(from);
+      expect(dateKey(w.lt)).toBe(to);
+    }
+    expect(d.monthlyTrend.at(-1)?.month).toBe(month);
+  });
+
+  it('the month figures really change when the month changes (not only the label)', async () => {
+    client.salesEnquiry.count.mockImplementation(async (args: { where?: { enquiryDate?: { gte: Date } } }) => (args.where?.enquiryDate && dateKey(args.where.enquiryDate.gte) === '2026-12-01' ? 7 : 2));
+    vi.setSystemTime(new Date('2026-12-31T20:59:59Z'));
+    const dec = await service.dashboard(REPORTER);
+    vi.setSystemTime(new Date('2026-12-31T21:00:00Z'));
+    const jan = await service.dashboard(REPORTER);
+    expect([dec.month, dec.enquiriesThisMonth]).toEqual(['2026-12', 7]);
+    expect([jan.month, jan.enquiriesThisMonth]).toEqual(['2027-01', 2]);
+  });
+});
+
+describe('add activity', () => {
+  const created = (over: Record<string, unknown> = {}) => ({ id: 'a1', enquiryId: 'e1', type: 'NOTE', activityDate: new Date('2026-10-21T00:00:00Z'), notes: 'Client visited', metadata: null, recordedByUser: USER, createdAt: new Date('2026-10-21T10:00:00Z'), ...over });
+  beforeEach(() => {
+    tx.salesActivity.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => created({ ...data, id: 'a1' }));
+    tx.salesActivity.findFirst.mockResolvedValue(null);
+    tx.salesFollowUp.create.mockResolvedValue({ id: 'f1' });
+  });
+
+  it('saves a plain note for today without a category, and never touches status or follow-ups', async () => {
+    const r = await service.addActivity('e1', { activityDate: '2026-10-21', notes: 'Client visited' }, ACTOR);
+    expect(tx.salesActivity.create.mock.calls[0]![0].data).toMatchObject({ type: 'NOTE', recordedByUserId: 'u1', notes: 'Client visited' });
+    expect(r.recordedBy).toEqual(USER);
+    expect(tx.salesEnquiry.updateMany).not.toHaveBeenCalled();
+    expect(tx.salesEnquiry.update).not.toHaveBeenCalled();
+    expect(tx.salesFollowUp.create).not.toHaveBeenCalled();
+    expect(tx.salesFollowUp.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('accepts an earlier date but refuses a future one (plans belong in the follow-up)', async () => {
+    await expect(service.addActivity('e1', { activityDate: '2026-10-10', notes: 'Earlier call' }, ACTOR)).resolves.toBeDefined();
+    await expect(service.addActivity('e1', { activityDate: '2026-10-22', notes: 'Tomorrow' }, ACTOR)).rejects.toThrow(/cannot be in the future/);
+    await expect(service.addActivity('e1', { activityDate: '2026-02-30', notes: 'x' }, ACTOR)).rejects.toThrow(UnprocessableEntityException);
+  });
+
+  it('schedules the optional next follow-up in the same transaction and links it in the entry', async () => {
+    await service.addActivity('e1', { activityDate: '2026-10-21', notes: 'Visit', nextFollowUpDate: '2026-10-28' }, ACTOR);
+    expect(tx.salesFollowUp.create).toHaveBeenCalledTimes(1);
+    expect(dateKey(tx.salesFollowUp.create.mock.calls[0]![0].data.followUpDate)).toBe('2026-10-28');
+    expect(tx.salesActivity.create.mock.calls[0]![0].data.metadata).toMatchObject({ followUpId: 'f1', followUpDate: '2026-10-28' });
+    expect(client.$transaction).toHaveBeenCalledTimes(1);
+    await expect(service.addActivity('e1', { activityDate: '2026-10-21', notes: 'Visit', nextFollowUpDate: '2026-10-20' }, ACTOR)).rejects.toThrow(/before today/);
+  });
+
+  it('a retry with the same requestId returns the first entry and creates nothing new', async () => {
+    tx.salesActivity.findFirst.mockResolvedValue(created({ metadata: { clientRequestId: 'req-12345678' } }));
+    const r = await service.addActivity('e1', { activityDate: '2026-10-21', notes: 'Client visited', nextFollowUpDate: '2026-10-28', requestId: 'req-12345678' }, ACTOR);
+    expect(r.id).toBe('a1');
+    expect(tx.salesActivity.create).not.toHaveBeenCalled();
+    expect(tx.salesFollowUp.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalled();
+  });
+});
 
 describe('create enquiry', () => {
   it('sets date (Kuwait today), creator, status and number on the server; blank value stays null', async () => {

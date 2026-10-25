@@ -59,8 +59,8 @@ describe('Sales formatting', () => {
   });
 
   it('dashboard uses the approved plain labels', () => {
-    const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx');
-    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Projects', 'Conversion This Month', 'Today’s Follow-ups', 'Record Follow-up', 'Open Enquiry', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
+    const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx') + read('../_components/follow-ups-panel.tsx');
+    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Projects', 'Conversion This Month', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
     expect(page).not.toContain('Not yet Confirmed or Not Proceeding');
     expect(page).not.toContain('See all');
     expect(page).not.toContain('opens All Enquiries with that filter');
@@ -72,7 +72,7 @@ describe('Sales formatting', () => {
     const kpis = page.slice(page.indexOf('const kpis'), page.indexOf('return (', page.indexOf('const kpis')));
     expect(kpis.match(/label: '/g)?.length).toBe(4);
     expect(kpis.match(/href: /g)?.length).toBe(3); // the estimated-value card has no matching list
-    expect(page).toContain('canUpdate && <FollowUpActions');
+    expect(read('../_components/follow-ups-panel.tsx')).toContain('actions && canUpdate && <FollowUpActions');
   });
 
   it('dashboard Recent Enquiries filter loads matching records on the server and applies immediately (no Show button)', () => {
@@ -80,22 +80,134 @@ describe('Sales formatting', () => {
     expect(c).toContain('loadRecentEnquiriesAction');
     expect(c).toContain('onChange={(e) => choose(e.target.value)}');
     expect(c).not.toContain('>Show<');
-    expect(read('../actions.ts')).toContain("pageSize: '6'");
+    expect(read('../actions.ts')).toContain("pageSize: '8'");
   });
 
   it('inline status control: editors only, nothing saved by selecting, confirmation for Confirmed/Not Proceeding, stale-status protection', () => {
     const c = read('../_components/enquiry-status-control.tsx');
-    expect(c).toContain('if (!canEdit) return <StatusBadge');
-    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Confirm status change', 'It does not create a contract']) expect(c).toContain(l);
+    expect(c).toContain('if (!canEdit) return null;');
+    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Change Status', 'It does not create a contract']) expect(c).toContain(l);
     expect(read('../actions.ts')).toContain('expectedStatus');
     for (const f of ['../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../_components/recent-enquiries.tsx']) expect(read(f)).toContain('EnquiryStatusControl');
     expect(read('../enquiries/page.tsx')).toContain("permissions.includes('sales.update')");
+  });
+
+  it('Add Activity: one shared popup (date, text, optional follow-up), no category; history renamed; viewers get no button', () => {
+    const c = read('../_components/add-activity-button.tsx');
+    for (const l of ['Add Activity', 'What happened?', 'Activity Date', 'Set Next Follow-up', 'Save Activity', 'Cancel', 'Saving…', 'Activity saved', 'requestId']) expect(c).toContain(l);
+    expect(c).not.toContain('<select');
+    for (const f of ['../_components/enquiry-actions.tsx', '../enquiries/page.tsx', '../_components/recent-enquiries.tsx']) expect(read(f)).toContain('AddActivityButton');
+    expect(read('../enquiries/page.tsx')).toContain('canUpdate && <AddActivityButton');
+    expect(read('../_components/recent-enquiries.tsx')).toContain('canUpdate && <AddActivityButton');
+    const detail = read('../enquiries/[id]/page.tsx');
+    expect(detail).toContain('Activity History');
+    expect(detail + read('../_components/enquiry-actions.tsx')).not.toMatch(/Record Meeting|Meetings and Notes/);
+  });
+
+  it('Sales Activities: renamed everywhere users see it; dashboard order; no old name left in user-facing strings', () => {
+    const page = read('../page.tsx');
+    expect(page).toContain('Sales Activities');
+    const i = (s: string): number => page.indexOf(s);
+    expect(i('Key figures')).toBeLessThan(i('monthly-results'));
+    expect(i('monthly-results')).toBeLessThan(i('<FollowUpsPanel'));
+    expect(i('<FollowUpsPanel')).toBeLessThan(i('<RecentEnquiries'));
+    expect(page).toContain('<DashboardClock serverToday={d.today} />');
+    for (const f of ['../page.tsx', '../layout.tsx', '../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../enquiries/new/page.tsx', '../follow-ups/page.tsx', '../_components/sales-nav.tsx']) expect(read(f)).not.toMatch(/Sales (&|&amp;) Enquiries/);
+  });
+
+  it('one status editor: the enquiry page no longer has a competing Update Status panel; only different statuses are offered', () => {
+    const actions = read('../_components/enquiry-actions.tsx');
+    expect(actions).not.toContain('Update Status');
+    expect(actions).not.toContain('StatusPanel');
+    const c = read('../_components/enquiry-status-control.tsx');
+    for (const l of ['Current Status:', 'Change Status', 'Save Status', 'options = STATUS_ORDER.filter((x) => x !== norm(saved))', 'type="radio"']) expect(c).toContain(l);
+    expect(c).not.toContain('<select');
+  });
+
+  it('Sales module shell: one header (title + New Client Enquiry) and one navigation row on every page; enquiry page has breadcrumb and Back with restored query', () => {
+    const layout = read('../layout.tsx');
+    expect(layout).toContain('Sales Activities');
+    expect(layout).toContain("permissions.includes('sales.create')");
+    expect(layout.indexOf('<header')).toBeLessThan(layout.indexOf('<SalesNav'));
+    expect(layout).toContain('md:sticky');
+    const nav = read('../_components/sales-nav.tsx');
+    for (const l of ['Dashboard', 'All Enquiries', 'Follow-ups', 'focus-visible:ring-2', 'min-h-12']) expect(nav).toContain(l);
+    const detail = read('../enquiries/[id]/page.tsx');
+    for (const l of ['Back to All Enquiries', 'aria-label="Breadcrumb"', 'backToList', 'enquiry.enquiryNumber'.replace('enquiry.', 'e.')]) expect(detail).toContain(l);
+    expect(read('../enquiries/page.tsx')).toContain('?back=');
+  });
+
+  it('dashboard previews are fitted to the real space, not to screen sizes', () => {
+    const hook = read('../_lib/use-fitted-count.ts');
+    expect(hook).toContain('ResizeObserver');
+    expect(hook).toContain('getBoundingClientRect');
+    expect(hook).not.toMatch(/max-height|1366|1920|2560/);
+    expect(read('../_components/recent-enquiries.tsx')).toContain('useFittedCount');
+    expect(read('../_components/follow-ups-panel.tsx')).toContain('useFittedCount');
+    expect(read('../_components/recent-enquiries.tsx')).toMatch(/Showing {count} of {total}/);
   });
 
   it('status filter offers All, Active, Follow-up Needed and More Statuses with every existing status', () => {
     const ui = read('../_components/sales-ui.tsx');
     for (const l of ['All', 'Active', 'More Statuses', 'STATUS_ORDER.map']) expect(ui).toContain(l);
     expect(ui).toContain("value: 'open'");
+  });
+});
+
+describe('button system (FMP-SALES-08)', () => {
+  const ui = read('../_components/sales-ui.tsx');
+  /** WCAG relative luminance contrast of two #rrggbb colours. */
+  const lum = (hex: string): number => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string): number => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+
+  it('every button colour pair is readable (>= 4.5:1), including hover and pressed shades', () => {
+    const WHITE = '#ffffff', INK = '#0f172a';
+    const pairs: Array<[string, string, string]> = [
+      ['Open Enquiry', WHITE, '#1d4ed8'], ['Open Enquiry hover', WHITE, '#1e40af'], ['Open Enquiry pressed', WHITE, '#1e3a8a'],
+      ['Add Activity / New Client Enquiry', WHITE, '#c62828'], ['Add hover (brightness 90%)', WHITE, '#b32424'], ['Add pressed (brightness 75%)', WHITE, '#951e1e'],
+      ['Change Status / Reschedule', INK, '#fbbf24'], ['Change Status hover', INK, '#fcd34d'], ['Change Status pressed', INK, '#f59e0b'],
+      ['Mark Completed', WHITE, '#15803d'], ['Mark Completed hover', WHITE, '#166534'], ['Mark Completed pressed', WHITE, '#14532d'],
+      ['Cancel / Back', INK, '#ffffff'], ['Cancel hover', INK, '#f1f5f9'], ['Cancel pressed', INK, '#e2e8f0'],
+      ['Selected tab', WHITE, '#1a2338'],
+    ];
+    for (const [name, fg, bg] of pairs) expect(contrast(fg, bg), name).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('one definition per action: shared classes, 48px, 18px semibold, visible edge and shadow, all states', () => {
+    for (const l of ['min-h-12', 'text-lg', 'font-semibold', 'border-2', 'shadow-sm', 'hover:', 'active:', 'focus-visible:ring-4', 'disabled:opacity-60']) expect(ui).toContain(l);
+    for (const n of ['BTN_OPEN', 'BTN_ADD', 'BTN_STATUS', 'BTN_DONE', 'BTN_NEUTRAL']) expect(ui).toContain('export const ' + n);
+    expect(ui).toContain('bg-blue-700');
+    expect(ui).toContain('bg-accent');
+    expect(ui).toContain('bg-amber-400');
+    expect(ui).toContain('bg-green-700');
+  });
+
+  it('the same action looks the same everywhere: label and component per action', () => {
+    const files = ['../page.tsx', '../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../follow-ups/page.tsx', '../_components/recent-enquiries.tsx', '../_components/follow-ups-panel.tsx'].map(read).join(' ');
+    expect(files).not.toMatch(/>Open Enquiry</);
+    expect(files).toContain('OpenEnquiryLink');
+    expect(read('../_components/follow-up-actions.tsx')).toContain('BTN_DONE');
+    expect(read('../_components/follow-up-actions.tsx')).toContain('BTN_STATUS');
+    expect(read('../_components/enquiry-status-control.tsx')).toContain('BTN_STATUS');
+    expect(read('../_components/add-activity-button.tsx')).toContain('BTN_ADD');
+    expect(read('../_components/new-enquiry-modal.tsx')).toContain('BTN_ADD');
+    expect(read('../_components/follow-up-actions.tsx')).not.toContain('Record Follow-up');
+  });
+
+  it('record actions are grouped Open Enquiry → Add Activity → Change Status, with Current Status outside the group', () => {
+    const rows = read('../enquiries/page.tsx');
+    expect(rows.indexOf('<OpenEnquiryLink')).toBeLessThan(rows.indexOf('<AddActivityButton'));
+    expect(rows.indexOf('<AddActivityButton')).toBeLessThan(rows.indexOf('<EnquiryStatusControl'));
+    expect(rows).toContain('<CurrentStatus');
+    const cards = read('../_components/recent-enquiries.tsx');
+    expect(cards.indexOf('<OpenEnquiryLink')).toBeLessThan(cards.indexOf('<AddActivityButton'));
+    expect(cards.indexOf('<AddActivityButton')).toBeLessThan(cards.indexOf('<EnquiryStatusControl'));
+    const nav = read('../_components/sales-nav.tsx');
+    expect(nav).toContain('border-slate-400');
+    expect(nav).toContain('bg-text-primary');
   });
 });
 
@@ -163,7 +275,7 @@ describe('Sales area guards', () => {
   });
 
   it('the dashboard and register open the popup instead of linking to a separate page', () => {
-    expect(read('../page.tsx')).toContain('<NewEnquiryButton');
+    expect(read('../layout.tsx')).toContain('<NewEnquiryButton');
     expect(read('../page.tsx')).not.toContain('/sales/enquiries/new');
     expect(read('../enquiries/page.tsx')).toContain('<NewEnquiryButton');
     expect(read('../enquiries/page.tsx')).not.toContain('/sales/enquiries/new');

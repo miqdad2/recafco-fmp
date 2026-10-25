@@ -28,7 +28,7 @@ export const FACTORY_PERFORMANCE_CARD = {
 } as const;
 
 export const SALES_ENQUIRIES_CARD = {
-  title: 'Sales & Enquiries',
+  title: 'Sales Activities',
   description: 'Client visits, enquiries, quotations and follow-ups.',
 } as const;
 
@@ -79,5 +79,5 @@ export const CARD_CTA: Record<string, string> = {
   STORAGE_DELIVERY: 'Open Delivery',
   ERECTION: 'Open Erection',
   FACTORY_PERFORMANCE: 'Open Factory Performance',
-  SALES_ENQUIRIES: 'Open Sales & Enquiries',
+  SALES_ENQUIRIES: 'Open Sales Activities',
 };

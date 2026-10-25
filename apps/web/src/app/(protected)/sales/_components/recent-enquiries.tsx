@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { useFittedCount } from '../_lib/use-fitted-count';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import type { SalesEnquiry } from '@/lib/sales-api';
 import { loadRecentEnquiriesAction } from '../actions';
 import { NOT_ESTIMATED, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER, formatDate, formatKwd } from '../_lib/sales-format';
-import { BTN_SECONDARY, ContactLine, EmptyState } from './sales-ui';
+import { ContactLine, CurrentStatus, EmptyState, LatestActivity, OpenEnquiryLink } from './sales-ui';
+import { AddActivityButton } from './add-activity-button';
 import { EnquiryStatusControl } from './enquiry-status-control';
 import { NewEnquiryButton } from './new-enquiry-modal';
 
@@ -17,9 +19,12 @@ import { NewEnquiryButton } from './new-enquiry-modal';
  * full list with the same filter. When the server data behind the dashboard changes (a follow-up was recorded, an
  * enquiry saved) the current filter is reloaded so the list never goes stale.
  */
-const CHIP = 'inline-flex min-h-12 items-center rounded-full border px-5 text-lg font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
+const CHIP = 'inline-flex min-h-12 items-center rounded-full border px-3 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
 const ON = 'border-text-primary bg-text-primary text-white';
 const OFF = 'border-border-strong bg-surface text-text-primary hover:bg-surface-secondary';
+
+/** Cards the dashboard may offer; how many are shown depends on the space (useFittedCount). */
+const MAX_SHOWN = 8;
 
 const CHIPS = [
   { value: '', label: 'All' },
@@ -46,6 +51,9 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
   const [total, setTotal] = useState(initialTotal);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const listRef = useRef<HTMLUListElement>(null);
+  const shown = useFittedCount(listRef, items.map((x) => `${x.id}:${x.status}:${x.latestActivity?.id ?? ''}`).join(',') + pending);
+  const count = Math.min(shown, Math.min(items.length, MAX_SHOWN));
   const latest = useRef(0);
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -93,9 +101,17 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
   const label = status === '' ? 'All' : (CHIPS.find((c) => c.value === status)?.label ?? STATUS_LABELS[STATUS_ORDER.find((x) => STATUS_FILTER_VALUE[x] === status) ?? 'NEW_ENQUIRY']);
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div role="group" aria-label="Filter recent enquiries by status" className="flex flex-wrap items-center gap-3">
+    <section aria-labelledby="recent-enquiries-title" className="rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h2 id="recent-enquiries-title" className="flex flex-wrap items-baseline gap-x-3 text-xl font-bold text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">
+          Recent Enquiries
+        </h2>
+        <Link href={viewAll} className="inline-flex min-h-9 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus 2xl:text-xl min-[137.5rem]:text-2xl">
+          View All Enquiries <ArrowRight className="size-5" aria-hidden="true" />
+        </Link>
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Filter recent enquiries by status" className="flex flex-wrap items-center gap-2">
           {CHIPS.map((c) => (
             <button key={c.label} type="button" onClick={() => choose(c.value)} aria-pressed={status === c.value} className={`${CHIP} ${status === c.value ? ON : OFF}`}>
               {c.label}
@@ -103,7 +119,7 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
           ))}
           <select
             aria-label="More statuses" value={inChips ? '' : status} onChange={(e) => choose(e.target.value)}
-            className={`min-h-12 rounded-full border px-4 text-lg font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? ON : OFF}`}
+            className={`min-h-12 rounded-full border px-3 text-base font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? ON : OFF}`}
           >
             <option value="" disabled={inChips}>More Statuses…</option>
             {STATUS_ORDER.map((s) => (
@@ -111,17 +127,6 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
             ))}
           </select>
         </div>
-        <Link href={viewAll} className="inline-flex min-h-12 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-          View All Enquiries <ArrowRight className="size-5" aria-hidden="true" />
-        </Link>
-      </div>
-
-      <div role="status" aria-live="polite" className="mb-3 flex min-h-7 items-center gap-2 text-base text-text-secondary">
-        {pending ? (
-          <><Loader2 className="size-5 animate-spin" aria-hidden="true" /> Loading enquiries…</>
-        ) : error ? null : (
-          <>{status ? `${label}: ` : ''}showing {items.length} of {total}</>
-        )}
       </div>
 
       {error ? (
@@ -134,30 +139,38 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
             actionNode={canCreate ? <NewEnquiryButton className={newButtonClass} /> : undefined}
           />
         ) : (
-          <p className="rounded-lg border border-dashed border-border-strong bg-surface px-5 py-8 text-center text-xl font-semibold text-text-primary">No matching enquiries</p>
+          <p className="rounded-lg border border-dashed border-border-strong bg-surface px-5 py-6 text-center text-xl font-semibold text-text-primary">No matching enquiries</p>
         )
       ) : (
-        <ul className={`space-y-4 transition-opacity ${pending ? 'opacity-50' : ''}`} aria-busy={pending}>
-          {items.map((e) => (
-            <li key={e.id} className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <p className="min-w-0 break-words text-2xl font-bold leading-snug text-text-primary">{e.companyName}</p>
-                <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} filter={status} filterLabel={label} />
+        <ul ref={listRef} className={`space-y-3 transition-opacity ${pending ? 'opacity-50' : ''}`} aria-busy={pending}>
+          {items.slice(0, MAX_SHOWN).map((e) => (
+            <li key={e.id} className="rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
+              <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                <p className="dense-clamp-1 line-clamp-2 min-w-0 break-words text-xl font-bold leading-snug text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">{e.companyName}</p>
+                <CurrentStatus status={e.status} />
               </div>
-              <p className="mt-1 line-clamp-2 break-words text-lg text-text-primary">{e.scopeOfWork}</p>
-              <div className="mt-2"><ContactLine person={e.contactPerson} number={e.contactNumber} /></div>
-              <dl className="mt-3 grid gap-x-6 gap-y-1 text-lg sm:grid-cols-3">
-                <div><dt className="text-base text-text-secondary">Estimated value</dt><dd className={`font-semibold ${e.estimatedValue ? 'text-purple-900' : 'text-text-secondary'}`}>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</dd></div>
-                <div><dt className="text-base text-text-secondary">Received</dt><dd className="font-semibold text-text-primary">{formatDate(e.enquiryDate)}</dd></div>
-                <div><dt className="text-base text-text-secondary">Next follow-up</dt><dd className="font-semibold text-text-primary">{e.nextFollowUpDate ? formatDate(e.nextFollowUpDate) : 'Not set'}</dd></div>
-              </dl>
-              <div className="mt-4">
-                <Link href={`/sales/enquiries/${e.id}`} className={BTN_SECONDARY} aria-label={`Open enquiry: ${e.companyName}`}>Open Enquiry</Link>
+              <p className="dense-hide line-clamp-1 break-words text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{e.scopeOfWork}</p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                <div className="dense-hide"><ContactLine person={e.contactPerson} number={e.contactNumber} /></div>
+                <p className={`text-lg font-semibold 2xl:text-xl min-[137.5rem]:text-2xl ${e.estimatedValue ? 'text-purple-900' : 'text-text-secondary'}`}>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</p>
+                <p className="text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><span className="text-text-secondary">Next follow-up:</span> <span className="font-semibold">{e.nextFollowUpDate ? formatDate(e.nextFollowUpDate) : 'Not set'}</span></p>
+                <p className="dense-hide text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><span className="text-text-secondary">Received:</span> <span className="font-semibold">{formatDate(e.enquiryDate)}</span></p>
+              </div>
+              <div className="dense-hide"><LatestActivity activity={e.latestActivity ?? null} compact /></div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <OpenEnquiryLink href={`/sales/enquiries/${e.id}`} companyName={e.companyName} />
+                {canUpdate && <AddActivityButton enquiryId={e.id} companyName={e.companyName} today={today} />}
+                <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} filter={status} filterLabel={label} />
               </div>
             </li>
           ))}
         </ul>
       )}
-    </div>
+      {!error && items.length > 0 && (
+        <p role="status" aria-live="polite" className="mt-2 text-base text-text-secondary 2xl:text-lg min-[137.5rem]:text-xl" data-showing={`${count}/${total}`}>
+          {pending ? <span className="inline-flex items-center gap-1"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading enquiries…</span> : <><span className="font-semibold text-text-primary">{status ? `${label}: ` : ''}Showing {count} of {total}</span> {total === 1 ? 'enquiry' : 'enquiries'}{count < total && <> · <Link href={viewAll} className="font-semibold text-accent hover:underline">View All Enquiries</Link></>}</>}
+        </p>
+      )}
+    </section>
   );
 }

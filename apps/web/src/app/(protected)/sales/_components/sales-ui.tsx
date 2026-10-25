@@ -1,16 +1,47 @@
 import Link from 'next/link';
-import { Phone } from 'lucide-react';
+import { FolderOpen, Phone } from 'lucide-react';
 import type { FollowUpBucket, SalesStatus } from '@/lib/sales-api';
-import { BUCKET_BADGE, BUCKET_LABELS, STATUS_BADGE, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER } from '../_lib/sales-format';
+import { BUCKET_BADGE, BUCKET_LABELS, formatDate, STATUS_BADGE, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER } from '../_lib/sales-format';
 
 // Shared building blocks for the Sales screens. No hooks, so usable from server and client components.
 
 export const INPUT_CLASS =
   'w-full rounded-lg border border-border-strong bg-surface min-h-12 px-4 py-3 text-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-focus';
-export const BTN_PRIMARY =
-  'inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 text-lg font-semibold text-white shadow-sm transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60';
-export const BTN_SECONDARY =
-  'inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-5 py-3 text-lg font-semibold text-text-primary transition hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60';
+/**
+ * FMP-SALES-08 — ONE button system for Sales Activities. Every action has one colour, one label and one icon wherever it
+ * appears: Open Enquiry = blue, Add Activity / New Client Enquiry (and saving them) = RECAFCO red, Change Status and
+ * Reschedule = amber with dark text, Mark Completed = green, Cancel / Back / everything else neutral with a visible border.
+ * All are 48px high, 18px semibold, with a visible edge and shadow before hover, plus hover, pressed, keyboard-focus,
+ * saving and disabled states. Text/background pairs all meet 4.5:1 (checked in sales-format.test.ts).
+ */
+const BTN_BASE =
+  'inline-flex min-h-12 select-none items-center justify-center gap-2 rounded-lg border-2 px-4 py-2 text-lg font-semibold leading-tight shadow-sm transition-colors duration-150 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus focus-visible:ring-offset-2 active:translate-y-px active:shadow-none disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60';
+export const BTN_OPEN = `${BTN_BASE} border-blue-900 bg-blue-700 text-white hover:bg-blue-800 active:bg-blue-900`;
+export const BTN_ADD = `${BTN_BASE} border-red-900 bg-accent text-white hover:brightness-90 active:brightness-75`;
+export const BTN_STATUS = `${BTN_BASE} border-amber-700 bg-amber-400 text-slate-900 hover:bg-amber-300 active:bg-amber-500`;
+export const BTN_DONE = `${BTN_BASE} border-green-900 bg-green-700 text-white hover:bg-green-800 active:bg-green-900`;
+export const BTN_NEUTRAL = `${BTN_BASE} border-slate-500 bg-white text-slate-900 hover:bg-slate-100 active:bg-slate-200`;
+/** Kept names used by the forms: primary = the red create/save button, secondary = the neutral Cancel/Back style. */
+export const BTN_PRIMARY = BTN_ADD;
+export const BTN_SECONDARY = BTN_NEUTRAL;
+
+/** Open Enquiry — the same blue button with the same folder icon everywhere. */
+export function OpenEnquiryLink({ href, companyName, className = '' }: { href: string; companyName?: string; className?: string }): React.JSX.Element {
+  return (
+    <Link href={href} className={`${BTN_OPEN} ${className}`} {...(companyName ? { 'aria-label': `Open Enquiry: ${companyName}` } : {})}>
+      <FolderOpen className="size-5 shrink-0" aria-hidden="true" /> Open Enquiry
+    </Link>
+  );
+}
+
+/** The saved status, shown as information (not a control), with its label. */
+export function CurrentStatus({ status }: { status: SalesStatus }): React.JSX.Element {
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-base text-text-secondary 2xl:text-lg">
+      <span>Current Status:</span> <StatusBadge status={status} />
+    </p>
+  );
+}
 
 export function StatusBadge({ status }: { status: SalesStatus }): React.JSX.Element {
   return (
@@ -70,7 +101,7 @@ export function EmptyState({ title, text, action, actionNode }: { title: string;
     <div className="rounded-xl border border-dashed border-border-strong bg-surface px-6 py-10 text-center">
       <p className="text-2xl font-bold text-text-primary">{title}</p>
       <p className="mx-auto mt-2 max-w-xl text-lg text-text-secondary">{text}</p>
-      {action && <Link href={action.href} className={`${BTN_PRIMARY} mt-5`}>{action.label}</Link>}
+      {action && <Link href={action.href} className={`${BTN_NEUTRAL} mt-5`}>{action.label}</Link>}
       {actionNode && <div className="mt-5">{actionNode}</div>}
     </div>
   );
@@ -141,7 +172,7 @@ export function StatusFilter({ status, search = '', month = '' }: { status: stri
 }
 
 export function ContactLine({ person, number }: { person: string | null; number: string | null }): React.JSX.Element {
-  if (!person && !number) return <p className="text-lg text-text-secondary">No contact saved</p>;
+  if (!person && !number) return <p className="dense-hide text-lg text-text-secondary">No contact saved</p>;
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-lg text-text-primary">
       {person && <span>{person}</span>}
@@ -150,6 +181,17 @@ export function ContactLine({ person, number }: { person: string | null; number:
           <Phone className="size-5" aria-hidden="true" /> {number}
         </a>
       )}
+    </p>
+  );
+}
+
+/** FMP-SALES-05 — short "Latest Activity" preview for enquiry rows and cards (full text is on the enquiry page). */
+export function LatestActivity({ activity, compact = false }: { activity: { activityDate: string; notes: string | null; recordedBy: string } | null; compact?: boolean }): React.JSX.Element {
+  if (!activity) return <p className="mt-1 text-base text-text-secondary">No activity yet</p>;
+  return (
+    <p className="mt-1 text-base text-text-primary">
+      <span className="font-semibold">Latest activity · {formatDate(activity.activityDate)}:</span>{' '}
+      <span className={`${compact ? 'line-clamp-1' : 'line-clamp-2'} break-words`}>{activity.notes}</span>
     </p>
   );
 }

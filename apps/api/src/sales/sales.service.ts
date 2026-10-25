@@ -58,6 +58,8 @@ export interface EnquiryView {
   createdBy: { id: string; displayName: string };
   createdAt: string;
   updatedAt: string;
+  /** Newest hand-written activity (list/dashboard only). */
+  latestActivity?: { id: string; activityDate: string; notes: string | null; recordedBy: string } | null;
 }
 
 export function toEnquiryView(r: EnquiryRow): EnquiryView {
@@ -223,6 +225,22 @@ export class SalesService {
     });
   }
 
+  /** Adds the newest hand-written activity (not status changes or field edits) to each enquiry, in one query. */
+  private async withLatestActivity(client: Pick<Tx, 'salesActivity'>, views: EnquiryView[]): Promise<EnquiryView[]> {
+    if (views.length === 0) return views;
+    const rows = await client.salesActivity.findMany({
+      where: { enquiryId: { in: views.map((v) => v.id) }, type: { notIn: [SalesActivityType.STATUS_CHANGE, SalesActivityType.ENQUIRY_UPDATED] } },
+      orderBy: [{ activityDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      distinct: ['enquiryId'],
+      include: { recordedByUser: USER_REF },
+    });
+    const byEnquiry = new Map(rows.map((r) => [r.enquiryId, r]));
+    return views.map((v) => {
+      const r = byEnquiry.get(v.id);
+      return { ...v, latestActivity: r ? { id: r.id, activityDate: dateKey(r.activityDate)!, notes: r.notes, recordedBy: r.recordedByUser.displayName } : null };
+    });
+  }
+
   async list(query: EnquiryListQueryDto): Promise<{
     items: EnquiryView[];
     today: string;
@@ -264,7 +282,7 @@ export class SalesService {
       client.salesEnquiry.count({ where }),
     ]);
     return {
-      items: rows.map(toEnquiryView),
+      items: await this.withLatestActivity(client, rows.map(toEnquiryView)),
       today: kuwaitToday(),
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     };
@@ -282,7 +300,7 @@ export class SalesService {
       client.salesActivity.findMany({
         where: { enquiryId: id },
         include: { recordedByUser: USER_REF },
-        orderBy: [{ activityDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ activityDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       }),
       client.salesFollowUp.findMany({
         where: { enquiryId: id },
@@ -454,19 +472,57 @@ export class SalesService {
     });
   }
 
+  /**
+   * One simple entry: a date (not in the future), the text, and optionally the next follow-up - all saved in one
+   * transaction so a failure never leaves half of it. A retry carrying the same requestId returns the first result.
+   * It never changes the enquiry's status and never completes an existing follow-up.
+   */
   async addActivity(id: string, dto: AddActivityDto, actor: AuthUser): Promise<ActivityView> {
-    if (!isValidDateString(dto.activityDate)) throw this.invalid('SALES_INVALID_DATE', 'Date is not a real date');
+    if (!isValidDateString(dto.activityDate)) throw this.invalid('SALES_INVALID_DATE', 'Activity Date is not a real date');
+    const today = kuwaitToday();
+    if (dto.activityDate > today) {
+      throw this.invalid('SALES_ACTIVITY_IN_FUTURE', 'Activity Date cannot be in the future. To plan something for later, set a Next Follow-up.');
+    }
+    if (dto.nextFollowUpDate) {
+      if (!isValidDateString(dto.nextFollowUpDate)) throw this.invalid('SALES_INVALID_DATE', 'Next Follow-up is not a real date');
+      if (dto.nextFollowUpDate < today) throw this.invalid('SALES_FOLLOW_UP_IN_PAST', 'Next Follow-up cannot be before today.');
+    }
     return this.db.getClient().$transaction(async (tx) => {
       await this.findOrThrow(tx, id);
+      if (dto.requestId) {
+        // Serialise identical requests so two quick clicks cannot both pass the check below.
+        const lockKey = `${id}:${dto.requestId}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+        const prior = await tx.salesActivity.findFirst({
+          where: { enquiryId: id, recordedByUserId: actor.id, metadata: { path: ['clientRequestId'], equals: dto.requestId } },
+          include: { recordedByUser: USER_REF },
+        });
+        if (prior) return toActivityView(prior);
+      }
+      let followUp: { id: string; date: string } | null = null;
+      if (dto.nextFollowUpDate) {
+        const f = await tx.salesFollowUp.create({
+          data: { enquiryId: id, followUpDate: dateOnly(dto.nextFollowUpDate), notes: null, responsibleUserId: actor.id, createdByUserId: actor.id },
+        });
+        await this.syncNextFollowUp(tx, id);
+        followUp = { id: f.id, date: dto.nextFollowUpDate };
+      }
+      const meta: Record<string, unknown> = {};
+      if (dto.requestId) meta['clientRequestId'] = dto.requestId;
+      if (followUp) {
+        meta['followUpId'] = followUp.id;
+        meta['followUpDate'] = followUp.date;
+      }
       const a = await tx.salesActivity.create({
-        data: { enquiryId: id, type: dto.type, activityDate: dateOnly(dto.activityDate), notes: dto.notes, recordedByUserId: actor.id },
+        data: {
+          enquiryId: id, type: dto.type ?? SalesActivityType.NOTE, activityDate: dateOnly(dto.activityDate), notes: dto.notes,
+          ...(Object.keys(meta).length ? { metadata: meta as Prisma.InputJsonValue } : {}), recordedByUserId: actor.id,
+        },
         include: { recordedByUser: USER_REF },
       });
-      await this.audit(tx, 'SALES_ACTIVITY_RECORDED', actor, { enquiryId: id, activityId: a.id, type: dto.type });
-      return {
-        id: a.id, type: a.type, activityDate: dateKey(a.activityDate)!, notes: a.notes,
-        metadata: null, recordedBy: a.recordedByUser, createdAt: a.createdAt.toISOString(),
-      };
+      await this.audit(tx, 'SALES_ACTIVITY_RECORDED', actor, { enquiryId: id, activityId: a.id, type: a.type });
+      if (followUp) await this.audit(tx, 'SALES_FOLLOW_UP_SCHEDULED', actor, { enquiryId: id, followUpId: followUp.id, date: followUp.date });
+      return toActivityView(a);
     });
   }
 
@@ -628,9 +684,9 @@ export class SalesService {
           enquiry: followUpEnquiry,
         },
         orderBy: { followUpDate: 'asc' },
-        take: 6,
+        take: 8,
       }),
-      client.salesEnquiry.findMany({ include: ENQUIRY_INCLUDE, orderBy: [{ enquiryDate: 'desc' }, { createdAt: 'desc' }], take: 6 }),
+      client.salesEnquiry.findMany({ include: ENQUIRY_INCLUDE, orderBy: [{ enquiryDate: 'desc' }, { createdAt: 'desc' }], take: 8 }),
       client.salesEnquiry.findMany({ where: { enquiryDate: { gte: trendStart, lt: endExclusive } }, select: { enquiryDate: true } }),
       canReport ? this.monthlyReport(month) : Promise.resolve(null),
       client.salesFollowUp.findMany({
@@ -670,7 +726,7 @@ export class SalesService {
       upcomingFollowUps: upcoming.map((f) => ({ ...toFollowUpView(f, today), enquiry: { ...f.enquiry } })),
       upcomingFollowUpCount: upcomingCount,
       activeWithoutFollowUp: noFollowUp,
-      recentEnquiries: recent.map(toEnquiryView),
+      recentEnquiries: await this.withLatestActivity(client, recent.map(toEnquiryView)),
       monthlyTrend: months.map((m) => ({ month: m, count: trendCounts.get(m) ?? 0 })),
     };
   }
@@ -679,6 +735,15 @@ export class SalesService {
 // ---------------------------------------------------------------------------
 // views
 // ---------------------------------------------------------------------------
+
+type ActivityRow = Prisma.SalesActivityGetPayload<{ include: { recordedByUser: typeof USER_REF } }>;
+
+function toActivityView(a: ActivityRow): ActivityView {
+  return {
+    id: a.id, type: a.type, activityDate: dateKey(a.activityDate)!, notes: a.notes,
+    metadata: (a.metadata ?? null) as Record<string, unknown> | null, recordedBy: a.recordedByUser, createdAt: a.createdAt.toISOString(),
+  };
+}
 
 export interface ActivityView {
   id: string;

@@ -45,6 +45,8 @@ export interface SalesEnquiry {
   createdBy: UserRef;
   createdAt: string;
   updatedAt: string;
+  /** Newest hand-written activity (list and dashboard only). */
+  latestActivity?: { id: string; activityDate: string; notes: string | null; recordedBy: string } | null;
 }
 
 export interface SalesActivity {

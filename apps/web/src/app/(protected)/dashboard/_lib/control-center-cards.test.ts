@@ -75,7 +75,7 @@ describe('Control Center cards (FMP-UI-36)', () => {
       STORAGE_DELIVERY: 'Open Delivery',
       ERECTION: 'Open Erection',
       FACTORY_PERFORMANCE: 'Open Factory Performance',
-      SALES_ENQUIRIES: 'Open Sales & Enquiries',
+      SALES_ENQUIRIES: 'Open Sales Activities',
     });
     expect(read('../_components/control-center-card.tsx')).not.toContain('Open Dashboard');
     expect(read('../_components/control-center-card.tsx')).not.toContain('truncate');

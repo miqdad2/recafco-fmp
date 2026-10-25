@@ -5,10 +5,10 @@ import { salesApi } from '@/lib/sales-api';
 import type { FollowUpBucket, SalesFollowUpListItem } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../contracts/_lib/get-user-permissions';
 import { BUCKET_LABELS, dueText, formatDate } from '../_lib/sales-format';
-import { BucketBadge, EmptyState } from '../_components/sales-ui';
+import { BucketBadge, EmptyState, OpenEnquiryLink } from '../_components/sales-ui';
 import { FollowUpActions } from '../_components/follow-up-actions';
 
-export const metadata: Metadata = { title: 'Follow-ups — Sales & Enquiries — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Follow-ups — Sales Activities — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
 
 type Group = Exclude<FollowUpBucket, 'CANCELLED'>;
@@ -37,21 +37,19 @@ function Item({ f, today, canUpdate }: { f: SalesFollowUpListItem; today: string
         </div>
         <div className="text-right">
           <BucketBadge bucket={f.bucket} />
-          <p className="mt-1 text-sm font-semibold text-text-primary">{formatDate(f.followUpDate)}</p>
-          {f.bucket !== 'COMPLETED' && <p className="text-xs text-text-secondary">{dueText(f.bucket, f.followUpDate, today)}</p>}
+          <p className="mt-1 text-base font-semibold text-text-primary">{formatDate(f.followUpDate)}</p>
+          {f.bucket !== 'COMPLETED' && <p className="text-base text-text-secondary">{dueText(f.bucket, f.followUpDate, today)}</p>}
         </div>
       </div>
       {f.notes && <p className="mt-2 text-base text-text-primary">{f.notes}</p>}
-      <p className="mt-1 text-sm text-text-secondary">
+      <p className="mt-1 text-base text-text-secondary">
         {f.bucket === 'COMPLETED'
           ? `Completed ${f.completedAt ? formatDate(f.completedAt.slice(0, 10)) : ''}${f.completedBy ? ` by ${f.completedBy.displayName}` : ''}${f.completionNotes ? ` — ${f.completionNotes}` : ''}`
           : f.responsibleUser ? `Responsible: ${f.responsibleUser.displayName}` : ''}
       </p>
-      <div className="mt-3 flex flex-wrap items-start gap-3">
-        <Link href={`/sales/enquiries/${f.enquiry.id}`} className="inline-flex min-h-11 items-center rounded-lg border border-border-strong px-4 text-sm font-semibold hover:bg-surface-secondary focus:outline-none focus:ring-2 focus:ring-focus">
-          Open Enquiry
-        </Link>
-        {canUpdate && f.bucket !== 'COMPLETED' && <FollowUpActions followUpId={f.id} enquiryId={f.enquiry.id} today={today} compact />}
+      <div className="mt-3 flex flex-wrap items-start gap-2">
+        <OpenEnquiryLink href={`/sales/enquiries/${f.enquiry.id}`} companyName={f.enquiry.companyName} />
+        {canUpdate && f.bucket !== 'COMPLETED' && <FollowUpActions followUpId={f.id} enquiryId={f.enquiry.id} today={today} />}
       </div>
     </li>
   );

@@ -131,9 +131,19 @@ export const RECORDABLE_ACTIVITY_TYPES: SalesActivityType[] = [
 ];
 
 export class AddActivityDto {
-  @IsIn(RECORDABLE_ACTIVITY_TYPES, { message: 'Choose what happened' }) type!: SalesActivityType;
-  @Matches(DATE, { message: `Date ${DATE_MSG}` }) activityDate!: string;
-  @IsString() @IsNotEmpty({ message: 'Please write a short note' }) @MaxLength(5000) @Transform(trim) notes!: string;
+  /** Optional: a plain activity is stored as a Note. The manager never has to choose a category. */
+  @IsOptional() @IsIn(RECORDABLE_ACTIVITY_TYPES, { message: 'Choose what happened' }) type?: SalesActivityType;
+  @Matches(DATE, { message: `Activity Date ${DATE_MSG}` }) activityDate!: string;
+  @IsString() @IsNotEmpty({ message: 'Please describe what happened' }) @MaxLength(5000) @Transform(trim) notes!: string;
+
+  /** Optional next follow-up, scheduled together with the activity (one transaction). */
+  @ValidateIf((o: AddActivityDto) => o.nextFollowUpDate !== null && o.nextFollowUpDate !== undefined)
+  @Matches(DATE, { message: `Next Follow-up ${DATE_MSG}` }) @Transform(blankToNull)
+  nextFollowUpDate?: string | null;
+
+  /** Made once per popup by the browser: a retry of the same save returns the first result instead of adding a second entry. */
+  @IsOptional() @IsString() @Matches(/^[A-Za-z0-9-]{8,64}$/, { message: 'Invalid request id' })
+  requestId?: string;
 }
 
 export class AddFollowUpDto {

@@ -80,7 +80,7 @@ export const ACTIVITY_LABELS: Record<SalesActivityType, string> = {
   FOLLOW_UP: 'Follow-up',
   QUOTATION_UPDATE: 'Quotation Update',
   STATUS_CHANGE: 'Status Change',
-  NOTE: 'Note',
+  NOTE: 'Activity',
   ENQUIRY_UPDATED: 'Details Updated',
 };
 

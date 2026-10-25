@@ -276,8 +276,7 @@ const RELATED_WORKFLOW_ICONS: Record<string, LucideIcon> = {
 // `/contracts/executive` itself, so visiting `/contracts/schedule` lights up
 // THIS item, not "Contract Management" — and since "Schedule" no longer
 // exists in CONTRACT_ITEMS (see that array's own FMP-UI-30 note), it can no
-// longer make the Contract Management row's own `executiveContractSubActive`
-// check true either.
+// longer appear in the Contract Management submenu either.
 // FMP-UI-37 — `external` added alongside `href`/`icon` for the same reason
 // as `NavItem.external` above: Factory Performance is a separate app, not
 // an in-platform route, and must render as a plain new-tab `<a>`.
@@ -435,13 +434,10 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
 
   // FMP-UI-26 — the executive sidebar's Contract Management row gets the same
   // submenu the dropdown uses, built from that same permission-filtered list.
-  // It only opens while a submenu route is the current page, so other
-  // modules' pages keep the flat list unchanged.
+  // The submenu is always listed under the Contract Management title; each item
+  // highlights itself through isExecutiveContractSubItemActive().
   const executiveContractSubItems = visibleContractItems.map((item) =>
     item.href === '/contracts/dashboard' ? { ...item, href: '/contracts/executive' } : item,
-  );
-  const executiveContractSubActive = executiveContractSubItems.some((item) =>
-    item.href ? isExecutiveContractSubItemActive(item.href, pathname) : false,
   );
 
   // A user who can only see Contract Management gets a flattened, dropdown-free sidebar:

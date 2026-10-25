@@ -1,18 +1,39 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { Pencil, Phone, Mail, MapPin, UserRound } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Pencil, Phone, Mail, MapPin, UserRound } from 'lucide-react';
 import { salesApi } from '@/lib/sales-api';
 import type { SalesActivity, SalesStatus } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../../contracts/_lib/get-user-permissions';
 import { ACTIVITY_LABELS, STATUS_LABELS, dueText, formatDate, formatKwd, NOT_ESTIMATED } from '../../_lib/sales-format';
-import { BTN_SECONDARY, BucketBadge, FormMessage, Section } from '../../_components/sales-ui';
+import { BTN_NEUTRAL, BucketBadge, CurrentStatus, FormMessage, Section } from '../../_components/sales-ui';
 import { EnquiryActions } from '../../_components/enquiry-actions';
 import { EnquiryStatusControl } from '../../_components/enquiry-status-control';
 import { FollowUpActions } from '../../_components/follow-up-actions';
 
-export const metadata: Metadata = { title: 'Enquiry — Sales & Enquiries — RECAFCO FMP' };
+export const metadata: Metadata = { title: 'Enquiry — Sales Activities — RECAFCO FMP' };
 export const dynamic = 'force-dynamic';
+
+/**
+ * "Back to All Enquiries" returns to the list exactly as the manager left it. The list puts its own query in ?back=; only
+ * the list's four known parameters are accepted again here (nothing else can be injected into the link).
+ */
+function backToList(raw: string | string[] | undefined): string {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return '/sales/enquiries';
+  const incoming = new URLSearchParams(value);
+  const out = new URLSearchParams();
+  const search = incoming.get('search');
+  if (search) out.set('search', search.slice(0, 200));
+  const status = incoming.get('status');
+  if (status && /^[A-Za-z_,]{1,60}$/.test(status)) out.set('status', status);
+  const month = incoming.get('month');
+  if (month && /^d{4}-(0[1-9]|1[0-2])$/.test(month)) out.set('month', month);
+  const page = incoming.get('page');
+  if (page && /^[1-9]d{0,4}$/.test(page)) out.set('page', page);
+  const q = out.toString();
+  return `/sales/enquiries${q ? `?${q}` : ''}`;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -25,6 +46,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
   );
 }
 const dash = <span className="text-text-muted">—</span>;
+
+/** "Next follow-up: 28 Oct 2026" for entries that scheduled one, "Follow-up due 21 Oct 2026" for completions. */
+function relatedFollowUpDate(a: SalesActivity): string | null {
+  const m = a.metadata ?? {};
+  if (typeof m['followUpDate'] === 'string') return `Next follow-up: ${formatDate(m['followUpDate'])}`;
+  if (a.type === 'FOLLOW_UP' && typeof m['dueDate'] === 'string') return `Follow-up was due ${formatDate(m['dueDate'])}`;
+  return null;
+}
 
 function describeActivity(a: SalesActivity): React.ReactNode {
   const m = a.metadata ?? {};
@@ -73,13 +102,26 @@ export default async function EnquiryDetailPage({
   }
   const { enquiry: e, activities, followUps, today } = res.data;
   const canUpdate = permissions.includes('sales.update');
+  const listHref = backToList(sp['back']);
   const pending = followUps.filter((f) => f.status === 'PENDING');
   const statusHistory = activities.filter((a) => a.type === 'STATUS_CHANGE');
   const contactHistory = activities.filter((a) => a.type !== 'STATUS_CHANGE');
   const closed = e.status === 'WON' || e.status === 'LOST';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-lg text-text-secondary">
+          <Link href="/sales" className="rounded px-1 hover:text-text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">Sales Activities</Link>
+          <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+          <Link href={listHref} className="rounded px-1 hover:text-text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">All Enquiries</Link>
+          <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+          <span aria-current="page" className="px-1 font-semibold text-text-primary">{e.enquiryNumber}</span>
+        </nav>
+        <Link href={listHref} className={BTN_NEUTRAL}>
+          <ArrowLeft className="size-5" aria-hidden="true" /> Back to All Enquiries
+        </Link>
+      </div>
       {sp['saved'] && <FormMessage error={null} ok="Enquiry saved successfully." />}
       {sp['updated'] && <FormMessage error={null} ok="Changes saved." />}
 
@@ -88,17 +130,17 @@ export default async function EnquiryDetailPage({
           <div className="min-w-0">
             <p className="text-base font-semibold text-text-secondary">{e.enquiryNumber} · registered {formatDate(e.enquiryDate)}</p>
             <h1 className="mt-1 break-words text-4xl font-extrabold tracking-tight text-text-primary">{e.companyName}</h1>
-            <div className="mt-3"><EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} /></div>
+            <div className="mt-3"><CurrentStatus status={e.status} /></div>
           </div>
           {canUpdate && (
-            <Link href={`/sales/enquiries/${e.id}/edit`} className={BTN_SECONDARY}>
+            <Link href={`/sales/enquiries/${e.id}/edit`} className={BTN_NEUTRAL}>
               <Pencil className="size-5" aria-hidden="true" /> Edit Enquiry
             </Link>
           )}
         </div>
         {canUpdate && (
           <div className="mt-5 border-t border-border pt-5">
-            <EnquiryActions enquiryId={e.id} status={e.status} today={today} />
+            <EnquiryActions enquiryId={e.id} companyName={e.companyName} today={today} statusSlot={<EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} />} />
           </div>
         )}
       </div>
@@ -132,17 +174,24 @@ export default async function EnquiryDetailPage({
             </dl>
           </Section>
 
-          <Section title="Meetings and Notes">
+          <Section title="Activity History">
             {contactHistory.length === 0 ? (
-              <p className="text-base text-text-secondary">No meetings or notes recorded yet.{canUpdate ? ' Use “Record Meeting / Note” above.' : ''}</p>
+              <p className="text-lg text-text-secondary">No activity recorded yet.{canUpdate ? ' Use “+ Add Activity” above.' : ''}</p>
             ) : (
-              <ol className="space-y-4">
-                {contactHistory.map((a) => (
-                  <li key={a.id} className="border-l-4 border-blue-300 pl-4">
-                    <p className="text-sm font-semibold text-text-secondary">{ACTIVITY_LABELS[a.type]} · {formatDate(a.activityDate)} · {a.recordedBy.displayName}</p>
-                    <div className="mt-0.5 whitespace-pre-wrap text-base text-text-primary">{describeActivity(a)}</div>
-                  </li>
-                ))}
+              <ol className="space-y-5">
+                {contactHistory.map((a) => {
+                  const related = relatedFollowUpDate(a);
+                  return (
+                    <li key={a.id} className="border-l-4 border-blue-300 pl-4">
+                      <p className="text-base font-semibold text-text-primary">
+                        {formatDate(a.activityDate)} <span className="font-normal text-text-secondary">· {a.recordedBy.displayName}</span>
+                        {a.type !== 'NOTE' && <span className="font-normal text-text-secondary"> · {ACTIVITY_LABELS[a.type]}</span>}
+                      </p>
+                      <div className="mt-1 whitespace-pre-wrap break-words text-lg leading-relaxed text-text-primary">{describeActivity(a)}</div>
+                      {related && <p className="mt-1 text-base font-semibold text-blue-800">{related}</p>}
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </Section>
