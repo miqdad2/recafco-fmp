@@ -3392,3 +3392,31 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 ### Sales Activities dashboard density (FMP-SALES-06)
 
 `SalesNav inline` lives in the dashboard heading row; `DashboardClock` (Kuwait-date refresh); preview counts limited with `xl:[@media(max-height:…)]:hidden` tiers; `EnquiryStatusControl compact` shows "Current Status" + a "Change Status…" selector in one row.
+
+### EnquiryContractPanel (FMP-SALES-09)
+
+`sales/_components/enquiry-contract-panel.tsx`. Contract step on a Confirmed enquiry: Create Contract (red), Link Existing Contract (neutral, search dialog), Open Contract (blue) when linked. Status editor popup now uses a single "Choose Status" dropdown.
+
+### FollowUpTaskCard / follow-up filter chips (FMP-SALES-10)
+
+`sales/follow-ups/page.tsx` — one card per follow-up task: `h2` task text (italic muted "Follow-up details not recorded" via `TASK_NOT_RECORDED` / `taskText()` in `sales-format.ts` when none), bucket badge + due date + `dueText`, "Company · ENQ-…", contact person and `tel:` number, "Responsible: …", then `OpenEnquiryLink` + `FollowUpActions` (BTN_DONE Mark Completed, BTN_STATUS Reschedule; none on completed cards). Left edge colour: red overdue, amber today, blue upcoming, green completed. Filters are `<nav aria-label="Filter follow-ups">` links using the exported `CHIP / CHIP_ON / CHIP_OFF` styles with a count pill (Pending default, Overdue, Due Today, Upcoming, Completed); pagination uses Previous/Next `BTN_NEUTRAL` links. The dashboard `FollowUpCard` and the enquiry page's Next Follow-up section lead with the same task heading. Add Activity's "Set Next Follow-up" block holds Follow-up Date and "What needs to be done?" (both required there).
+
+
+### MonthlyResultsCards / Confirm Enquiry popup (FMP-SALES-11)
+
+`sales/page.tsx` — section `#monthly-results` "Monthly Results · <Month Year>" with three equal `article[data-monthly-card]` cards (green tint, 18px label, 32px number, 16px support text, blue 48px action links via `MONTHLY_LINK`): confirmed, value (KWD label + amount; "Not estimated" / "—" / recorded 0 distinct; amber missing-estimate note), contracts (null = "Needs access to Contract Management", no link). `enquiry-status-control.tsx` switches to confirm mode when Confirmed is chosen: title "Confirm Enquiry", green explanation, Confirmation Date (`max=today`), Confirmation Notes textarea, `BTN_DONE` "Save Confirmation"; toast "Enquiry confirmed.". `/contracts?fromEnquiryMonth=YYYY-MM` shows a green banner above the Contract List.
+
+
+### Short-desktop dashboard layout (FMP-SALES-12)
+
+`globals.css` block "FMP-SALES-12": classes `sd-kpi`, `sd-kpi-row`, `sd-kpi-link`, `sd-month-section`, `sd-month-grid`, `sd-month`, `sd-panels`, `sd-panel` are neutral outside `@media (min-width:1280px) and (max-height:959px)`; inside it they tighten the Sales dashboard (no scaling or font reduction). `EnquiryStatusControl` menu: Arrow/Home/End navigation, Escape and popup close return focus to the Change Status button, `keepFocusInside` traps Tab in the popup.
+
+
+### Short-window dashboard presentation (FMP-SALES-13)
+
+`globals.css` block "FMP-SALES-13" (min-width 1280px, max-height 900px). Hooks: `sd-short-only` / `sd-short-hide` / `sd-short-none` (swap long and short text or controls), `sd-short-block`, `sd-repeats` (screen-reader-only on short windows), `sd-open-arrow` (visible "opens a list" arrow on clickable cards), `sd-month-link` + `sd-month-link-text` (stretched whole-card link), `sd-short-clamp` (one-line preview text with a title tooltip), `sd-fu` / `sd-recent` / `sd-btn-row` (one-row preview buttons), `sd-note`, `sd-status-label`. `compactKwd()` in `sales-format.ts` formats dashboard amounts (exact below one million, words above).
+
+
+### ExactAmount (FMP-SALES-14)
+
+`sales/_components/exact-amount.tsx` — a dashboard figure shown in words ("12.5 million", from `compactKwd`) rendered as a dotted-underline button; click / Enter / Space toggle an absolutely positioned "Exactly KWD …" bubble (`role=status`, `aria-expanded`), Escape or a click elsewhere closes it. Use it wherever an abbreviated amount is shown; lists and detail pages keep `formatKwd` exact amounts.

@@ -105,6 +105,8 @@ export const STATUS_LABELS: Record<SalesEnquiryStatus, string> = {
   FOLLOW_UP: 'Follow-up Needed',
   WON: 'Confirmed',
   LOST: 'Not Proceeding',
+  WAITING_FOR_DRAWINGS: 'Waiting for Drawings',
+  WAITING_FOR_CLIENT: 'Waiting for Client Response',
 };
 
 /** Human enquiry number: ENQ-2026-0001. */

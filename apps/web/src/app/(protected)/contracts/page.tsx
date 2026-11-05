@@ -40,10 +40,12 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
   const statusFilter = typeof params['status'] === 'string' ? params['status'] : undefined;
   const ownerFilter = typeof params['ownerUserId'] === 'string' ? params['ownerUserId'] : undefined;
   const search = typeof params['search'] === 'string' ? params['search'] : undefined;
+  // FMP-SALES-11 — "View Contracts" on the Sales dashboard: contracts created from enquiries in one Kuwait month.
+  const fromEnquiryMonth = typeof params['fromEnquiryMonth'] === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(params['fromEnquiryMonth']) ? params['fromEnquiryMonth'] : undefined;
   const page = typeof params['page'] === 'string' ? parseInt(params['page'], 10) : 1;
 
   const hasActiveFilters = Boolean(
-    lifecycleFilter ?? statusFilter ?? scheduleStatusFilter ?? contractTypeFilter ?? daysRemainingFilter ?? ownerFilter ?? search,
+    lifecycleFilter ?? statusFilter ?? scheduleStatusFilter ?? contractTypeFilter ?? daysRemainingFilter ?? ownerFilter ?? search ?? fromEnquiryMonth,
   );
 
   // CM-69I — the exact same filter scope passed to both list() (the table)
@@ -61,6 +63,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
     ...(daysRemainingFilter && !dateWindow ? { daysRemaining: daysRemainingFilter } : {}),
     ...(ownerFilter ? { ownerUserId: ownerFilter } : {}),
     ...(search ? { search } : {}),
+    ...(fromEnquiryMonth ? { fromEnquiryMonth } : {}),
   };
 
   const [listRes, summaryRes, dashboardRes] = await Promise.allSettled([
@@ -108,6 +111,7 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
       daysRemaining: daysRemainingFilter,
       ownerUserId: ownerFilter,
       search,
+      fromEnquiryMonth,
       page: page > 1 ? String(page) : undefined,
       ...overrides,
     };
@@ -125,6 +129,12 @@ export default async function ContractsPage({ searchParams }: PageProps): Promis
           <h1 className="text-3xl font-semibold text-text-primary tracking-tight">Contract List</h1>
           <p className="mt-1.5 text-sm text-text-secondary">Find and manage contracts, project status, BOQ, payments, and issues.</p>
           <div className="mt-2"><DashboardScopeBadge scope={scope} /></div>
+          {fromEnquiryMonth && (
+            <p className="mt-2 text-base font-semibold text-green-900" data-from-enquiry-month={fromEnquiryMonth}>
+              Showing contracts created from Sales enquiries in {new Date(`${fromEnquiryMonth}-01T00:00:00Z`).toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}.{' '}
+              <Link href="/contracts" className="underline">Show all contracts</Link>
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {canCreate && (

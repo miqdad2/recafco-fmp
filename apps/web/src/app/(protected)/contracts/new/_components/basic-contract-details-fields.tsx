@@ -14,6 +14,9 @@ interface Props {
   secondParties: ContractParty[];
   /** Whether the viewer may add a new customer from here (contracts.create). */
   canAddParty: boolean;
+  /** FMP-SALES-09 — prefilled from a Confirmed Sales enquiry (empty otherwise). */
+  initialFirstPartyId?: string;
+  initialTitle?: string;
   errors: BasicDetailsErrors;
   onClearError: (field: keyof BasicDetailsErrors) => void;
 }
@@ -37,11 +40,13 @@ export function BasicContractDetailsFields({
   firstParties: initialFirstParties,
   secondParties,
   canAddParty,
+  initialFirstPartyId = '',
+  initialTitle = '',
   errors,
   onClearError,
 }: Props): React.JSX.Element {
   const [firstParties, setFirstParties] = useState(initialFirstParties);
-  const [firstPartyId, setFirstPartyId] = useState('');
+  const [firstPartyId, setFirstPartyId] = useState(initialFirstPartyId);
   const [secondPartyId, setSecondPartyId] = useState(() => pickDefaultSecondPartyId(secondParties));
   const [showQuickAdd, setShowQuickAdd] = useState(false);
 
@@ -147,6 +152,7 @@ export function BasicContractDetailsFields({
           name="title"
           type="text"
           maxLength={300}
+          defaultValue={initialTitle}
           placeholder="Enter project name"
           onChange={() => onClearError('title')}
           aria-invalid={Boolean(errors.title)}

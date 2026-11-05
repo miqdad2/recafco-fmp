@@ -8,7 +8,9 @@ const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 // (YYYY-MM-DD); money is a decimal string in KWD (null = not known).
 // ---------------------------------------------------------------------------
 
-export type SalesStatus = 'NEW_ENQUIRY' | 'CONTACTED' | 'MEETING_DONE' | 'QUOTATION_SENT' | 'FOLLOW_UP' | 'WON' | 'LOST';
+export type SalesStatus =
+  | 'NEW_ENQUIRY' | 'CONTACTED' | 'MEETING_DONE' | 'QUOTATION_SENT' | 'FOLLOW_UP' | 'WON' | 'LOST'
+  | 'WAITING_FOR_DRAWINGS' | 'WAITING_FOR_CLIENT';
 export type SalesActivityType =
   | 'OFFICE_MEETING' | 'PHONE_CALL' | 'EMAIL' | 'CLIENT_VISIT' | 'FOLLOW_UP' | 'QUOTATION_UPDATE' | 'STATUS_CHANGE' | 'NOTE' | 'ENQUIRY_UPDATED';
 export type FollowUpBucket = 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED' | 'CANCELLED';
@@ -43,6 +45,9 @@ export interface SalesEnquiry {
   wonDate: string | null;
   lostDate: string | null;
   createdBy: UserRef;
+  confirmedBy: UserRef | null;
+  confirmedAt: string | null;
+  hasContract: boolean;
   createdAt: string;
   updatedAt: string;
   /** Newest hand-written activity (list and dashboard only). */
@@ -88,6 +93,10 @@ export interface SalesDashboard {
   potentialValue: string | null;
   openWithoutEstimate: number;
   projectsWon: number;
+  /** Enquiries Confirmed this month (by confirmation date) and the sum of their recorded estimates. */
+  confirmedMonth: { count: number; estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
+  /** Contracts created through an enquiry this month; null when the viewer cannot read contracts. */
+  contractsCreated: number | null;
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
@@ -105,17 +114,24 @@ export interface SalesEnquiryList {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+export interface SalesEnquiryContract { id: string | null; referenceNumber: string; title: string | null; linkedAt: string | null; linkedBy: string | null }
+
 export interface SalesEnquiryDetail {
+  contract: SalesEnquiryContract | null;
   enquiry: SalesEnquiry;
   activities: SalesActivity[];
   followUps: SalesFollowUp[];
   today: string;
 }
 
+export type FollowUpFilter = 'PENDING' | 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED';
+
 export interface SalesFollowUpList {
   today: string;
-  counts: Record<'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED', number>;
+  bucket: FollowUpFilter;
+  counts: Record<FollowUpFilter, number>;
   items: SalesFollowUpListItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
 export interface SalesApiError {
@@ -164,5 +180,5 @@ export const salesApi = {
   dashboard: () => salesFetch<SalesDashboard>('/sales/dashboard'),
   enquiries: (qs: URLSearchParams) => salesFetch<SalesEnquiryList>(`/sales/enquiries?${qs.toString()}`),
   enquiry: (id: string) => salesFetch<SalesEnquiryDetail>(`/sales/enquiries/${id}`),
-  followUps: (bucket?: string) => salesFetch<SalesFollowUpList>(`/sales/follow-ups${bucket ? `?bucket=${bucket}` : ''}`),
+  followUps: (qs?: URLSearchParams) => salesFetch<SalesFollowUpList>(`/sales/follow-ups${qs && qs.toString() ? `?${qs.toString()}` : ''}`),
 };

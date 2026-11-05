@@ -6,6 +6,7 @@ import { HandCoins, Shield, ShieldCheck, Umbrella, Receipt, Landmark } from 'luc
 import type { LucideIcon } from 'lucide-react';
 import type { ContractParty } from '@/lib/contracts-api';
 import type { ActionResult } from '../../actions';
+import type { EnquiryContractPrefill } from '../../_lib/enquiry-prefill';
 import { createContractAction } from '../../actions';
 import { ContractBoqRegisterTable } from '../../_components/contract-boq-register-table';
 import { BoqFileTypesHint, makeStagedFiles } from '../../../technical/_components/boq-staged-files';
@@ -32,6 +33,8 @@ import {
 } from '../../_lib/contract-boq-helpers';
 
 interface Props {
+  /** FMP-SALES-09 — set when opened from a Confirmed Sales enquiry (Create Contract). */
+  prefill?: EnquiryContractPrefill | null;
   /** Active Customer (First Party) records from the Contract Party master. */
   firstParties: ContractParty[];
   /** Active Second Party records from the Contract Party master (RECAFCO is the default). */
@@ -92,7 +95,7 @@ function formatKwd(amount: number): string {
 // One blank row to start; an untouched row is ignored on save (BOQ stays optional).
 const INITIAL_BOQ_ROW_COUNT = 1;
 
-export function NewContractForm({ scope: deptScope, firstParties, secondParties, canAddParty }: Props): React.JSX.Element {
+export function NewContractForm({ scope: deptScope, firstParties, secondParties, canAddParty, prefill = null }: Props): React.JSX.Element {
   const [state, formAction, isPending] = useActionState<ActionResult, FormData>(
     createContractAction,
     { error: null },
@@ -180,8 +183,28 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
     <>
       {errorBanner && <div className="mb-6">{errorBanner}</div>}
       {departmentBanner && <div className="mb-6">{departmentBanner}</div>}
+      {prefill && (
+        <div className="mb-6 rounded-md border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-950" data-from-enquiry={prefill.enquiryId}>
+          <p className="font-semibold">Prefilled from Sales enquiry {prefill.enquiryNumber} ({prefill.companyName}).</p>
+          <p className="mt-1">
+            Please review and complete the details. Only the project name{prefill.firstPartyId ? ', the customer' : ''}, client contact, site location, scope description and an enquiry reference in the notes are carried over;
+            nothing else is filled in. When you save, the contract is linked to this enquiry.
+            {!prefill.firstPartyId && ' Please choose the customer (First Party) yourself.'}
+          </p>
+        </div>
+      )}
 
       <form id={NEW_CONTRACT_FORM_ID} action={formAction} onSubmit={handleSubmit} className="space-y-4">
+        {prefill && (
+          <>
+            <input type="hidden" name="fromEnquiryId" value={prefill.enquiryId} />
+            <input type="hidden" name="notes" value={prefill.notes} />
+            <input type="hidden" name="clientContactName" value={prefill.clientContactName} />
+            <input type="hidden" name="clientContactPhone" value={prefill.clientContactPhone} />
+            <input type="hidden" name="projectSiteLocation" value={prefill.projectSiteLocation} />
+            <input type="hidden" name="scopeDescription" value={prefill.scopeDescription} />
+          </>
+        )}
         {/* Row 1 — Basic Contract Details (~60%) and Scope of Work (~40%) side by side on desktop */}
         <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4 items-start">
           {/* Section 1 — Basic Contract Details */}
@@ -190,6 +213,8 @@ export function NewContractForm({ scope: deptScope, firstParties, secondParties,
               firstParties={firstParties}
               secondParties={secondParties}
               canAddParty={canAddParty}
+              initialFirstPartyId={prefill?.firstPartyId ?? ''}
+              initialTitle={prefill?.title ?? ''}
               errors={basicErrors}
               onClearError={(field) => setBasicErrors((prev) => ({ ...prev, [field]: undefined }))}
             />

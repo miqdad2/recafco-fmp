@@ -86,10 +86,17 @@ function QuickForm({ onClose, onSaved }: FormProps): React.JSX.Element {
               />
             </div>
           </Field>
-          <Field id="q-next" label="Next Follow-up Date" errors={err('nextFollowUpDate')}>
+          <Field id="q-next" label="Follow-up Date (optional)" errors={err('nextFollowUpDate')}>
             <input id="q-next" name="nextFollowUpDate" type="date" defaultValue={v('nextFollowUpDate')} className={`${INPUT_CLASS} h-14 text-lg`} />
           </Field>
         </div>
+        <Field id="q-task" label="What needs to be done?" hint="Needed when you choose a follow-up date." errors={err('followUpTask')}>
+          <input
+            id="q-task" name="followUpTask" type="text" defaultValue={v('followUpTask')} maxLength={300} autoComplete="off"
+            placeholder="Call the client to request drawings" aria-invalid={!!err('followUpTask')} aria-describedby={err('followUpTask') ? 'q-task-error' : 'q-task-hint'}
+            className={`${INPUT_CLASS} h-14 text-lg`}
+          />
+        </Field>
         <Field id="q-notes" label="Meeting Notes" errors={err('remarks')}>
           <textarea id="q-notes" name="remarks" rows={3} defaultValue={v('remarks')} maxLength={5000} className={`${INPUT_CLASS} resize-y text-lg`} />
         </Field>

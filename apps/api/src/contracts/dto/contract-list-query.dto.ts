@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, Min, Max, IsString, IsUUID, IsIn } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsString, IsUUID, IsIn, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // CM-69C — 'ALL' is a real, explicit filter value (not the absence of one):
@@ -75,6 +75,11 @@ export class ContractListQueryDto {
   @IsOptional()
   @IsUUID('4')
   plantId?: string;
+
+  // FMP-SALES-11 — only contracts created through a Sales enquiry's "Create Contract" flow in this Kuwait month (YYYY-MM).
+  @IsOptional()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'fromEnquiryMonth must be YYYY-MM' })
+  fromEnquiryMonth?: string;
 }
 
 export interface PaginatedResult<T> {

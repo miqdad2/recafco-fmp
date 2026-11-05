@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
-import { Prisma, SalesEnquiryStatus, SalesActivityType, SalesFollowUpStatus } from '@recafco/database';
+import { Prisma, SalesContractLinkSource, SalesEnquiryStatus, SalesActivityType, SalesFollowUpStatus } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
+import { ContractsService } from '../contracts/contracts.service';
+import { logContractActivity } from '../contracts/contract-activity-log';
 import type { AuthUser } from '../common/types/auth-user';
 import type {
   CreateEnquiryDto, UpdateEnquiryDto, ChangeStatusDto, AddActivityDto, AddFollowUpDto, CompleteFollowUpDto,
@@ -10,6 +12,9 @@ import {
   kuwaitToday, dateOnly, dateKey, monthOf, monthRange, lastMonths, followUpBucket, cohortConversionRate, formatEnquiryNumber,
   statusChangeError, isValidDateString, CLOSED_STATUSES, type FollowUpBucket,
 } from './sales.logic';
+
+/** Shown with the monthly report so the cohort rate is never misread as "confirmed this month / received this month". */
+const CONVERSION_BASIS = 'Conversion rate = enquiries RECEIVED in the month that are now Confirmed, divided by all enquiries received in that month. An enquiry received in an earlier month and confirmed this month counts in that later month’s Confirmed Enquiries but not in this rate.';
 
 // ---------------------------------------------------------------------------
 // FMP-SALES-01 — Sales & Enquiries. Every method that changes data writes an
@@ -24,9 +29,9 @@ const CLOSED: SalesEnquiryStatus[] = [...CLOSED_STATUSES];
 type Db = ReturnType<DatabaseService['getClient']>;
 type Tx = Parameters<Parameters<Db['$transaction']>[0]>[0];
 
-type EnquiryRow = Prisma.SalesEnquiryGetPayload<{ include: { createdByUser: typeof USER_REF; assignedToUser: typeof USER_REF } }>;
+type EnquiryRow = Prisma.SalesEnquiryGetPayload<{ include: { createdByUser: typeof USER_REF; assignedToUser: typeof USER_REF; confirmedByUser: typeof USER_REF } }>;
 
-const ENQUIRY_INCLUDE = { createdByUser: USER_REF, assignedToUser: USER_REF } as const;
+const ENQUIRY_INCLUDE = { createdByUser: USER_REF, assignedToUser: USER_REF, confirmedByUser: USER_REF } as const;
 
 export interface EnquiryView {
   id: string;
@@ -56,6 +61,11 @@ export interface EnquiryView {
   wonDate: string | null;
   lostDate: string | null;
   createdBy: { id: string; displayName: string };
+  /** Who confirmed the enquiry and when (null while not Confirmed, and for enquiries confirmed before this was recorded). */
+  confirmedBy: { id: string; displayName: string } | null;
+  confirmedAt: string | null;
+  /** True when linked to a contract (the details come from getOne, gated by contracts.read). */
+  hasContract: boolean;
   createdAt: string;
   updatedAt: string;
   /** Newest hand-written activity (list/dashboard only). */
@@ -91,6 +101,9 @@ export function toEnquiryView(r: EnquiryRow): EnquiryView {
     wonDate: dateKey(r.wonDate),
     lostDate: dateKey(r.lostDate),
     createdBy: r.createdByUser,
+    confirmedBy: r.confirmedByUser ?? null,
+    confirmedAt: r.confirmedAt ? r.confirmedAt.toISOString() : null,
+    hasContract: Boolean(r.contractId),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
@@ -118,7 +131,10 @@ const FIELD_LABELS: Record<string, string> = {
 
 @Injectable()
 export class SalesService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly contracts?: ContractsService,
+  ) {}
 
   // -------------------------------------------------------------------------
   // helpers
@@ -136,6 +152,10 @@ export class SalesService {
 
   private invalid(code: string, message: string): UnprocessableEntityException {
     return new UnprocessableEntityException({ code, message });
+  }
+
+  private taskRequired(): UnprocessableEntityException {
+    return this.invalid('SALES_FOLLOW_UP_TASK_REQUIRED', 'Please say what needs to be done for this follow-up.');
   }
 
   /** The enquiry's "next follow-up" is always the earliest PENDING follow-up (or none). */
@@ -167,6 +187,7 @@ export class SalesService {
     for (const [label, v] of [['Next Follow-up Date', dto.nextFollowUpDate], ['Expected Project Start Date', dto.expectedStartDate], ['Expected Contract Award Date', dto.expectedAwardDate]] as const) {
       if (v && !isValidDateString(v)) throw this.invalid('SALES_INVALID_DATE', `${label} is not a real date`);
     }
+    if (dto.nextFollowUpDate && !dto.followUpTask) throw this.taskRequired();
     const year = Number(today.slice(0, 4));
 
     return this.db.getClient().$transaction(async (tx) => {
@@ -214,7 +235,7 @@ export class SalesService {
           data: {
             enquiryId: created.id,
             followUpDate: dateOnly(dto.nextFollowUpDate),
-            notes: dto.remarks ?? null,
+            notes: dto.followUpTask ?? null,
             responsibleUserId: actor.id,
             createdByUserId: actor.id,
           },
@@ -269,6 +290,12 @@ export class SalesService {
       const { start, endExclusive } = monthRange(query.month);
       where.enquiryDate = { gte: start, lt: endExclusive };
     }
+    if (query.wonMonth) {
+      // Same rule as the dashboard's Confirmed Projects figure: Confirmed, with a Confirmed date in that month.
+      const { start, endExclusive } = monthRange(query.wonMonth);
+      where.status = SalesEnquiryStatus.WON;
+      where.wonDate = { gte: start, lt: endExclusive };
+    }
 
     const client = this.db.getClient();
     const [rows, total] = await Promise.all([
@@ -288,7 +315,8 @@ export class SalesService {
     };
   }
 
-  async getOne(id: string): Promise<{
+  async getOne(id: string, actor: AuthUser): Promise<{
+    contract: { id: string | null; referenceNumber: string; title: string | null; linkedAt: string | null; linkedBy: string | null } | null;
     enquiry: EnquiryView;
     activities: ActivityView[];
     followUps: FollowUpView[];
@@ -309,7 +337,23 @@ export class SalesService {
       }),
     ]);
     const today = kuwaitToday();
+    const linked = row.contractId
+      ? await client.contract.findUnique({ where: { id: row.contractId }, select: { id: true, referenceNumber: true, title: true } })
+      : null;
+    const linkedBy = row.contractLinkedByUserId
+      ? await client.user.findUnique({ where: { id: row.contractLinkedByUserId }, select: { displayName: true } })
+      : null;
+    const mayOpen = actor.permissions.includes('contracts.read');
     return {
+      contract: linked
+        ? {
+            id: mayOpen ? linked.id : null,
+            referenceNumber: linked.referenceNumber,
+            title: mayOpen ? linked.title : null,
+            linkedAt: row.contractLinkedAt ? row.contractLinkedAt.toISOString() : null,
+            linkedBy: linkedBy?.displayName ?? null,
+          }
+        : null,
       enquiry: toEnquiryView(row),
       activities: activities.map((a) => ({
         id: a.id,
@@ -326,7 +370,7 @@ export class SalesService {
   }
 
   async update(id: string, dto: UpdateEnquiryDto, actor: AuthUser): Promise<EnquiryView> {
-    for (const [label, v] of [['Next Follow-up Date', dto.nextFollowUpDate], ['Expected Project Start Date', dto.expectedStartDate], ['Expected Contract Award Date', dto.expectedAwardDate]] as const) {
+    for (const [label, v] of [['Expected Project Start Date', dto.expectedStartDate], ['Expected Contract Award Date', dto.expectedAwardDate]] as const) {
       if (v && !isValidDateString(v)) throw this.invalid('SALES_INVALID_DATE', `${label} is not a real date`);
     }
     if (dto.assignedToUserId !== undefined && !actor.permissions.includes('sales.manage')) {
@@ -361,41 +405,9 @@ export class SalesService {
         data.assignedToUserId = dto.assignedToUserId;
       }
 
-      const followUpChanged = dto.nextFollowUpDate !== undefined && (dto.nextFollowUpDate ?? null) !== beforeView.nextFollowUpDate;
-      if (followUpChanged) changes.push({ field: 'nextFollowUpDate', label: FIELD_LABELS['nextFollowUpDate']!, from: beforeView.nextFollowUpDate, to: dto.nextFollowUpDate ?? null });
       if (changes.length === 0) return beforeView;
 
       if (Object.keys(data).length > 0) await tx.salesEnquiry.update({ where: { id }, data });
-
-      if (followUpChanged) {
-        // History is kept: an old pending follow-up is cancelled (never deleted) and a new one created.
-        const pending = await tx.salesFollowUp.findMany({ where: { enquiryId: id, status: SalesFollowUpStatus.PENDING }, orderBy: { followUpDate: 'asc' } });
-        const earliest = pending[0];
-        if (dto.nextFollowUpDate) {
-          if (earliest) {
-            await tx.salesFollowUp.update({
-              where: { id: earliest.id },
-              data: { status: SalesFollowUpStatus.CANCELLED, completionNotes: `Rescheduled to ${dto.nextFollowUpDate}.` },
-            });
-          }
-          await tx.salesFollowUp.create({
-            data: {
-              enquiryId: id,
-              followUpDate: dateOnly(dto.nextFollowUpDate),
-              notes: earliest?.notes ?? null,
-              responsibleUserId: earliest?.responsibleUserId ?? actor.id,
-              rescheduledFromId: earliest?.id ?? null,
-              createdByUserId: actor.id,
-            },
-          });
-        } else if (pending.length > 0) {
-          await tx.salesFollowUp.updateMany({
-            where: { enquiryId: id, status: SalesFollowUpStatus.PENDING },
-            data: { status: SalesFollowUpStatus.CANCELLED, completionNotes: 'Follow-up date cleared.' },
-          });
-        }
-        await this.syncNextFollowUp(tx, id);
-      }
 
       await tx.salesActivity.create({
         data: {
@@ -416,30 +428,42 @@ export class SalesService {
     const problem = statusChangeError(dto.status, dto.reason);
     if (problem) throw this.invalid('SALES_LOST_REASON_REQUIRED', problem);
     if (dto.wonDate && !isValidDateString(dto.wonDate)) throw this.invalid('SALES_INVALID_DATE', 'Confirmation date is not a real date');
-    if (dto.status !== SalesEnquiryStatus.WON && (dto.awardedValue || dto.wonDate)) {
-      throw this.invalid('SALES_WON_ONLY', 'Confirmed value and confirmation date can only be recorded when the enquiry is Confirmed');
+    if (dto.status !== SalesEnquiryStatus.WON && (dto.awardedValue || dto.wonDate || dto.confirmationNotes)) {
+      throw this.invalid('SALES_WON_ONLY', 'Confirmed value, confirmation date and confirmation notes can only be recorded when the enquiry is Confirmed');
     }
     const today = kuwaitToday();
+    if (dto.wonDate && dto.wonDate > today) throw this.invalid('SALES_WON_DATE_IN_FUTURE', 'The confirmation date cannot be in the future.');
 
     return this.db.getClient().$transaction(async (tx) => {
       const before = await this.findOrThrow(tx, id);
       if (dto.expectedStatus && before.status !== dto.expectedStatus) throw this.invalid('SALES_STATUS_CONFLICT', 'The enquiry was just changed by someone else. Please refresh and try again.');
       if (before.status === dto.status) throw this.invalid('SALES_STATUS_UNCHANGED', 'The enquiry already has this status');
+      if (before.status === SalesEnquiryStatus.WON && before.contractId) {
+        throw this.invalid('SALES_ENQUIRY_HAS_CONTRACT', 'This confirmed enquiry is linked to a contract, so its status cannot be changed.');
+      }
 
       const data: Prisma.SalesEnquiryUncheckedUpdateInput = { status: dto.status };
       const meta: Record<string, unknown> = { from: before.status, to: dto.status };
+      if (dto.status === SalesEnquiryStatus.WON && dto.wonDate && dto.wonDate < dateKey(before.enquiryDate)!) {
+        throw this.invalid('SALES_WON_DATE_BEFORE_ENQUIRY', 'The confirmation date cannot be before the enquiry was received.');
+      }
       if (dto.status === SalesEnquiryStatus.WON) {
         data.wonDate = dateOnly(dto.wonDate ?? today);
         data.awardedValue = dto.awardedValue ?? null;
+        data.confirmedByUserId = actor.id;
+        data.confirmedAt = new Date();
         data.lostReason = null;
         data.lostDate = null;
         meta['wonDate'] = dto.wonDate ?? today;
         meta['awardedValue'] = dto.awardedValue ?? null;
+        if (dto.confirmationNotes) meta['confirmationNotes'] = dto.confirmationNotes;
       } else if (dto.status === SalesEnquiryStatus.LOST) {
         data.lostReason = dto.reason!.trim();
         data.lostDate = dateOnly(today);
         data.wonDate = null;
         data.awardedValue = null;
+        data.confirmedByUserId = null;
+        data.confirmedAt = null;
         meta['reason'] = dto.reason!.trim();
       } else {
         // Re-opened: the outcome fields are cleared, but what they were stays in this activity's metadata.
@@ -452,6 +476,8 @@ export class SalesService {
         data.awardedValue = null;
         data.lostReason = null;
         data.lostDate = null;
+        data.confirmedByUserId = null;
+        data.confirmedAt = null;
       }
       // Guarded write: only applies if nobody changed the status in the meantime.
       const res = await tx.salesEnquiry.updateMany({ where: { id, status: before.status }, data });
@@ -462,7 +488,7 @@ export class SalesService {
           enquiryId: id,
           type: SalesActivityType.STATUS_CHANGE,
           activityDate: dateOnly(today),
-          notes: dto.reason ?? null,
+          notes: (dto.status === SalesEnquiryStatus.WON ? dto.confirmationNotes : dto.reason) ?? null,
           metadata: meta as Prisma.InputJsonValue,
           recordedByUserId: actor.id,
         },
@@ -470,6 +496,49 @@ export class SalesService {
       await this.audit(tx, 'SALES_ENQUIRY_STATUS_CHANGED', actor, { enquiryId: id, from: before.status, to: dto.status });
       return toEnquiryView(await this.findOrThrow(tx, id));
     });
+  }
+
+  /**
+   * Links a Confirmed enquiry to an existing contract. The actor must be able to see that contract (ContractsService.findOne
+   * applies contracts.read and department scope). One enquiry <-> one contract: either side already linked is refused,
+   * linking the same pair again is harmless. Nothing is created or changed on the contract itself except an entry in its
+   * activity log naming the enquiry.
+   */
+  async linkContract(id: string, contractId: string, actor: AuthUser): Promise<{ contractId: string; referenceNumber: string }> {
+    if (!this.contracts) throw this.invalid('SALES_CONTRACTS_UNAVAILABLE', 'Contracts are not available right now.');
+    const contract = await this.contracts.findOne(contractId, actor); // throws 403/404 when the actor may not see it
+    // FMP-SALES-12: this path only ever links an EXISTING contract, so the origin is always LINKED, whatever its age or creator.
+    // "Created from an enquiry" is recorded only by ContractsService.create, atomically with the creation.
+    const linkSource = SalesContractLinkSource.LINKED;
+    const result = await this.db.getClient().$transaction(async (tx) => {
+      const enquiry = await this.findOrThrow(tx, id);
+      if (enquiry.status !== SalesEnquiryStatus.WON) throw this.invalid('SALES_ENQUIRY_NOT_CONFIRMED', 'Only a Confirmed enquiry can be linked to a contract.');
+      if (enquiry.contractId === contractId) return { enquiryNumber: enquiry.enquiryNumber, already: true };
+      if (enquiry.contractId) throw this.invalid('SALES_ENQUIRY_ALREADY_LINKED', 'This enquiry is already linked to a contract.');
+      const other = await tx.salesEnquiry.findFirst({ where: { contractId }, select: { enquiryNumber: true } });
+      if (other) throw this.invalid('SALES_CONTRACT_ALREADY_LINKED', `That contract is already linked to enquiry ${other.enquiryNumber}.`);
+      const res = await tx.salesEnquiry.updateMany({
+        where: { id, contractId: null },
+        data: { contractId, contractLinkedByUserId: actor.id, contractLinkedAt: new Date(), contractLinkSource: linkSource },
+      });
+      if (res.count === 0) throw this.invalid('SALES_ENQUIRY_ALREADY_LINKED', 'This enquiry is already linked to a contract.');
+      await tx.salesActivity.create({
+        data: {
+          enquiryId: id,
+          type: SalesActivityType.ENQUIRY_UPDATED,
+          activityDate: dateOnly(kuwaitToday()),
+          notes: null,
+          metadata: { changes: [{ label: 'Contract', from: null, to: contract.referenceNumber }], contractId, linkSource } as Prisma.InputJsonValue,
+          recordedByUserId: actor.id,
+        },
+      });
+      await this.audit(tx, 'SALES_ENQUIRY_CONTRACT_LINKED', actor, { enquiryId: id, contractId, linkSource });
+      return { enquiryNumber: enquiry.enquiryNumber, already: false };
+    });
+    if (!result.already) {
+      await logContractActivity(this.db, contractId, actor, 'SALES_ENQUIRY_LINKED', { enquiryId: id, enquiryNumber: result.enquiryNumber });
+    }
+    return { contractId, referenceNumber: contract.referenceNumber };
   }
 
   /**
@@ -486,6 +555,8 @@ export class SalesService {
     if (dto.nextFollowUpDate) {
       if (!isValidDateString(dto.nextFollowUpDate)) throw this.invalid('SALES_INVALID_DATE', 'Next Follow-up is not a real date');
       if (dto.nextFollowUpDate < today) throw this.invalid('SALES_FOLLOW_UP_IN_PAST', 'Next Follow-up cannot be before today.');
+      // The task is only required when a new follow-up is being scheduled; the activity text is never reused for it.
+      if (!dto.followUpTask) throw this.taskRequired();
     }
     return this.db.getClient().$transaction(async (tx) => {
       await this.findOrThrow(tx, id);
@@ -502,7 +573,7 @@ export class SalesService {
       let followUp: { id: string; date: string } | null = null;
       if (dto.nextFollowUpDate) {
         const f = await tx.salesFollowUp.create({
-          data: { enquiryId: id, followUpDate: dateOnly(dto.nextFollowUpDate), notes: null, responsibleUserId: actor.id, createdByUserId: actor.id },
+          data: { enquiryId: id, followUpDate: dateOnly(dto.nextFollowUpDate), notes: dto.followUpTask ?? null, responsibleUserId: actor.id, createdByUserId: actor.id },
         });
         await this.syncNextFollowUp(tx, id);
         followUp = { id: f.id, date: dto.nextFollowUpDate };
@@ -576,6 +647,7 @@ export class SalesService {
   async rescheduleFollowUp(followUpId: string, dto: RescheduleFollowUpDto, actor: AuthUser): Promise<{ id: string }> {
     if (!isValidDateString(dto.followUpDate)) throw this.invalid('SALES_INVALID_DATE', 'New follow-up date is not a real date');
     const today = kuwaitToday();
+    if (dto.followUpDate < today) throw this.invalid('SALES_FOLLOW_UP_IN_PAST', 'The new date cannot be before today.');
     return this.db.getClient().$transaction(async (tx) => {
       const f = await this.pendingFollowUpOrThrow(tx, followUpId);
       const res = await tx.salesFollowUp.updateMany({
@@ -602,29 +674,52 @@ export class SalesService {
     });
   }
 
-  async listFollowUps(bucket?: FollowUpBucket): Promise<{
+  /**
+   * FMP-SALES-10 — the Follow-ups task list. One row per task (never per activity), whatever the enquiry's status.
+   * PENDING (the default) is overdue + today + upcoming, earliest due date first, so overdue work leads. Counts are
+   * for every filter so the chips can show them; cancelled (replaced) tasks are kept in the database but never listed.
+   */
+  async listFollowUps(q: { bucket?: FollowUpFilter; page?: number; pageSize?: number } = {}): Promise<{
     today: string;
-    counts: Record<'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED', number>;
+    bucket: FollowUpFilter;
+    counts: Record<FollowUpFilter, number>;
     items: FollowUpListItem[];
+    pagination: { page: number; pageSize: number; total: number; totalPages: number };
   }> {
     const client = this.db.getClient();
     const today = kuwaitToday();
+    const day = dateOnly(today);
+    const bucket = q.bucket ?? 'PENDING';
+    const page = Math.max(1, q.page ?? 1);
+    const pageSize = Math.min(50, Math.max(1, q.pageSize ?? 15));
+    const pending = { status: SalesFollowUpStatus.PENDING };
+    const where: Record<FollowUpFilter, Prisma.SalesFollowUpWhereInput> = {
+      PENDING: pending,
+      OVERDUE: { ...pending, followUpDate: { lt: day } },
+      TODAY: { ...pending, followUpDate: day },
+      UPCOMING: { ...pending, followUpDate: { gt: day } },
+      COMPLETED: { status: SalesFollowUpStatus.COMPLETED },
+    };
     const include = {
       responsibleUser: USER_REF,
       completedByUser: USER_REF,
       enquiry: { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true } },
     } as const;
-    const [pending, completed] = await Promise.all([
-      client.salesFollowUp.findMany({ where: { status: SalesFollowUpStatus.PENDING }, include, orderBy: { followUpDate: 'asc' } }),
-      client.salesFollowUp.findMany({ where: { status: SalesFollowUpStatus.COMPLETED }, include, orderBy: { completedAt: 'desc' }, take: 50 }),
+    const [rows, ...countList] = await Promise.all([
+      client.salesFollowUp.findMany({
+        where: where[bucket], include,
+        orderBy: bucket === 'COMPLETED' ? [{ completedAt: 'desc' }, { id: 'asc' }] : [{ followUpDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize, take: pageSize,
+      }),
+      ...FOLLOW_UP_FILTERS.map((k) => client.salesFollowUp.count({ where: where[k] })),
     ]);
-    const all: FollowUpListItem[] = [...pending, ...completed].map((f) => ({
-      ...toFollowUpView(f, today),
-      enquiry: { ...f.enquiry },
-    }));
-    const counts = { OVERDUE: 0, TODAY: 0, UPCOMING: 0, COMPLETED: 0 };
-    for (const f of all) if (f.bucket !== 'CANCELLED') counts[f.bucket]++;
-    return { today, counts, items: bucket ? all.filter((f) => f.bucket === bucket) : all };
+    const counts = Object.fromEntries(FOLLOW_UP_FILTERS.map((k, i) => [k, countList[i]!])) as Record<FollowUpFilter, number>;
+    const total = counts[bucket];
+    return {
+      today, bucket, counts,
+      items: rows.map((f) => ({ ...toFollowUpView(f, today), enquiry: { ...f.enquiry } })),
+      pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -646,6 +741,7 @@ export class SalesService {
     ]);
     return {
       month,
+      conversionBasis: CONVERSION_BASIS,
       enquiriesCreated: createdCount,
       cohortWon,
       cohortConversionRate: cohortConversionRate(createdCount, cohortWon),
@@ -655,6 +751,20 @@ export class SalesService {
       estimatedValueCreated: createdEstimate._sum.estimatedValue === null || createdEstimate._sum.estimatedValue === undefined ? null : createdEstimate._sum.estimatedValue.toString(),
       createdWithoutEstimate: createdMissing,
     };
+  }
+
+  /**
+   * Contracts created through an enquiry's Create Contract flow in this Kuwait month - the SAME query the Contract List runs
+   * for `fromEnquiryMonth`, so the figure, the department scope and the list always agree. null when the viewer cannot read
+   * contracts (the card then says so instead of showing a number that would be wrong or leak scope).
+   */
+  private async contractsCreatedInMonth(month: string, actor: AuthUser): Promise<number | null> {
+    if (!this.contracts || !actor.permissions.includes('contracts.read')) return null;
+    try {
+      return (await this.contracts.findAll({ fromEnquiryMonth: month, page: 1, pageSize: 1 }, actor)).total;
+    } catch {
+      return null;
+    }
   }
 
   async dashboard(actor: AuthUser): Promise<SalesDashboard> {
@@ -668,7 +778,8 @@ export class SalesService {
     const open: Prisma.SalesEnquiryWhereInput = { status: { notIn: CLOSED } };
 
     const followUpEnquiry = { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, scopeOfWork: true } } as const;
-    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp] = await Promise.all([
+    const monthWon = { status: SalesEnquiryStatus.WON, wonDate: { gte: start, lt: endExclusive } };
+    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp, wonEstimated, wonMissing, contractsCreated] = await Promise.all([
       client.salesEnquiry.count({ where: { enquiryDate: { gte: start, lt: endExclusive } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { lt: dateOnly(today) } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: dateOnly(today) } }),
@@ -690,13 +801,18 @@ export class SalesService {
       client.salesEnquiry.findMany({ where: { enquiryDate: { gte: trendStart, lt: endExclusive } }, select: { enquiryDate: true } }),
       canReport ? this.monthlyReport(month) : Promise.resolve(null),
       client.salesFollowUp.findMany({
-        where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) }, enquiry: open },
+        where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) } },
         include: { responsibleUser: USER_REF, completedByUser: USER_REF, enquiry: followUpEnquiry },
         orderBy: { followUpDate: 'asc' },
         take: 5,
       }),
-      client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) }, enquiry: open } }),
+      // Same set as the Follow-ups page's Upcoming filter (every pending task after today), so the numbers always agree.
+      client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { gt: dateOnly(today) } } }),
       client.salesEnquiry.count({ where: { ...open, followUps: { none: { status: SalesFollowUpStatus.PENDING } } } }),
+      // Estimated value of the enquiries confirmed this month (by confirmation date): the recorded estimates only; a blank is never a zero.
+      client.salesEnquiry.aggregate({ where: { ...monthWon, estimatedValue: { not: null } }, _count: true, _sum: { estimatedValue: true } }),
+      client.salesEnquiry.count({ where: { ...monthWon, estimatedValue: null } }),
+      this.contractsCreatedInMonth(month, actor),
     ]);
 
     const trendCounts = new Map<string, number>(months.map((m) => [m, 0]));
@@ -718,6 +834,13 @@ export class SalesService {
       potentialValue: potential._sum.estimatedValue === null || potential._sum.estimatedValue === undefined ? null : potential._sum.estimatedValue.toString(),
       openWithoutEstimate: openMissing,
       projectsWon: wonRes._count,
+      confirmedMonth: {
+        count: wonRes._count,
+        estimatedValue: wonEstimated._sum.estimatedValue === null || wonEstimated._sum.estimatedValue === undefined ? null : wonEstimated._sum.estimatedValue.toString(),
+        withEstimate: wonEstimated._count,
+        withoutEstimate: wonMissing,
+      },
+      contractsCreated,
       awardedValueWon: wonRes._sum.awardedValue === null || wonRes._sum.awardedValue === undefined ? null : wonRes._sum.awardedValue.toString(),
       // Cohort conversion (see monthlyReport). null when the viewer lacks sales.reports.read; rate null = N/A.
       conversion: report ? { rate: report.cohortConversionRate, created: report.enquiriesCreated, won: report.cohortWon } : null,
@@ -754,6 +877,9 @@ export interface ActivityView {
   recordedBy: { id: string; displayName: string };
   createdAt: string;
 }
+
+export const FOLLOW_UP_FILTERS = ['PENDING', 'OVERDUE', 'TODAY', 'UPCOMING', 'COMPLETED'] as const;
+export type FollowUpFilter = (typeof FOLLOW_UP_FILTERS)[number];
 
 export interface FollowUpView {
   id: string;
@@ -795,6 +921,8 @@ function toFollowUpView(f: FollowUpRow, today: string): FollowUpView {
 
 export interface MonthlyReport {
   month: string;
+  /** Plain-language definition of cohortConversionRate: its denominator is the enquiries RECEIVED in the month, not the ones confirmed in it. */
+  conversionBasis: string;
   enquiriesCreated: number;
   cohortWon: number;
   cohortConversionRate: number | null;
@@ -816,6 +944,10 @@ export interface SalesDashboard {
   potentialValue: string | null;
   openWithoutEstimate: number;
   projectsWon: number;
+  /** Enquiries Confirmed this month by their confirmation date, with the sum of their recorded estimates. */
+  confirmedMonth: { count: number; estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
+  /** Contracts created through an enquiry in this month; null when the viewer cannot read contracts. */
+  contractsCreated: number | null;
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;

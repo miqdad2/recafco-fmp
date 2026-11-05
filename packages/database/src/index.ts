@@ -88,6 +88,7 @@ export {
   SalesEnquiryStatus,
   SalesActivityType,
   SalesFollowUpStatus,
+  SalesContractLinkSource,
   OperationsLinkMethod,
   OperationsSnapshotOrigin,
   OperationsSyncOutcome,

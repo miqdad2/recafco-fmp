@@ -58,6 +58,7 @@ export function AddActivityButton({ enquiryId, companyName, today, label = 'Add 
   const [notes, setNotes] = useState('');
   const [withFollowUp, setWithFollowUp] = useState(false);
   const [nextDate, setNextDate] = useState('');
+  const [task, setTask] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -69,6 +70,7 @@ export function AddActivityButton({ enquiryId, companyName, today, label = 'Add 
     setNotes('');
     setWithFollowUp(false);
     setNextDate('');
+    setTask('');
     setError(null);
     setFieldErrors({});
     setOpen(true);
@@ -113,6 +115,8 @@ export function AddActivityButton({ enquiryId, companyName, today, label = 'Add 
     if (!notes.trim()) errors['notes'] = ['Please describe what happened.'];
     if (withFollowUp && !nextDate) errors['nextFollowUpDate'] = ['Please choose the follow-up date, or choose “No follow-up”.'];
     else if (withFollowUp && nextDate < today) errors['nextFollowUpDate'] = ['The follow-up date cannot be before today.'];
+    // The task is asked for only when a follow-up is being scheduled; the "What happened?" note is never reused for it.
+    if (withFollowUp && !task.trim()) errors['followUpTask'] = ['Please say what needs to be done, for example “Call the client to request drawings”.'];
     setFieldErrors(errors);
     setError(null);
     if (Object.keys(errors).length > 0) return;
@@ -121,7 +125,7 @@ export function AddActivityButton({ enquiryId, companyName, today, label = 'Add 
     setPending(true);
     try {
       const res = await addActivityEntryAction(enquiryId, {
-        activityDate: date, notes, ...(withFollowUp ? { nextFollowUpDate: nextDate } : {}), requestId: requestId.current,
+        activityDate: date, notes, ...(withFollowUp ? { nextFollowUpDate: nextDate, followUpTask: task } : {}), requestId: requestId.current,
       });
       if (!res.ok) {
         setFieldErrors(res.fieldErrors);
@@ -189,13 +193,22 @@ export function AddActivityButton({ enquiryId, companyName, today, label = 'Add 
               </Field>
               {withFollowUp ? (
                 <div className="rounded-xl border border-border bg-surface-secondary/50 p-4">
-                  <Field id="act-next" label="Next Follow-up Date" errors={err('nextFollowUpDate')}>
-                    <input
-                      id="act-next" type="date" value={nextDate} min={today} onChange={(e) => setNextDate(e.target.value)}
-                      aria-invalid={!!err('nextFollowUpDate')} className={`${INPUT_CLASS} h-14 max-w-64 text-lg`}
-                    />
-                  </Field>
-                  <button type="button" onClick={() => { setWithFollowUp(false); setNextDate(''); }} className="mt-3 min-h-12 rounded-lg px-2 text-lg font-semibold text-text-secondary underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                  <div className="space-y-4">
+                    <Field id="act-next" label="Follow-up Date" required errors={err('nextFollowUpDate')}>
+                      <input
+                        id="act-next" type="date" value={nextDate} min={today} onChange={(e) => setNextDate(e.target.value)}
+                        aria-invalid={!!err('nextFollowUpDate')} className={`${INPUT_CLASS} h-14 max-w-64 text-lg`}
+                      />
+                    </Field>
+                    <Field id="act-task" label="What needs to be done?" required errors={err('followUpTask')}>
+                      <input
+                        id="act-task" type="text" value={task} onChange={(e) => { setTask(e.target.value); if (fieldErrors['followUpTask']) setFieldErrors((f) => ({ ...f, followUpTask: [] })); }} maxLength={300} autoComplete="off"
+                        placeholder="Call the client to request drawings"
+                        aria-required="true" aria-invalid={!!err('followUpTask')} className={`${INPUT_CLASS} h-14 text-lg`}
+                      />
+                    </Field>
+                  </div>
+                  <button type="button" onClick={() => { setWithFollowUp(false); setNextDate(''); setTask(''); }} className="mt-3 min-h-12 rounded-lg px-2 text-lg font-semibold text-text-secondary underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                     No follow-up
                   </button>
                 </div>

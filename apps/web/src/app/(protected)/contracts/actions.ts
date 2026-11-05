@@ -245,8 +245,14 @@ export async function createContractAction(
   const craneProvidedBy = (formData.get('craneProvidedBy') as string | null)?.trim() || undefined;
   const estimatedCraneCapacity = (formData.get('estimatedCraneCapacity') as string | null)?.trim() || undefined;
 
+  // FMP-SALES-12 — "Create Contract" from a Confirmed enquiry: the API validates this reference and links the new contract to the
+  // enquiry inside the creation transaction (nothing is created if the enquiry is not eligible any more).
+  const fromEnquiryRaw = (formData.get('fromEnquiryId') as string | null)?.trim();
+  const fromEnquiryId = fromEnquiryRaw && /^[0-9a-f-]{36}$/i.test(fromEnquiryRaw) ? fromEnquiryRaw : undefined;
+
   const result = await actionFetch('/contracts', 'POST', {
     title,
+    ...(fromEnquiryId !== undefined ? { fromEnquiryId } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(firstPartyId !== undefined ? { firstPartyId } : {}),
     ...(secondPartyId !== undefined ? { secondPartyId } : {}),
@@ -295,6 +301,10 @@ export async function createContractAction(
   // lands on BOQ Progress with a plain notice and can add the files there.
   if (result.id) {
     const failedFiles = await uploadRegisterBoqFiles(result.id, formData);
+    if (fromEnquiryId) {
+      revalidatePath(`/sales/enquiries/${fromEnquiryId}`);
+      redirect(`/sales/enquiries/${fromEnquiryId}?contractLinked=1${failedFiles > 0 ? `&filesNotSaved=${failedFiles}` : ''}`);
+    }
     if (failedFiles > 0) redirect(`/contracts/${result.id}/boq-progress?filesNotSaved=${failedFiles}`);
     redirect(`/contracts/${result.id}`);
   }

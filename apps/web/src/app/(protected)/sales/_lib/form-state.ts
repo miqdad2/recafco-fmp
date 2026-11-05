@@ -37,3 +37,6 @@ export interface ActivityResult {
   error: string | null;
   fieldErrors: Record<string, string[]>;
 }
+
+/** FMP-SALES-09 — one contract offered in the "Link Existing Contract" search. */
+export interface ContractChoice { id: string; referenceNumber: string; title: string; counterpartyName: string; status: string }

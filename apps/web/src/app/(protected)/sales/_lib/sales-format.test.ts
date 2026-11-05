@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatKwd, formatDate, formatMonth, formatRate, dueText, daysBetween, STATUS_ORDER, STATUS_LABELS, STATUS_FILTER_VALUE, foldStatusCounts, NOT_ESTIMATED } from './sales-format';
+import { formatKwd, formatDate, formatMonth, formatRate, dueText, daysBetween, STATUS_ORDER, STATUS_LABELS, STATUS_FILTER_VALUE, foldStatusCounts, NOT_ESTIMATED, TASK_NOT_RECORDED, taskText, compactKwd } from './sales-format';
 
 const read = (p: string): string => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
 
@@ -37,8 +37,10 @@ describe('Sales formatting', () => {
     expect(dueText('UPCOMING', '2026-10-26', '2026-10-21')).toBe('In 5 days');
   });
 
-  it('plain-language statuses: six offered, in order; Contacted folds into Under Discussion', () => {
-    expect(STATUS_ORDER.map((s) => STATUS_LABELS[s])).toEqual(['New', 'Follow-up Needed', 'Quotation Sent', 'Under Discussion', 'Confirmed', 'Not Proceeding']);
+  it('plain-language statuses: eight offered, in order (two waiting statuses added); Contacted folds into Under Discussion', () => {
+    expect(STATUS_ORDER.map((s) => STATUS_LABELS[s])).toEqual(['New', 'Waiting for Drawings', 'Follow-up Needed', 'Quotation Sent', 'Under Discussion', 'Waiting for Client Response', 'Confirmed', 'Not Proceeding']);
+    expect(STATUS_FILTER_VALUE.WAITING_FOR_DRAWINGS).toBe('WAITING_FOR_DRAWINGS');
+    expect(STATUS_FILTER_VALUE.WAITING_FOR_CLIENT).toBe('WAITING_FOR_CLIENT');
     expect(STATUS_LABELS.CONTACTED).toBe('Under Discussion');
     expect(STATUS_FILTER_VALUE.MEETING_DONE).toBe('MEETING_DONE,CONTACTED');
     expect(foldStatusCounts({ MEETING_DONE: 2, CONTACTED: 3, WON: 1 }).MEETING_DONE).toBe(5);
@@ -60,7 +62,7 @@ describe('Sales formatting', () => {
 
   it('dashboard uses the approved plain labels', () => {
     const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx') + read('../_components/follow-ups-panel.tsx');
-    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Projects', 'Conversion This Month', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
+    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Enquiries', 'Estimated Value of Confirmed Enquiries', 'Contracts Created', 'Confirmed this month', 'For enquiries confirmed this month', 'Created from enquiries this month', 'View Contracts', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
     expect(page).not.toContain('Not yet Confirmed or Not Proceeding');
     expect(page).not.toContain('See all');
     expect(page).not.toContain('opens All Enquiries with that filter');
@@ -86,7 +88,7 @@ describe('Sales formatting', () => {
   it('inline status control: editors only, nothing saved by selecting, confirmation for Confirmed/Not Proceeding, stale-status protection', () => {
     const c = read('../_components/enquiry-status-control.tsx');
     expect(c).toContain('if (!canEdit) return null;');
-    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Change Status', 'It does not create a contract']) expect(c).toContain(l);
+    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Change Status', 'Confirm Enquiry', 'Save Confirmation', 'The client has agreed to proceed.', 'Confirmation Date', 'Confirmation Notes', 'Enquiry confirmed.']) expect(c).toContain(l);
     expect(read('../actions.ts')).toContain('expectedStatus');
     for (const f of ['../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../_components/recent-enquiries.tsx']) expect(read(f)).toContain('EnquiryStatusControl');
     expect(read('../enquiries/page.tsx')).toContain("permissions.includes('sales.update')");
@@ -112,7 +114,7 @@ describe('Sales formatting', () => {
     expect(i('monthly-results')).toBeLessThan(i('<FollowUpsPanel'));
     expect(i('<FollowUpsPanel')).toBeLessThan(i('<RecentEnquiries'));
     expect(page).toContain('<DashboardClock serverToday={d.today} />');
-    for (const f of ['../page.tsx', '../layout.tsx', '../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../enquiries/new/page.tsx', '../follow-ups/page.tsx', '../_components/sales-nav.tsx']) expect(read(f)).not.toMatch(/Sales (&|&amp;) Enquiries/);
+    for (const f of ['../page.tsx', '../layout.tsx', '../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../enquiries/new/page.tsx', '../follow-ups/page.tsx']) expect(read(f)).not.toMatch(/Sales (&|&amp;) Enquiries/);
   });
 
   it('one status editor: the enquiry page no longer has a competing Update Status panel; only different statuses are offered', () => {
@@ -120,18 +122,18 @@ describe('Sales formatting', () => {
     expect(actions).not.toContain('Update Status');
     expect(actions).not.toContain('StatusPanel');
     const c = read('../_components/enquiry-status-control.tsx');
-    for (const l of ['Current Status:', 'Change Status', 'Save Status', 'options = STATUS_ORDER.filter((x) => x !== norm(saved))', 'type="radio"']) expect(c).toContain(l);
-    expect(c).not.toContain('<select');
+    for (const l of ['Current Status:', 'Change Status', 'Save Status', 'options = STATUS_ORDER.filter((x) => x !== norm(saved))', 'Choose Status']) expect(c).toContain(l);
+    expect(c).not.toContain('type="radio"');
   });
 
-  it('Sales module shell: one header (title + New Client Enquiry) and one navigation row on every page; enquiry page has breadcrumb and Back with restored query', () => {
+  it('Sales module shell: one header (title + New Client Enquiry); module navigation is in the FMP sidebar; enquiry page has breadcrumb and Back with restored query', () => {
     const layout = read('../layout.tsx');
     expect(layout).toContain('Sales Activities');
     expect(layout).toContain("permissions.includes('sales.create')");
-    expect(layout.indexOf('<header')).toBeLessThan(layout.indexOf('<SalesNav'));
-    expect(layout).toContain('md:sticky');
-    const nav = read('../_components/sales-nav.tsx');
-    for (const l of ['Dashboard', 'All Enquiries', 'Follow-ups', 'focus-visible:ring-2', 'min-h-12']) expect(nav).toContain(l);
+    expect(layout).not.toContain('SalesNav');
+    expect(fs.existsSync(path.resolve(__dirname, '../_components/sales-nav.tsx'))).toBe(false);
+    const sidebar = fs.readFileSync(path.resolve(__dirname, '../../_components/sidebar.tsx'), 'utf8');
+    for (const l of ['SALES_SUBMENU', "href: '/sales/enquiries'", "href: '/sales/follow-ups'", "p.startsWith('/sales/enquiries/')", 'onSales || open']) expect(sidebar).toContain(l);
     const detail = read('../enquiries/[id]/page.tsx');
     for (const l of ['Back to All Enquiries', 'aria-label="Breadcrumb"', 'backToList', 'enquiry.enquiryNumber'.replace('enquiry.', 'e.')]) expect(detail).toContain(l);
     expect(read('../enquiries/page.tsx')).toContain('?back=');
@@ -145,6 +147,22 @@ describe('Sales formatting', () => {
     expect(read('../_components/recent-enquiries.tsx')).toContain('useFittedCount');
     expect(read('../_components/follow-ups-panel.tsx')).toContain('useFittedCount');
     expect(read('../_components/recent-enquiries.tsx')).toMatch(/Showing {count} of {total}/);
+  });
+
+  it('FMP-SALES-09: Confirmed chip, wonMonth filter, contract panel, no Add Follow-up button, single dropdown editor', () => {
+    const ui = read('../_components/sales-ui.tsx');
+    expect(ui).toContain("{ value: 'WON', label: STATUS_LABELS.WON }");
+    expect(read('../_components/recent-enquiries.tsx')).toContain("{ value: 'WON', label: STATUS_LABELS.WON }");
+    const list = read('../enquiries/page.tsx');
+    expect(list).toContain(String.raw`/^\d{4}-(0[1-9]|1[0-2])$/.test(one(sp['wonMonth']))`);
+    expect(list).toContain("qs.set('wonMonth', wonMonth)");
+    expect(read('../page.tsx')).toContain('status=WON&wonMonth=');
+    const actions = read('../_components/enquiry-actions.tsx') + read('../enquiries/[id]/page.tsx');
+    expect(actions).not.toContain('Add Follow-up');
+    expect(actions).toContain('Set Next Follow-up');
+    const panel = read('../_components/enquiry-contract-panel.tsx');
+    for (const l of ['Create Contract', 'Link Existing Contract', 'Open Contract', 'fromEnquiry=', 'canCreateContract', 'canReadContracts']) expect(panel).toContain(l);
+    expect(panel).not.toMatch(/create.*automatically/i);
   });
 
   it('status filter offers All, Active, Follow-up Needed and More Statuses with every existing status', () => {
@@ -205,9 +223,6 @@ describe('button system (FMP-SALES-08)', () => {
     const cards = read('../_components/recent-enquiries.tsx');
     expect(cards.indexOf('<OpenEnquiryLink')).toBeLessThan(cards.indexOf('<AddActivityButton'));
     expect(cards.indexOf('<AddActivityButton')).toBeLessThan(cards.indexOf('<EnquiryStatusControl'));
-    const nav = read('../_components/sales-nav.tsx');
-    expect(nav).toContain('border-slate-400');
-    expect(nav).toContain('bg-text-primary');
   });
 });
 
@@ -233,10 +248,11 @@ describe('Sales area guards', () => {
     for (const line of exports) expect(line).toMatch(/^export async function /);
   });
 
-  it('Sales appears in the sidebar only as the sales.read-gated sibling under Contract Management, and there is no export route', () => {
+  it('Sales appears in the sidebar only as the sales.read-gated Sales Activities group with its three submenu links, and there is no export route', () => {
     const sidebar = fs.readFileSync(path.resolve(__dirname, '../../_components/sidebar.tsx'), 'utf8');
     expect(sidebar).toContain("permissions.includes('sales.read')");
-    expect(sidebar.match(/href="\/sales"/g)?.length).toBe(2);
+    expect(sidebar).toContain('SALES_SUBMENU');
+    expect(sidebar.match(/<SalesNavGroup /g)?.length).toBeGreaterThanOrEqual(2);
     const files: string[] = [];
     const walk = (dir: string): void => {
       for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -271,7 +287,7 @@ describe('Sales area guards', () => {
     expect(m).toContain("'Save Enquiry'");
     // quick entry asks only the seven essentials
     const names = [...m.matchAll(/\sname="(\w+)"/g)].map((x) => x[1]);
-    expect(names).toEqual(['companyName', 'contactPerson', 'contactNumber', 'scopeOfWork', 'estimatedValue', 'nextFollowUpDate', 'remarks']);
+    expect(names).toEqual(['companyName', 'contactPerson', 'contactNumber', 'scopeOfWork', 'estimatedValue', 'nextFollowUpDate', 'followUpTask', 'remarks']);
   });
 
   it('the dashboard and register open the popup instead of linking to a separate page', () => {
@@ -279,5 +295,146 @@ describe('Sales area guards', () => {
     expect(read('../page.tsx')).not.toContain('/sales/enquiries/new');
     expect(read('../enquiries/page.tsx')).toContain('<NewEnquiryButton');
     expect(read('../enquiries/page.tsx')).not.toContain('/sales/enquiries/new');
+  });
+});
+
+describe('FMP-SALES-11 confirmation and Monthly Results', () => {
+  it('the dashboard no longer shows Conversion This Month or Confirmed Projects; missing estimates stay distinct from zero', () => {
+    const page = read('../page.tsx');
+    expect(page).not.toContain('Conversion This Month');
+    expect(page).not.toContain('Confirmed Projects');
+    expect(page).toContain('data-missing-estimates');
+    expect(page).toContain("d.confirmedMonth.withEstimate > 0 ? compactKwd(d.confirmedMonth.estimatedValue) : null");
+    expect(page).toContain('/contracts?fromEnquiryMonth=');
+    expect(page).toContain('/sales/enquiries?status=WON&wonMonth=');
+  });
+
+  it('Save Confirmation is the green button and the Confirmation Date defaults to Kuwait today and cannot be in the future', () => {
+    const c = read('../_components/enquiry-status-control.tsx');
+    expect(c).toContain("choice === 'WON' ? BTN_DONE : BTN_STATUS");
+    expect(c).toContain('useState(today)');
+    expect(c).toContain('max={today}');
+    expect(c).toContain('wonDate > today');
+    expect(c).not.toContain('Confirmed value (KWD)');
+  });
+
+  it('no month pattern has lost its backslash (a dropped digit-class backslash once made every month filter silently fail)', () => {
+    for (const f of ['../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../../contracts/page.tsx', '../../../../../../api/src/contracts/dto/contract-list-query.dto.ts']) {
+      const src = read(f);
+      expect(src, f).not.toContain('/^d{4}');
+    }
+  });
+
+  it('Create Contract sends an explicit enquiry reference with the creation request (validated and recorded atomically by the server); no timing heuristic and no separate link call remain', () => {
+    const create = fs.readFileSync(path.resolve(__dirname, '../../contracts/actions.ts'), 'utf8');
+    expect(create).toContain('...(fromEnquiryId !== undefined ? { fromEnquiryId } : {})');
+    expect(create).not.toContain('createdFromEnquiry');
+    expect(create).not.toContain('/contract`'); // the old second request that linked after creation
+    expect(read('../actions.ts')).not.toContain('createdFromEnquiry');
+    const svc = fs.readFileSync(path.resolve(__dirname, '../../../../../../api/src/sales/sales.service.ts'), 'utf8');
+    expect(svc).not.toContain('CREATE_LINK_WINDOW');
+    expect(svc).not.toContain('createdFromEnquiry');
+  });
+
+  it('the Change Status menu and popup are keyboard operable: arrow keys, Escape and focus returned to the button', () => {
+    const c = read('../_components/enquiry-status-control.tsx');
+    for (const k of ["'ArrowDown'", "'ArrowUp'", "'Home'", "'End'", "trigger.current?.focus()", 'autoFocus']) expect(c).toContain(k);
+  });
+
+  it('dashboard amounts: exact below one million, in words above, a recorded zero stays 0 and a blank stays blank', () => {
+    expect(compactKwd('52000')).toEqual({ text: '52,000', number: '52,000', unit: '', exact: '52,000' });
+    expect(compactKwd('999999.999')?.text).toBe('999,999.999');
+    expect(compactKwd('12500000')).toMatchObject({ number: '12.5', unit: 'million', exact: '12,500,000' });
+    expect(compactKwd('1123456839012.345')).toMatchObject({ number: '1,123.46', unit: 'billion' });
+    expect(compactKwd('0')?.text).toBe('0');
+    expect(compactKwd(null)).toBeNull();
+    expect(compactKwd('')).toBeNull();
+  });
+
+  it('FMP-SALES-14: an amount shown in words opens its exact value by click and keyboard (not only hover); lists keep exact amounts', () => {
+    const c = read('../_components/exact-amount.tsx');
+    expect(c).toContain('<button');
+    expect(c).toContain('aria-expanded={open}');
+    expect(c).toContain("e.key === 'Escape'");
+    expect(c).toContain('Exactly KWD');
+    const page = read('../page.tsx');
+    expect(page).toContain('<ExactAmount number={k.value}');
+    expect(page).toContain('<ExactAmount number={confirmedValue.number}');
+    expect(read('../enquiries/page.tsx')).toContain('formatKwd(e.estimatedValue)'); // the list still shows the exact amount
+  });
+
+  it('FMP-SALES-14: previews switch to the short card form whenever that shows more records (not only when none fits)', () => {
+    const h = read('./use-fitted-count.ts');
+    expect(h).toContain('const PREFERRED_RECORDS = 3;');
+    expect(h).toContain('if (denseCount > n || n < 1) n = denseCount;');
+    expect(read('../_components/follow-ups-panel.tsx')).toContain('sd-short-hide dense-hide');
+  });
+
+  it('short desktop windows (FMP-SALES-13): shorter dashboard presentation without hiding overflow, scaling or nested scrolling', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '../../../globals.css'), 'utf8');
+    const block = css.slice(css.indexOf('/* FMP-SALES-13')).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(block).toContain('@media (min-width: 1280px) and (max-height: 900px)');
+    expect(block).not.toMatch(/transform|zoom|scale\(|overflow-y:\s*(auto|scroll)|font-size:\s*(0|1[0-5]px|0\.\d+rem)/);
+    const page = read('../page.tsx');
+    expect(page).toContain('sd-open-arrow'); // visible "opens a list" arrow on clickable cards
+    expect(page).toContain('sd-month-link-text');
+    const recent = read('../_components/recent-enquiries.tsx');
+    expect(recent).toContain('sd-short-only'); // one "Show" filter on short windows
+    expect(recent).toContain('View All Enquiries</Link>');
+    expect(read('../_components/follow-ups-panel.tsx')).toContain('without follow-up');
+  });
+
+  it('the short-desktop layout uses real layout rules only (no CSS scaling or zoom) and leaves small screens to scroll', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '../../../globals.css'), 'utf8');
+    const block = css.slice(css.indexOf('/* FMP-SALES-12')).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(block).toContain('@media (min-width: 1280px) and (max-height: 959px)');
+    expect(block).not.toMatch(/transform|zoom|scale\(/);
+  });
+});
+
+describe('FMP-SALES-10 follow-up task list', () => {
+  it('Add Activity asks "What needs to be done?" only when a follow-up is scheduled, and never reuses the activity note', () => {
+    const a = read('../_components/add-activity-button.tsx');
+    expect(a).toContain('What needs to be done?');
+    expect(a).toContain('Follow-up Date');
+    expect(a).toContain('followUpTask: task');
+    expect(a).toContain('if (withFollowUp && !task.trim())');
+    expect(a).not.toContain('followUpTask: notes');
+    const act = read('../actions.ts');
+    expect(act).toContain("body['followUpTask'] = task");
+    expect(act).toContain('SALES_FOLLOW_UP_TASK_REQUIRED');
+  });
+
+  it('editing an enquiry never sends follow-up fields (no silent overwrite of a pending task)', () => {
+    const act = read('../actions.ts');
+    expect(act).toContain("delete body['nextFollowUpDate']");
+    expect(act).toContain("delete body['followUpTask']");
+    const form = read('../_components/enquiry-form.tsx');
+    expect(form).toContain("mode === 'create' && (");
+    expect(form).toContain('Follow-up tasks are added with');
+  });
+
+  it('the Follow-ups page lists tasks: filters with counts, Pending default, pagination, legacy fallback and the coloured buttons', () => {
+    const p = read('../follow-ups/page.tsx');
+    for (const label of ['Pending', 'Overdue', 'Due Today', 'Upcoming', 'Completed']) expect(p).toContain(`label: '${label}'`);
+    expect(p).toContain("'PENDING'");
+    expect(p).toContain('counts[f.key]');
+    expect(p).toContain('pagination.totalPages');
+    expect(p).toContain('TASK_NOT_RECORDED');
+    expect(p).toContain('href={`/sales/enquiries/${f.enquiry.id}`}'); // each card opens its OWN enquiry
+    expect(p).toContain('<FollowUpActions followUpId={f.id}');
+    expect(p).not.toContain('GROUPS'); // the four large stacked sections are gone
+    const actions = read('../_components/follow-up-actions.tsx');
+    expect(actions).toContain('className={BTN_DONE}');
+    expect(actions).toContain('className={BTN_STATUS}');
+    expect(read('../_components/sales-ui.tsx')).toContain('export function OpenEnquiryLink');
+  });
+
+  it('older tasks without a description show "Follow-up details not recorded" and nothing is invented', () => {
+    expect(TASK_NOT_RECORDED).toBe('Follow-up details not recorded');
+    expect(taskText(null)).toBeNull();
+    expect(taskText('   ')).toBeNull();
+    expect(taskText(' Call the client ')).toBe('Call the client');
+    for (const f of ['../follow-ups/page.tsx', '../_components/follow-ups-panel.tsx', '../enquiries/[id]/page.tsx']) expect(read(f)).toContain('TASK_NOT_RECORDED');
   });
 });

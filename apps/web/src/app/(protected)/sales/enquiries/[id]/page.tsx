@@ -5,9 +5,10 @@ import { ArrowLeft, ChevronRight, Pencil, Phone, Mail, MapPin, UserRound } from 
 import { salesApi } from '@/lib/sales-api';
 import type { SalesActivity, SalesStatus } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../../contracts/_lib/get-user-permissions';
-import { ACTIVITY_LABELS, STATUS_LABELS, dueText, formatDate, formatKwd, NOT_ESTIMATED } from '../../_lib/sales-format';
+import { ACTIVITY_LABELS, STATUS_LABELS, TASK_NOT_RECORDED, dueText, formatDate, taskText, formatKwd, NOT_ESTIMATED } from '../../_lib/sales-format';
 import { BTN_NEUTRAL, BucketBadge, CurrentStatus, FormMessage, Section } from '../../_components/sales-ui';
 import { EnquiryActions } from '../../_components/enquiry-actions';
+import { EnquiryContractPanel } from '../../_components/enquiry-contract-panel';
 import { EnquiryStatusControl } from '../../_components/enquiry-status-control';
 import { FollowUpActions } from '../../_components/follow-up-actions';
 
@@ -28,7 +29,9 @@ function backToList(raw: string | string[] | undefined): string {
   const status = incoming.get('status');
   if (status && /^[A-Za-z_,]{1,60}$/.test(status)) out.set('status', status);
   const month = incoming.get('month');
-  if (month && /^d{4}-(0[1-9]|1[0-2])$/.test(month)) out.set('month', month);
+  if (month && /^\d{4}-(0[1-9]|1[0-2])$/.test(month)) out.set('month', month);
+  const wonMonth = incoming.get('wonMonth');
+  if (wonMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(wonMonth)) out.set('wonMonth', wonMonth);
   const page = incoming.get('page');
   if (page && /^[1-9]d{0,4}$/.test(page)) out.set('page', page);
   const q = out.toString();
@@ -100,7 +103,7 @@ export default async function EnquiryDetailPage({
     if (res.error.status === 404) notFound();
     return <div role="alert" className="rounded-xl border border-error bg-error-light px-5 py-4 text-base text-error">The enquiry could not be loaded. Please refresh the page.</div>;
   }
-  const { enquiry: e, activities, followUps, today } = res.data;
+  const { enquiry: e, activities, followUps, today, contract } = res.data;
   const canUpdate = permissions.includes('sales.update');
   const listHref = backToList(sp['back']);
   const pending = followUps.filter((f) => f.status === 'PENDING');
@@ -124,6 +127,7 @@ export default async function EnquiryDetailPage({
       </div>
       {sp['saved'] && <FormMessage error={null} ok="Enquiry saved successfully." />}
       {sp['updated'] && <FormMessage error={null} ok="Changes saved." />}
+      {sp['contractLinked'] && <FormMessage error={null} ok="Contract created and linked to this enquiry." />}
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -205,7 +209,8 @@ export default async function EnquiryDetailPage({
             <p className="mt-2 text-sm text-text-secondary">A rough estimate for planning. It is not a contract value.</p>
             {e.status === 'WON' && (
               <div className="mt-4 rounded-lg border border-green-300 bg-green-50 p-3">
-                <p className="text-base font-bold text-green-800">Confirmed on {formatDate(e.wonDate)}</p>
+                <p className="text-base font-bold text-green-800">Confirmed on {formatDate(e.wonDate)}{e.confirmedBy ? ` by ${e.confirmedBy.displayName}` : ''}</p>
+                <p className="text-sm text-green-900">The client has agreed to proceed with this enquiry.</p>
                 <p className="text-base text-green-900">Confirmed value: {formatKwd(e.awardedValue) ?? 'not recorded'}</p>
               </div>
             )}
@@ -217,19 +222,32 @@ export default async function EnquiryDetailPage({
             )}
           </section>
 
+          {(e.status === 'WON' || contract) && (
+            <EnquiryContractPanel
+              enquiryId={e.id}
+              enquiryNumber={e.enquiryNumber}
+              companyName={e.companyName}
+              confirmed={e.status === 'WON'}
+              contract={contract}
+              canUpdate={canUpdate}
+              canCreateContract={permissions.includes('contracts.create')}
+              canReadContracts={permissions.includes('contracts.read')}
+            />
+          )}
+
           <Section title="Next Follow-up">
             {pending.length === 0 ? (
-              <p className="text-base text-text-secondary">{closed ? 'No follow-up is scheduled.' : 'No follow-up is scheduled yet.'}{canUpdate && !closed ? ' Use “Add Follow-up” above.' : ''}</p>
+              <p className="text-base text-text-secondary">{closed ? 'No follow-up is scheduled.' : 'No follow-up is scheduled yet.'}{canUpdate && !closed ? ' Choose “Set Next Follow-up” inside “Add Activity”.' : ''}</p>
             ) : (
               <ul className="space-y-4">
                 {pending.map((f) => (
                   <li key={f.id} className="rounded-lg border border-border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-lg font-bold text-text-primary">{formatDate(f.followUpDate)}</p>
+                    <p className={`text-xl font-bold ${taskText(f.notes) ? 'text-text-primary' : 'italic text-text-secondary'}`}>{taskText(f.notes) ?? TASK_NOT_RECORDED}</p>
+                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-lg font-semibold text-text-primary">{formatDate(f.followUpDate)}</p>
                       <BucketBadge bucket={f.bucket} />
                     </div>
-                    <p className="text-sm text-text-secondary">{dueText(f.bucket, f.followUpDate, today)}{f.responsibleUser ? ` · ${f.responsibleUser.displayName}` : ''}</p>
-                    {f.notes && <p className="mt-1 text-base text-text-primary">{f.notes}</p>}
+                    <p className="text-base text-text-secondary">{dueText(f.bucket, f.followUpDate, today)}{f.responsibleUser ? ` · ${f.responsibleUser.displayName}` : ''}</p>
                     {canUpdate && <div className="mt-3"><FollowUpActions followUpId={f.id} enquiryId={e.id} today={today} compact /></div>}
                   </li>
                 ))}
@@ -242,10 +260,10 @@ export default async function EnquiryDetailPage({
                   {followUps.filter((f) => f.status !== 'PENDING').map((f) => (
                     <li key={f.id} className="rounded-lg bg-surface-secondary/60 px-3 py-2 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-semibold text-text-primary">{formatDate(f.followUpDate)}</span>
+                        <span className="font-semibold text-text-primary">{taskText(f.notes) ?? TASK_NOT_RECORDED} · {formatDate(f.followUpDate)}</span>
                         <BucketBadge bucket={f.bucket} />
                       </div>
-                      {(f.completionNotes || f.notes) && <p className="mt-0.5 text-text-secondary">{f.completionNotes ?? f.notes}</p>}
+                      {f.completionNotes && <p className="mt-0.5 text-text-secondary">{f.completionNotes}</p>}
                       {f.completedAt && f.completedBy && <p className="text-text-muted">Completed by {f.completedBy.displayName}</p>}
                     </li>
                   ))}

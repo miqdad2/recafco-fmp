@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
   ConflictException,
 } from '@nestjs/common';
-import { ContractStatus, ContractScheduleStatus, ContractClaimStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType } from '@recafco/database';
+import { ContractStatus, ContractScheduleStatus, ContractClaimStatus, ModuleIdentifier, DepartmentAccessScope, ContractBoqMixDesignType, SalesEnquiryStatus, SalesContractLinkSource } from '@recafco/database';
 import { DatabaseService } from '../database/database.service';
 import { resolveContractParties } from './contract-party-resolve';
 import { DepartmentAccessService } from '../department-access/department-access.service';
@@ -590,7 +590,23 @@ export class ContractsService {
     const now = new Date();
     const year = now.getUTCFullYear();
 
+    if (dto.fromEnquiryId && !actor.permissions.includes('sales.update')) {
+      throw new ForbiddenException({ code: 'CONTRACTS_PERMISSION_DENIED', message: 'Creating a contract from an enquiry needs sales.update' });
+    }
+
     const contract = await this.db.getClient().$transaction(async (tx) => {
+      // FMP-SALES-12 — creating from a Confirmed enquiry: lock that enquiry row first so two competing requests are serialised,
+      // then check it is still Confirmed and unlinked. Any failure rolls the whole creation back (no contract is left behind).
+      let sourceEnquiry: { id: string; enquiryNumber: string; companyName: string } | null = null;
+      if (dto.fromEnquiryId) {
+        await tx.$queryRaw`SELECT id FROM sales_enquiries WHERE id = ${dto.fromEnquiryId}::uuid FOR UPDATE`;
+        const enq = await tx.salesEnquiry.findUnique({ where: { id: dto.fromEnquiryId }, select: { id: true, enquiryNumber: true, companyName: true, status: true, contractId: true } });
+        if (!enq) throw new NotFoundException({ code: 'SALES_ENQUIRY_NOT_FOUND', message: 'The enquiry for this contract could not be found.' });
+        if (enq.status !== SalesEnquiryStatus.WON) throw new UnprocessableEntityException({ code: 'SALES_ENQUIRY_NOT_CONFIRMED', message: 'Only a Confirmed enquiry can be converted to a contract.' });
+        if (enq.contractId) throw new UnprocessableEntityException({ code: 'SALES_ENQUIRY_ALREADY_LINKED', message: 'This enquiry is already linked to a contract.' });
+        sourceEnquiry = { id: enq.id, enquiryNumber: enq.enquiryNumber, companyName: enq.companyName };
+      }
+
       // FMP-CONTRACT-01 — selected parties from the Contract Party master. The
       // chosen Customer (First Party) name/contact is copied into the existing
       // counterparty text fields so every older page keeps working unchanged.
@@ -686,6 +702,28 @@ export class ContractsService {
           metadata: { referenceNumber, boqItemCount: boqItems.length },
         },
       });
+
+      if (sourceEnquiry) {
+        // Origin = CREATED, written in the same transaction as the contract itself. Guarded by contractId = null.
+        const linked = await tx.salesEnquiry.updateMany({
+          where: { id: sourceEnquiry.id, contractId: null, status: SalesEnquiryStatus.WON },
+          data: { contractId: created.id, contractLinkedByUserId: actor.id, contractLinkedAt: new Date(), contractLinkSource: SalesContractLinkSource.CREATED },
+        });
+        if (linked.count === 0) throw new UnprocessableEntityException({ code: 'SALES_ENQUIRY_ALREADY_LINKED', message: 'This enquiry is already linked to a contract.' });
+        await tx.salesActivity.create({
+          data: {
+            enquiryId: sourceEnquiry.id, type: 'ENQUIRY_UPDATED', activityDate: new Date(new Date().toISOString().slice(0, 10)),
+            notes: null, recordedByUserId: actor.id,
+            metadata: { changes: [{ label: 'Contract', from: null, to: referenceNumber }], contractId: created.id, linkSource: SalesContractLinkSource.CREATED } as never,
+          },
+        });
+        await tx.contractActivity.create({
+          data: { contractId: created.id, actorUserId: actor.id, actorName: actor.displayName, event: 'SALES_ENQUIRY_LINKED', metadata: { enquiryId: sourceEnquiry.id, enquiryNumber: sourceEnquiry.enquiryNumber, origin: 'CREATED' } },
+        });
+        await tx.securityAuditEvent.create({
+          data: { event: 'SALES_ENQUIRY_CONTRACT_CREATED', userId: actor.id, actorId: actor.id, metadata: { enquiryId: sourceEnquiry.id, contractId: created.id, referenceNumber } },
+        });
+      }
 
       await tx.securityAuditEvent.create({
         data: {
@@ -1842,6 +1880,19 @@ export function buildListWhere(query: ContractListQueryDto): Record<string, unkn
         { counterpartyName: { contains: s, mode: 'insensitive' } },
       ],
     });
+  }
+
+  // FMP-SALES-12 — created through a Sales enquiry's "Create Contract" flow in this month: the contract's ACTUAL creation time
+  // (Kuwait midnight edges, UTC+3, no DST) AND an origin of CREATED recorded atomically with the creation. Linking an existing
+  // contract (origin LINKED) or a link of unknown origin (NULL) never matches. The Sales dashboard count uses this same rule.
+  if (query.fromEnquiryMonth) {
+    const [y, m] = query.fromEnquiryMonth.split('-').map(Number) as [number, number];
+    and.push({
+      salesEnquiry: {
+        is: { contractLinkSource: 'CREATED' },
+      },
+    });
+    and.push({ createdAt: { gte: new Date(Date.UTC(y, m - 1, 1, -3)), lt: new Date(Date.UTC(y, m, 1, -3)) } });
   }
 
   if (and.length > 0) where['AND'] = and;

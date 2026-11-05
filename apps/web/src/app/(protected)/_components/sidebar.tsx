@@ -32,6 +32,9 @@ import {
   ExternalLink,
   Gauge,
   Handshake,
+  House,
+  ListChecks,
+  CalendarClock,
   X,
 } from 'lucide-react';
 import type { ShellUser } from './app-shell';
@@ -80,7 +83,65 @@ interface NavGroup {
 // they appear immediately after that dropdown (see the group-rendering loop
 // below, which renders the dropdown before this array's items).
 /**
- * Factory Performance and Sales & Enquiries sit directly under the Contract Management submenu as its SIBLINGS: same
+ * FMP-NAV-03 — the Sales Activities submenu (the module's own navigation lives here, not at the top of its pages).
+ * Dashboard is /sales only; All Enquiries covers the list, detail, creation and edit pages; Follow-ups is its own page.
+ */
+const SALES_SUBMENU: { label: string; href: string; icon: LucideIcon; isActive: (p: string) => boolean }[] = [
+  { label: 'Dashboard', href: '/sales', icon: LayoutDashboard, isActive: (p) => p === '/sales' },
+  { label: 'All Enquiries', href: '/sales/enquiries', icon: ListChecks, isActive: (p) => p === '/sales/enquiries' || p.startsWith('/sales/enquiries/') },
+  { label: 'Follow-ups', href: '/sales/follow-ups', icon: CalendarClock, isActive: (p) => p === '/sales/follow-ups' || p.startsWith('/sales/follow-ups/') },
+];
+const isOnSales = (p: string): boolean => p === '/sales' || p.startsWith('/sales/');
+
+/** Top-level "Sales Activities" with its indented submenu, same look as the Contract Management submenu. Expanded on every Sales page. */
+function SalesNavGroup({ pathname, onClose }: { pathname: string; onClose: () => void }): React.JSX.Element {
+  const onSales = isOnSales(pathname);
+  const [open, setOpen] = useState(false);
+  const expanded = onSales || open;
+  return (
+    <div className="mb-0.5" data-nav-group="sales">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls="sales-nav-items"
+        className={[
+          'w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
+          onSales ? 'text-text-inverse font-medium' : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+        ].join(' ')}
+      >
+        <Handshake className="size-4 shrink-0" aria-hidden="true" />
+        <span className="flex-1 text-left">{SALES_ENQUIRIES_CARD.title}</span>
+        {expanded ? <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
+      </button>
+      {expanded && (
+        <div id="sales-nav-items" className="ml-3 border-l border-nav-hover">
+          {SALES_SUBMENU.map((item) => {
+            const active = item.isActive(pathname);
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                onClick={onClose}
+                aria-current={active ? 'page' : undefined}
+                className={[
+                  'flex items-center gap-2.5 pl-5 pr-4 py-1.5 text-sm transition-colors',
+                  active ? 'bg-nav-active text-text-inverse font-medium' : 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse',
+                ].join(' ')}
+              >
+                <item.icon className="size-3.5 shrink-0" aria-hidden="true" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Factory Performance and Sales Activities sit directly under the Contract Management submenu as its SIBLINGS: same
  * left edge, icon size and weight as the Contract Management row, outside the indented submenu and its connecting line.
  * Destinations and gates are the Control Center cards': Factory Performance is the separate application (new tab,
  * not permission-gated); Sales & Enquiries is /sales and appears only for users holding sales.read.
@@ -88,7 +149,6 @@ interface NavGroup {
 function SiblingNavLinks({ showSales, pathname, onClose }: { showSales: boolean; pathname: string; onClose: () => void }): React.JSX.Element {
   const base = 'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors';
   const idle = 'text-text-inverse/70 hover:bg-nav-hover hover:text-text-inverse';
-  const salesActive = pathname === '/sales' || pathname.startsWith('/sales/');
   return (
     <div data-nav-siblings="contract-management" className="mt-0.5">
       <a href={FACTORY_PERFORMANCE_URL} target="_blank" rel="noopener noreferrer" className={`${base} ${idle}`}>
@@ -97,17 +157,7 @@ function SiblingNavLinks({ showSales, pathname, onClose }: { showSales: boolean;
         <ExternalLink className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
         <span className="sr-only">(opens in a new tab)</span>
       </a>
-      {showSales && (
-        <Link
-          href="/sales"
-          onClick={onClose}
-          aria-current={salesActive ? 'page' : undefined}
-          className={[base, salesActive ? 'bg-nav-active text-text-inverse font-medium' : idle].join(' ')}
-        >
-          <Handshake className="size-4 shrink-0" aria-hidden="true" />
-          {SALES_ENQUIRIES_CARD.title}
-        </Link>
-      )}
+      {showSales && <SalesNavGroup pathname={pathname} onClose={onClose} />}
     </div>
   );
 }
@@ -116,8 +166,8 @@ const MAIN_GROUPS: NavGroup[] = [
   {
     label: null,
     items: [
-      // FMP-ACCESS-01 — this link IS the Factory Operations Control Center (same route); hidden for Single Module users.
-      { label: 'Factory Operations Control Center', href: '/dashboard', icon: LayoutDashboard },
+      // FMP-ACCESS-01 / FMP-NAV-04 — "Home" IS the Factory Overview page (same /dashboard route, no duplicate); hidden for Single Module users.
+      { label: 'Home', href: '/dashboard', icon: House },
     ],
   },
   {
@@ -510,6 +560,22 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
           // Administration section (Executive Manager holds no admin
           // permission, so hasAnyAdminPermission is already false for them).
           <div className="px-2 space-y-1.5">
+            {/* FMP-NAV-04 — Home (the Factory Overview page) first, same large style as the other executive items. */}
+            <Link
+              href="/dashboard"
+              onClick={onClose}
+              data-nav-home="executive"
+              aria-current={pathname === '/dashboard' ? 'page' : undefined}
+              className={[
+                'flex items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
+                pathname === '/dashboard'
+                  ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                  : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
+              ].join(' ')}
+            >
+              <House className="size-6 shrink-0" aria-hidden="true" />
+              Home
+            </Link>
             {EXECUTIVE_VISIBLE_ITEMS.map((item) => {
               // FMP-UI-27 — the Contract Management row is a disclosure button,
               // not a link: it toggles its submenu and shows a chevron. Its
@@ -562,21 +628,34 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                       <span className="sr-only">(opens in a new tab)</span>
                     </a>
                     {user.permissions.includes('sales.read') && (
-                      <Link
-                        href="/sales"
-                        onClick={onClose}
-                        data-nav-sibling="sales"
-                        aria-current={pathname === '/sales' || pathname.startsWith('/sales/') ? 'page' : undefined}
-                        className={[
-                          'flex items-center gap-3 rounded-r-md border-l-4 py-3.5 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
-                          pathname === '/sales' || pathname.startsWith('/sales/')
-                            ? 'border-accent bg-nav-active font-semibold text-text-inverse'
-                            : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
-                        ].join(' ')}
-                      >
-                        <Handshake className="size-6 shrink-0" aria-hidden="true" />
-                        {SALES_ENQUIRIES_CARD.title}
-                      </Link>
+                      <>
+                        <div data-nav-sibling="sales" className="flex w-full items-center gap-3 border-l-4 border-transparent py-3.5 pl-3 pr-3 text-lg font-semibold leading-snug text-text-inverse">
+                          <Handshake className="size-6 shrink-0" aria-hidden="true" />
+                          <span className="flex-1">{SALES_ENQUIRIES_CARD.title}</span>
+                        </div>
+                        <div id="executive-sales-nav-items" className="ml-6 mb-1 space-y-0.5 border-l border-nav-hover pl-1">
+                          {SALES_SUBMENU.map((sub) => {
+                            const subActive = sub.isActive(pathname);
+                            return (
+                              <Link
+                                key={sub.label}
+                                href={sub.href}
+                                onClick={onClose}
+                                aria-current={subActive ? 'page' : undefined}
+                                className={[
+                                  'flex items-center gap-2.5 rounded-r-md border-l-4 py-3 pl-3 pr-3 text-lg leading-snug transition-colors duration-150',
+                                  subActive
+                                    ? 'border-accent bg-nav-active font-semibold text-text-inverse'
+                                    : 'border-transparent font-medium text-text-inverse/75 hover:bg-nav-hover/70 hover:text-text-inverse',
+                                ].join(' ')}
+                              >
+                                <sub.icon className="size-5 shrink-0" aria-hidden="true" />
+                                {sub.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </>
                     )}
                   </Fragment>
                 );
@@ -655,7 +734,8 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
             return isNavItemVisible(item, user.permissions, hasAnyAdminPermission);
           });
           const showContractsHere = group.label === 'Operations' && hasAnyContractPermission && !contractManagementOnly;
-          if (visibleItems.length === 0 && !showContractsHere) return null;
+          const showSalesOnlyHere = group.label === 'Operations' && !showContractsHere && !contractManagementOnly && !singleModule && user.permissions.includes('sales.read');
+          if (visibleItems.length === 0 && !showContractsHere && !showSalesOnlyHere) return null;
 
           return (
             <div key={group.label ?? 'main'} className="mb-1">
@@ -716,6 +796,7 @@ export function Sidebar({ user, mobileOpen, onClose, pathname }: SidebarProps): 
                 </div>
               )}
               {showContractsHere && <SiblingNavLinks showSales={user.permissions.includes('sales.read')} pathname={pathname} onClose={onClose} />}
+              {showSalesOnlyHere && <SalesNavGroup pathname={pathname} onClose={onClose} />}
 
               {/* FMP-ACCESS-02 — a Single Module user's module is already the section heading, so its one link reads "Dashboard". */}
               {(singleModule && group.label === 'Operations'

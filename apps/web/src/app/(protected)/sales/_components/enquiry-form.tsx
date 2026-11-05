@@ -15,7 +15,7 @@ import { BTN_PRIMARY, BTN_SECONDARY, Field, FormMessage, INPUT_CLASS } from './s
  */
 export type EnquiryFormValues = Partial<Record<
   | 'companyName' | 'contactPerson' | 'contactNumber' | 'email' | 'projectName' | 'scopeOfWork' | 'estimatedValue' | 'typeOfWork'
-  | 'projectLocation' | 'nextFollowUpDate' | 'remarks' | 'source' | 'estimatedValueSource' | 'expectedStartDate' | 'expectedAwardDate' | 'additionalNotes',
+  | 'projectLocation' | 'nextFollowUpDate' | 'followUpTask' | 'remarks' | 'source' | 'estimatedValueSource' | 'expectedStartDate' | 'expectedAwardDate' | 'additionalNotes',
   string
 >>;
 
@@ -114,10 +114,23 @@ export function EnquiryForm({ mode, action, initial, cancelHref }: Props): React
         </Field>
       </SectionCard>
 
-      <SectionCard icon={CalendarClock} title="Next Action" subtitle="When should we get back to the client?">
-        <Field id="nextFollowUpDate" label="Next Follow-up Date" errors={err('nextFollowUpDate')}>
-          <input id="nextFollowUpDate" name="nextFollowUpDate" type="date" defaultValue={val('nextFollowUpDate')} className={INPUT_CLASS} />
-        </Field>
+      <SectionCard icon={CalendarClock} title="Next Action" subtitle={mode === 'create' ? 'When should we get back to the client?' : 'Notes about this enquiry.'}>
+        {mode === 'create' && (
+          <>
+            <Field id="nextFollowUpDate" label="Follow-up Date (optional)" errors={err('nextFollowUpDate')}>
+              <input id="nextFollowUpDate" name="nextFollowUpDate" type="date" defaultValue={val('nextFollowUpDate')} className={INPUT_CLASS} />
+            </Field>
+            <Field id="followUpTask" label="What needs to be done?" hint="Needed when you choose a follow-up date." errors={err('followUpTask')}>
+              <input id="followUpTask" name="followUpTask" type="text" defaultValue={val('followUpTask')} maxLength={300} autoComplete="off"
+                placeholder="Call the client to request drawings" aria-invalid={!!err('followUpTask')} aria-describedby={describe('followUpTask', true)} className={INPUT_CLASS} />
+            </Field>
+          </>
+        )}
+        {mode === 'edit' && (
+          <p className="text-base text-text-secondary sm:col-span-2">
+            Follow-up tasks are added with <span className="font-semibold text-text-primary">Add Activity</span> and finished or moved from the <span className="font-semibold text-text-primary">Follow-ups</span> list.
+          </p>
+        )}
         <div className="sm:col-span-2">
           <Field id="remarks" label="Remarks" errors={err('remarks')}>
             <textarea id="remarks" name="remarks" rows={3} defaultValue={val('remarks')} maxLength={5000} className={`${INPUT_CLASS} resize-y`} />

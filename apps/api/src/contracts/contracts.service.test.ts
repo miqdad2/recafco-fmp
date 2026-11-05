@@ -24,7 +24,15 @@ const mockTxSecurityAuditEventCreate = vi.fn();
 const mockTxBoqItemCreateMany = vi.fn();
 const mockTxBoqItemDeleteMany = vi.fn();
 
+const mockTxEnquiryFindUnique = vi.fn();
+const mockTxEnquiryUpdateMany = vi.fn();
+const mockTxSalesActivityCreate = vi.fn();
+const mockTxQueryRaw = vi.fn();
+
 const mockTx = {
+  salesEnquiry: { findUnique: mockTxEnquiryFindUnique, updateMany: mockTxEnquiryUpdateMany },
+  salesActivity: { create: mockTxSalesActivityCreate },
+  $queryRaw: mockTxQueryRaw,
   contract: {
     updateMany: mockTxContractUpdateMany,
     create: mockTxContractCreate,
@@ -482,6 +490,47 @@ describe('ContractsService.create', () => {
     await expect(
       service.create({ title: 'T', counterpartyName: 'V', ownerUserId: 'other-user' }, ACTOR_VIEWER),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  describe('create from a Confirmed enquiry (FMP-SALES-12)', () => {
+    const ENQ = '11111111-1111-4111-8111-111111111111';
+    const SALES_ACTOR: AuthUser = { ...ACTOR_ADMIN, permissions: [...ACTOR_ADMIN.permissions, 'sales.update'] };
+    beforeEach(() => {
+      mockTxContractCreate.mockResolvedValue(makeContract());
+      mockTxActivityCreate.mockResolvedValue({});
+      mockTxEnquiryUpdateMany.mockResolvedValue({ count: 1 });
+      mockTxEnquiryFindUnique.mockResolvedValue({ id: ENQ, enquiryNumber: 'ENQ-2026-0001', companyName: 'Acme', status: 'WON', contractId: null });
+    });
+
+    it('records origin CREATED in the same transaction as the contract, with history and audit', async () => {
+      await service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, SALES_ACTOR);
+      expect(mockTxQueryRaw).toHaveBeenCalledTimes(1); // enquiry row locked first
+      expect(mockTxEnquiryUpdateMany.mock.calls[0]![0]).toMatchObject({ where: { id: ENQ, contractId: null }, data: { contractLinkSource: 'CREATED', contractLinkedByUserId: SALES_ACTOR.id } });
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxSalesActivityCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses (and creates nothing) when the enquiry is not Confirmed, already linked or missing', async () => {
+      mockTxEnquiryFindUnique.mockResolvedValue({ id: ENQ, enquiryNumber: 'E', companyName: 'A', status: 'FOLLOW_UP', contractId: null });
+      await expect(service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, SALES_ACTOR)).rejects.toThrow(/Only a Confirmed enquiry/);
+      mockTxEnquiryFindUnique.mockResolvedValue({ id: ENQ, enquiryNumber: 'E', companyName: 'A', status: 'WON', contractId: 'c-old' });
+      await expect(service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, SALES_ACTOR)).rejects.toThrow(/already linked/);
+      mockTxEnquiryFindUnique.mockResolvedValue(null);
+      await expect(service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, SALES_ACTOR)).rejects.toThrow(/could not be found/);
+      expect(mockTxContractCreate).not.toHaveBeenCalled();
+    });
+
+    it('a competing request that lost the race rolls the whole creation back (guarded update matches nothing)', async () => {
+      mockTxEnquiryUpdateMany.mockResolvedValue({ count: 0 });
+      await expect(service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, SALES_ACTOR)).rejects.toThrow(/already linked/);
+    });
+
+    it('needs sales.update as well as contracts.create; a plain create never touches the enquiry tables', async () => {
+      await expect(service.create({ title: 'T', counterpartyName: 'V', fromEnquiryId: ENQ }, ACTOR_ADMIN)).rejects.toThrow(ForbiddenException);
+      await service.create({ title: 'T', counterpartyName: 'V' }, ACTOR_ADMIN);
+      expect(mockTxQueryRaw).not.toHaveBeenCalled();
+      expect(mockTxEnquiryUpdateMany).not.toHaveBeenCalled();
+    });
   });
 
   it('defaults ownerUserId to actor.id when not provided', async () => {

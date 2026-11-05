@@ -198,6 +198,8 @@ model User {
   factoryTasksCreated       FactoryTask[]        @relation("TaskCreatedBy")
   salesEnquiriesCreated     SalesEnquiry[]       @relation("SalesEnquiryCreatedBy")
   salesEnquiriesAssigned    SalesEnquiry[]       @relation("SalesEnquiryAssignedTo")
+  salesEnquiriesConfirmed   SalesEnquiry[]       @relation("SalesEnquiryConfirmedBy")
+  salesEnquiriesLinked      SalesEnquiry[]       @relation("SalesEnquiryContractLinkedBy")
   salesActivitiesRecorded   SalesActivity[]      @relation("SalesActivityRecordedBy")
   salesFollowUpsResponsible SalesFollowUp[]      @relation("SalesFollowUpResponsible")
   salesFollowUpsCompleted   SalesFollowUp[]      @relation("SalesFollowUpCompletedBy")
@@ -1241,6 +1243,8 @@ model Contract {
   firstParty       ContractParty? @relation("ContractFirstParty", fields: [firstPartyId], references: [id], onDelete: Restrict)
   secondParty      ContractParty? @relation("ContractSecondParty", fields: [secondPartyId], references: [id], onDelete: Restrict)
 
+  // FMP-SALES-09 — the Sales enquiry this contract was created from / linked to (at most one; the FK lives on sales_enquiries).
+  salesEnquiry                      SalesEnquiry?     @relation("SalesEnquiryContract")
   comments                          ContractComment[]
   activities                        ContractActivity[]
   boqItems                          ContractBoqItem[]
@@ -4026,6 +4030,9 @@ enum SalesEnquiryStatus {
   FOLLOW_UP
   WON
   LOST
+  // FMP-SALES-09 — two active "waiting" statuses
+  WAITING_FOR_DRAWINGS
+  WAITING_FOR_CLIENT
 }
 
 enum SalesActivityType {
@@ -4038,6 +4045,12 @@ enum SalesActivityType {
   STATUS_CHANGE
   NOTE
   ENQUIRY_UPDATED
+}
+
+/// FMP-SALES-11 — origin of an enquiry's contract link (NULL = linked before this was recorded, origin unknown).
+enum SalesContractLinkSource {
+  CREATED
+  LINKED
 }
 
 enum SalesFollowUpStatus {
@@ -4079,6 +4092,13 @@ model SalesEnquiry {
   lostReason           String?            @map("lost_reason") @db.VarChar(1000)
   awardedValue         Decimal?           @map("awarded_value") @db.Decimal(15, 3)
   wonDate              DateTime?          @map("won_date") @db.Date
+  // FMP-SALES-09 — who confirmed the enquiry and when (set with the Confirmed status), and the optional link to a contract.
+  confirmedByUserId    String?            @map("confirmed_by_user_id") @db.Uuid
+  confirmedAt          DateTime?          @map("confirmed_at") @db.Timestamptz(3)
+  contractId           String?            @unique @map("contract_id") @db.Uuid
+  contractLinkedByUserId String?          @map("contract_linked_by_user_id") @db.Uuid
+  contractLinkedAt     DateTime?          @map("contract_linked_at") @db.Timestamptz(3)
+  contractLinkSource   SalesContractLinkSource? @map("contract_link_source")
   lostDate             DateTime?          @map("lost_date") @db.Date
   createdByUserId      String             @map("created_by_user_id") @db.Uuid
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -4086,12 +4106,16 @@ model SalesEnquiry {
 
   createdByUser  User            @relation("SalesEnquiryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   assignedToUser User?           @relation("SalesEnquiryAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  confirmedByUser User?          @relation("SalesEnquiryConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  contractLinkedByUser User?     @relation("SalesEnquiryContractLinkedBy", fields: [contractLinkedByUserId], references: [id], onDelete: SetNull)
+  contract       Contract?       @relation("SalesEnquiryContract", fields: [contractId], references: [id], onDelete: SetNull)
   activities     SalesActivity[]
   followUps      SalesFollowUp[]
 
   @@index([status, enquiryDate(sort: Desc)])
   @@index([enquiryDate])
   @@index([wonDate])
+  @@index([contractLinkSource, contractLinkedAt])
   @@index([nextFollowUpDate])
   @@index([companyName])
   @@index([contactNumber])

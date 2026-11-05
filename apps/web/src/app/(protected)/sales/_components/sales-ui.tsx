@@ -38,7 +38,7 @@ export function OpenEnquiryLink({ href, companyName, className = '' }: { href: s
 export function CurrentStatus({ status }: { status: SalesStatus }): React.JSX.Element {
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-base text-text-secondary 2xl:text-lg">
-      <span>Current Status:</span> <StatusBadge status={status} />
+      <span className="sd-status-label">Current Status:</span> <StatusBadge status={status} />
     </p>
   );
 }
@@ -120,27 +120,29 @@ export function Section({ title, children, aside }: { title: string; children: R
 }
 
 /**
- * FMP-SALES-02 — the one status filter for enquiry lists: All, Active, Follow-up Needed and a "More Statuses" selector
- * holding every existing status. "Active" is the existing 'open' filter (every status except Confirmed and Not
+ * FMP-SALES-02 / 09 — the one status filter for enquiry lists: All, Active, Confirmed and a "More Statuses" selector
+ * holding every status (Follow-up Needed, the waiting statuses, Confirmed, Not Proceeding, ...). "Active" is the existing 'open' filter (every status except Confirmed and Not
  * Proceeding), not a stored status. It always navigates to All Enquiries and carries the search/month already chosen.
  */
-const CHIP = 'inline-flex min-h-12 items-center rounded-full border px-5 text-lg font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
-const CHIP_ON = 'border-text-primary bg-text-primary text-white';
-const CHIP_OFF = 'border-border-strong bg-surface text-text-primary hover:bg-surface-secondary';
+export const CHIP = 'inline-flex min-h-12 items-center rounded-full border px-5 text-lg font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
+export const CHIP_ON = 'border-text-primary bg-text-primary text-white';
+export const CHIP_OFF = 'border-border-strong bg-surface text-text-primary hover:bg-surface-secondary';
 
-export function StatusFilter({ status, search = '', month = '' }: { status: string; search?: string; month?: string }): React.JSX.Element {
+export function StatusFilter({ status, search = '', month = '', wonMonth = '' }: { status: string; search?: string; month?: string; wonMonth?: string }): React.JSX.Element {
   const to = (value: string): string => {
     const qs = new URLSearchParams();
     if (search) qs.set('search', search);
     if (value) qs.set('status', value);
     if (month) qs.set('month', month);
+    // The "confirmed in <month>" view only belongs to the Confirmed status; any other choice leaves it.
+    if (wonMonth && value === 'WON') qs.set('wonMonth', wonMonth);
     const q = qs.toString();
     return `/sales/enquiries${q ? `?${q}` : ''}`;
   };
   const chips = [
     { value: '', label: 'All' },
     { value: 'open', label: 'Active' },
-    { value: STATUS_FILTER_VALUE.FOLLOW_UP, label: STATUS_LABELS.FOLLOW_UP },
+    { value: 'WON', label: STATUS_LABELS.WON },
   ];
   const inChips = chips.some((c) => c.value === status);
   return (

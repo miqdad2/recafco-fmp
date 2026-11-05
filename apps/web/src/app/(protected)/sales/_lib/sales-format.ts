@@ -15,10 +15,12 @@ export const STATUS_LABELS: Record<SalesStatus, string> = {
   CONTACTED: 'Under Discussion',
   WON: 'Confirmed',
   LOST: 'Not Proceeding',
+  WAITING_FOR_DRAWINGS: 'Waiting for Drawings',
+  WAITING_FOR_CLIENT: 'Waiting for Client Response',
 };
 
-/** The six statuses a manager can choose, in the order they are shown. Under Discussion is stored as MEETING_DONE. */
-export const STATUS_ORDER: SalesStatus[] = ['NEW_ENQUIRY', 'FOLLOW_UP', 'QUOTATION_SENT', 'MEETING_DONE', 'WON', 'LOST'];
+/** The eight statuses a manager can choose, in the order they are shown. Under Discussion is stored as MEETING_DONE. */
+export const STATUS_ORDER: SalesStatus[] = ['NEW_ENQUIRY', 'WAITING_FOR_DRAWINGS', 'FOLLOW_UP', 'QUOTATION_SENT', 'MEETING_DONE', 'WAITING_FOR_CLIENT', 'WON', 'LOST'];
 
 /** Filter value for each status pill (Under Discussion also covers the older Contacted value). */
 export const STATUS_FILTER_VALUE: Record<SalesStatus, string> = {
@@ -29,6 +31,8 @@ export const STATUS_FILTER_VALUE: Record<SalesStatus, string> = {
   CONTACTED: 'MEETING_DONE,CONTACTED',
   WON: 'WON',
   LOST: 'LOST',
+  WAITING_FOR_DRAWINGS: 'WAITING_FOR_DRAWINGS',
+  WAITING_FOR_CLIENT: 'WAITING_FOR_CLIENT',
 };
 
 /** Counts for the six shown statuses (Contacted is folded into Under Discussion). */
@@ -41,6 +45,8 @@ export function foldStatusCounts(counts: Record<string, number>): Record<SalesSt
     CONTACTED: 0,
     WON: counts['WON'] ?? 0,
     LOST: counts['LOST'] ?? 0,
+    WAITING_FOR_DRAWINGS: counts['WAITING_FOR_DRAWINGS'] ?? 0,
+    WAITING_FOR_CLIENT: counts['WAITING_FOR_CLIENT'] ?? 0,
   };
 }
 
@@ -53,6 +59,8 @@ export const STATUS_BADGE: Record<SalesStatus, string> = {
   FOLLOW_UP: 'bg-amber-50 text-amber-900 border-amber-300',
   WON: 'bg-green-50 text-green-800 border-green-300',
   LOST: 'bg-red-50 text-red-800 border-red-200',
+  WAITING_FOR_DRAWINGS: 'bg-orange-50 text-orange-900 border-orange-300',
+  WAITING_FOR_CLIENT: 'bg-cyan-50 text-cyan-900 border-cyan-300',
 };
 
 export const BUCKET_LABELS: Record<FollowUpBucket, string> = {
@@ -156,4 +164,32 @@ export function statusFilterLabel(filter: string): string {
   if (filter === 'open') return 'Active';
   const first = filter.split(',')[0] as SalesStatus;
   return STATUS_LABELS[first] ?? 'selected';
+}
+
+/** Shown for older follow-ups saved before tasks had a description. Never replaced by guessed text. */
+export const TASK_NOT_RECORDED = 'Follow-up details not recorded';
+
+/** The follow-up's task text, or null when it was never recorded (legacy rows). */
+export function taskText(notes: string | null | undefined): string | null {
+  const t = (notes ?? '').trim();
+  return t === '' ? null : t;
+}
+
+/**
+ * FMP-SALES-13 — a dashboard figure in KWD, without the "KWD" prefix. Up to 999,999.999 it is exact; from one million it is
+ * written in words ("1.25 million", "1,123.46 billion") so it always fits its card. The exact amount stays available as
+ * `exact` (shown as a tooltip and to screen readers) and in the enquiry lists.
+ */
+export function compactKwd(value: string | null | undefined): { text: string; number: string; unit: string; exact: string } | null {
+  const exact = formatKwd(value);
+  if (!exact) return null;
+  const n = Number(value);
+  const plain = exact.replace(/^KWD\s/, '');
+  const words = (v: number, unit: string): { text: string; number: string; unit: string; exact: string } => {
+    const num = v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return { text: `${num} ${unit}`, number: num, unit, exact: plain };
+  };
+  if (Math.abs(n) >= 1e9) return words(n / 1e9, 'billion');
+  if (Math.abs(n) >= 1e6) return words(n / 1e6, 'million');
+  return { text: plain, number: plain, unit: '', exact: plain };
 }

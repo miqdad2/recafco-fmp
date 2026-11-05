@@ -29,7 +29,7 @@ const MAX_SHOWN = 8;
 const CHIPS = [
   { value: '', label: 'All' },
   { value: 'open', label: 'Active' },
-  { value: STATUS_FILTER_VALUE.FOLLOW_UP, label: STATUS_LABELS.FOLLOW_UP },
+  { value: 'WON', label: STATUS_LABELS.WON },
 ];
 
 interface Props {
@@ -101,16 +101,26 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
   const label = status === '' ? 'All' : (CHIPS.find((c) => c.value === status)?.label ?? STATUS_LABELS[STATUS_ORDER.find((x) => STATUS_FILTER_VALUE[x] === status) ?? 'NEW_ENQUIRY']);
 
   return (
-    <section aria-labelledby="recent-enquiries-title" className="rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
+    <section aria-labelledby="recent-enquiries-title" className="sd-panel sd-recent rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h2 id="recent-enquiries-title" className="flex flex-wrap items-baseline gap-x-3 text-xl font-bold text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">
           Recent Enquiries
         </h2>
-        <Link href={viewAll} className="inline-flex min-h-9 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus 2xl:text-xl min-[137.5rem]:text-2xl">
+        <label className="sd-short-only items-center gap-2 text-base font-semibold text-text-primary">
+          Show
+          <select
+            value={status} onChange={(e) => choose(e.target.value)}
+            className="min-h-12 max-w-[13rem] rounded-full border border-border-strong bg-surface px-3 text-base font-semibold text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {CHIPS.map((c) => <option key={c.label} value={c.value}>{c.label}</option>)}
+            {STATUS_ORDER.filter((x) => !CHIPS.some((c) => c.value === STATUS_FILTER_VALUE[x])).map((x) => <option key={x} value={STATUS_FILTER_VALUE[x]}>{STATUS_LABELS[x]}</option>)}
+          </select>
+        </label>
+        <Link href={viewAll} className="sd-short-none inline-flex min-h-9 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus 2xl:text-xl min-[137.5rem]:text-2xl">
           View All Enquiries <ArrowRight className="size-5" aria-hidden="true" />
         </Link>
       </div>
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+      <div className="sd-short-none mb-2 flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Filter recent enquiries by status" className="flex flex-wrap items-center gap-2">
           {CHIPS.map((c) => (
             <button key={c.label} type="button" onClick={() => choose(c.value)} aria-pressed={status === c.value} className={`${CHIP} ${status === c.value ? ON : OFF}`}>
@@ -146,18 +156,18 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
           {items.slice(0, MAX_SHOWN).map((e) => (
             <li key={e.id} className="rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
               <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-                <p className="dense-clamp-1 line-clamp-2 min-w-0 break-words text-xl font-bold leading-snug text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">{e.companyName}</p>
+                <p title={e.companyName} className="sd-short-clamp dense-clamp-1 line-clamp-2 min-w-0 break-words text-xl font-bold leading-snug text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">{e.companyName}</p>
                 <CurrentStatus status={e.status} />
               </div>
               <p className="dense-hide line-clamp-1 break-words text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{e.scopeOfWork}</p>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
+              <div className="sd-short-hide flex flex-wrap items-center gap-x-4 gap-y-0.5">
                 <div className="dense-hide"><ContactLine person={e.contactPerson} number={e.contactNumber} /></div>
                 <p className={`text-lg font-semibold 2xl:text-xl min-[137.5rem]:text-2xl ${e.estimatedValue ? 'text-purple-900' : 'text-text-secondary'}`}>{formatKwd(e.estimatedValue) ?? NOT_ESTIMATED}</p>
                 <p className="text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><span className="text-text-secondary">Next follow-up:</span> <span className="font-semibold">{e.nextFollowUpDate ? formatDate(e.nextFollowUpDate) : 'Not set'}</span></p>
                 <p className="dense-hide text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><span className="text-text-secondary">Received:</span> <span className="font-semibold">{formatDate(e.enquiryDate)}</span></p>
               </div>
               <div className="dense-hide"><LatestActivity activity={e.latestActivity ?? null} compact /></div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="sd-btn-row mt-2 flex flex-wrap items-center gap-2">
                 <OpenEnquiryLink href={`/sales/enquiries/${e.id}`} companyName={e.companyName} />
                 {canUpdate && <AddActivityButton enquiryId={e.id} companyName={e.companyName} today={today} />}
                 <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} filter={status} filterLabel={label} />
@@ -168,7 +178,7 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
       )}
       {!error && items.length > 0 && (
         <p role="status" aria-live="polite" className="mt-2 text-base text-text-secondary 2xl:text-lg min-[137.5rem]:text-xl" data-showing={`${count}/${total}`}>
-          {pending ? <span className="inline-flex items-center gap-1"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading enquiries…</span> : <><span className="font-semibold text-text-primary">{status ? `${label}: ` : ''}Showing {count} of {total}</span> {total === 1 ? 'enquiry' : 'enquiries'}{count < total && <> · <Link href={viewAll} className="font-semibold text-accent hover:underline">View All Enquiries</Link></>}</>}
+          {pending ? <span className="inline-flex items-center gap-1"><Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading enquiries…</span> : <><span className="font-semibold text-text-primary">{status ? `${label}: ` : ''}Showing {count} of {total}</span> {total === 1 ? 'enquiry' : 'enquiries'}{' · '}<Link href={viewAll} className="font-semibold text-accent underline-offset-2 hover:underline">View All Enquiries</Link></>}
         </p>
       )}
     </section>

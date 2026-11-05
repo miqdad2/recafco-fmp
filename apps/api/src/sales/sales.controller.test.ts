@@ -29,7 +29,7 @@ const OPERATIONAL = ['contracts.read', 'contracts.update', 'production.read', 'p
 
 describe('Sales authorization', () => {
   const reads: (keyof SalesController)[] = ['dashboard', 'followUps', 'list', 'getOne'];
-  const writes: (keyof SalesController)[] = ['create', 'update', 'changeStatus', 'addActivity', 'addFollowUp', 'completeFollowUp', 'rescheduleFollowUp'];
+  const writes: (keyof SalesController)[] = ['create', 'update', 'changeStatus', 'addActivity', 'linkContract', 'addFollowUp', 'completeFollowUp', 'rescheduleFollowUp'];
 
   it('a Sales Viewer can read and see reports but cannot create or change anything', () => {
     for (const h of reads) expect(guard.canActivate(ctx(h, as(VIEWER)))).toBe(true);

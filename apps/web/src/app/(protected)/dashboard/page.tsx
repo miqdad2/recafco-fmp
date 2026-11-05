@@ -81,7 +81,7 @@ export default async function ExecutiveDashboardPage(): Promise<React.JSX.Elemen
     // FMP-UI-36 — uses the full content width (no narrow centered container). Columns: 1 (mobile),
     // 2 (md/tablet), 3 (xl, e.g. 1366px), 4 (2xl, e.g. 1920px: 4 + 3). No fixed widths, so no horizontal scroll.
     <div className="mx-auto w-full max-w-[1760px] px-5 py-6 lg:px-8 lg:py-8">
-      <h1 className="mb-8 text-3xl font-extrabold tracking-tight text-text-primary lg:text-4xl">Factory Operations Control Center</h1>
+      <h1 className="mb-8 text-3xl font-extrabold tracking-tight text-text-primary lg:text-4xl">Factory Overview</h1>
 
       {loadError && (
         <div role="alert" className="mt-6 rounded-md border border-error bg-error-light px-4 py-3 text-sm text-error">

@@ -10,7 +10,7 @@ import { SalesService } from './sales.service';
 import { kuwaitToday, monthOf } from './sales.logic';
 import {
   CreateEnquiryDto, UpdateEnquiryDto, ChangeStatusDto, AddActivityDto, AddFollowUpDto, CompleteFollowUpDto,
-  RescheduleFollowUpDto, EnquiryListQueryDto, FollowUpListQueryDto, MonthQueryDto,
+  RescheduleFollowUpDto, EnquiryListQueryDto, FollowUpListQueryDto, MonthQueryDto, LinkContractDto,
 } from './dto/sales.dto';
 
 function meta(): { requestId?: string } {
@@ -45,7 +45,7 @@ export class SalesController {
   @Get('follow-ups')
   @Permissions('sales.read')
   async followUps(@Query() q: FollowUpListQueryDto): Promise<ApiSuccessResponse<unknown>> {
-    return ok(await this.service.listFollowUps(q.bucket));
+    return ok(await this.service.listFollowUps(q));
   }
 
   @Post('follow-ups/:followUpId/complete')
@@ -84,8 +84,8 @@ export class SalesController {
 
   @Get('enquiries/:id')
   @Permissions('sales.read')
-  async getOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string): Promise<ApiSuccessResponse<unknown>> {
-    return ok(await this.service.getOne(id));
+  async getOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string, @CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
+    return ok(await this.service.getOne(id, actor));
   }
 
   @Patch('enquiries/:id')
@@ -107,6 +107,18 @@ export class SalesController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
     return ok(await this.service.changeStatus(id, dto, actor));
+  }
+
+  /** Links a Confirmed enquiry to an existing contract the actor can see (contracts.read + department scope). */
+  @Post('enquiries/:id/contract')
+  @HttpCode(200)
+  @Permissions('sales.update')
+  async linkContract(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: LinkContractDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    return ok(await this.service.linkContract(id, dto.contractId, actor));
   }
 
   @Post('enquiries/:id/activities')

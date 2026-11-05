@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { salesApi, salesFetch } from '@/lib/sales-api';
-import type { ActivityResult, RecentEnquiriesResult, SalesFormState, StatusChangeResult } from './_lib/form-state';
+import { contractsApi } from '@/lib/contracts-api';
+import type { ActivityResult, ContractChoice, RecentEnquiriesResult, SalesFormState, StatusChangeResult } from './_lib/form-state';
 import { STATUS_FILTER_VALUE } from './_lib/sales-format';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,7 @@ function readValues(formData: FormData): Record<string, string> {
 
 const text = (v: Record<string, string>, k: string): string => (v[k] ?? '').trim();
 
+const TASK_REQUIRED = 'Please say what needs to be done, for example “Call the client to request drawings”.';
 const API_FIELD_FALLBACK = 'Please check the highlighted fields.';
 
 /** Turns an API error into form state; a server-side field error is shown beside its field. */
@@ -41,7 +43,7 @@ function failure(values: Record<string, string>, err: { message: string; fields?
 
 const ENQUIRY_FIELDS = [
   'companyName', 'contactPerson', 'contactNumber', 'email', 'projectName', 'scopeOfWork', 'estimatedValue', 'typeOfWork',
-  'projectLocation', 'nextFollowUpDate', 'remarks', 'source', 'estimatedValueSource', 'expectedStartDate', 'expectedAwardDate', 'additionalNotes',
+  'projectLocation', 'nextFollowUpDate', 'followUpTask', 'remarks', 'source', 'estimatedValueSource', 'expectedStartDate', 'expectedAwardDate', 'additionalNotes',
 ] as const;
 
 /** Quick client-side checks so obvious mistakes are caught before the round trip; the API re-checks everything. */
@@ -53,6 +55,7 @@ function checkEnquiry(v: Record<string, string>): Record<string, string[]> {
   if (value && !/^\d{1,12}(\.\d{1,3})?$/.test(value)) errors['estimatedValue'] = ['Enter an amount in KWD, for example 125000 or 125000.500. It cannot be negative.'];
   const email = text(v, 'email');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors['email'] = ['This email address does not look right.'];
+  if (text(v, 'nextFollowUpDate') && !text(v, 'followUpTask')) errors['followUpTask'] = [TASK_REQUIRED];
   return errors;
 }
 
@@ -95,23 +98,16 @@ export async function updateEnquiryAction(id: string, _prev: SalesFormState, for
   const fieldErrors = checkEnquiry(values);
   if (Object.keys(fieldErrors).length > 0) return { error: API_FIELD_FALLBACK, fieldErrors, values, ok: null };
 
-  const res = await salesFetch(`/sales/enquiries/${id}`, { method: 'PATCH', body: JSON.stringify(enquiryBody(values)) });
+  // Follow-up tasks are never edited here (that used to replace a pending task); they are scheduled in Add Activity.
+  const body = enquiryBody(values);
+  delete body['nextFollowUpDate'];
+  delete body['followUpTask'];
+  const res = await salesFetch(`/sales/enquiries/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
   if (res.error) return failure(values, res.error);
 
   revalidatePath('/sales');
   revalidatePath(`/sales/enquiries/${id}`);
   redirect(`/sales/enquiries/${id}?updated=1`);
-}
-
-export async function addFollowUpAction(id: string, _prev: SalesFormState, formData: FormData): Promise<SalesFormState> {
-  const values = readValues(formData);
-  if (!text(values, 'followUpDate')) return { error: null, fieldErrors: { followUpDate: ['Please choose a date.'] }, values, ok: null };
-  const res = await salesFetch(`/sales/enquiries/${id}/follow-ups`, {
-    method: 'POST',
-    body: JSON.stringify({ followUpDate: text(values, 'followUpDate'), notes: text(values, 'notes') }),
-  });
-  if (res.error) return failure(values, res.error);
-  return { error: null, fieldErrors: {}, values: {}, ok: 'Follow-up scheduled.' };
 }
 
 export async function completeFollowUpAction(followUpId: string, enquiryId: string, _prev: SalesFormState, formData: FormData): Promise<SalesFormState> {
@@ -153,19 +149,17 @@ export async function loadRecentEnquiriesAction(status: string): Promise<RecentE
  */
 export async function changeEnquiryStatusAction(
   id: string,
-  input: { status: string; expectedStatus: string; reason?: string; awardedValue?: string; wonDate?: string },
+  input: { status: string; expectedStatus: string; reason?: string; confirmationNotes?: string; wonDate?: string },
 ): Promise<StatusChangeResult> {
   const reason = (input.reason ?? '').trim();
-  const awarded = (input.awardedValue ?? '').trim().replace(/,/g, '');
   if (!/^[A-Z_]+$/.test(input.status) || !/^[A-Z_]+$/.test(input.expectedStatus)) return { ok: false, error: 'Please choose a status.', fieldErrors: {}, conflict: false };
   if (input.status === 'LOST' && !reason) return { ok: false, error: null, fieldErrors: { reason: ['Please give a short reason why it is not proceeding.'] }, conflict: false };
-  if (awarded && !/^d{1,12}(.d{1,3})?$/.test(awarded)) {
-    return { ok: false, error: null, fieldErrors: { awardedValue: ['Enter an amount in KWD, for example 85000 or 85000.500.'] }, conflict: false };
-  }
   const body: Record<string, string> = { status: input.status, expectedStatus: input.expectedStatus, reason };
   if (input.status === 'WON') {
-    body['awardedValue'] = awarded;
-    body['wonDate'] = (input.wonDate ?? '').trim();
+    const date = (input.wonDate ?? '').trim();
+    if (!date) return { ok: false, error: null, fieldErrors: { wonDate: ['Please choose the confirmation date.'] }, conflict: false };
+    body['wonDate'] = date;
+    body['confirmationNotes'] = (input.confirmationNotes ?? '').trim();
   }
   const res = await salesFetch(`/sales/enquiries/${id}/status`, { method: 'POST', body: JSON.stringify(body) });
   if (res.error) {
@@ -186,19 +180,50 @@ export async function changeEnquiryStatusAction(
  */
 export async function addActivityEntryAction(
   enquiryId: string,
-  input: { activityDate: string; notes: string; nextFollowUpDate?: string; requestId: string },
+  input: { activityDate: string; notes: string; nextFollowUpDate?: string; followUpTask?: string; requestId: string },
 ): Promise<ActivityResult> {
   const notes = input.notes.trim();
   if (!notes) return { ok: false, error: null, fieldErrors: { notes: ['Please describe what happened.'] } };
   const body: Record<string, string> = { activityDate: input.activityDate, notes, requestId: input.requestId };
-  if (input.nextFollowUpDate) body['nextFollowUpDate'] = input.nextFollowUpDate;
+  if (input.nextFollowUpDate) {
+    const task = (input.followUpTask ?? '').trim();
+    if (!task) return { ok: false, error: null, fieldErrors: { followUpTask: [TASK_REQUIRED] } };
+    body['nextFollowUpDate'] = input.nextFollowUpDate;
+    body['followUpTask'] = task;
+  }
   const res = await salesFetch(`/sales/enquiries/${enquiryId}/activities`, { method: 'POST', body: JSON.stringify(body) });
   if (!res.error) return { ok: true, error: null, fieldErrors: {} };
   const e = res.error;
   if (e.status === 403) return { ok: false, error: 'You do not have permission to add activities.', fieldErrors: {} };
   if (e.code === 'SALES_ACTIVITY_IN_FUTURE') return { ok: false, error: null, fieldErrors: { activityDate: [e.message] } };
+  if (e.code === 'SALES_FOLLOW_UP_TASK_REQUIRED') return { ok: false, error: null, fieldErrors: { followUpTask: [TASK_REQUIRED] } };
   if (e.code === 'SALES_FOLLOW_UP_IN_PAST') return { ok: false, error: null, fieldErrors: { nextFollowUpDate: [e.message] } };
   const fields = e.fields ?? {};
   if (Object.keys(fields).length > 0) return { ok: false, error: null, fieldErrors: fields };
   return { ok: false, error: e.status === 404 ? 'This enquiry could not be found.' : e.message, fieldErrors: {} };
+}
+
+// ---------------------------------------------------------------------------
+// FMP-SALES-09 — linking a Confirmed enquiry to a contract. The search goes through the existing Contracts API as the
+// signed-in user, so the list is already limited to the contracts (and departments) that user may see; the Sales API
+// checks that again when the link is saved.
+// ---------------------------------------------------------------------------
+
+export async function searchContractsToLinkAction(query: string): Promise<{ items: ContractChoice[]; error: string | null }> {
+  const q = query.trim().slice(0, 100);
+  try {
+    const res = await contractsApi.list({ search: q, pageSize: 10 });
+    return { items: res.items.map((c) => ({ id: c.id, referenceNumber: c.referenceNumber, title: c.title, counterpartyName: c.counterpartyName, status: c.status })), error: null };
+  } catch {
+    return { items: [], error: 'The contracts could not be loaded. You may not have access to Contract Management.' };
+  }
+}
+
+export async function linkContractAction(enquiryId: string, contractId: string): Promise<{ ok: boolean; error: string | null }> {
+  if (!/^[0-9a-f-]{36}$/i.test(contractId)) return { ok: false, error: 'Please choose a contract.' };
+  const res = await salesFetch(`/sales/enquiries/${enquiryId}/contract`, { method: 'POST', body: JSON.stringify({ contractId }) });
+  if (res.error) {
+    return { ok: false, error: res.error.status === 403 ? 'You do not have permission to link this contract.' : res.error.status === 404 ? 'That contract could not be found.' : res.error.message };
+  }
+  return { ok: true, error: null };
 }

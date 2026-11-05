@@ -1972,6 +1972,8 @@ interface ContractListQuery {
   ownerUserId?: string;
   departmentId?: string;
   plantId?: string;
+  /** FMP-SALES-11 — only contracts created through a Sales enquiry in this Kuwait month (YYYY-MM). */
+  fromEnquiryMonth?: string;
 }
 
 function buildQuery(q: ContractListQuery): string {
@@ -1987,6 +1989,7 @@ function buildQuery(q: ContractListQuery): string {
   if (q.ownerUserId) params.set('ownerUserId', q.ownerUserId);
   if (q.departmentId) params.set('departmentId', q.departmentId);
   if (q.plantId) params.set('plantId', q.plantId);
+  if (q.fromEnquiryMonth) params.set('fromEnquiryMonth', q.fromEnquiryMonth);
   const str = params.toString();
   return str ? `?${str}` : '';
 }

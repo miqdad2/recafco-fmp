@@ -18,6 +18,7 @@ const DATE_MSG = 'must be a date in YYYY-MM-DD format';
 // Up to 12 digits and 3 decimals, never negative. Blank means "not known yet" - it is never turned into 0.
 const MONEY = /^\d{1,12}(\.\d{1,3})?$/;
 const MONEY_MSG = 'must be a positive amount with up to 3 decimals';
+export const FOLLOW_UP_TASK_MAX = 300;
 
 export class CreateEnquiryDto {
   @IsString() @IsNotEmpty({ message: 'Company/Client Name is required' }) @MaxLength(200) @Transform(trim)
@@ -47,6 +48,9 @@ export class CreateEnquiryDto {
   @ValidateIf((o: CreateEnquiryDto) => o.nextFollowUpDate !== null && o.nextFollowUpDate !== undefined)
   @Matches(DATE, { message: `Next Follow-up Date ${DATE_MSG}` }) @Transform(blankToNull)
   nextFollowUpDate?: string | null;
+
+  /** What needs to be done on that date. Required (checked in the service) when a follow-up date is given. */
+  @IsOptional() @IsString() @MaxLength(FOLLOW_UP_TASK_MAX) @Transform(blankToNull) followUpTask?: string | null;
 
   @IsOptional() @IsString() @MaxLength(5000) @Transform(blankToNull) remarks?: string | null;
   @IsOptional() @IsString() @MaxLength(5000) @Transform(blankToNull) additionalNotes?: string | null;
@@ -82,9 +86,8 @@ export class UpdateEnquiryDto {
   @IsOptional() @IsString() @MaxLength(200) @Transform(blankToNull) estimatedValueSource?: string | null;
   @IsOptional() @IsString() @MaxLength(100) @Transform(blankToNull) source?: string | null;
 
-  @ValidateIf((o: UpdateEnquiryDto) => o.nextFollowUpDate !== null && o.nextFollowUpDate !== undefined)
-  @Matches(DATE, { message: `Next Follow-up Date ${DATE_MSG}` }) @Transform(blankToNull)
-  nextFollowUpDate?: string | null;
+  // FMP-SALES-10: follow-up tasks are never edited through the enquiry (that silently replaced a pending task). Schedule
+  // them with Add Activity; move or finish them from the Follow-ups list.
 
   @IsOptional() @IsString() @MaxLength(5000) @Transform(blankToNull) remarks?: string | null;
   @IsOptional() @IsString() @MaxLength(5000) @Transform(blankToNull) additionalNotes?: string | null;
@@ -119,6 +122,9 @@ export class ChangeStatusDto {
   @ValidateIf((o: ChangeStatusDto) => o.wonDate !== null && o.wonDate !== undefined)
   @Matches(DATE, { message: `Confirmation date ${DATE_MSG}` }) @Transform(blankToNull)
   wonDate?: string | null;
+
+  /** Confirmed (Won) only: optional notes about the confirmation, kept in the status history entry. */
+  @IsOptional() @IsString() @MaxLength(1000) @Transform(blankToNull) confirmationNotes?: string | null;
 }
 
 export const RECORDABLE_ACTIVITY_TYPES: SalesActivityType[] = [
@@ -140,6 +146,9 @@ export class AddActivityDto {
   @ValidateIf((o: AddActivityDto) => o.nextFollowUpDate !== null && o.nextFollowUpDate !== undefined)
   @Matches(DATE, { message: `Next Follow-up ${DATE_MSG}` }) @Transform(blankToNull)
   nextFollowUpDate?: string | null;
+
+  /** "What needs to be done?" for the follow-up above. Required when nextFollowUpDate is given; ignored otherwise. */
+  @IsOptional() @IsString() @MaxLength(FOLLOW_UP_TASK_MAX) @Transform(blankToNull) followUpTask?: string | null;
 
   /** Made once per popup by the browser: a retry of the same save returns the first result instead of adding a second entry. */
   @IsOptional() @IsString() @Matches(/^[A-Za-z0-9-]{8,64}$/, { message: 'Invalid request id' })
@@ -165,12 +174,22 @@ export class EnquiryListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
   @IsOptional() @IsString() @MaxLength(100) @Transform(trim) search?: string;
   /** "open" (every enquiry not yet Confirmed or Not Proceeding), or one or more statuses separated by commas. */
-  @IsOptional() @Matches(/^(open|(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST)(,(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST))*)$/) status?: string;
+  @IsOptional() @Matches(/^(open|(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT)(,(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT))*)$/) status?: string;
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'month must be YYYY-MM' }) month?: string;
+  /** Enquiries confirmed (Confirmed date) in this month, YYYY-MM - what the dashboard's Confirmed Projects figure counts. */
+  @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'wonMonth must be YYYY-MM' }) wonMonth?: string;
+}
+
+export class LinkContractDto {
+  @IsUUID('4') contractId!: string;
+
 }
 
 export class FollowUpListQueryDto {
-  @IsOptional() @IsIn(['OVERDUE', 'TODAY', 'UPCOMING', 'COMPLETED']) bucket?: 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED';
+  /** PENDING = overdue + today + upcoming (the default). */
+  @IsOptional() @IsIn(['PENDING', 'OVERDUE', 'TODAY', 'UPCOMING', 'COMPLETED']) bucket?: 'PENDING' | 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) pageSize?: number;
 }
 
 export class MonthQueryDto {

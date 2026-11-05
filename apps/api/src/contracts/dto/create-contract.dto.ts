@@ -46,6 +46,12 @@ export class CreateContractDto {
   @IsUUID('4')
   firstPartyId?: string;
 
+  // FMP-SALES-12 — set only by "Create Contract" on a Confirmed Sales enquiry. The server validates it and links the new
+  // contract to that enquiry in the same transaction as the creation; nothing else can ever mark a contract as "created from an enquiry".
+  @IsOptional()
+  @IsUUID('4')
+  fromEnquiryId?: string;
+
   @IsOptional()
   @IsUUID('4')
   secondPartyId?: string;

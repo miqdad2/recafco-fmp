@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Search } from 'lucide-react';
 import { salesApi } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../../contracts/_lib/get-user-permissions';
-import { statusFilterLabel, formatDate, formatKwd, NOT_ESTIMATED } from '../_lib/sales-format';
+import { statusFilterLabel, formatMonth, formatDate, formatKwd, NOT_ESTIMATED } from '../_lib/sales-format';
 import { NewEnquiryButton } from '../_components/new-enquiry-modal';
 import { EnquiryStatusControl } from '../_components/enquiry-status-control';
 import { AddActivityButton } from '../_components/add-activity-button';
@@ -16,11 +16,12 @@ export const dynamic = 'force-dynamic';
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined): string => (Array.isArray(v) ? (v[0] ?? '') : (v ?? ''));
 
-function href(search: string, status: string, month: string, page = 1): string {
+function href(search: string, status: string, month: string, page = 1, wonMonth = ''): string {
   const qs = new URLSearchParams();
   if (search) qs.set('search', search);
   if (status) qs.set('status', status);
   if (month) qs.set('month', month);
+  if (wonMonth) qs.set('wonMonth', wonMonth);
   if (page > 1) qs.set('page', String(page));
   const s = qs.toString();
   return `/sales/enquiries${s ? `?${s}` : ''}`;
@@ -31,19 +32,21 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
   const search = one(sp['search']).trim();
   const status = one(sp['status']);
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(one(sp['month'])) ? one(sp['month']) : '';
+  const wonMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(one(sp['wonMonth'])) ? one(sp['wonMonth']) : '';
   const page = Math.max(1, Number.parseInt(one(sp['page']), 10) || 1);
 
   const qs = new URLSearchParams({ page: String(page), pageSize: '15' });
   if (search) qs.set('search', search);
   if (status) qs.set('status', status);
   if (month) qs.set('month', month);
+  if (wonMonth) qs.set('wonMonth', wonMonth);
 
   const [{ permissions }, res] = await Promise.all([getCurrentUserContext(), salesApi.enquiries(qs)]);
   const canCreate = permissions.includes('sales.create');
   const canUpdate = permissions.includes('sales.update');
-  const filtered = Boolean(search || status || month);
+  const filtered = Boolean(search || status || month || wonMonth);
   // The enquiry page's "Back to All Enquiries" returns to exactly this search, filter and page.
-  const hereQuery = href(search, status, month, page).split('?')[1] ?? '';
+  const hereQuery = href(search, status, month, page, wonMonth).split('?')[1] ?? '';
   const backParam = hereQuery ? `?back=${encodeURIComponent(hereQuery)}` : '';
 
   return (
@@ -52,6 +55,7 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
 
       <form method="get" action="/sales/enquiries" className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm">
         {status && <input type="hidden" name="status" value={status} />}
+        {wonMonth && <input type="hidden" name="wonMonth" value={wonMonth} />}
         <div className="min-w-64 flex-1">
           <label htmlFor="search" className="mb-1.5 block text-base font-semibold text-text-primary">Search</label>
           <div className="relative">
@@ -67,7 +71,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
         {filtered && <Link href="/sales/enquiries" className={BTN_NEUTRAL}>Clear</Link>}
       </form>
 
-      <StatusFilter status={status} search={search} month={month} />
+      <StatusFilter status={status} search={search} month={month} wonMonth={wonMonth} />
+      {wonMonth && <p className="text-lg font-semibold text-green-900">Showing enquiries confirmed in {formatMonth(wonMonth)}. <Link href={href(search, status, month)} className="underline">Show all confirmed</Link></p>}
 
       {res.error ? (
         <div role="alert" className="rounded-xl border border-error bg-error-light px-5 py-4 text-base text-error">The enquiries could not be loaded. Please refresh the page.</div>
@@ -123,8 +128,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
               {res.data.pagination.total} {res.data.pagination.total === 1 ? 'enquiry' : 'enquiries'} · page {res.data.pagination.page} of {res.data.pagination.totalPages}
             </p>
             <div className="flex gap-2">
-              {page > 1 && <Link href={href(search, status, month, page - 1)} className={BTN_NEUTRAL}>Previous</Link>}
-              {page < res.data.pagination.totalPages && <Link href={href(search, status, month, page + 1)} className={BTN_NEUTRAL}>Next</Link>}
+              {page > 1 && <Link href={href(search, status, month, page - 1, wonMonth)} className={BTN_NEUTRAL}>Previous</Link>}
+              {page < res.data.pagination.totalPages && <Link href={href(search, status, month, page + 1, wonMonth)} className={BTN_NEUTRAL}>Next</Link>}
             </div>
           </div>
         </>
