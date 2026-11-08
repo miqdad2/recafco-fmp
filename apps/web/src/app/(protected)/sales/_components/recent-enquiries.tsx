@@ -6,10 +6,11 @@ import { useFittedCount } from '../_lib/use-fitted-count';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import type { SalesEnquiry } from '@/lib/sales-api';
 import { loadRecentEnquiriesAction } from '../actions';
-import { NOT_ESTIMATED, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER, formatDate, formatKwd } from '../_lib/sales-format';
+import { NOT_ESTIMATED, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER, customStatusFilter, formatDate, formatKwd, statusFilterLabel } from '../_lib/sales-format';
 import { ContactLine, CurrentStatus, EmptyState, LatestActivity, OpenEnquiryLink } from './sales-ui';
 import { AddActivityButton } from './add-activity-button';
 import { EnquiryStatusControl } from './enquiry-status-control';
+import { useCustomStatuses } from './custom-statuses';
 import { NewEnquiryButton } from './new-enquiry-modal';
 
 /**
@@ -97,8 +98,11 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
   }, [signature]);
 
   const inChips = CHIPS.some((c) => c.value === status);
+  // FMP-SALES-18 — custom statuses are filters too (after the system ones).
+  const customStatuses = useCustomStatuses();
+  const customOptions = customStatuses.map((c) => <option key={c.id} value={customStatusFilter(c.id)}>{c.name}</option>);
   const viewAll = `/sales/enquiries${status ? `?status=${encodeURIComponent(status)}` : ''}`;
-  const label = status === '' ? 'All' : (CHIPS.find((c) => c.value === status)?.label ?? STATUS_LABELS[STATUS_ORDER.find((x) => STATUS_FILTER_VALUE[x] === status) ?? 'NEW_ENQUIRY']);
+  const label = status === '' ? 'All' : (CHIPS.find((c) => c.value === status)?.label ?? (status.startsWith('custom:') ? statusFilterLabel(status, customStatuses) : STATUS_LABELS[STATUS_ORDER.find((x) => STATUS_FILTER_VALUE[x] === status) ?? 'NEW_ENQUIRY']));
 
   return (
     <section aria-labelledby="recent-enquiries-title" className="sd-panel sd-recent rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
@@ -114,6 +118,7 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
           >
             {CHIPS.map((c) => <option key={c.label} value={c.value}>{c.label}</option>)}
             {STATUS_ORDER.filter((x) => !CHIPS.some((c) => c.value === STATUS_FILTER_VALUE[x])).map((x) => <option key={x} value={STATUS_FILTER_VALUE[x]}>{STATUS_LABELS[x]}</option>)}
+            {customOptions}
           </select>
         </label>
         <Link href={viewAll} className="sd-short-none inline-flex min-h-9 items-center gap-1 text-lg font-semibold text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-focus 2xl:text-xl min-[137.5rem]:text-2xl">
@@ -129,12 +134,13 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
           ))}
           <select
             aria-label="More statuses" value={inChips ? '' : status} onChange={(e) => choose(e.target.value)}
-            className={`min-h-12 rounded-full border px-3 text-base font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? ON : OFF}`}
+            className={`min-h-12 max-w-72 rounded-full border px-3 text-base font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? ON : OFF}`}
           >
             <option value="" disabled={inChips}>More Statuses…</option>
             {STATUS_ORDER.map((s) => (
               <option key={s} value={STATUS_FILTER_VALUE[s]}>{STATUS_LABELS[s]}</option>
             ))}
+            {customOptions}
           </select>
         </div>
       </div>
@@ -157,7 +163,7 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
             <li key={e.id} className="rounded-xl border border-border bg-surface p-3 shadow-sm 2xl:p-4">
               <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                 <p title={e.companyName} className="sd-short-clamp dense-clamp-1 line-clamp-2 min-w-0 break-words text-xl font-bold leading-snug text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">{e.companyName}</p>
-                <CurrentStatus status={e.status} />
+                <CurrentStatus status={e.status} customStatus={e.customStatus} />
               </div>
               <p className="dense-hide line-clamp-1 break-words text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{e.scopeOfWork}</p>
               <div className="sd-short-hide flex flex-wrap items-center gap-x-4 gap-y-0.5">
@@ -170,7 +176,7 @@ export function RecentEnquiries({ initial, initialTotal, signature, canCreate, c
               <div className="sd-btn-row mt-2 flex flex-wrap items-center gap-2">
                 <OpenEnquiryLink href={`/sales/enquiries/${e.id}`} companyName={e.companyName} />
                 {canUpdate && <AddActivityButton enquiryId={e.id} companyName={e.companyName} today={today} />}
-                <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} filter={status} filterLabel={label} />
+                <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} customStatus={e.customStatus} canEdit={canUpdate} today={today} filter={status} filterLabel={label} />
               </div>
             </li>
           ))}

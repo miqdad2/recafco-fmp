@@ -41,7 +41,8 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
   if (month) qs.set('month', month);
   if (wonMonth) qs.set('wonMonth', wonMonth);
 
-  const [{ permissions }, res] = await Promise.all([getCurrentUserContext(), salesApi.enquiries(qs)]);
+  const [{ permissions }, res, customRes] = await Promise.all([getCurrentUserContext(), salesApi.enquiries(qs), salesApi.customStatuses()]);
+  const customStatuses = customRes.data ?? [];
   const canCreate = permissions.includes('sales.create');
   const canUpdate = permissions.includes('sales.update');
   const filtered = Boolean(search || status || month || wonMonth);
@@ -71,8 +72,10 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
         {filtered && <Link href="/sales/enquiries" className={BTN_NEUTRAL}>Clear</Link>}
       </form>
 
-      <StatusFilter status={status} search={search} month={month} wonMonth={wonMonth} />
+      <StatusFilter status={status} search={search} month={month} wonMonth={wonMonth} customStatuses={customStatuses} />
       {wonMonth && <p className="text-lg font-semibold text-green-900">Showing enquiries confirmed in {formatMonth(wonMonth)}. <Link href={href(search, status, month)} className="underline">Show all confirmed</Link></p>}
+      {/* FMP-SALES-17 — the dashboard's Monthly Results links land here: the same received-month group, current status. */}
+      {month && !wonMonth && <p className="text-lg font-semibold text-text-primary" data-received-month={month}>Showing enquiries received in {formatMonth(month)}{status === 'WON' ? ' that are now Confirmed' : ''}.</p>}
 
       {res.error ? (
         <div role="alert" className="rounded-xl border border-error bg-error-light px-5 py-4 text-base text-error">The enquiries could not be loaded. Please refresh the page.</div>
@@ -112,11 +115,11 @@ export default async function EnquiryRegisterPage({ searchParams }: { searchPara
                       </>
                     ) : <span className="text-text-muted">—</span>}
                   </div>
-                  <div><CurrentStatus status={e.status} /></div>
+                  <div><CurrentStatus status={e.status} customStatus={e.customStatus} /></div>
                   <div className="flex flex-wrap items-center gap-2 @6xl:justify-self-start">
                     <OpenEnquiryLink href={`/sales/enquiries/${e.id}${backParam}`} companyName={e.companyName} />
                     {canUpdate && <AddActivityButton enquiryId={e.id} companyName={e.companyName} today={res.data.today} />}
-                    <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={res.data.today} filter={status} filterLabel={statusFilterLabel(status)} />
+                    <EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} customStatus={e.customStatus} canEdit={canUpdate} today={res.data.today} filter={status} filterLabel={statusFilterLabel(status, customStatuses)} />
                   </div>
                 </li>
               );

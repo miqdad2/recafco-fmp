@@ -200,6 +200,7 @@ model User {
   salesEnquiriesAssigned    SalesEnquiry[]       @relation("SalesEnquiryAssignedTo")
   salesEnquiriesConfirmed   SalesEnquiry[]       @relation("SalesEnquiryConfirmedBy")
   salesEnquiriesLinked      SalesEnquiry[]       @relation("SalesEnquiryContractLinkedBy")
+  salesCustomStatusesCreated SalesCustomStatus[]  @relation("SalesCustomStatusCreatedBy")
   salesActivitiesRecorded   SalesActivity[]      @relation("SalesActivityRecordedBy")
   salesFollowUpsResponsible SalesFollowUp[]      @relation("SalesFollowUpResponsible")
   salesFollowUpsCompleted   SalesFollowUp[]      @relation("SalesFollowUpCompletedBy")
@@ -4033,6 +4034,8 @@ enum SalesEnquiryStatus {
   // FMP-SALES-09 — two active "waiting" statuses
   WAITING_FOR_DRAWINGS
   WAITING_FOR_CLIENT
+  // FMP-SALES-18 — an in-progress status named by management; the name lives in sales_custom_statuses (custom_status_id).
+  CUSTOM
 }
 
 enum SalesActivityType {
@@ -4099,6 +4102,8 @@ model SalesEnquiry {
   contractLinkedByUserId String?          @map("contract_linked_by_user_id") @db.Uuid
   contractLinkedAt     DateTime?          @map("contract_linked_at") @db.Timestamptz(3)
   contractLinkSource   SalesContractLinkSource? @map("contract_link_source")
+  // FMP-SALES-18 — set exactly when status = CUSTOM (database CHECK); otherwise null.
+  customStatusId       String?            @map("custom_status_id") @db.Uuid
   lostDate             DateTime?          @map("lost_date") @db.Date
   createdByUserId      String             @map("created_by_user_id") @db.Uuid
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -4109,6 +4114,7 @@ model SalesEnquiry {
   confirmedByUser User?          @relation("SalesEnquiryConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
   contractLinkedByUser User?     @relation("SalesEnquiryContractLinkedBy", fields: [contractLinkedByUserId], references: [id], onDelete: SetNull)
   contract       Contract?       @relation("SalesEnquiryContract", fields: [contractId], references: [id], onDelete: SetNull)
+  customStatus   SalesCustomStatus? @relation(fields: [customStatusId], references: [id], onDelete: Restrict)
   activities     SalesActivity[]
   followUps      SalesFollowUp[]
 
@@ -4116,11 +4122,28 @@ model SalesEnquiry {
   @@index([enquiryDate])
   @@index([wonDate])
   @@index([contractLinkSource, contractLinkedAt])
+  @@index([customStatusId])
   @@index([nextFollowUpDate])
   @@index([companyName])
   @@index([contactNumber])
   @@index([createdByUserId])
   @@map("sales_enquiries")
+}
+
+/// FMP-SALES-18 — in-progress enquiry statuses added by management from the Change Status menu. Shared across Sales (Sales
+/// enquiries have no department). nameKey is the normalised name (lower case, hyphens/underscores as spaces, single spaces)
+/// and is unique, so case or spacing variants cannot be created twice. No rename or delete in this change.
+model SalesCustomStatus {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(60)
+  nameKey         String   @unique @map("name_key") @db.VarChar(60)
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  createdByUser User           @relation("SalesCustomStatusCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  enquiries     SalesEnquiry[]
+
+  @@map("sales_custom_statuses")
 }
 
 model SalesActivity {

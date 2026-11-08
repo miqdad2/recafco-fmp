@@ -266,4 +266,29 @@ ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
   .sd-tiny-only { display: inline !important; }
   .sd-tiny-sr { display: inline; position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .sd-panel > p[data-showing] { margin-top: 0; }
+  /* FMP-SALES-17 — slightly slimmer side padding so "Conversion" and "2 of 4 enquiries confirmed" each keep one line. */
+  .sd-month { padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+/* FMP-SALES-17 — short desktop windows: the Month selector and This Month stay on the heading's row (the heading and its one-line
+   definition on the left), and the decorative calendar icon is left out. Same 48px controls and text sizes; nothing is scaled. */
+@media (min-width: 1280px) and (max-height: 900px) {
+  .sd-month-head { flex-wrap: nowrap; align-items: center; }
+  .sd-month-picker { flex-wrap: nowrap; flex-shrink: 0; }
+  .sd-month-picker > label > svg { display: none; }
+  .sd-month-picker select { min-width: 12rem; }
+  .sd-contracts-line { line-height: 1.25; }
+  /* The conversion percentage sits beside its sentence, so "12 of 120 enquiries confirmed" wrapping never adds card height. */
+  .sd-conv-figure { display: flex; align-items: center; column-gap: 0.625rem; }
+  .sd-conv-figure > p:last-child { line-height: 1.25; }
+  /* FMP-SALES-18 — a long custom status keeps to one line in the compact preview (full name in the tooltip, on the
+     enquiry page and in All Enquiries), like long company names. */
+  .sd-recent [data-status-badge="custom"] { display: block; max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The View Contracts link keeps its 48px target; it overlaps the gaps above and below instead of adding row height. */
+  .sd-contracts-line > a { margin-top: -0.5rem; margin-bottom: -0.5rem; }
+}
+/* FMP-SALES-17 — very short desktop windows (about 600px of page area): the select uses the page's 16px base size so the definition
+   line beside it stays on one line, and the Confirmed / Value cards get one-line labels (full labels kept for screen readers). */
+@media (min-width: 1280px) and (max-height: 640px) {
+  .sd-month-picker select { font-size: 1rem; }
+  .sd-month-picker button { padding-left: 0.75rem; padding-right: 0.75rem; }
 }

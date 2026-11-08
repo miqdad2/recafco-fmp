@@ -62,7 +62,7 @@ describe('Sales formatting', () => {
 
   it('dashboard uses the approved plain labels', () => {
     const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx') + read('../_components/follow-ups-panel.tsx');
-    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Enquiries', 'Estimated Confirmed Value — KWD', 'Contracts Created', 'Enquiry Conversion', 'View Enquiries', 'Confirmed this month', 'For enquiries confirmed this month', 'Created from enquiries this month', 'View Contracts', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
+    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Enquiries', 'Estimated Confirmed Value — KWD', 'Contracts Created', 'Enquiry Conversion', 'View Enquiries', 'Enquiries Received', 'Now Confirmed', 'View Confirmed', 'Estimates of the Confirmed enquiries', 'Contracts created in', 'View Contracts', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
     expect(page).not.toContain('Not yet Confirmed or Not Proceeding');
     expect(page).not.toContain('See all');
     expect(page).not.toContain('opens All Enquiries with that filter');
@@ -88,7 +88,7 @@ describe('Sales formatting', () => {
   it('inline status control: editors only, nothing saved by selecting, confirmation for Confirmed/Not Proceeding, stale-status protection', () => {
     const c = read('../_components/enquiry-status-control.tsx');
     expect(c).toContain('if (!canEdit) return null;');
-    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: saved', 'Change Status', 'Confirm Enquiry', 'Save Confirmation', 'The client has agreed to proceed.', 'Confirmation Date', 'Confirmation Notes', 'Enquiry confirmed.']) expect(c).toContain(l);
+    for (const l of ['Save Status', 'Cancel', 'Saving…', 'Status updated', 'Not saved', 'expectedStatus: codeOf(saved)', 'Change Status', 'Confirm Enquiry', 'Save Confirmation', 'The client has agreed to proceed.', 'Confirmation Date', 'Confirmation Notes', 'Enquiry confirmed.']) expect(c).toContain(l);
     expect(read('../actions.ts')).toContain('expectedStatus');
     for (const f of ['../enquiries/page.tsx', '../enquiries/[id]/page.tsx', '../_components/recent-enquiries.tsx']) expect(read(f)).toContain('EnquiryStatusControl');
     expect(read('../enquiries/page.tsx')).toContain("permissions.includes('sales.update')");
@@ -122,7 +122,7 @@ describe('Sales formatting', () => {
     expect(actions).not.toContain('Update Status');
     expect(actions).not.toContain('StatusPanel');
     const c = read('../_components/enquiry-status-control.tsx');
-    for (const l of ['Current Status:', 'Change Status', 'Save Status', 'options = STATUS_ORDER.filter((x) => x !== norm(saved))', 'Choose Status']) expect(c).toContain(l);
+    for (const l of ['Current Status:', 'Change Status', 'Save Status', 'systemOptions = STATUS_ORDER.filter((x) => x !== norm(saved))', 'Choose Status']) expect(c).toContain(l);
     expect(c).not.toContain('type="radio"');
   });
 
@@ -156,7 +156,8 @@ describe('Sales formatting', () => {
     const list = read('../enquiries/page.tsx');
     expect(list).toContain(String.raw`/^\d{4}-(0[1-9]|1[0-2])$/.test(one(sp['wonMonth']))`);
     expect(list).toContain("qs.set('wonMonth', wonMonth)");
-    expect(read('../page.tsx')).toContain('status=WON&wonMonth=');
+    // FMP-SALES-17: the dashboard links by RECEIVED month now; the list keeps the wonMonth filter for other links.
+    expect(read('../page.tsx')).not.toContain('wonMonth=');
     const actions = read('../_components/enquiry-actions.tsx') + read('../enquiries/[id]/page.tsx');
     expect(actions).not.toContain('Add Follow-up');
     expect(actions).toContain('Set Next Follow-up');
@@ -304,9 +305,8 @@ describe('FMP-SALES-11 confirmation and Monthly Results', () => {
     expect(page).not.toContain('Conversion This Month');
     expect(page).not.toContain('Confirmed Projects');
     expect(page).toContain('data-missing-estimates');
-    expect(page).toContain("d.confirmedMonth.withEstimate > 0 ? compactKwd(d.confirmedMonth.estimatedValue) : null");
-    expect(page).toContain('/contracts?fromEnquiryMonth=');
-    expect(page).toContain('/sales/enquiries?status=WON&wonMonth=');
+    expect(page).toContain("r.confirmedValue.withEstimate > 0 ? compactKwd(r.confirmedValue.estimatedValue) : null");
+    expect(page).toContain('/contracts?fromEnquiryMonth=${d.reportMonth}');
   });
 
   it('Save Confirmation is the green button and the Confirmation Date defaults to Kuwait today and cannot be in the future', () => {
@@ -439,28 +439,34 @@ describe('FMP-SALES-10 follow-up task list', () => {
   });
 });
 
-describe('FMP-SALES-16 Enquiry Conversion in Monthly Results (current Kuwait month)', () => {
+describe('FMP-SALES-16/17 Enquiry Conversion in Monthly Results', () => {
   const g = (received: number, confirmed: number, rate: number | null) => ({ period: '2026-11', received, confirmed, rate });
 
   it('shows the percentage and a plain sentence; "—" when nothing was received; 0% when none is confirmed', () => {
-    expect(monthConversionText(g(2, 1, 50))).toEqual({ value: '50%', detail: '1 of 2 enquiries received this month confirmed' });
-    expect(monthConversionText(g(3, 1, 33.3))).toEqual({ value: '33.3%', detail: '1 of 3 enquiries received this month confirmed' });
-    expect(monthConversionText(g(4, 0, 0))).toEqual({ value: '0%', detail: '0 of 4 enquiries received this month confirmed' });
-    expect(monthConversionText(g(1, 1, 100)).detail).toBe('1 of 1 enquiry received this month confirmed');
+    expect(monthConversionText(g(2, 1, 50))).toEqual({ value: '50%', detail: '1 of 2 enquiries confirmed' });
+    expect(monthConversionText(g(3, 1, 33.3))).toEqual({ value: '33.3%', detail: '1 of 3 enquiries confirmed' });
+    expect(monthConversionText(g(4, 0, 0))).toEqual({ value: '0%', detail: '0 of 4 enquiries confirmed' });
+    expect(monthConversionText(g(1, 1, 100))).toEqual({ value: '100%', detail: '1 of 1 enquiry confirmed' });
     expect(monthConversionText(g(0, 0, null))).toEqual({ value: '—', detail: 'No enquiries received this month' });
     expect(monthConversionText(undefined)).toEqual({ value: '—', detail: 'No enquiries received this month' });
   });
 
-  it('is the fourth Monthly Results card, follows the heading month (no period dropdown or query parameter) and opens that received month', () => {
+  it('FMP-SALES-17: four received-month cards in order, Contracts Created on its own line, every link on the selected month', () => {
     const page = read('../page.tsx');
-    const order = ['data-monthly-card="confirmed"', 'data-monthly-card="value"', 'data-monthly-card="contracts"', 'data-monthly-card="conversion"'].map((t) => page.indexOf(t));
+    const order = ['data-monthly-card="received"', 'data-monthly-card="confirmed"', 'data-monthly-card="value"', 'data-monthly-card="conversion"', 'data-monthly-contracts'].map((t) => page.indexOf(t));
     expect(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1]!))).toBe(true);
-    expect(page).toContain('d.enquiryConversion.months.find((m) => m.period === d.month)');
-    expect(page).toContain('href={`/sales/enquiries?month=${d.month}`}');
+    expect(page).not.toContain('data-monthly-card="contracts"');
+    expect(page).toContain('const r = d.monthlyResults;');
+    expect(page).toContain('monthConversionText({ received: r.received, confirmed: r.confirmed, rate: r.conversionRate })');
+    expect(page).toContain('href={`/sales/enquiries?${q}`}');
+    expect(page).toContain('href={`/sales/enquiries?${q}&status=WON`}');
+    expect(page).toContain('const q = `month=${d.reportMonth}`;');
+    expect(page).toContain('Enquiries received in {reportName}, with their current status.');
+    expect(page).toContain('Contracts created in {reportName}:');
+    expect(page).not.toMatch(/confirmedMonth|enquiryConversion\.months/); // no confirmation-date or old per-card figures
     expect(page).toContain('Estimated Confirmed Value — KWD');
     expect(page).toContain('xl:grid-cols-4');
     expect(page).not.toContain('EnquiryConversionCard');
-    expect(page).not.toContain('<select');
     expect(fs.existsSync(path.resolve(__dirname, '../_components/enquiry-conversion-card.tsx'))).toBe(false);
   });
 
@@ -469,5 +475,96 @@ describe('FMP-SALES-16 Enquiry Conversion in Monthly Results (current Kuwait mon
     const block = css.slice(css.indexOf('/* FMP-SALES-15 — very short')).replace(/\/\*[\s\S]*?\*\//g, '');
     expect(block).toContain('@media (min-width: 1280px) and (max-height: 640px)');
     expect(block).not.toMatch(/transform|zoom|scale\(|overflow-y:\s*(auto|scroll)/);
+  });
+});
+
+describe('FMP-SALES-17 Month selector', () => {
+  it('only an earlier month is written into the address; the current month (or anything else) is plain /sales', async () => {
+    const { reportMonthHref, requestedReportMonth } = await import('./report-month');
+    expect(reportMonthHref('2026-10', '2026-11')).toBe('/sales?month=2026-10');
+    expect(reportMonthHref('2026-11', '2026-11')).toBe('/sales');
+    expect(reportMonthHref('2027-01', '2026-11')).toBe('/sales');
+    expect(reportMonthHref('bad', '2026-11')).toBe('/sales');
+    expect(requestedReportMonth('2026-09')).toBe('2026-09');
+    expect(requestedReportMonth(['2026-08', '2026-07'])).toBe('2026-08');
+    expect(requestedReportMonth('2026-13')).toBeUndefined();
+    expect(requestedReportMonth(undefined)).toBeUndefined();
+  });
+
+  it('a labelled native select and a This Month button, 48px targets, server-supplied months, no stored default or new timer', () => {
+    const c = read('../_components/report-month-selector.tsx');
+    expect(c).toContain('<label htmlFor="report-month"');
+    expect(c).toContain('id="report-month"');
+    expect(c).toContain('This Month');
+    expect((c.match(/min-h-12/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(c).toContain('router.push(reportMonthHref(month, currentMonth)');
+    expect(c).not.toMatch(/localStorage|sessionStorage|document\.cookie|setInterval|setTimeout|new Date/);
+    const page = read('../page.tsx');
+    expect(page).toContain('<ReportMonthSelector months={d.reportMonths} selected={d.reportMonth} currentMonth={d.month} />');
+    expect(page).toContain("requestedReportMonth((await searchParams)['month'])");
+    expect(page).toContain('salesApi.dashboard(requested)');
+    // The summary cards stay on today's month; the New Enquiries card says so while an earlier month is selected.
+    expect(page).toContain('`/sales/enquiries?month=${d.month}`');
+    expect(page).toContain('Current month: ${monthName}');
+  });
+
+  it('the enquiry list explains the received-month group it was opened with', () => {
+    const list = read('../enquiries/page.tsx');
+    expect(list).toContain('Showing enquiries received in {formatMonth(month)}');
+    expect(list).toContain("status === 'WON' ? ' that are now Confirmed' : ''");
+  });
+});
+
+describe('FMP-SALES-18 custom statuses', () => {
+  const CS = { id: '5f0c6c1e-7d1a-4e7b-9c1d-2a3b4c5d6e7f', name: 'Waiting for Site Visit' };
+
+  it('one key per status, the custom name on badges, and custom filters named by their status', async () => {
+    const { statusKey, statusText, customStatusFilter, statusFilterLabel } = await import('./sales-format');
+    expect(statusKey('CUSTOM', CS)).toBe(`custom:${CS.id}`);
+    expect(statusKey('FOLLOW_UP', null)).toBe('FOLLOW_UP');
+    expect(statusText('CUSTOM', CS)).toBe('Waiting for Site Visit');
+    expect(statusText('WON', null)).toBe('Confirmed');
+    expect(statusFilterLabel(customStatusFilter(CS.id), [CS])).toBe('Waiting for Site Visit');
+    expect(statusFilterLabel('open', [CS])).toBe('Active');
+  });
+
+  it('a custom status counts as active and stays in only its own custom filter', async () => {
+    const { matchesStatusFilter } = await import('./sales-format');
+    expect(matchesStatusFilter('open', `custom:${CS.id}`)).toBe(true);
+    expect(matchesStatusFilter(`custom:${CS.id}`, `custom:${CS.id}`)).toBe(true);
+    expect(matchesStatusFilter('custom:other', `custom:${CS.id}`)).toBe(false);
+    expect(matchesStatusFilter('WON', `custom:${CS.id}`)).toBe(false);
+  });
+
+  it('the menu lists custom statuses and ends with a separated "Add New Status" that opens a simple popup', () => {
+    const c = read('../_components/enquiry-status-control.tsx');
+    const sep = c.indexOf('role="separator"');
+    expect(sep).toBeGreaterThan(c.indexOf('{options.map((x) => ('));
+    expect(c.indexOf('Add New Status', sep)).toBeGreaterThan(sep);
+    for (const l of ['Add New Status', 'Status Name', 'placeholder="For example, Waiting for Site Visit"', 'This status means the enquiry is still in progress.', 'Save & Apply', 'Cancel', 'Status added and applied.', 'maxLength={NAME_MAX}']) expect(c).toContain(l);
+    expect(c).toContain('nameInput.current?.focus()'); // focus on opening and after an error
+    expect(c).toContain('if (busy.current) return; // a second click while saving does nothing');
+    expect(c).not.toMatch(/colou?r|category/i); // no colour or category choice
+    expect(c).toContain('useCustomStatuses()');
+  });
+
+  it('server action posts to the one create-and-apply route; name errors land on the field; no exported non-functions', () => {
+    const a = read('../actions.ts');
+    expect(a).toContain('/sales/enquiries/${id}/custom-status');
+    expect(a).toContain("res.error.code === 'SALES_CUSTOM_STATUS_EXISTS'");
+    expect(a).toContain('fieldErrors: { name: [res.error.message] }');
+  });
+
+  it('badges, filters, history and the layout all know custom statuses', () => {
+    const ui = read('../_components/sales-ui.tsx');
+    expect(ui).toContain('statusText(status, customStatus)');
+    expect(ui).toContain('[overflow-wrap:anywhere]'); // long names wrap instead of overflowing
+    expect(ui).toContain('customStatuses.map((c) => (');
+    expect(read('../layout.tsx')).toContain('<CustomStatusesProvider statuses={custom.data ?? []}>');
+    const detail = read('../enquiries/[id]/page.tsx');
+    expect(detail).toContain("m['toLabel']");
+    expect(detail).toContain('customStatus={e.customStatus}');
+    expect(read('../enquiries/page.tsx')).toContain('customStatuses={customStatuses}');
+    expect(read('../_components/recent-enquiries.tsx')).toContain('{customOptions}');
   });
 });

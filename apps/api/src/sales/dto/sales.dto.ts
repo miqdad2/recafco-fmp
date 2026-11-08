@@ -125,6 +125,21 @@ export class ChangeStatusDto {
 
   /** Confirmed (Won) only: optional notes about the confirmation, kept in the status history entry. */
   @IsOptional() @IsString() @MaxLength(1000) @Transform(blankToNull) confirmationNotes?: string | null;
+
+  /** FMP-SALES-18 — with status CUSTOM: which custom (in-progress) status to apply. */
+  @IsOptional() @IsUUID('4') customStatusId?: string;
+
+  /** FMP-SALES-18 — with expectedStatus CUSTOM: the custom status the user was looking at (conflict check). */
+  @ValidateIf((o: ChangeStatusDto) => o.expectedCustomStatusId !== null && o.expectedCustomStatusId !== undefined)
+  @IsUUID('4') expectedCustomStatusId?: string | null;
+}
+
+/** FMP-SALES-18 — "+ Add New Status": the new status name (normalised and checked by the service) and what the user saw. */
+export class AddCustomStatusDto {
+  @IsString() @MaxLength(200) name!: string;
+  @IsOptional() @IsEnum(SalesEnquiryStatus) expectedStatus?: SalesEnquiryStatus;
+  @ValidateIf((o: AddCustomStatusDto) => o.expectedCustomStatusId !== null && o.expectedCustomStatusId !== undefined)
+  @IsUUID('4') expectedCustomStatusId?: string | null;
 }
 
 export const RECORDABLE_ACTIVITY_TYPES: SalesActivityType[] = [
@@ -174,7 +189,8 @@ export class EnquiryListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
   @IsOptional() @IsString() @MaxLength(100) @Transform(trim) search?: string;
   /** "open" (every enquiry not yet Confirmed or Not Proceeding), or one or more statuses separated by commas. */
-  @IsOptional() @Matches(/^(open|(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT)(,(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT))*)$/) status?: string;
+  // FMP-SALES-18: also "custom:<id>" for one custom status.
+  @IsOptional() @Matches(/^(open|custom:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT)(,(NEW_ENQUIRY|CONTACTED|MEETING_DONE|QUOTATION_SENT|FOLLOW_UP|WON|LOST|WAITING_FOR_DRAWINGS|WAITING_FOR_CLIENT))*)$/) status?: string;
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'month must be YYYY-MM' }) month?: string;
   /** Enquiries confirmed (Confirmed date) in this month, YYYY-MM - what the dashboard's Confirmed Projects figure counts. */
   @IsOptional() @Matches(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'wonMonth must be YYYY-MM' }) wonMonth?: string;

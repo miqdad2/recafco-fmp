@@ -3,6 +3,7 @@ import { SalesEnquiryStatus } from '@recafco/database';
 import {
   kuwaitToday, dateOnly, dateKey, monthOf, monthRange, lastMonths, followUpBucket, cohortConversionRate, normalizeMoney,
   statusChangeError, isOpenStatus, formatEnquiryNumber, isValidDateString, isValidMonth,
+  reportingMonths, receivedMonthWhere,
 } from './sales.logic';
 
 describe('Kuwait dates', () => {
@@ -107,5 +108,34 @@ describe('plain-language status wording (FMP-SALES-01C)', () => {
   });
   it('the not-proceeding reason message is plain', () => {
     expect(statusChangeError(SalesEnquiryStatus.LOST, '')).toBe('Please give a short reason why this enquiry is not proceeding.');
+  });
+});
+
+describe('reportingMonths (FMP-SALES-17)', () => {
+  it('always includes the current month, newest first, no duplicates and no future months', () => {
+    expect(reportingMonths('2026-11', ['2026-10', '2026-11', '2027-01', '2026-02', '2026-10', 'bad'])).toEqual(['2026-11', '2026-10', '2026-02']);
+  });
+  it('receivedMonthWhere covers the whole Kuwait calendar month', () => {
+    const w = receivedMonthWhere('2026-12').enquiryDate;
+    expect([w.gte.toISOString().slice(0, 10), w.lt.toISOString().slice(0, 10)]).toEqual(['2026-12-01', '2027-01-01']);
+  });
+});
+
+describe('custom status names (FMP-SALES-18)', () => {
+  it('normalises whitespace and builds a case/spacing/hyphen-insensitive key', async () => {
+    const { normalizeStatusName, statusNameKey } = await import('./sales.logic');
+    expect(normalizeStatusName('  Waiting   for\nSite  Visit ')).toBe('Waiting for Site Visit');
+    expect(statusNameKey('Follow-up_Needed')).toBe('follow up needed');
+  });
+  it('refuses blank, too long, symbol-only and protected or legacy names; accepts a normal name', async () => {
+    const { customStatusNameError } = await import('./sales.logic');
+    for (const n of ['', 'x'.repeat(61), '...', 'Won', 'LOST', 'Confirmed', 'not proceeding', 'New Enquiry', 'Custom']) expect(customStatusNameError(n)).not.toBeNull();
+    expect(customStatusNameError('Waiting for Site Visit')).toBeNull();
+    expect(customStatusNameError('x'.repeat(60))).toBeNull();
+  });
+  it('a custom status shows its own name; system statuses keep their labels', async () => {
+    const { effectiveStatusLabel } = await import('./sales.logic');
+    expect(effectiveStatusLabel(SalesEnquiryStatus.CUSTOM, 'Waiting for Site Visit')).toBe('Waiting for Site Visit');
+    expect(effectiveStatusLabel(SalesEnquiryStatus.WON, 'ignored')).toBe('Confirmed');
   });
 });

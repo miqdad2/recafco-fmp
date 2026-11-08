@@ -40,6 +40,26 @@ export function monthRange(month: string): { start: Date; endExclusive: Date } {
   return { start: new Date(Date.UTC(y, m - 1, 1)), endExclusive: new Date(Date.UTC(y, m, 1)) };
 }
 
+/**
+ * FMP-SALES-17 — the ONE received-month rule used by the dashboard's Monthly Results cards AND the enquiry list's `month`
+ * filter: every enquiry whose received date (enquiryDate, a Kuwait calendar date) falls in that month. Add
+ * `status: WON` for the Confirmed group. Never mixes in confirmation dates.
+ */
+export function receivedMonthWhere(month: string): { enquiryDate: { gte: Date; lt: Date } } {
+  const { start, endExclusive } = monthRange(month);
+  return { enquiryDate: { gte: start, lt: endExclusive } };
+}
+
+/**
+ * FMP-SALES-17 — the months the Month selector offers: the current Kuwait month, plus every earlier month with data, newest
+ * first. Future months (a mistyped enquiry date, a clock skew) are never offered.
+ */
+export function reportingMonths(currentMonth: string, dataMonths: Iterable<string>): string[] {
+  const set = new Set<string>([currentMonth]);
+  for (const m of dataMonths) if (isValidMonth(m) && m <= currentMonth) set.add(m);
+  return [...set].sort((a, b) => (a < b ? 1 : -1));
+}
+
 export function isValidMonth(value: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
@@ -107,7 +127,48 @@ export const STATUS_LABELS: Record<SalesEnquiryStatus, string> = {
   LOST: 'Not Proceeding',
   WAITING_FOR_DRAWINGS: 'Waiting for Drawings',
   WAITING_FOR_CLIENT: 'Waiting for Client Response',
+  // FMP-SALES-18 — never shown on its own: the enquiry's custom status name is (effectiveStatusLabel).
+  CUSTOM: 'Custom Status',
 };
+
+/** FMP-SALES-18 — the one place an enquiry's displayed status is decided: a custom status shows its own name. */
+export function effectiveStatusLabel(status: SalesEnquiryStatus, customStatusName: string | null | undefined): string {
+  return status === SalesEnquiryStatus.CUSTOM && customStatusName ? customStatusName : STATUS_LABELS[status];
+}
+
+export const CUSTOM_STATUS_NAME_MAX = 60;
+
+/** Trimmed, with every run of whitespace (tabs, line breaks, double spaces) turned into one space. */
+export function normalizeStatusName(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim();
+}
+
+/** The comparison key stored in name_key: lower case, hyphens/underscores/full stops read as spaces, single spaces. */
+export function statusNameKey(name: string): string {
+  return normalizeStatusName(name.toLowerCase().replace(/[-_.]+/g, ' '));
+}
+
+/**
+ * Names a custom status may never take: every system label, the stored codes written as words, and legacy wording
+ * (Won / Lost / Awarded / Closed ...) and the list filter names, so no custom status can pass for a protected outcome.
+ */
+const RESERVED_STATUS_KEYS: ReadonlySet<string> = new Set(
+  [
+    ...Object.values(STATUS_LABELS),
+    ...Object.keys(STATUS_LABELS),
+    'New Enquiry', 'Contacted', 'Meeting Done', 'Follow Up', 'Won', 'Lost', 'Confirm', 'Confirmed Enquiry', 'Awarded', 'Win',
+    'Not Proceed', 'Not Proceeding Enquiry', 'Closed', 'Cancelled', 'Canceled', 'Rejected', 'Active', 'All', 'Open', 'Custom',
+  ].map(statusNameKey),
+);
+
+/** Why this custom status name cannot be used (before the database uniqueness check), or null. */
+export function customStatusNameError(name: string): string | null {
+  if (!name) return 'Please enter a status name.';
+  if (name.length > CUSTOM_STATUS_NAME_MAX) return `Please keep the status name to ${CUSTOM_STATUS_NAME_MAX} characters or fewer.`;
+  if (!/[\p{L}\p{N}]/u.test(name)) return 'The status name needs at least one letter or number.';
+  if (RESERVED_STATUS_KEYS.has(statusNameKey(name))) return `“${name}” is a built-in status. Choose it from the Change Status menu, or use a different name.`;
+  return null;
+}
 
 /** Human enquiry number: ENQ-2026-0001. */
 export function formatEnquiryNumber(year: number, seq: number): string {

@@ -10,7 +10,12 @@ const API_BASE = process.env['API_BASE_URL'] ?? 'http://localhost:4000';
 
 export type SalesStatus =
   | 'NEW_ENQUIRY' | 'CONTACTED' | 'MEETING_DONE' | 'QUOTATION_SENT' | 'FOLLOW_UP' | 'WON' | 'LOST'
-  | 'WAITING_FOR_DRAWINGS' | 'WAITING_FOR_CLIENT';
+  | 'WAITING_FOR_DRAWINGS' | 'WAITING_FOR_CLIENT'
+  /** FMP-SALES-18 — an in-progress status added by management; its name is in `customStatus`. */
+  | 'CUSTOM';
+
+/** FMP-SALES-18 — a custom in-progress status (shared across Sales). */
+export interface SalesCustomStatus { id: string; name: string }
 export type SalesActivityType =
   | 'OFFICE_MEETING' | 'PHONE_CALL' | 'EMAIL' | 'CLIENT_VISIT' | 'FOLLOW_UP' | 'QUOTATION_UPDATE' | 'STATUS_CHANGE' | 'NOTE' | 'ENQUIRY_UPDATED';
 export type FollowUpBucket = 'OVERDUE' | 'TODAY' | 'UPCOMING' | 'COMPLETED' | 'CANCELLED';
@@ -34,6 +39,10 @@ export interface SalesEnquiry {
   estimatedValueSource: string | null;
   currency: string;
   status: SalesStatus;
+  /** FMP-SALES-18 — set when status is CUSTOM. */
+  customStatus: SalesCustomStatus | null;
+  /** What the badge says (system label or the custom status name), decided by the API. */
+  statusLabel: string;
   assignedTo: UserRef | null;
   nextFollowUpDate: string | null;
   remarks: string | null;
@@ -79,7 +88,7 @@ export interface SalesFollowUp {
 }
 
 export interface SalesFollowUpListItem extends SalesFollowUp {
-  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesStatus; scopeOfWork?: string };
+  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesStatus; customStatus?: SalesCustomStatus | null; scopeOfWork?: string };
 }
 
 /** One received-date group for the Enquiry Conversion card ('all' or YYYY-MM). `rate` is null when nothing was received. */
@@ -88,6 +97,19 @@ export interface SalesConversionGroup {
   received: number;
   confirmed: number;
   rate: number | null;
+}
+
+/** FMP-SALES-17 — received-month group for the Monthly Results cards (same rule as the list's month filter). */
+export interface SalesMonthlyResults {
+  month: string;
+  received: number;
+  confirmed: number;
+  /** confirmed / received x 100 (one decimal); null when nothing was received. */
+  conversionRate: number | null;
+  /** estimatedValue null = no recorded estimate in the Confirmed group (a recorded 0 is '0'). */
+  confirmedValue: { estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
+  /** null when the viewer cannot read contracts. */
+  contractsCreated: number | null;
 }
 
 export interface SalesDashboard {
@@ -107,6 +129,14 @@ export interface SalesDashboard {
   contractsCreated: number | null;
   /** FMP-SALES-15 — Enquiry Conversion card: currently Confirmed / all enquiries received, All Time and per received month. */
   enquiryConversion: { allTime: SalesConversionGroup; months: SalesConversionGroup[] };
+  /** FMP-SALES-17 — the month Monthly Results reports; the other figures always use month (today). */
+  reportMonth: string;
+  /** True when no earlier month is selected, so Monthly Results moves on with the Kuwait calendar. */
+  reportFollowsCurrentMonth: boolean;
+  /** Month selector options, newest first (current month first; never a future month). */
+  reportMonths: string[];
+  /** Enquiries RECEIVED in reportMonth with their current status (not confirmation date), plus enquiry-created contracts. */
+  monthlyResults: SalesMonthlyResults;
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
@@ -187,7 +217,10 @@ export async function salesFetch<T>(path: string, init?: RequestInit): Promise<{
 }
 
 export const salesApi = {
-  dashboard: () => salesFetch<SalesDashboard>('/sales/dashboard'),
+  /** FMP-SALES-17 — `month` (YYYY-MM) selects the Monthly Results reporting month only; omitted = the current Kuwait month. */
+  dashboard: (month?: string) => salesFetch<SalesDashboard>(month ? `/sales/dashboard?month=${encodeURIComponent(month)}` : '/sales/dashboard'),
+  /** FMP-SALES-18 — custom status names for badges, menus and filters (sales.read). */
+  customStatuses: () => salesFetch<SalesCustomStatus[]>('/sales/statuses'),
   enquiries: (qs: URLSearchParams) => salesFetch<SalesEnquiryList>(`/sales/enquiries?${qs.toString()}`),
   enquiry: (id: string) => salesFetch<SalesEnquiryDetail>(`/sales/enquiries/${id}`),
   followUps: (qs?: URLSearchParams) => salesFetch<SalesFollowUpList>(`/sales/follow-ups${qs && qs.toString() ? `?${qs.toString()}` : ''}`),

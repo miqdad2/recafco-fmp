@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation';
 import { getCurrentUserContext } from '../contracts/_lib/get-user-permissions';
 import { Eye } from 'lucide-react';
 import { NewEnquiryButton } from './_components/new-enquiry-modal';
+import { CustomStatusesProvider } from './_components/custom-statuses';
+import { salesApi } from '@/lib/sales-api';
 
 /**
  * FMP-SALES-01 — every /sales page needs sales.read (the API enforces it again on each call). Operational
@@ -19,6 +21,8 @@ export default async function SalesLayout({ children }: { children: React.ReactN
   // elsewhere in /sales is simply not rendered for them, and the API refuses the requests anyway.
   const canChange = permissions.includes('sales.create') || permissions.includes('sales.update');
   const canCreate = permissions.includes('sales.create');
+  // FMP-SALES-18 — custom status names for every badge, menu and filter below (empty if they cannot be read).
+  const custom = await salesApi.customStatuses();
 
   return (
     <div data-sales-shell className="mx-auto flex min-h-full w-full max-w-[2200px] flex-col gap-2 px-5 pb-3 lg:px-8 2xl:gap-4 2xl:pb-4">
@@ -27,14 +31,16 @@ export default async function SalesLayout({ children }: { children: React.ReactN
         {canCreate && (
           <NewEnquiryButton />
         )}
+        {/* FMP-SALES-18 — read-only visitors have no New Client Enquiry button, so their note sits in its place (it wraps below
+            the title on narrow screens), keeping the dashboard on one screen for them too. */}
+        {!canChange && (
+          <p className="flex items-center gap-2 rounded-lg border border-border bg-surface-secondary/60 px-4 py-2 text-base text-text-secondary" data-view-only-note>
+            <Eye className="size-5 shrink-0" aria-hidden="true" />
+            You can view Sales Activities. Adding and changing enquiries is done by management.
+          </p>
+        )}
       </header>
-      {!canChange && (
-        <p className="flex items-center gap-2 rounded-lg border border-border bg-surface-secondary/60 px-4 py-2.5 text-base text-text-secondary">
-          <Eye className="size-5 shrink-0" aria-hidden="true" />
-          You can view Sales Activities. Adding and changing enquiries is done by management.
-        </p>
-      )}
-      {children}
+      <CustomStatusesProvider statuses={custom.data ?? []}>{children}</CustomStatusesProvider>
     </div>
   );
 }

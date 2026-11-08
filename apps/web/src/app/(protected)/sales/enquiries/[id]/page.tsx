@@ -61,11 +61,13 @@ function relatedFollowUpDate(a: SalesActivity): string | null {
 function describeActivity(a: SalesActivity): React.ReactNode {
   const m = a.metadata ?? {};
   if (a.type === 'STATUS_CHANGE') {
-    const from = typeof m['from'] === 'string' ? STATUS_LABELS[m['from'] as SalesStatus] : null;
-    const to = typeof m['to'] === 'string' ? STATUS_LABELS[m['to'] as SalesStatus] : '';
+    // FMP-SALES-18 — newer entries carry the labels as they read at the time (custom status names included).
+    const from = typeof m['fromLabel'] === 'string' ? m['fromLabel'] : typeof m['from'] === 'string' ? STATUS_LABELS[m['from'] as SalesStatus] : null;
+    const to = typeof m['toLabel'] === 'string' ? m['toLabel'] : typeof m['to'] === 'string' ? STATUS_LABELS[m['to'] as SalesStatus] : '';
     return (
       <>
-        <span className="font-semibold">{from ? `${from} → ${to}` : to}</span>
+        <span className="font-semibold [overflow-wrap:anywhere]">{from ? `${from} → ${to}` : to}</span>
+        {m['customStatusCreated'] === true && <span className="block text-text-secondary">New status “{to}” added by {a.recordedBy.displayName}</span>}
         {typeof m['awardedValue'] === 'string' && <span> · Confirmed value {formatKwd(m['awardedValue'])}</span>}
         {typeof m['wonDate'] === 'string' && <span> · Confirmation date {formatDate(m['wonDate'])}</span>}
         {a.notes && <span className="block text-text-secondary">{a.notes}</span>}
@@ -134,7 +136,7 @@ export default async function EnquiryDetailPage({
           <div className="min-w-0">
             <p className="text-base font-semibold text-text-secondary">{e.enquiryNumber} · registered {formatDate(e.enquiryDate)}</p>
             <h1 className="mt-1 break-words text-4xl font-extrabold tracking-tight text-text-primary">{e.companyName}</h1>
-            <div className="mt-3"><CurrentStatus status={e.status} /></div>
+            <div className="mt-3"><CurrentStatus status={e.status} customStatus={e.customStatus} /></div>
           </div>
           {canUpdate && (
             <Link href={`/sales/enquiries/${e.id}/edit`} className={BTN_NEUTRAL}>
@@ -144,7 +146,7 @@ export default async function EnquiryDetailPage({
         </div>
         {canUpdate && (
           <div className="mt-5 border-t border-border pt-5">
-            <EnquiryActions enquiryId={e.id} companyName={e.companyName} today={today} statusSlot={<EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} canEdit={canUpdate} today={today} />} />
+            <EnquiryActions enquiryId={e.id} companyName={e.companyName} today={today} statusSlot={<EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} customStatus={e.customStatus} canEdit={canUpdate} today={today} />} />
           </div>
         )}
       </div>

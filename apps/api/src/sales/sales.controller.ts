@@ -10,7 +10,7 @@ import { SalesService } from './sales.service';
 import { kuwaitToday, monthOf } from './sales.logic';
 import {
   CreateEnquiryDto, UpdateEnquiryDto, ChangeStatusDto, AddActivityDto, AddFollowUpDto, CompleteFollowUpDto,
-  RescheduleFollowUpDto, EnquiryListQueryDto, FollowUpListQueryDto, MonthQueryDto, LinkContractDto,
+  RescheduleFollowUpDto, EnquiryListQueryDto, FollowUpListQueryDto, MonthQueryDto, LinkContractDto, AddCustomStatusDto,
 } from './dto/sales.dto';
 
 function meta(): { requestId?: string } {
@@ -32,8 +32,9 @@ export class SalesController {
 
   @Get('dashboard')
   @Permissions('sales.read')
-  async dashboard(@CurrentUser() actor: AuthUser): Promise<ApiSuccessResponse<unknown>> {
-    return ok(await this.service.dashboard(actor));
+  async dashboard(@CurrentUser() actor: AuthUser, @Query() q: MonthQueryDto): Promise<ApiSuccessResponse<unknown>> {
+    // FMP-SALES-17 — optional ?month=YYYY-MM selects the Monthly Results reporting month only.
+    return ok(await this.service.dashboard(actor, q.month));
   }
 
   @Get('reports/monthly')
@@ -107,6 +108,25 @@ export class SalesController {
     @CurrentUser() actor: AuthUser,
   ): Promise<ApiSuccessResponse<unknown>> {
     return ok(await this.service.changeStatus(id, dto, actor));
+  }
+
+  /** FMP-SALES-18 — custom (in-progress) status names, for badges, menus and filters. Viewers may read them. */
+  @Get('statuses')
+  @Permissions('sales.read')
+  async customStatuses(): Promise<ApiSuccessResponse<unknown>> {
+    return ok(await this.service.listCustomStatuses());
+  }
+
+  /** FMP-SALES-18 — "+ Add New Status": creates a custom status and applies it to this enquiry atomically (same boundary as Change Status). */
+  @Post('enquiries/:id/custom-status')
+  @HttpCode(200)
+  @Permissions('sales.update')
+  async addCustomStatus(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: AddCustomStatusDto,
+    @CurrentUser() actor: AuthUser,
+  ): Promise<ApiSuccessResponse<unknown>> {
+    return ok(await this.service.createAndApplyCustomStatus(id, dto, actor));
   }
 
   /** Links a Confirmed enquiry to an existing contract the actor can see (contracts.read + department scope). */

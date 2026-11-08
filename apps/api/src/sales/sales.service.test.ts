@@ -16,12 +16,14 @@ const tx = {
   salesActivity: { create: vi.fn(), findFirst: vi.fn() },
   salesFollowUp: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   securityAuditEvent: { create: vi.fn() },
+  salesCustomStatus: { findUnique: vi.fn(), create: vi.fn() },
   user: { findUnique: vi.fn() },
   $queryRaw: vi.fn(),
   $executeRaw: vi.fn(),
 };
 const client = {
   salesEnquiry: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), aggregate: vi.fn(), groupBy: vi.fn() },
+  salesCustomStatus: { findUnique: vi.fn(), findMany: vi.fn() },
   contract: { findUnique: vi.fn() },
   user: { findUnique: vi.fn() },
   salesFollowUp: { count: vi.fn(), findMany: vi.fn() },
@@ -646,5 +648,201 @@ describe('Enquiry Conversion (FMP-SALES-15)', () => {
     const dec = await service.dashboard(ACTOR);
     expect(dec.month).toBe('2026-12');
     expect(dec.enquiryConversion.months.find((m) => m.period === dec.month)).toEqual({ period: '2026-12', received: 0, confirmed: 0, rate: null });
+  });
+});
+
+describe('Monthly Results by received month (FMP-SALES-17)', () => {
+  type Fx = { enquiryDate: string; status: SalesEnquiryStatus; estimatedValue: string | null; wonDate?: string | null };
+  let rows: Fx[] = [];
+  const CONTRACT_READER: AuthUser = { ...ACTOR, permissions: [...ACTOR.permissions, 'contracts.read'] };
+  type W = { enquiryDate?: { gte: Date; lt: Date }; status?: unknown; estimatedValue?: unknown; wonDate?: { gte: Date; lt: Date } };
+  const inRange = (d: string | null | undefined, r?: { gte: Date; lt: Date }): boolean => !r || (!!d && d >= dateKey(r.gte)! && d < dateKey(r.lt)!);
+  const match = (w: W = {}) => rows.filter((r) =>
+    inRange(r.enquiryDate, w.enquiryDate) && (!w.wonDate || inRange(r.wonDate, w.wonDate)) &&
+    (typeof w.status !== 'string' || r.status === w.status) &&
+    (w.estimatedValue === undefined || (w.estimatedValue === null ? r.estimatedValue === null : r.estimatedValue !== null)));
+  beforeEach(() => {
+    rows = [];
+    client.salesEnquiry.count.mockImplementation(async (a: { where?: W }) => match(a.where).length);
+    client.salesEnquiry.aggregate.mockImplementation(async (a: { where?: W }) => {
+      const m = match(a.where);
+      const sum = m.filter((r) => r.estimatedValue !== null).reduce<Prisma.Decimal | null>((s, r) => (s ?? new Prisma.Decimal(0)).plus(r.estimatedValue!), null);
+      return { _count: m.length, _sum: { estimatedValue: sum, awardedValue: null } };
+    });
+    client.salesEnquiry.groupBy.mockImplementation(async (a: { by: string[] }) => {
+      if (!a.by.includes('enquiryDate')) return [];
+      return rows.map((r) => ({ enquiryDate: new Date(`${r.enquiryDate}T00:00:00Z`), status: r.status, _count: { _all: 1 } }));
+    });
+    client.salesEnquiry.findMany.mockResolvedValue([]);
+    client.salesFollowUp.count.mockResolvedValue(0);
+    client.salesFollowUp.findMany.mockResolvedValue([]);
+    client.salesActivity.findMany.mockResolvedValue([]);
+    contractsMock.findAll = vi.fn().mockResolvedValue({ total: 0 });
+    vi.setSystemTime(new Date('2026-11-08T09:00:00Z'));
+  });
+  const W = SalesEnquiryStatus.WON;
+
+  it('defaults to the current Kuwait month and follows it', async () => {
+    const d = await service.dashboard(ACTOR);
+    expect([d.reportMonth, d.reportFollowsCurrentMonth, d.reportMonths]).toEqual(['2026-11', true, ['2026-11']]);
+    expect(d.monthlyResults).toMatchObject({ month: '2026-11', received: 0, confirmed: 0, conversionRate: null });
+  });
+
+  it('an October enquiry confirmed in November counts in October, not November; November 1 of 1 = 100%', async () => {
+    rows = [
+      { enquiryDate: '2026-10-20', status: W, estimatedValue: '1000', wonDate: '2026-11-03' },
+      { enquiryDate: '2026-10-21', status: SalesEnquiryStatus.QUOTATION_SENT, estimatedValue: null },
+      { enquiryDate: '2026-11-02', status: W, estimatedValue: '250.5', wonDate: '2026-11-04' },
+    ];
+    const nov = await service.dashboard(ACTOR);
+    expect(nov.monthlyResults).toMatchObject({ received: 1, confirmed: 1, conversionRate: 100, confirmedValue: { estimatedValue: '250.5', withEstimate: 1, withoutEstimate: 0 } });
+    expect(nov.confirmedMonth.count).toBe(2); // the confirmation-date figure is unchanged for its other consumers
+    const oct = await service.dashboard(ACTOR, '2026-10');
+    expect([oct.reportMonth, oct.reportFollowsCurrentMonth, oct.month]).toEqual(['2026-10', false, '2026-11']);
+    expect(oct.monthlyResults).toMatchObject({ month: '2026-10', received: 2, confirmed: 1, conversionRate: 50, confirmedValue: { estimatedValue: '1000' } });
+    expect(oct.reportMonths).toEqual(['2026-11', '2026-10']);
+    expect(oct.enquiriesThisMonth).toBe(1); // operational figures stay on the current month
+  });
+
+  it('Not Proceeding stays in the denominator; no confirmed gives 0%; an empty month gives null', async () => {
+    rows = [
+      { enquiryDate: '2026-09-01', status: SalesEnquiryStatus.LOST, estimatedValue: null },
+      { enquiryDate: '2026-09-02', status: SalesEnquiryStatus.NEW_ENQUIRY, estimatedValue: null },
+      { enquiryDate: '2026-09-03', status: W, estimatedValue: null },
+    ];
+    expect((await service.dashboard(ACTOR, '2026-09')).monthlyResults).toMatchObject({ received: 3, confirmed: 1, conversionRate: 33.3, confirmedValue: { estimatedValue: null, withEstimate: 0, withoutEstimate: 1 } });
+    rows[2]!.status = SalesEnquiryStatus.FOLLOW_UP; // reopened
+    expect((await service.dashboard(ACTOR, '2026-09')).monthlyResults).toMatchObject({ received: 3, confirmed: 0, conversionRate: 0 });
+    rows[2]!.status = W; // reconfirmed: counted once
+    expect((await service.dashboard(ACTOR, '2026-09')).monthlyResults).toMatchObject({ received: 3, confirmed: 1 });
+    expect((await service.dashboard(ACTOR, '2026-08')).monthlyResults).toMatchObject({ received: 0, confirmed: 0, conversionRate: null });
+  });
+
+  it('a recorded zero estimate is 0, not missing', async () => {
+    rows = [{ enquiryDate: '2026-11-01', status: W, estimatedValue: '0' }];
+    expect((await service.dashboard(ACTOR)).monthlyResults.confirmedValue).toEqual({ estimatedValue: '0', withEstimate: 1, withoutEstimate: 0 });
+  });
+
+  it('a future month falls back to the current month; a selected empty month is still offered', async () => {
+    const f = await service.dashboard(ACTOR, '2027-01');
+    expect([f.reportMonth, f.reportFollowsCurrentMonth]).toEqual(['2026-11', true]);
+    const e = await service.dashboard(ACTOR, '2025-03');
+    expect(e.reportMonths).toEqual(['2026-11', '2025-03']);
+  });
+
+  it('Contracts Created follows the selected month with the viewer scope; months with enquiry-created contracts are offered', async () => {
+    client.salesEnquiry.findMany.mockImplementation(async (a: { where?: { contractLinkSource?: string } }) =>
+      a.where?.contractLinkSource === 'CREATED' ? [{ contract: { createdAt: new Date('2026-06-30T21:30:00Z') } }] : []); // 1 July in Kuwait
+    contractsMock.findAll = vi.fn().mockImplementation(async (q: { fromEnquiryMonth: string }) => ({ total: q.fromEnquiryMonth === '2026-07' ? 1 : 0 }));
+    const d = await service.dashboard(CONTRACT_READER, '2026-07');
+    expect(contractsMock.findAll).toHaveBeenCalledWith({ fromEnquiryMonth: '2026-07', page: 1, pageSize: 1 }, CONTRACT_READER);
+    expect(d.reportMonths).toEqual(['2026-11', '2026-07']);
+    expect(d.monthlyResults.contractsCreated).toBe(1);
+    // A viewer whose department scope hides that contract is not offered the month.
+    contractsMock.findAll = vi.fn().mockResolvedValue({ total: 0 });
+    expect((await service.dashboard(CONTRACT_READER)).reportMonths).toEqual(['2026-11']);
+    const noContracts = await service.dashboard(ACTOR, '2026-07');
+    expect(noContracts.monthlyResults.contractsCreated).toBeNull();
+  });
+
+  it('the list month filter and the cards share one received-date rule', async () => {
+    client.salesEnquiry.findMany.mockResolvedValue([]);
+    client.salesEnquiry.count.mockResolvedValue(0);
+    await service.list({ month: '2026-10', status: 'WON' });
+    const where = client.salesEnquiry.count.mock.calls.at(-1)![0].where;
+    expect(where.status).toBe('WON');
+    expect([dateKey(where.enquiryDate.gte), dateKey(where.enquiryDate.lt)]).toEqual(['2026-10-01', '2026-11-01']);
+    expect(where.wonDate).toBeUndefined();
+  });
+});
+
+describe('custom in-progress statuses (FMP-SALES-18)', () => {
+  const CS = { id: '5f0c6c1e-7d1a-4e7b-9c1d-2a3b4c5d6e7f', name: 'Waiting for Site Visit' };
+  beforeEach(() => {
+    tx.salesCustomStatus.findUnique.mockResolvedValue(null);
+    tx.salesCustomStatus.create.mockImplementation(async ({ data }: { data: { name: string } }) => ({ id: CS.id, name: data.name }));
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.FOLLOW_UP, customStatusId: null, customStatus: null }));
+  });
+  const reason = async (p: Promise<unknown>): Promise<string> => {
+    try { await p; return 'resolved'; } catch (e) { return ((e as { getResponse?: () => { code: string } }).getResponse?.() ?? { code: String(e) }).code; }
+  };
+
+  it('normalises the name, creates it and applies it in the same transaction, with history and audit', async () => {
+    await service.createAndApplyCustomStatus('e1', { name: '  Waiting   for\tSite Visit ', expectedStatus: SalesEnquiryStatus.FOLLOW_UP }, ACTOR);
+    expect(client.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.salesCustomStatus.create).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'Waiting for Site Visit', nameKey: 'waiting for site visit', createdByUserId: 'u1' } }));
+    const upd = tx.salesEnquiry.updateMany.mock.calls[0]![0];
+    expect(upd.where).toEqual({ id: 'e1', status: SalesEnquiryStatus.FOLLOW_UP, customStatusId: null });
+    expect(upd.data).toMatchObject({ status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, wonDate: null, lostDate: null });
+    const meta = tx.salesActivity.create.mock.calls[0]![0].data.metadata;
+    expect(meta).toMatchObject({ from: 'FOLLOW_UP', to: 'CUSTOM', fromLabel: 'Follow-up Needed', toLabel: 'Waiting for Site Visit', toCustomStatusId: CS.id, customStatusCreated: true });
+    expect(tx.securityAuditEvent.create.mock.calls.map((c) => c[0].data.event)).toEqual(['SALES_CUSTOM_STATUS_CREATED', 'SALES_ENQUIRY_STATUS_CHANGED']);
+    expect(tx.salesFollowUp.updateMany).not.toHaveBeenCalled(); // follow-ups are never completed or changed
+  });
+
+  it.each([
+    ['', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['   ', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['x'.repeat(61), 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['---', 'SALES_CUSTOM_STATUS_NAME_INVALID'],
+    ['won', 'SALES_CUSTOM_STATUS_NAME_INVALID'], [' CONFIRMED ', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['Not-Proceeding', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['lost', 'SALES_CUSTOM_STATUS_NAME_INVALID'],
+    ['new', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['follow up needed', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['waiting_for_drawings', 'SALES_CUSTOM_STATUS_NAME_INVALID'], ['Under  Discussion', 'SALES_CUSTOM_STATUS_NAME_INVALID'],
+  ])('refuses %j before creating anything', async (name, code) => {
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name }, ACTOR))).toBe(code);
+    expect(tx.salesCustomStatus.create).not.toHaveBeenCalled();
+  });
+
+  it('a case or spacing variant of an existing custom status is refused; a concurrent insert (P2002) gives the same message', async () => {
+    tx.salesCustomStatus.findUnique.mockResolvedValue({ name: 'Waiting for Site Visit' });
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name: 'WAITING for site-visit' }, ACTOR))).toBe('SALES_CUSTOM_STATUS_EXISTS');
+    expect(tx.salesCustomStatus.create).not.toHaveBeenCalled();
+    tx.salesCustomStatus.findUnique.mockResolvedValue(null);
+    tx.salesCustomStatus.create.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x' }));
+    client.salesCustomStatus.findUnique.mockResolvedValue({ name: 'Waiting for Site Visit' });
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name: 'Waiting for site visit' }, ACTOR))).toBe('SALES_CUSTOM_STATUS_EXISTS');
+  });
+
+  it('applying fails inside the creating transaction (so the new status is rolled back): linked contract, conflict, same status', async () => {
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.WON, contractId: 'c1', customStatusId: null, customStatus: null }));
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name: 'Site Visit Booked' }, ACTOR))).toBe('SALES_ENQUIRY_HAS_CONTRACT');
+    expect(tx.salesCustomStatus.create).toHaveBeenCalledTimes(1); // created, then the transaction threw: Postgres discards both
+    expect(tx.salesEnquiry.updateMany).not.toHaveBeenCalled();
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.FOLLOW_UP, customStatusId: null, customStatus: null }));
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name: 'Site Visit Booked', expectedStatus: SalesEnquiryStatus.QUOTATION_SENT }, ACTOR))).toBe('SALES_STATUS_CONFLICT');
+    tx.salesEnquiry.updateMany.mockResolvedValueOnce({ count: 0 });
+    expect(await reason(service.createAndApplyCustomStatus('e1', { name: 'Site Visit Booked' }, ACTOR))).toBe('SALES_STATUS_CONFLICT');
+  });
+
+  it('Change Status to an existing custom status; the same one again is refused; another custom status is a change', async () => {
+    tx.salesCustomStatus.findUnique.mockResolvedValue(CS);
+    await service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, expectedStatus: SalesEnquiryStatus.FOLLOW_UP }, ACTOR);
+    expect(tx.salesEnquiry.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'CUSTOM', customStatusId: CS.id });
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, customStatus: CS }));
+    expect(await reason(service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id }, ACTOR))).toBe('SALES_STATUS_UNCHANGED');
+    expect(await reason(service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, expectedStatus: SalesEnquiryStatus.CUSTOM, expectedCustomStatusId: '6f0c6c1e-7d1a-4e7b-9c1d-2a3b4c5d6e7f' }, ACTOR))).toBe('SALES_STATUS_CONFLICT');
+    const other = { id: '7a0c6c1e-7d1a-4e7b-9c1d-2a3b4c5d6e7f', name: 'Awaiting Samples' };
+    tx.salesCustomStatus.findUnique.mockResolvedValue(other);
+    await service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM, customStatusId: other.id, expectedStatus: SalesEnquiryStatus.CUSTOM, expectedCustomStatusId: CS.id }, ACTOR);
+    const last = tx.salesEnquiry.updateMany.mock.calls.at(-1)![0];
+    expect(last.where).toEqual({ id: 'e1', status: 'CUSTOM', customStatusId: CS.id });
+    expect(tx.salesActivity.create.mock.calls.at(-1)![0].data.metadata).toMatchObject({ fromLabel: 'Waiting for Site Visit', toLabel: 'Awaiting Samples' });
+  });
+
+  it('leaving a custom status clears the id; Confirmed keeps its usual fields; bad combinations are refused', async () => {
+    tx.salesEnquiry.findUnique.mockResolvedValue(row({ status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, customStatus: CS }));
+    await service.changeStatus('e1', { status: SalesEnquiryStatus.WON }, ACTOR);
+    expect(tx.salesEnquiry.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'WON', customStatusId: null, confirmedByUserId: 'u1' });
+    expect(await reason(service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM }, ACTOR))).toBe('SALES_CUSTOM_STATUS_REQUIRED');
+    expect(await reason(service.changeStatus('e1', { status: SalesEnquiryStatus.FOLLOW_UP, customStatusId: CS.id }, ACTOR))).toBe('SALES_CUSTOM_STATUS_MISMATCH');
+    tx.salesCustomStatus.findUnique.mockResolvedValue(null);
+    expect(await reason(service.changeStatus('e1', { status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id }, ACTOR))).toBe('SALES_CUSTOM_STATUS_NOT_FOUND');
+  });
+
+  it('enquiries carry their custom status name; the list filters by one custom status', async () => {
+    client.salesEnquiry.findMany.mockResolvedValue([row({ status: SalesEnquiryStatus.CUSTOM, customStatusId: CS.id, customStatus: CS })]);
+    client.salesEnquiry.count.mockResolvedValue(1);
+    client.salesActivity.findMany.mockResolvedValue([]);
+    const res = await service.list({ status: `custom:${CS.id}` });
+    expect(client.salesEnquiry.count.mock.calls.at(-1)![0].where).toEqual({ customStatusId: CS.id });
+    expect(res.items[0]).toMatchObject({ status: 'CUSTOM', customStatus: CS, statusLabel: 'Waiting for Site Visit' });
+    await service.list({ status: 'open' });
+    expect(client.salesEnquiry.count.mock.calls.at(-1)![0].where).toEqual({ status: { notIn: ['WON', 'LOST'] } }); // custom = active
   });
 });

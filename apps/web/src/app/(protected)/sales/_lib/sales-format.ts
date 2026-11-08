@@ -1,4 +1,4 @@
-import type { FollowUpBucket, SalesActivityType, SalesStatus } from '@/lib/sales-api';
+import type { FollowUpBucket, SalesActivityType, SalesCustomStatus, SalesStatus } from '@/lib/sales-api';
 
 // ---------------------------------------------------------------------------
 // FMP-SALES-01 — wording, colours and number/date formatting for the Sales screens.
@@ -17,6 +17,8 @@ export const STATUS_LABELS: Record<SalesStatus, string> = {
   LOST: 'Not Proceeding',
   WAITING_FOR_DRAWINGS: 'Waiting for Drawings',
   WAITING_FOR_CLIENT: 'Waiting for Client Response',
+  // FMP-SALES-18 — only a fallback: a custom status always shows its own name (statusText).
+  CUSTOM: 'Custom Status',
 };
 
 /** The eight statuses a manager can choose, in the order they are shown. Under Discussion is stored as MEETING_DONE. */
@@ -33,6 +35,8 @@ export const STATUS_FILTER_VALUE: Record<SalesStatus, string> = {
   LOST: 'LOST',
   WAITING_FOR_DRAWINGS: 'WAITING_FOR_DRAWINGS',
   WAITING_FOR_CLIENT: 'WAITING_FOR_CLIENT',
+  // Custom statuses are filtered one at a time with customStatusFilter(id).
+  CUSTOM: '',
 };
 
 /** Counts for the six shown statuses (Contacted is folded into Under Discussion). */
@@ -47,6 +51,7 @@ export function foldStatusCounts(counts: Record<string, number>): Record<SalesSt
     LOST: counts['LOST'] ?? 0,
     WAITING_FOR_DRAWINGS: counts['WAITING_FOR_DRAWINGS'] ?? 0,
     WAITING_FOR_CLIENT: counts['WAITING_FOR_CLIENT'] ?? 0,
+    CUSTOM: counts['CUSTOM'] ?? 0,
   };
 }
 
@@ -61,7 +66,37 @@ export const STATUS_BADGE: Record<SalesStatus, string> = {
   LOST: 'bg-red-50 text-red-800 border-red-200',
   WAITING_FOR_DRAWINGS: 'bg-orange-50 text-orange-900 border-orange-300',
   WAITING_FOR_CLIENT: 'bg-cyan-50 text-cyan-900 border-cyan-300',
+  CUSTOM: 'bg-teal-50 text-teal-900 border-teal-300',
 };
+
+// ---------------------------------------------------------------------------
+// FMP-SALES-18 — custom (in-progress) statuses. One key per choosable status: the system code, or "custom:<id>" for a
+// custom status. The same key is the All Enquiries / Recent Enquiries filter value.
+// ---------------------------------------------------------------------------
+
+export const CUSTOM_STATUS_PREFIX = 'custom:';
+
+export function customStatusFilter(id: string): string {
+  return `${CUSTOM_STATUS_PREFIX}${id}`;
+}
+
+/** The status key of an enquiry (system code, or custom:<id>). */
+export function statusKey(status: SalesStatus, customStatus: SalesCustomStatus | null | undefined): string {
+  return status === 'CUSTOM' && customStatus ? customStatusFilter(customStatus.id) : status;
+}
+
+/** Does an enquiry with this status key still belong in a list filtered by `filter` (the API's status filter value)? */
+export function matchesStatusFilter(filter: string | undefined, key: string): boolean {
+  if (!filter) return true;
+  if (filter === 'open') return key !== 'WON' && key !== 'LOST';
+  if (filter.startsWith(CUSTOM_STATUS_PREFIX)) return filter === key;
+  return filter.split(',').includes(key);
+}
+
+/** What a badge says: the custom status name, or the system label. */
+export function statusText(status: SalesStatus, customStatus: SalesCustomStatus | null | undefined): string {
+  return status === 'CUSTOM' && customStatus ? customStatus.name : STATUS_LABELS[status];
+}
 
 export const BUCKET_LABELS: Record<FollowUpBucket, string> = {
   OVERDUE: 'Overdue',
@@ -159,9 +194,10 @@ export function dueText(bucket: FollowUpBucket, date: string, today: string): st
 }
 
 /** Name of a status filter value ('open', 'FOLLOW_UP', 'MEETING_DONE,CONTACTED', …) for messages. */
-export function statusFilterLabel(filter: string): string {
+export function statusFilterLabel(filter: string, customStatuses: SalesCustomStatus[] = []): string {
   if (!filter) return 'All';
   if (filter === 'open') return 'Active';
+  if (filter.startsWith(CUSTOM_STATUS_PREFIX)) return customStatuses.find((c) => customStatusFilter(c.id) === filter)?.name ?? 'selected';
   const first = filter.split(',')[0] as SalesStatus;
   return STATUS_LABELS[first] ?? 'selected';
 }
@@ -195,10 +231,10 @@ export function compactKwd(value: string | null | undefined): { text: string; nu
 }
 
 /**
- * FMP-SALES-16 — the Enquiry Conversion card in Monthly Results: of the enquiries RECEIVED in the current Kuwait month, the
+ * FMP-SALES-16/17 — the Enquiry Conversion card in Monthly Results: of the enquiries RECEIVED in the selected Kuwait month, the
  * share that are currently Confirmed (figures computed on the server). No group or nothing received: "—", never a made-up 0%.
  */
 export function monthConversionText(group: { received: number; confirmed: number; rate: number | null } | undefined): { value: string; detail: string } {
   if (!group || group.received === 0 || group.rate === null) return { value: '—', detail: 'No enquiries received this month' };
-  return { value: `${group.rate}%`, detail: `${group.confirmed} of ${group.received} ${group.received === 1 ? 'enquiry' : 'enquiries'} received this month confirmed` };
+  return { value: `${group.rate}%`, detail: `${group.confirmed} of ${group.received} ${group.received === 1 ? 'enquiry' : 'enquiries'} confirmed` };
 }

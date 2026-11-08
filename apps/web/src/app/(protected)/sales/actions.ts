@@ -149,12 +149,18 @@ export async function loadRecentEnquiriesAction(status: string): Promise<RecentE
  */
 export async function changeEnquiryStatusAction(
   id: string,
-  input: { status: string; expectedStatus: string; reason?: string; confirmationNotes?: string; wonDate?: string },
+  input: { status: string; expectedStatus: string; reason?: string; confirmationNotes?: string; wonDate?: string; customStatusId?: string; expectedCustomStatusId?: string | null },
 ): Promise<StatusChangeResult> {
   const reason = (input.reason ?? '').trim();
   if (!/^[A-Z_]+$/.test(input.status) || !/^[A-Z_]+$/.test(input.expectedStatus)) return { ok: false, error: 'Please choose a status.', fieldErrors: {}, conflict: false };
   if (input.status === 'LOST' && !reason) return { ok: false, error: null, fieldErrors: { reason: ['Please give a short reason why it is not proceeding.'] }, conflict: false };
   const body: Record<string, string> = { status: input.status, expectedStatus: input.expectedStatus, reason };
+  // FMP-SALES-18 — a custom (in-progress) status, and the custom status the user was looking at.
+  if (input.customStatusId) {
+    if (!UUID.test(input.customStatusId)) return { ok: false, error: 'Please choose a status.', fieldErrors: {}, conflict: false };
+    body['customStatusId'] = input.customStatusId;
+  }
+  if (input.expectedCustomStatusId && UUID.test(input.expectedCustomStatusId)) body['expectedCustomStatusId'] = input.expectedCustomStatusId;
   if (input.status === 'WON') {
     const date = (input.wonDate ?? '').trim();
     if (!date) return { ok: false, error: null, fieldErrors: { wonDate: ['Please choose the confirmation date.'] }, conflict: false };
@@ -172,6 +178,40 @@ export async function changeEnquiryStatusAction(
     };
   }
   return { ok: true, error: null, fieldErrors: {}, conflict: false };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type AddCustomStatusResult = StatusChangeResult & { status?: { id: string; name: string } };
+
+/**
+ * FMP-SALES-18 — "+ Add New Status": the API creates the in-progress status and applies it to this enquiry in one
+ * transaction (sales.update, same restrictions as Change Status). Name problems come back on the Status Name field.
+ */
+export async function addCustomStatusAction(
+  id: string,
+  input: { name: string; expectedStatus: string; expectedCustomStatusId?: string | null },
+): Promise<AddCustomStatusResult> {
+  const name = input.name.replace(/\s+/g, ' ').trim();
+  if (!name) return { ok: false, error: null, fieldErrors: { name: ['Please enter a status name.'] }, conflict: false };
+  if (!/^[A-Z_]+$/.test(input.expectedStatus)) return { ok: false, error: 'Please refresh the page and try again.', fieldErrors: {}, conflict: false };
+  const body: Record<string, string> = { name, expectedStatus: input.expectedStatus };
+  if (input.expectedCustomStatusId && UUID.test(input.expectedCustomStatusId)) body['expectedCustomStatusId'] = input.expectedCustomStatusId;
+  const res = await salesFetch<{ customStatus: { id: string; name: string } | null }>(`/sales/enquiries/${id}/custom-status`, { method: 'POST', body: JSON.stringify(body) });
+  if (res.error) {
+    if (res.error.code === 'SALES_CUSTOM_STATUS_NAME_INVALID' || res.error.code === 'SALES_CUSTOM_STATUS_EXISTS') {
+      return { ok: false, error: null, fieldErrors: { name: [res.error.message] }, conflict: false };
+    }
+    const conflict = res.error.code === 'SALES_STATUS_CONFLICT' || res.error.code === 'SALES_STATUS_UNCHANGED';
+    return {
+      ok: false,
+      error: res.error.status === 403 ? 'You do not have permission to add or change statuses.' : conflict ? 'This enquiry was just changed by someone else.' : res.error.message,
+      fieldErrors: res.error.fields ?? {},
+      conflict,
+    };
+  }
+  const status = res.data?.customStatus ?? null;
+  return status ? { ok: true, error: null, fieldErrors: {}, conflict: false, status } : { ok: false, error: 'Please refresh the page to see the result.', fieldErrors: {}, conflict: false };
 }
 
 /**

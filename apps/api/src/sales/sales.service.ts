@@ -10,7 +10,7 @@ import type {
 } from './dto/sales.dto';
 import {
   kuwaitToday, dateOnly, dateKey, monthOf, monthRange, lastMonths, followUpBucket, cohortConversionRate, formatEnquiryNumber,
-  statusChangeError, isValidDateString, CLOSED_STATUSES, type FollowUpBucket,
+  statusChangeError, isValidDateString, CLOSED_STATUSES, effectiveStatusLabel, normalizeStatusName, statusNameKey, customStatusNameError, receivedMonthWhere, reportingMonths, type FollowUpBucket,
 } from './sales.logic';
 
 /** Shown with the monthly report so the cohort rate is never misread as "confirmed this month / received this month". */
@@ -29,9 +29,12 @@ const CLOSED: SalesEnquiryStatus[] = [...CLOSED_STATUSES];
 type Db = ReturnType<DatabaseService['getClient']>;
 type Tx = Parameters<Parameters<Db['$transaction']>[0]>[0];
 
-type EnquiryRow = Prisma.SalesEnquiryGetPayload<{ include: { createdByUser: typeof USER_REF; assignedToUser: typeof USER_REF; confirmedByUser: typeof USER_REF } }>;
+/** FMP-SALES-18 — the custom status name travels with every enquiry so badges, filters and history can show it. */
+const CUSTOM_STATUS_REF = { select: { id: true, name: true } } as const;
 
-const ENQUIRY_INCLUDE = { createdByUser: USER_REF, assignedToUser: USER_REF, confirmedByUser: USER_REF } as const;
+type EnquiryRow = Prisma.SalesEnquiryGetPayload<{ include: { createdByUser: typeof USER_REF; assignedToUser: typeof USER_REF; confirmedByUser: typeof USER_REF; customStatus: typeof CUSTOM_STATUS_REF } }>;
+
+const ENQUIRY_INCLUDE = { createdByUser: USER_REF, assignedToUser: USER_REF, confirmedByUser: USER_REF, customStatus: CUSTOM_STATUS_REF } as const;
 
 export interface EnquiryView {
   id: string;
@@ -50,6 +53,10 @@ export interface EnquiryView {
   estimatedValueSource: string | null;
   currency: string;
   status: SalesEnquiryStatus;
+  /** FMP-SALES-18 — set when status is CUSTOM (an in-progress status added by management). */
+  customStatus: { id: string; name: string } | null;
+  /** What the badge says: the system label, or the custom status name (effectiveStatusLabel). */
+  statusLabel: string;
   assignedTo: { id: string; displayName: string } | null;
   nextFollowUpDate: string | null;
   remarks: string | null;
@@ -90,6 +97,8 @@ export function toEnquiryView(r: EnquiryRow): EnquiryView {
     estimatedValueSource: r.estimatedValueSource,
     currency: r.currency,
     status: r.status,
+    customStatus: r.customStatus ?? null,
+    statusLabel: effectiveStatusLabel(r.status, r.customStatus?.name),
     assignedTo: r.assignedToUser,
     nextFollowUpDate: dateKey(r.nextFollowUpDate),
     remarks: r.remarks,
@@ -282,14 +291,13 @@ export class SalesService {
       ];
     }
     if (query.status === 'open') where.status = { notIn: CLOSED };
+    else if (query.status?.startsWith('custom:')) where.customStatusId = query.status.slice('custom:'.length); // FMP-SALES-18
     else if (query.status) {
       const list = query.status.split(',') as SalesEnquiryStatus[];
       where.status = list.length === 1 ? list[0]! : { in: list };
     }
-    if (query.month) {
-      const { start, endExclusive } = monthRange(query.month);
-      where.enquiryDate = { gte: start, lt: endExclusive };
-    }
+    // Received-month group: the same rule as the dashboard's Monthly Results cards (receivedMonthWhere).
+    if (query.month) where.enquiryDate = receivedMonthWhere(query.month).enquiryDate;
     if (query.wonMonth) {
       // Same rule as the dashboard's Confirmed Projects figure: Confirmed, with a Confirmed date in that month.
       const { start, endExclusive } = monthRange(query.wonMonth);
@@ -425,77 +433,159 @@ export class SalesService {
   }
 
   async changeStatus(id: string, dto: ChangeStatusDto, actor: AuthUser): Promise<EnquiryView> {
+    this.checkStatusRequest(dto);
+    return this.db.getClient().$transaction(async (tx) => {
+      let custom: { id: string; name: string } | null = null;
+      if (dto.status === SalesEnquiryStatus.CUSTOM) {
+        if (!dto.customStatusId) throw this.invalid('SALES_CUSTOM_STATUS_REQUIRED', 'Please choose a status.');
+        custom = await tx.salesCustomStatus.findUnique({ where: { id: dto.customStatusId }, select: { id: true, name: true } });
+        if (!custom) throw this.invalid('SALES_CUSTOM_STATUS_NOT_FOUND', 'That status no longer exists. Please refresh and choose again.');
+      } else if (dto.customStatusId) {
+        throw this.invalid('SALES_CUSTOM_STATUS_MISMATCH', 'A custom status can only be given with the custom status choice.');
+      }
+      return this.applyStatus(tx, id, dto, custom, actor, false);
+    });
+  }
+
+  /** FMP-SALES-18 — every custom (in-progress) status, oldest first; readable by anyone with sales.read. */
+  async listCustomStatuses(): Promise<{ id: string; name: string }[]> {
+    return this.db.getClient().salesCustomStatus.findMany({ select: { id: true, name: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
+  /**
+   * FMP-SALES-18 — "+ Add New Status": creates an in-progress status and applies it to this enquiry in ONE transaction. The
+   * same checks as any other status change apply (linked contract, someone else changed it), and if applying fails the new
+   * status is rolled back with it. Names are normalised; system and legacy names are refused; the unique name_key refuses
+   * case/spacing duplicates, including two people creating the same name at the same moment.
+   */
+  async createAndApplyCustomStatus(
+    id: string,
+    dto: { name: string; expectedStatus?: SalesEnquiryStatus | undefined; expectedCustomStatusId?: string | null | undefined },
+    actor: AuthUser,
+  ): Promise<EnquiryView> {
+    const name = normalizeStatusName(dto.name ?? '');
+    const problem = customStatusNameError(name);
+    if (problem) throw this.invalid('SALES_CUSTOM_STATUS_NAME_INVALID', problem);
+    const key = statusNameKey(name);
+    try {
+      return await this.db.getClient().$transaction(async (tx) => {
+        const existing = await tx.salesCustomStatus.findUnique({ where: { nameKey: key }, select: { name: true } });
+        if (existing) throw this.nameTaken(existing.name);
+        const created = await tx.salesCustomStatus.create({ data: { name, nameKey: key, createdByUserId: actor.id }, select: { id: true, name: true } });
+        await this.audit(tx, 'SALES_CUSTOM_STATUS_CREATED', actor, { customStatusId: created.id, name: created.name, enquiryId: id });
+        return this.applyStatus(
+          tx, id,
+          { status: SalesEnquiryStatus.CUSTOM, customStatusId: created.id, expectedStatus: dto.expectedStatus, expectedCustomStatusId: dto.expectedCustomStatusId },
+          created, actor, true,
+        );
+      });
+    } catch (e) {
+      // Someone else saved the same name between our check and our insert: the unique name_key refused it, nothing was kept.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const other = await this.db.getClient().salesCustomStatus.findUnique({ where: { nameKey: key }, select: { name: true } });
+        throw this.nameTaken(other?.name ?? name);
+      }
+      throw e;
+    }
+  }
+
+  private nameTaken(existingName: string): UnprocessableEntityException {
+    return this.invalid('SALES_CUSTOM_STATUS_EXISTS', `A status called “${existingName}” already exists. Choose it from the Change Status menu.`);
+  }
+
+  private checkStatusRequest(dto: ChangeStatusDto): void {
     const problem = statusChangeError(dto.status, dto.reason);
     if (problem) throw this.invalid('SALES_LOST_REASON_REQUIRED', problem);
     if (dto.wonDate && !isValidDateString(dto.wonDate)) throw this.invalid('SALES_INVALID_DATE', 'Confirmation date is not a real date');
     if (dto.status !== SalesEnquiryStatus.WON && (dto.awardedValue || dto.wonDate || dto.confirmationNotes)) {
       throw this.invalid('SALES_WON_ONLY', 'Confirmed value, confirmation date and confirmation notes can only be recorded when the enquiry is Confirmed');
     }
+    if (dto.wonDate && dto.wonDate > kuwaitToday()) throw this.invalid('SALES_WON_DATE_IN_FUTURE', 'The confirmation date cannot be in the future.');
+  }
+
+  /**
+   * The one status write (inside the caller's transaction): conflict and linked-contract checks, outcome fields, guarded
+   * update, history entry and audit. A custom status is an in-progress status: it clears outcome fields exactly like
+   * re-opening to any other active status, and never touches follow-ups or activities.
+   */
+  private async applyStatus(
+    tx: Tx,
+    id: string,
+    dto: { status: SalesEnquiryStatus; expectedStatus?: SalesEnquiryStatus | undefined; reason?: string | null | undefined; awardedValue?: string | null | undefined; wonDate?: string | null | undefined; confirmationNotes?: string | null | undefined; customStatusId?: string | null | undefined; expectedCustomStatusId?: string | null | undefined },
+    custom: { id: string; name: string } | null,
+    actor: AuthUser,
+    createdStatus: boolean,
+  ): Promise<EnquiryView> {
     const today = kuwaitToday();
-    if (dto.wonDate && dto.wonDate > today) throw this.invalid('SALES_WON_DATE_IN_FUTURE', 'The confirmation date cannot be in the future.');
+    const before = await this.findOrThrow(tx, id);
+    const conflict = (): UnprocessableEntityException => this.invalid('SALES_STATUS_CONFLICT', 'The enquiry was just changed by someone else. Please refresh and try again.');
+    const beforeCustomId = before.customStatusId ?? null;
+    if (dto.expectedStatus && before.status !== dto.expectedStatus) throw conflict();
+    if (dto.expectedCustomStatusId !== undefined && dto.expectedStatus === SalesEnquiryStatus.CUSTOM && (dto.expectedCustomStatusId ?? null) !== beforeCustomId) throw conflict();
+    const nextCustomId = custom?.id ?? null;
+    if (before.status === dto.status && beforeCustomId === nextCustomId) throw this.invalid('SALES_STATUS_UNCHANGED', 'The enquiry already has this status');
+    if (before.status === SalesEnquiryStatus.WON && before.contractId) {
+      throw this.invalid('SALES_ENQUIRY_HAS_CONTRACT', 'This confirmed enquiry is linked to a contract, so its status cannot be changed.');
+    }
 
-    return this.db.getClient().$transaction(async (tx) => {
-      const before = await this.findOrThrow(tx, id);
-      if (dto.expectedStatus && before.status !== dto.expectedStatus) throw this.invalid('SALES_STATUS_CONFLICT', 'The enquiry was just changed by someone else. Please refresh and try again.');
-      if (before.status === dto.status) throw this.invalid('SALES_STATUS_UNCHANGED', 'The enquiry already has this status');
-      if (before.status === SalesEnquiryStatus.WON && before.contractId) {
-        throw this.invalid('SALES_ENQUIRY_HAS_CONTRACT', 'This confirmed enquiry is linked to a contract, so its status cannot be changed.');
+    const data: Prisma.SalesEnquiryUncheckedUpdateInput = { status: dto.status, customStatusId: nextCustomId };
+    const fromLabel = effectiveStatusLabel(before.status, before.customStatus?.name);
+    const toLabel = effectiveStatusLabel(dto.status, custom?.name);
+    const meta: Record<string, unknown> = { from: before.status, to: dto.status, fromLabel, toLabel };
+    if (before.customStatusId) meta['fromCustomStatusId'] = before.customStatusId;
+    if (custom) meta['toCustomStatusId'] = custom.id;
+    if (createdStatus) meta['customStatusCreated'] = true;
+    if (dto.status === SalesEnquiryStatus.WON && dto.wonDate && dto.wonDate < dateKey(before.enquiryDate)!) {
+      throw this.invalid('SALES_WON_DATE_BEFORE_ENQUIRY', 'The confirmation date cannot be before the enquiry was received.');
+    }
+    if (dto.status === SalesEnquiryStatus.WON) {
+      data.wonDate = dateOnly(dto.wonDate ?? today);
+      data.awardedValue = dto.awardedValue ?? null;
+      data.confirmedByUserId = actor.id;
+      data.confirmedAt = new Date();
+      data.lostReason = null;
+      data.lostDate = null;
+      meta['wonDate'] = dto.wonDate ?? today;
+      meta['awardedValue'] = dto.awardedValue ?? null;
+      if (dto.confirmationNotes) meta['confirmationNotes'] = dto.confirmationNotes;
+    } else if (dto.status === SalesEnquiryStatus.LOST) {
+      data.lostReason = dto.reason!.trim();
+      data.lostDate = dateOnly(today);
+      data.wonDate = null;
+      data.awardedValue = null;
+      data.confirmedByUserId = null;
+      data.confirmedAt = null;
+      meta['reason'] = dto.reason!.trim();
+    } else {
+      // Re-opened (or moved between active statuses): the outcome fields are cleared, but what they were stays in this activity's metadata.
+      if (before.status === SalesEnquiryStatus.WON) {
+        meta['previousWonDate'] = dateKey(before.wonDate);
+        meta['previousAwardedValue'] = before.awardedValue === null ? null : before.awardedValue.toString();
       }
+      if (before.status === SalesEnquiryStatus.LOST) meta['previousLostReason'] = before.lostReason;
+      data.wonDate = null;
+      data.awardedValue = null;
+      data.lostReason = null;
+      data.lostDate = null;
+      data.confirmedByUserId = null;
+      data.confirmedAt = null;
+    }
+    // Guarded write: only applies if nobody changed the status (or the custom status) in the meantime.
+    const res = await tx.salesEnquiry.updateMany({ where: { id, status: before.status, customStatusId: beforeCustomId }, data });
+    if (res.count === 0) throw conflict();
 
-      const data: Prisma.SalesEnquiryUncheckedUpdateInput = { status: dto.status };
-      const meta: Record<string, unknown> = { from: before.status, to: dto.status };
-      if (dto.status === SalesEnquiryStatus.WON && dto.wonDate && dto.wonDate < dateKey(before.enquiryDate)!) {
-        throw this.invalid('SALES_WON_DATE_BEFORE_ENQUIRY', 'The confirmation date cannot be before the enquiry was received.');
-      }
-      if (dto.status === SalesEnquiryStatus.WON) {
-        data.wonDate = dateOnly(dto.wonDate ?? today);
-        data.awardedValue = dto.awardedValue ?? null;
-        data.confirmedByUserId = actor.id;
-        data.confirmedAt = new Date();
-        data.lostReason = null;
-        data.lostDate = null;
-        meta['wonDate'] = dto.wonDate ?? today;
-        meta['awardedValue'] = dto.awardedValue ?? null;
-        if (dto.confirmationNotes) meta['confirmationNotes'] = dto.confirmationNotes;
-      } else if (dto.status === SalesEnquiryStatus.LOST) {
-        data.lostReason = dto.reason!.trim();
-        data.lostDate = dateOnly(today);
-        data.wonDate = null;
-        data.awardedValue = null;
-        data.confirmedByUserId = null;
-        data.confirmedAt = null;
-        meta['reason'] = dto.reason!.trim();
-      } else {
-        // Re-opened: the outcome fields are cleared, but what they were stays in this activity's metadata.
-        if (before.status === SalesEnquiryStatus.WON) {
-          meta['previousWonDate'] = dateKey(before.wonDate);
-          meta['previousAwardedValue'] = before.awardedValue === null ? null : before.awardedValue.toString();
-        }
-        if (before.status === SalesEnquiryStatus.LOST) meta['previousLostReason'] = before.lostReason;
-        data.wonDate = null;
-        data.awardedValue = null;
-        data.lostReason = null;
-        data.lostDate = null;
-        data.confirmedByUserId = null;
-        data.confirmedAt = null;
-      }
-      // Guarded write: only applies if nobody changed the status in the meantime.
-      const res = await tx.salesEnquiry.updateMany({ where: { id, status: before.status }, data });
-      if (res.count === 0) throw this.invalid('SALES_STATUS_CONFLICT', 'The enquiry was just changed by someone else. Please refresh and try again.');
-
-      await tx.salesActivity.create({
-        data: {
-          enquiryId: id,
-          type: SalesActivityType.STATUS_CHANGE,
-          activityDate: dateOnly(today),
-          notes: (dto.status === SalesEnquiryStatus.WON ? dto.confirmationNotes : dto.reason) ?? null,
-          metadata: meta as Prisma.InputJsonValue,
-          recordedByUserId: actor.id,
-        },
-      });
-      await this.audit(tx, 'SALES_ENQUIRY_STATUS_CHANGED', actor, { enquiryId: id, from: before.status, to: dto.status });
-      return toEnquiryView(await this.findOrThrow(tx, id));
+    await tx.salesActivity.create({
+      data: {
+        enquiryId: id,
+        type: SalesActivityType.STATUS_CHANGE,
+        activityDate: dateOnly(today),
+        notes: (dto.status === SalesEnquiryStatus.WON ? dto.confirmationNotes : dto.reason) ?? null,
+        metadata: meta as Prisma.InputJsonValue,
+        recordedByUserId: actor.id,
+      },
     });
+    await this.audit(tx, 'SALES_ENQUIRY_STATUS_CHANGED', actor, { enquiryId: id, from: before.status, to: dto.status, fromLabel, toLabel, customStatusId: nextCustomId });
+    return toEnquiryView(await this.findOrThrow(tx, id));
   }
 
   /**
@@ -703,7 +793,7 @@ export class SalesService {
     const include = {
       responsibleUser: USER_REF,
       completedByUser: USER_REF,
-      enquiry: { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true } },
+      enquiry: { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, customStatus: CUSTOM_STATUS_REF } },
     } as const;
     const [rows, ...countList] = await Promise.all([
       client.salesFollowUp.findMany({
@@ -767,17 +857,71 @@ export class SalesService {
     }
   }
 
-  async dashboard(actor: AuthUser): Promise<SalesDashboard> {
+  /**
+   * FMP-SALES-17 — Monthly Results for one reporting month: the enquiries RECEIVED in that Kuwait month (receivedMonthWhere,
+   * the same rule as the list's `month` filter), with their CURRENT status. Counted over every matching record, never a
+   * preview or a page. Contracts Created is separate: the contract's own creation time plus an explicit CREATED origin.
+   */
+  private async receivedMonthResults(month: string, actor: AuthUser): Promise<ReceivedMonthResults> {
+    const client = this.db.getClient();
+    const received = receivedMonthWhere(month);
+    const confirmed = { ...received, status: SalesEnquiryStatus.WON };
+    const [receivedCount, confirmedCount, estimated, withoutEstimate, contractsCreated] = await Promise.all([
+      client.salesEnquiry.count({ where: received }),
+      client.salesEnquiry.count({ where: confirmed }),
+      client.salesEnquiry.aggregate({ where: { ...confirmed, estimatedValue: { not: null } }, _count: true, _sum: { estimatedValue: true } }),
+      client.salesEnquiry.count({ where: { ...confirmed, estimatedValue: null } }),
+      this.contractsCreatedInMonth(month, actor),
+    ]);
+    return {
+      month,
+      received: receivedCount,
+      confirmed: confirmedCount,
+      conversionRate: cohortConversionRate(receivedCount, confirmedCount),
+      confirmedValue: {
+        // Only recorded estimates are summed; null when none of the Confirmed group has one (a recorded 0 gives "0.000").
+        estimatedValue: estimated._sum.estimatedValue === null || estimated._sum.estimatedValue === undefined ? null : estimated._sum.estimatedValue.toString(),
+        withEstimate: estimated._count,
+        withoutEstimate,
+      },
+      contractsCreated,
+    };
+  }
+
+  /** Months the selector offers: current month + months with received enquiries or enquiry-created contracts (if visible). */
+  private async reportingMonthOptions(currentMonth: string, receivedMonths: Iterable<string>, actor: AuthUser): Promise<string[]> {
+    const months = new Set(receivedMonths);
+    if (actor.permissions.includes('contracts.read')) {
+      const rows = await this.db.getClient().salesEnquiry.findMany({
+        where: { contractLinkSource: SalesContractLinkSource.CREATED, contractId: { not: null } },
+        select: { contract: { select: { createdAt: true } } },
+      });
+      const contractMonths = new Set<string>();
+      for (const r of rows) if (r.contract) contractMonths.add(monthOf(kuwaitToday(r.contract.createdAt)));
+      // Offer a contract-only month only when the viewer's own (department-scoped) Contracts Created count is above zero.
+      const extra = [...contractMonths].filter((m) => !months.has(m) && m <= currentMonth);
+      const counts = await Promise.all(extra.map((m) => this.contractsCreatedInMonth(m, actor)));
+      extra.forEach((m, i) => { if ((counts[i] ?? 0) > 0) months.add(m); });
+    }
+    return reportingMonths(currentMonth, months);
+  }
+
+  /**
+   * `reportMonth` (YYYY-MM) only changes the Monthly Results section; every other figure stays on today. Missing, or later
+   * than the current Kuwait month, means the current month (`reportFollowsCurrentMonth` true).
+   */
+  async dashboard(actor: AuthUser, reportMonth?: string): Promise<SalesDashboard> {
     const client = this.db.getClient();
     const today = kuwaitToday();
     const month = monthOf(today);
+    const selectedMonth = reportMonth && reportMonth < month ? reportMonth : month;
     const { start, endExclusive } = monthRange(month);
     const months = lastMonths(month, 6);
     const trendStart = monthRange(months[0]!).start;
     const canReport = actor.permissions.includes('sales.reports.read');
     const open: Prisma.SalesEnquiryWhereInput = { status: { notIn: CLOSED } };
 
-    const followUpEnquiry = { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, scopeOfWork: true } } as const;
+    const followUpEnquiry = { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, customStatus: CUSTOM_STATUS_REF, scopeOfWork: true } } as const;
     const monthWon = { status: SalesEnquiryStatus.WON, wonDate: { gte: start, lt: endExclusive } };
     const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp, wonEstimated, wonMissing, contractsCreated, receivedGroups] = await Promise.all([
       client.salesEnquiry.count({ where: { enquiryDate: { gte: start, lt: endExclusive } } }),
@@ -816,6 +960,11 @@ export class SalesService {
       // FMP-SALES-15 — every enquiry counted once, by received date and current status (all records the viewer may read).
       client.salesEnquiry.groupBy({ by: ['enquiryDate', 'status'], _count: { _all: true } }),
     ]);
+    const conversionGroups = enquiryConversion(receivedGroups, month);
+    const [monthlyResults, reportMonths] = await Promise.all([
+      this.receivedMonthResults(selectedMonth, actor),
+      this.reportingMonthOptions(month, conversionGroups.months.filter((g) => g.received > 0).map((g) => g.period), actor),
+    ]);
 
     const trendCounts = new Map<string, number>(months.map((m) => [m, 0]));
     for (const r of trendRows) {
@@ -843,7 +992,11 @@ export class SalesService {
         withoutEstimate: wonMissing,
       },
       contractsCreated,
-      enquiryConversion: enquiryConversion(receivedGroups, month),
+      enquiryConversion: conversionGroups,
+      reportMonth: selectedMonth,
+      reportFollowsCurrentMonth: selectedMonth === month,
+      reportMonths: reportMonths.includes(selectedMonth) ? reportMonths : [...reportMonths, selectedMonth].sort((a, b) => (a < b ? 1 : -1)),
+      monthlyResults,
       awardedValueWon: wonRes._sum.awardedValue === null || wonRes._sum.awardedValue === undefined ? null : wonRes._sum.awardedValue.toString(),
       // Cohort conversion (see monthlyReport). null when the viewer lacks sales.reports.read; rate null = N/A.
       conversion: report ? { rate: report.cohortConversionRate, created: report.enquiriesCreated, won: report.cohortWon } : null,
@@ -900,7 +1053,7 @@ export interface FollowUpView {
 }
 
 export interface FollowUpListItem extends FollowUpView {
-  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesEnquiryStatus; /** Dashboard only. */ scopeOfWork?: string };
+  enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesEnquiryStatus; customStatus?: { id: string; name: string } | null; /** Dashboard only. */ scopeOfWork?: string };
 }
 
 type FollowUpRow = Prisma.SalesFollowUpGetPayload<{ include: { responsibleUser: typeof USER_REF; completedByUser: typeof USER_REF } }>;
@@ -953,6 +1106,14 @@ export interface SalesDashboard {
   contractsCreated: number | null;
   /** FMP-SALES-15 — Enquiry Conversion card: currently Confirmed / all enquiries, for All Time and per received month. */
   enquiryConversion: EnquiryConversion;
+  /** FMP-SALES-17 — the month Monthly Results reports (YYYY-MM, Kuwait); the other figures always use `month` (today). */
+  reportMonth: string;
+  /** True when the dashboard is following the current Kuwait month (no earlier month selected). */
+  reportFollowsCurrentMonth: boolean;
+  /** Month selector options, newest first: the current month and earlier months with data. Never a future month. */
+  reportMonths: string[];
+  /** Received-month results for `reportMonth`. Unlike `confirmedMonth` (confirmation date), every figure uses the received date. */
+  monthlyResults: ReceivedMonthResults;
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
@@ -964,6 +1125,21 @@ export interface SalesDashboard {
   activeWithoutFollowUp: number;
   recentEnquiries: EnquiryView[];
   monthlyTrend: { month: string; count: number }[];
+}
+
+/** FMP-SALES-17 — enquiries received in `month` with their current status, plus that month's enquiry-created contracts. */
+export interface ReceivedMonthResults {
+  month: string;
+  /** Every enquiry received in the month (any status, Not Proceeding included). */
+  received: number;
+  /** Of those, the ones whose CURRENT status is Confirmed. */
+  confirmed: number;
+  /** confirmed / received x 100, one decimal; null when nothing was received. */
+  conversionRate: number | null;
+  /** Recorded estimates of the Confirmed group; estimatedValue null = none recorded (never shown as 0). */
+  confirmedValue: { estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
+  /** Contracts created from an enquiry in the month (contract createdAt + CREATED origin); null without contract access. */
+  contractsCreated: number | null;
 }
 
 /** One group of enquiries for the Enquiry Conversion card. `rate` is null when the group is empty (never a division by zero). */

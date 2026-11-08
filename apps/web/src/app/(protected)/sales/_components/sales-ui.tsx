@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { FolderOpen, Phone } from 'lucide-react';
-import type { FollowUpBucket, SalesStatus } from '@/lib/sales-api';
-import { BUCKET_BADGE, BUCKET_LABELS, formatDate, STATUS_BADGE, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER } from '../_lib/sales-format';
+import type { FollowUpBucket, SalesCustomStatus, SalesStatus } from '@/lib/sales-api';
+import { BUCKET_BADGE, BUCKET_LABELS, customStatusFilter, formatDate, STATUS_BADGE, STATUS_FILTER_VALUE, STATUS_LABELS, STATUS_ORDER, statusText } from '../_lib/sales-format';
 
 // Shared building blocks for the Sales screens. No hooks, so usable from server and client components.
 
@@ -35,18 +35,24 @@ export function OpenEnquiryLink({ href, companyName, className = '' }: { href: s
 }
 
 /** The saved status, shown as information (not a control), with its label. */
-export function CurrentStatus({ status }: { status: SalesStatus }): React.JSX.Element {
+export function CurrentStatus({ status, customStatus }: { status: SalesStatus; customStatus?: SalesCustomStatus | null | undefined }): React.JSX.Element {
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-base text-text-secondary 2xl:text-lg">
-      <span className="sd-status-label">Current Status:</span> <StatusBadge status={status} />
+      <span className="sd-status-label">Current Status:</span> <StatusBadge status={status} customStatus={customStatus} />
     </p>
   );
 }
 
-export function StatusBadge({ status }: { status: SalesStatus }): React.JSX.Element {
+/** FMP-SALES-18 — a custom status shows its own name and may wrap (long names never push the page sideways). */
+export function StatusBadge({ status, customStatus }: { status: SalesStatus; customStatus?: SalesCustomStatus | null | undefined }): React.JSX.Element {
+  const custom = status === 'CUSTOM';
   return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-base font-semibold ${STATUS_BADGE[status]}`}>
-      {STATUS_LABELS[status]}
+    <span
+      className={`inline-flex max-w-full items-center rounded-full border px-3 py-1 text-base font-semibold ${custom ? 'whitespace-normal text-left leading-snug [overflow-wrap:anywhere]' : 'whitespace-nowrap'} ${STATUS_BADGE[status]}`}
+      data-status-badge={custom ? 'custom' : status}
+      title={custom ? statusText(status, customStatus) : undefined}
+    >
+      {statusText(status, customStatus)}
     </span>
   );
 }
@@ -128,7 +134,7 @@ export const CHIP = 'inline-flex min-h-12 items-center rounded-full border px-5 
 export const CHIP_ON = 'border-text-primary bg-text-primary text-white';
 export const CHIP_OFF = 'border-border-strong bg-surface text-text-primary hover:bg-surface-secondary';
 
-export function StatusFilter({ status, search = '', month = '', wonMonth = '' }: { status: string; search?: string; month?: string; wonMonth?: string }): React.JSX.Element {
+export function StatusFilter({ status, search = '', month = '', wonMonth = '', customStatuses = [] }: { status: string; search?: string; month?: string; wonMonth?: string; customStatuses?: SalesCustomStatus[] }): React.JSX.Element {
   const to = (value: string): string => {
     const qs = new URLSearchParams();
     if (search) qs.set('search', search);
@@ -153,17 +159,21 @@ export function StatusFilter({ status, search = '', month = '', wonMonth = '' }:
             {c.label}
           </Link>
         ))}
-        <form method="get" action="/sales/enquiries" className="flex items-center gap-2">
+        <form method="get" action="/sales/enquiries" className="flex min-w-0 max-w-full items-center gap-2">
           {search && <input type="hidden" name="search" value={search} />}
           {month && <input type="hidden" name="month" value={month} />}
           <label htmlFor="more-statuses" className="sr-only">More statuses</label>
           <select
             id="more-statuses" name="status" defaultValue={inChips ? '' : status}
-            className={`min-h-12 rounded-full border px-4 text-lg font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? CHIP_ON : CHIP_OFF}`}
+            className={`min-h-12 min-w-0 max-w-72 flex-1 rounded-full border px-4 text-lg font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${!inChips ? CHIP_ON : CHIP_OFF}`}
           >
             <option value="">More Statuses…</option>
             {STATUS_ORDER.map((st) => (
               <option key={st} value={STATUS_FILTER_VALUE[st]}>{STATUS_LABELS[st]}</option>
+            ))}
+            {/* FMP-SALES-18 — custom statuses after the system ones. */}
+            {customStatuses.map((c) => (
+              <option key={c.id} value={customStatusFilter(c.id)}>{c.name}</option>
             ))}
           </select>
           <button type="submit" className={`${CHIP} ${CHIP_OFF}`}>Show</button>
