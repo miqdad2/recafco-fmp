@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ForbiddenException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma, SalesEnquiryStatus, SalesFollowUpStatus } from '@recafco/database';
-import { SalesService } from './sales.service';
+import { SalesService, enquiryConversion } from './sales.service';
 import type { DatabaseService } from '../database/database.service';
 import type { ContractsService } from '../contracts/contracts.service';
 import type { AuthUser } from '../common/types/auth-user';
@@ -592,5 +592,59 @@ describe('register status filter accepts several statuses (Under Discussion = Me
     expect(client.salesEnquiry.findMany.mock.calls.at(-1)![0].where.status).toEqual({ in: ['MEETING_DONE', 'CONTACTED'] });
     await service.list({ status: 'WON' });
     expect(client.salesEnquiry.findMany.mock.calls.at(-1)![0].where.status).toBe('WON');
+  });
+});
+
+describe('Enquiry Conversion (FMP-SALES-15)', () => {
+  const g = (date: string, status: SalesEnquiryStatus, n: number): { enquiryDate: Date; status: SalesEnquiryStatus; _count: { _all: number } } => ({ enquiryDate: new Date(date + 'T00:00:00Z'), status, _count: { _all: n } });
+
+  it('3 confirmed of 10 received is 30%; Not Proceeding and active enquiries stay in the denominator', () => {
+    const r = enquiryConversion([g('2026-11-02', SalesEnquiryStatus.WON, 3), g('2026-11-03', SalesEnquiryStatus.LOST, 2), g('2026-11-04', SalesEnquiryStatus.NEW_ENQUIRY, 5)], '2026-11');
+    expect(r.allTime).toEqual({ period: 'all', received: 10, confirmed: 3, rate: 30 });
+    expect(r.months).toEqual([{ period: '2026-11', received: 10, confirmed: 3, rate: 30 }]);
+  });
+
+  it('no enquiries: no rate (shown as —), never a division by zero; enquiries without confirmations: 0%', () => {
+    expect(enquiryConversion([], '2026-11')).toEqual({ allTime: { period: 'all', received: 0, confirmed: 0, rate: null }, months: [{ period: '2026-11', received: 0, confirmed: 0, rate: null }] });
+    expect(enquiryConversion([g('2026-11-01', SalesEnquiryStatus.FOLLOW_UP, 4)], '2026-11').allTime.rate).toBe(0);
+  });
+
+  it('an enquiry received in October and confirmed in November counts in the October group and All Time, not in November', () => {
+    const r = enquiryConversion([g('2026-10-20', SalesEnquiryStatus.WON, 1), g('2026-10-21', SalesEnquiryStatus.QUOTATION_SENT, 2), g('2026-11-02', SalesEnquiryStatus.NEW_ENQUIRY, 1)], '2026-11');
+    expect(r.months.map((m) => [m.period, m.received, m.confirmed])).toEqual([['2026-11', 1, 0], ['2026-10', 3, 1]]); // newest first
+    expect(r.allTime).toMatchObject({ received: 4, confirmed: 1, rate: 25 });
+  });
+
+  it('rounds to one decimal; the current Kuwait month is always offered even before its first enquiry', () => {
+    const r = enquiryConversion([g('2026-09-10', SalesEnquiryStatus.WON, 1), g('2026-09-11', SalesEnquiryStatus.NEW_ENQUIRY, 2)], '2026-11');
+    expect(r.allTime.rate).toBe(33.3);
+    expect(r.months.map((m) => m.period)).toEqual(['2026-11', '2026-09']);
+  });
+
+  it('the dashboard counts every enquiry the viewer may read, by received date and current status (not a page or preview)', async () => {
+    client.salesEnquiry.count.mockResolvedValue(0);
+    client.salesEnquiry.aggregate.mockResolvedValue({ _count: 0, _sum: { estimatedValue: null, awardedValue: null } });
+    client.salesEnquiry.findMany.mockResolvedValue([]);
+    client.salesFollowUp.count.mockResolvedValue(0);
+    client.salesFollowUp.findMany.mockResolvedValue([]);
+    client.salesActivity.findMany.mockResolvedValue([]);
+    client.salesEnquiry.groupBy.mockImplementation(async (a: { by: string[] }) => (a.by.includes('enquiryDate') ? [g('2026-10-05', SalesEnquiryStatus.WON, 3), g('2026-10-06', SalesEnquiryStatus.LOST, 7)] : []));
+    const d = await service.dashboard(ACTOR);
+    const call = client.salesEnquiry.groupBy.mock.calls.map((x) => x[0] as { by: string[]; where?: unknown }).find((a) => a.by.includes('enquiryDate'))!;
+    expect(call.by).toEqual(['enquiryDate', 'status']);
+    expect(call.where).toBeUndefined(); // no paging, no preview limit
+    expect(d.enquiryConversion.allTime).toEqual({ period: 'all', received: 10, confirmed: 3, rate: 30 });
+  });
+
+  it('FMP-SALES-16: the current-month group follows the Kuwait calendar, so at Kuwait midnight on 1 December the card switches to December', async () => {
+    client.salesEnquiry.groupBy.mockImplementation(async (a: { by: string[] }) => (a.by.includes('enquiryDate') ? [g('2026-11-20', SalesEnquiryStatus.WON, 1), g('2026-11-21', SalesEnquiryStatus.NEW_ENQUIRY, 1)] : []));
+    vi.setSystemTime(new Date('2026-11-30T20:59:59Z')); // 23:59:59 on 30 November in Kuwait
+    const nov = await service.dashboard(ACTOR);
+    expect(nov.month).toBe('2026-11');
+    expect(nov.enquiryConversion.months.find((m) => m.period === nov.month)).toEqual({ period: '2026-11', received: 2, confirmed: 1, rate: 50 });
+    vi.setSystemTime(new Date('2026-11-30T21:00:00Z')); // 00:00 on 1 December in Kuwait
+    const dec = await service.dashboard(ACTOR);
+    expect(dec.month).toBe('2026-12');
+    expect(dec.enquiryConversion.months.find((m) => m.period === dec.month)).toEqual({ period: '2026-12', received: 0, confirmed: 0, rate: null });
   });
 });

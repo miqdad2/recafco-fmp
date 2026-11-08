@@ -779,7 +779,7 @@ export class SalesService {
 
     const followUpEnquiry = { select: { id: true, enquiryNumber: true, companyName: true, contactPerson: true, contactNumber: true, status: true, scopeOfWork: true } } as const;
     const monthWon = { status: SalesEnquiryStatus.WON, wonDate: { gte: start, lt: endExclusive } };
-    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp, wonEstimated, wonMissing, contractsCreated] = await Promise.all([
+    const [thisMonth, overdue, dueToday, openCount, potential, openMissing, wonRes, statusGroups, attention, recent, trendRows, report, upcoming, upcomingCount, noFollowUp, wonEstimated, wonMissing, contractsCreated, receivedGroups] = await Promise.all([
       client.salesEnquiry.count({ where: { enquiryDate: { gte: start, lt: endExclusive } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: { lt: dateOnly(today) } } }),
       client.salesFollowUp.count({ where: { status: SalesFollowUpStatus.PENDING, followUpDate: dateOnly(today) } }),
@@ -813,6 +813,8 @@ export class SalesService {
       client.salesEnquiry.aggregate({ where: { ...monthWon, estimatedValue: { not: null } }, _count: true, _sum: { estimatedValue: true } }),
       client.salesEnquiry.count({ where: { ...monthWon, estimatedValue: null } }),
       this.contractsCreatedInMonth(month, actor),
+      // FMP-SALES-15 — every enquiry counted once, by received date and current status (all records the viewer may read).
+      client.salesEnquiry.groupBy({ by: ['enquiryDate', 'status'], _count: { _all: true } }),
     ]);
 
     const trendCounts = new Map<string, number>(months.map((m) => [m, 0]));
@@ -841,6 +843,7 @@ export class SalesService {
         withoutEstimate: wonMissing,
       },
       contractsCreated,
+      enquiryConversion: enquiryConversion(receivedGroups, month),
       awardedValueWon: wonRes._sum.awardedValue === null || wonRes._sum.awardedValue === undefined ? null : wonRes._sum.awardedValue.toString(),
       // Cohort conversion (see monthlyReport). null when the viewer lacks sales.reports.read; rate null = N/A.
       conversion: report ? { rate: report.cohortConversionRate, created: report.enquiriesCreated, won: report.cohortWon } : null,
@@ -948,6 +951,8 @@ export interface SalesDashboard {
   confirmedMonth: { count: number; estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
   /** Contracts created through an enquiry in this month; null when the viewer cannot read contracts. */
   contractsCreated: number | null;
+  /** FMP-SALES-15 — Enquiry Conversion card: currently Confirmed / all enquiries, for All Time and per received month. */
+  enquiryConversion: EnquiryConversion;
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;
@@ -959,4 +964,50 @@ export interface SalesDashboard {
   activeWithoutFollowUp: number;
   recentEnquiries: EnquiryView[];
   monthlyTrend: { month: string; count: number }[];
+}
+
+/** One group of enquiries for the Enquiry Conversion card. `rate` is null when the group is empty (never a division by zero). */
+export interface ConversionGroup {
+  /** 'all' or a received month YYYY-MM (Kuwait calendar, from the enquiry date). */
+  period: string;
+  received: number;
+  confirmed: number;
+  rate: number | null;
+}
+
+export interface EnquiryConversion {
+  allTime: ConversionGroup;
+  /** Newest first: every month with at least one received enquiry, plus the current Kuwait month. */
+  months: ConversionGroup[];
+}
+
+/**
+ * FMP-SALES-15 — Enquiry Conversion: of the enquiries received in a group (all time, or one received month), the share whose
+ * CURRENT status is Confirmed. Active and Not Proceeding enquiries stay in the denominator; contracts play no part. This is
+ * the same calculation as the monthly report's cohort conversion rate (cohortConversionRate), so the two never disagree.
+ * Re-opening removes an enquiry from the numerator, re-confirming adds it back once - each enquiry has one current status.
+ */
+export function enquiryConversion(
+  groups: { enquiryDate: Date; status: SalesEnquiryStatus; _count: { _all: number } }[],
+  currentMonth: string,
+): EnquiryConversion {
+  const byMonth = new Map<string, { received: number; confirmed: number }>([[currentMonth, { received: 0, confirmed: 0 }]]);
+  let received = 0;
+  let confirmed = 0;
+  for (const g of groups) {
+    const m = monthOf(dateKey(g.enquiryDate)!);
+    const row = byMonth.get(m) ?? { received: 0, confirmed: 0 };
+    row.received += g._count._all;
+    received += g._count._all;
+    if (g.status === SalesEnquiryStatus.WON) {
+      row.confirmed += g._count._all;
+      confirmed += g._count._all;
+    }
+    byMonth.set(m, row);
+  }
+  const group = (period: string, r: number, c: number): ConversionGroup => ({ period, received: r, confirmed: c, rate: cohortConversionRate(r, c) });
+  return {
+    allTime: group('all', received, confirmed),
+    months: [...byMonth.entries()].sort(([a], [b]) => (a < b ? 1 : -1)).map(([m, v]) => group(m, v.received, v.confirmed)),
+  };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatKwd, formatDate, formatMonth, formatRate, dueText, daysBetween, STATUS_ORDER, STATUS_LABELS, STATUS_FILTER_VALUE, foldStatusCounts, NOT_ESTIMATED, TASK_NOT_RECORDED, taskText, compactKwd } from './sales-format';
+import { formatKwd, formatDate, formatMonth, formatRate, dueText, daysBetween, STATUS_ORDER, STATUS_LABELS, STATUS_FILTER_VALUE, foldStatusCounts, NOT_ESTIMATED, TASK_NOT_RECORDED, taskText, compactKwd, monthConversionText } from './sales-format';
 
 const read = (p: string): string => fs.readFileSync(path.resolve(__dirname, p), 'utf8');
 
@@ -62,7 +62,7 @@ describe('Sales formatting', () => {
 
   it('dashboard uses the approved plain labels', () => {
     const page = read('../page.tsx') + read('../_components/recent-enquiries.tsx') + read('../_components/follow-ups-panel.tsx');
-    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Enquiries', 'Estimated Value of Confirmed Enquiries', 'Contracts Created', 'Confirmed this month', 'For enquiries confirmed this month', 'Created from enquiries this month', 'View Contracts', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
+    for (const l of ['Active Enquiries', 'Follow-ups Due', 'New Enquiries This Month', 'Estimated Value of Active Enquiries — KWD', 'Monthly Results', 'Confirmed Enquiries', 'Estimated Confirmed Value — KWD', 'Contracts Created', 'Enquiry Conversion', 'View Enquiries', 'Confirmed this month', 'For enquiries confirmed this month', 'Created from enquiries this month', 'View Contracts', 'Today’s Follow-ups', 'Follow-up date:', 'OpenEnquiryLink', 'Not set', 'Received', 'Enquiries still in progress.', 'View Active Enquiries', 'View Follow-ups', 'View This Month’s Enquiries', 'View All Enquiries', 'No matching enquiries']) expect(page).toContain(l);
     expect(page).not.toContain('Not yet Confirmed or Not Proceeding');
     expect(page).not.toContain('See all');
     expect(page).not.toContain('opens All Enquiries with that filter');
@@ -387,7 +387,7 @@ describe('FMP-SALES-11 confirmation and Monthly Results', () => {
   it('the short-desktop layout uses real layout rules only (no CSS scaling or zoom) and leaves small screens to scroll', () => {
     const css = fs.readFileSync(path.resolve(__dirname, '../../../globals.css'), 'utf8');
     const block = css.slice(css.indexOf('/* FMP-SALES-12')).replace(/\/\*[\s\S]*?\*\//g, '');
-    expect(block).toContain('@media (min-width: 1280px) and (max-height: 959px)');
+    expect(block).toContain('@media (min-width: 1280px) and (max-height: 1100px)'); // FMP-SALES-15: compact spacing up to 1100px tall
     expect(block).not.toMatch(/transform|zoom|scale\(/);
   });
 });
@@ -436,5 +436,38 @@ describe('FMP-SALES-10 follow-up task list', () => {
     expect(taskText('   ')).toBeNull();
     expect(taskText(' Call the client ')).toBe('Call the client');
     for (const f of ['../follow-ups/page.tsx', '../_components/follow-ups-panel.tsx', '../enquiries/[id]/page.tsx']) expect(read(f)).toContain('TASK_NOT_RECORDED');
+  });
+});
+
+describe('FMP-SALES-16 Enquiry Conversion in Monthly Results (current Kuwait month)', () => {
+  const g = (received: number, confirmed: number, rate: number | null) => ({ period: '2026-11', received, confirmed, rate });
+
+  it('shows the percentage and a plain sentence; "—" when nothing was received; 0% when none is confirmed', () => {
+    expect(monthConversionText(g(2, 1, 50))).toEqual({ value: '50%', detail: '1 of 2 enquiries received this month confirmed' });
+    expect(monthConversionText(g(3, 1, 33.3))).toEqual({ value: '33.3%', detail: '1 of 3 enquiries received this month confirmed' });
+    expect(monthConversionText(g(4, 0, 0))).toEqual({ value: '0%', detail: '0 of 4 enquiries received this month confirmed' });
+    expect(monthConversionText(g(1, 1, 100)).detail).toBe('1 of 1 enquiry received this month confirmed');
+    expect(monthConversionText(g(0, 0, null))).toEqual({ value: '—', detail: 'No enquiries received this month' });
+    expect(monthConversionText(undefined)).toEqual({ value: '—', detail: 'No enquiries received this month' });
+  });
+
+  it('is the fourth Monthly Results card, follows the heading month (no period dropdown or query parameter) and opens that received month', () => {
+    const page = read('../page.tsx');
+    const order = ['data-monthly-card="confirmed"', 'data-monthly-card="value"', 'data-monthly-card="contracts"', 'data-monthly-card="conversion"'].map((t) => page.indexOf(t));
+    expect(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1]!))).toBe(true);
+    expect(page).toContain('d.enquiryConversion.months.find((m) => m.period === d.month)');
+    expect(page).toContain('href={`/sales/enquiries?month=${d.month}`}');
+    expect(page).toContain('Estimated Confirmed Value — KWD');
+    expect(page).toContain('xl:grid-cols-4');
+    expect(page).not.toContain('EnquiryConversionCard');
+    expect(page).not.toContain('<select');
+    expect(fs.existsSync(path.resolve(__dirname, '../_components/enquiry-conversion-card.tsx'))).toBe(false);
+  });
+
+  it('very short windows get one-line labels by layout rules only (no scaling, nested scrolling or hidden overflow)', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, '../../../globals.css'), 'utf8');
+    const block = css.slice(css.indexOf('/* FMP-SALES-15 — very short')).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(block).toContain('@media (min-width: 1280px) and (max-height: 640px)');
+    expect(block).not.toMatch(/transform|zoom|scale\(|overflow-y:\s*(auto|scroll)/);
   });
 });

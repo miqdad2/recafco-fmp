@@ -193,3 +193,12 @@ export function compactKwd(value: string | null | undefined): { text: string; nu
   if (Math.abs(n) >= 1e6) return words(n / 1e6, 'million');
   return { text: plain, number: plain, unit: '', exact: plain };
 }
+
+/**
+ * FMP-SALES-16 — the Enquiry Conversion card in Monthly Results: of the enquiries RECEIVED in the current Kuwait month, the
+ * share that are currently Confirmed (figures computed on the server). No group or nothing received: "—", never a made-up 0%.
+ */
+export function monthConversionText(group: { received: number; confirmed: number; rate: number | null } | undefined): { value: string; detail: string } {
+  if (!group || group.received === 0 || group.rate === null) return { value: '—', detail: 'No enquiries received this month' };
+  return { value: `${group.rate}%`, detail: `${group.confirmed} of ${group.received} ${group.received === 1 ? 'enquiry' : 'enquiries'} received this month confirmed` };
+}

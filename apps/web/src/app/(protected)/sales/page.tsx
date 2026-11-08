@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { CalendarClock, FolderOpen, FilePlus2, Banknote, Trophy, FileCheck2, ArrowRight } from 'lucide-react';
+import { CalendarClock, FolderOpen, FilePlus2, Banknote, Trophy, FileCheck2, ArrowRight, Percent } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { salesApi } from '@/lib/sales-api';
 import { getCurrentUserContext } from '../contracts/_lib/get-user-permissions';
-import { compactKwd, formatKwd, formatMonth } from './_lib/sales-format';
+import { compactKwd, formatKwd, formatMonth, monthConversionText } from './_lib/sales-format';
 import { RecentEnquiries } from './_components/recent-enquiries';
 import { FollowUpsPanel } from './_components/follow-ups-panel';
 import { DashboardClock } from './_components/dashboard-clock';
@@ -30,6 +30,8 @@ interface Kpi {
   unit?: string | undefined;
   /** A shorter label and caption for short desktop windows (the full ones are used everywhere else). */
   shortLabel?: string | undefined;
+  /** One-line label for very short desktop windows (about 600px of page height); the full label stays for screen readers. */
+  tinyLabel?: string | undefined;
   shortCaption?: string | undefined;
   shortWarn?: boolean | undefined;
   /** The caption only repeats what the label already says; on short desktop windows it is kept for screen readers only. */
@@ -66,9 +68,12 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
   const activeValue = compactKwd(d.potentialValue);
   // Only the recorded estimates are summed; when none of this month's confirmed enquiries has one this is null (never shown as 0).
   const confirmedValue = d.confirmedMonth.withEstimate > 0 ? compactKwd(d.confirmedMonth.estimatedValue) : null;
+  // Enquiry Conversion follows the reporting month of the heading: enquiries RECEIVED this Kuwait month, currently Confirmed.
+  const conversion = monthConversionText(d.enquiryConversion.months.find((m) => m.period === d.month));
+  const conversionRate = d.enquiryConversion.months.find((m) => m.period === d.month)?.rate ?? null;
   const due = d.followUpsNeedingAttention;
   // Changes whenever anything shown here changes, so the client-side Recent Enquiries list reloads itself.
-  const signature = JSON.stringify([d.month, d.recentEnquiries.map((e) => [e.id, e.status, e.nextFollowUpDate, e.updatedAt, e.latestActivity?.id ?? null]), d.openEnquiries, d.followUpsDue, d.enquiriesThisMonth]);
+  const signature = JSON.stringify([d.month, d.recentEnquiries.map((e) => [e.id, e.status, e.nextFollowUpDate, e.updatedAt, e.latestActivity?.id ?? null]), d.openEnquiries, d.followUpsDue, d.enquiriesThisMonth, conversionRate]);
 
   const kpis: Kpi[] = [
     {
@@ -96,6 +101,7 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
     },
     {
       label: 'New Enquiries This Month',
+      tinyLabel: 'New This Month',
       value: String(d.enquiriesThisMonth),
       caption: `Received in ${monthName}`,
       repeatsLabel: true,
@@ -110,6 +116,7 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
       value: activeValue ? activeValue.number : '—',
       unit: activeValue?.unit || undefined,
       shortLabel: 'Estimated Active Value — KWD',
+      tinyLabel: 'Active Value — KWD',
       exact: activeValue && activeValue.text !== activeValue.exact ? activeValue.exact : undefined,
       shortCaption: d.openWithoutEstimate > 0 ? `${d.openWithoutEstimate} without estimate` : undefined,
       shortWarn: true,
@@ -132,7 +139,7 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
           const body = (
             <>
               <div className="flex items-start justify-between gap-2">
-                <p className="text-lg font-semibold leading-snug text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{k.shortLabel ? <><span className="sd-short-hide">{k.label}</span><span className="sd-short-only">{k.shortLabel}</span></> : k.label}</p>
+                <p className="text-lg font-semibold leading-snug text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{k.tinyLabel ? <><span className="sd-tiny-hide">{k.shortLabel ? <><span className="sd-short-hide">{k.label}</span><span className="sd-short-only">{k.shortLabel}</span></> : k.label}</span><span className="sd-tiny-only" aria-hidden="true">{k.tinyLabel}</span><span className="sd-tiny-sr">{k.label}</span></> : k.shortLabel ? <><span className="sd-short-hide">{k.label}</span><span className="sd-short-only">{k.shortLabel}</span></> : k.label}</p>
                 <span className={`hidden size-9 shrink-0 items-center justify-center rounded-lg 2xl:flex ${k.chip}`}>
                   <k.icon className="size-5" aria-hidden="true" />
                 </span>
@@ -160,8 +167,8 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
       </section>
 
       <section aria-labelledby="monthly-results" className="sd-month-section space-y-2 2xl:space-y-3">
-        <h2 id="monthly-results" className="text-xl font-bold text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">Monthly Results<span className="sd-short-hide"> · </span> <span data-reporting-month className="sd-short-block">{monthName}</span></h2>
-        <div className="sd-month-grid grid grid-cols-1 gap-3 md:grid-cols-3 2xl:gap-4">
+        <h2 id="monthly-results" className="text-xl font-bold text-text-primary 2xl:text-2xl min-[137.5rem]:text-3xl">Monthly Results · <span data-reporting-month>{monthName}</span></h2>
+        <div className="sd-month-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:gap-4">
           <article className="sd-month relative flex flex-col gap-0.5 rounded-xl border border-green-300 bg-green-50/70 px-4 py-2 shadow-sm 2xl:px-5 2xl:py-3" data-monthly-card="confirmed">
             <p className="flex items-center gap-2 text-lg font-semibold text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><Trophy className="sd-short-hide size-5 shrink-0 text-green-800" aria-hidden="true" /> Confirmed Enquiries <ArrowRight className="sd-open-arrow ml-auto hidden size-5 shrink-0 text-blue-800" aria-hidden="true" /></p>
             <p className="flex flex-wrap items-baseline gap-x-3">
@@ -174,7 +181,7 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
           </article>
 
           <article className="sd-month relative flex flex-col gap-0.5 rounded-xl border border-green-300 bg-green-50/70 px-4 py-2 shadow-sm 2xl:px-5 2xl:py-3" data-monthly-card="value">
-            <p className="flex items-center gap-2 text-lg font-semibold text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><Banknote className="sd-short-hide size-5 shrink-0 text-green-800" aria-hidden="true" /> Estimated Value of Confirmed Enquiries</p>
+            <p className="flex items-center gap-2 text-lg font-semibold text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><Banknote className="sd-short-hide size-5 shrink-0 text-green-800" aria-hidden="true" /> Estimated Confirmed Value — KWD</p>
             <p className="break-words text-[2rem] font-extrabold tabular-nums leading-tight text-text-primary 2xl:text-[2.5rem] min-[137.5rem]:text-5xl" data-confirmed-value={confirmedValue?.exact ?? ''}>
               {confirmedValue ? <><span className="mr-2 text-xl font-bold text-text-secondary 2xl:text-2xl">KWD</span>{confirmedValue.unit ? <ExactAmount number={confirmedValue.number} unit={confirmedValue.unit} exact={confirmedValue.exact} /> : confirmedValue.number}</> : d.confirmedMonth.count === 0 ? '—' : 'Not estimated'}
             </p>
@@ -198,6 +205,17 @@ export default async function SalesDashboardPage(): Promise<React.JSX.Element> {
                 <span className="sd-month-link-text">View Contracts</span><span className="sr-only"> created from enquiries in {monthName}</span> <ArrowRight className="size-4" aria-hidden="true" />
               </Link>
             )}
+          </article>
+
+          <article className="sd-month relative flex flex-col gap-0.5 rounded-xl border border-indigo-300 bg-indigo-50/70 px-4 py-2 shadow-sm 2xl:px-5 2xl:py-3" data-monthly-card="conversion">
+            <p className="flex items-center gap-2 text-lg font-semibold text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl"><Percent className="sd-short-hide size-5 shrink-0 text-indigo-800" aria-hidden="true" /> Enquiry Conversion <ArrowRight className="sd-open-arrow ml-auto hidden size-5 shrink-0 text-blue-800" aria-hidden="true" /></p>
+            <p className="flex flex-wrap items-baseline gap-x-3">
+              <span className="text-[2rem] font-extrabold tabular-nums leading-tight text-indigo-950 2xl:text-[2.5rem] min-[137.5rem]:text-5xl" data-conversion-rate={conversionRate ?? ''}>{conversion.value}</span>
+            </p>
+            <p className="text-base font-medium text-text-primary 2xl:text-lg min-[137.5rem]:text-xl" data-conversion-detail>{conversion.detail}</p>
+            <Link href={`/sales/enquiries?month=${d.month}`} className={`sd-month-link ${MONTHLY_LINK}`}>
+              <span className="sd-month-link-text">View Enquiries</span><span className="sr-only"> received in {monthName}</span> <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
           </article>
         </div>
       </section>

@@ -82,6 +82,14 @@ export interface SalesFollowUpListItem extends SalesFollowUp {
   enquiry: { id: string; enquiryNumber: string; companyName: string; contactPerson: string | null; contactNumber: string | null; status: SalesStatus; scopeOfWork?: string };
 }
 
+/** One received-date group for the Enquiry Conversion card ('all' or YYYY-MM). `rate` is null when nothing was received. */
+export interface SalesConversionGroup {
+  period: string;
+  received: number;
+  confirmed: number;
+  rate: number | null;
+}
+
 export interface SalesDashboard {
   today: string;
   month: string;
@@ -97,6 +105,8 @@ export interface SalesDashboard {
   confirmedMonth: { count: number; estimatedValue: string | null; withEstimate: number; withoutEstimate: number };
   /** Contracts created through an enquiry this month; null when the viewer cannot read contracts. */
   contractsCreated: number | null;
+  /** FMP-SALES-15 — Enquiry Conversion card: currently Confirmed / all enquiries received, All Time and per received month. */
+  enquiryConversion: { allTime: SalesConversionGroup; months: SalesConversionGroup[] };
   awardedValueWon: string | null;
   conversion: { rate: number | null; created: number; won: number } | null;
   statusCounts: Record<string, number>;

@@ -14,11 +14,11 @@ function FollowUpCard({ f, today, canUpdate, actions }: { f: SalesFollowUpListIt
   const task = taskText(f.notes);
   const tone = overdue ? 'border-red-200 border-l-red-600 bg-red-50/40' : f.bucket === 'TODAY' ? 'border-amber-200 border-l-amber-500 bg-amber-50/40' : 'border-blue-200 border-l-blue-500';
   return (
-    <li className={`rounded-xl border border-l-8 bg-surface p-3 2xl:p-4 ${tone}`}>
+    <li className={`sd-fu-card rounded-xl border border-l-8 bg-surface p-3 2xl:p-4 ${tone}`}>
       <p title={task ?? undefined} className={`sd-short-clamp line-clamp-2 min-w-0 break-words text-xl font-bold leading-snug 2xl:text-2xl min-[137.5rem]:text-3xl ${task ? 'text-text-primary' : 'italic text-text-secondary'}`}>{task ?? TASK_NOT_RECORDED}</p>
       <p title={f.enquiry.companyName} className="sd-short-clamp dense-clamp-1 line-clamp-2 min-w-0 break-words text-lg font-semibold text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">{f.enquiry.companyName} <span className="font-normal text-text-secondary">· {f.enquiry.enquiryNumber}</span></p>
       <div className="sd-short-hide dense-hide"><ContactLine person={f.enquiry.contactPerson} number={f.enquiry.contactNumber} /></div>
-      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">
+      <p className="sd-fu-due mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-lg text-text-primary 2xl:text-xl min-[137.5rem]:text-2xl">
         <BucketBadge bucket={f.bucket} />
         <span><span className="sd-repeats font-semibold">Follow-up date:</span> {formatDate(f.followUpDate)}</span>
         <span className={`dense-hide font-semibold ${overdue ? 'text-red-700' : f.bucket === 'TODAY' ? 'text-amber-800' : 'text-text-secondary'}`}>({dueText(f.bucket, f.followUpDate, today)})</span>

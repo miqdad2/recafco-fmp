@@ -3420,3 +3420,13 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 ### ExactAmount (FMP-SALES-14)
 
 `sales/_components/exact-amount.tsx` — a dashboard figure shown in words ("12.5 million", from `compactKwd`) rendered as a dotted-underline button; click / Enter / Space toggle an absolutely positioned "Exactly KWD …" bubble (`role=status`, `aria-expanded`), Escape or a click elsewhere closes it. Use it wherever an abbreviated amount is shown; lists and detail pages keep `formatKwd` exact amounts.
+
+
+### EnquiryConversionCard (FMP-SALES-15)
+
+`sales/_components/enquiry-conversion-card.tsx` — full-width card (indigo tint) with grid areas title / period / figure / group / note / link (`sd-conv-*` in `globals.css`): stacked below 768px, two lines on desktop. Period `<select>` (48px, visible "Period" label except on short windows, where it stays for screen readers) switches between server-supplied groups; `conversionText()` gives the percentage and sentence ("—" for an empty group), `conversionListHref()` the matching All Enquiries link. Very short windows (max-height 640px): `sd-tiny-only` / `sd-tiny-hide` / `sd-tiny-sr` give one-line summary labels.
+
+
+### Monthly Results: four cards (FMP-SALES-16)
+
+`sales/page.tsx` — `#monthly-results` heading "Monthly Results · <Month Year>" above a `sd-month-grid` of four `article.sd-month[data-monthly-card]` cards (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`): confirmed, value ("Estimated Confirmed Value — KWD"), contracts, conversion (indigo tint, `data-conversion-rate`, `data-conversion-detail`, text from `monthConversionText()` in `sales-format.ts`). On short windows the list cards are whole-card links (stretched `sd-month-link`, visible arrow). Supersedes the FMP-SALES-15 EnquiryConversionCard (removed).

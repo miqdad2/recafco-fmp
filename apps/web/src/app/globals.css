@@ -176,7 +176,7 @@ ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
 .sd-short-only { display: none; }
 /* FMP-SALES-14 — on every desktop width the summary number and its caption share a line (more room for the previews). */
 @media (min-width: 1280px) { .sd-kpi-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.5rem; } }
-@media (min-width: 1280px) and (max-height: 959px) {
+@media (min-width: 1280px) and (max-height: 1100px) {
   [data-sales-shell] { gap: 0.25rem; padding-bottom: 0.25rem; }
   [data-sales-shell] > header { padding-top: 0.25rem; }
   .sd-kpi { padding-top: 0.25rem; padding-bottom: 0.25rem; position: relative; }
@@ -199,17 +199,14 @@ ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
 }
 
 /* FMP-SALES-13 — short desktop windows such as a 1366x768 or 1280x720 screen with the browser toolbars showing (about 650 or 600 px
-   of page area). Shorter dashboard presentation: the monthly heading sits beside its three cards; captions that only repeat the
-   label are kept for screen readers only; the two monthly list cards become whole-card links with a visible arrow; each preview
+   of page area). Shorter dashboard presentation: the Monthly Results heading sits above its four cards; captions that only repeat the
+   label are kept for screen readers only; the monthly list cards (Confirmed Enquiries, Contracts Created, Enquiry Conversion) become whole-card links with a visible arrow; each preview
    shows one compact record (contact line, estimate and follow-up lines are on the enquiry and follow-up pages); the Recent
    Enquiries filter becomes one "Show" dropdown. Text sizes, button labels and 48px targets are unchanged and nothing is scaled. */
 @media (min-width: 1280px) and (max-height: 900px) {
   .sd-short-hide, .sd-short-none { display: none !important; }
   .sd-short-only { display: inline-flex; }
   .sd-repeats { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .sd-month-section { display: grid; grid-template-columns: 10rem 1fr; column-gap: 0.5rem; align-items: center; }
-  .sd-month-section > * + * { margin-top: 0; }
-  .sd-month-section > h2 { line-height: 1.25; }
   .sd-month .sd-open-arrow { display: block; }
   /* Stretched link: the link's ::after covers its card, so the whole card opens the list; its text stays for screen readers. */
   .sd-month-link { position: static; min-height: 0; margin: 0; }
@@ -221,7 +218,11 @@ ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
   .sd-month:has(.sd-month-link:hover) { box-shadow: 0 4px 12px rgb(15 23 42 / 0.15); }
   .sd-panel ul > li { padding-top: 0.375rem; padding-bottom: 0.375rem; }
   .sd-short-only { display: inline; }
-  .sd-short-block { display: block; }
+  /* Follow-up preview: the due badge and date share a line with the company (full name in the tooltip). */
+  .sd-fu-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.5rem; align-items: center; }
+  .sd-fu-card > p:first-child, .sd-fu-card > .sd-btn-row { grid-column: 1 / -1; }
+  .sd-fu-card > .sd-fu-due { grid-row: 2; grid-column: 1; flex-wrap: nowrap; white-space: nowrap; }
+  .sd-fu-card > p:nth-child(2) { grid-row: 2; grid-column: 2; }
   /* One line each for the preview's task and names (full text in the tooltip and on the enquiry / follow-up pages). */
   .sd-short-clamp { -webkit-line-clamp: 1; }
   /* Previews always use the short record form here (scope, latest activity and 'no contact' lines are on the full pages). */
@@ -254,4 +255,15 @@ ul[data-dense="true"] .dense-clamp-1 { -webkit-line-clamp: 1; }
   .sd-fu .sd-btn-row > a > svg:first-child, .sd-fu .sd-btn-row > div > div > button > svg:first-child { display: none; }
   .sd-recent .sd-btn-row > a, .sd-recent .sd-btn-row > button, .sd-recent .sd-btn-row > div > button[data-status-control] { padding-left: 0.625rem; padding-right: 0.625rem; white-space: nowrap; }
   .sd-recent .sd-btn-row > a > svg:first-child, .sd-recent .sd-btn-row > button > svg:first-child, .sd-recent .sd-btn-row > div > button[data-status-control] > svg:first-child { display: none; }
+}
+
+/* FMP-SALES-15 — very short desktop windows (about 600px of page area, e.g. 1280x720 with browser toolbars): two summary labels get a
+   one-line form (the full label is still read by screen readers), and the panel footers are slimmer. */
+.sd-tiny-only { display: none; }
+.sd-tiny-sr { display: none; }
+@media (min-width: 1280px) and (max-height: 640px) {
+  .sd-tiny-hide { display: none !important; }
+  .sd-tiny-only { display: inline !important; }
+  .sd-tiny-sr { display: inline; position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sd-panel > p[data-showing] { margin-top: 0; }
 }
