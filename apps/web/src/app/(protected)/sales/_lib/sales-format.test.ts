@@ -568,3 +568,34 @@ describe('FMP-SALES-18 custom statuses', () => {
     expect(read('../_components/recent-enquiries.tsx')).toContain('{customOptions}');
   });
 });
+
+describe('FMP-SALES-19 Set Status buttons on the enquiry page', () => {
+  it('the enquiry page uses the buttons layout with the linked-contract reason; Add Activity stays first', () => {
+    const page = read('../enquiries/[id]/page.tsx');
+    expect(page).toContain('<EnquiryStatusControl layout="buttons"');
+    expect(page).toContain("lockedReason={e.status === 'WON' && e.hasContract ?");
+    const actions = read('../_components/enquiry-actions.tsx');
+    expect(actions.indexOf('<AddActivityButton')).toBeLessThan(actions.indexOf('{statusSlot'));
+    // dashboard and list previews keep the menu
+    expect(read('../_components/recent-enquiries.tsx')).not.toContain('layout="buttons"');
+    expect(read('../enquiries/page.tsx')).not.toContain('layout="buttons"');
+  });
+
+  it('buttons come from the shared definitions and custom statuses, in order, and reuse the existing popups', () => {
+    const c = read('../_components/enquiry-status-control.tsx');
+    expect(c).toContain("...(STATUS_ORDER.filter((x) => x !== 'WON' && x !== 'LOST') as string[]),");
+    expect(c).toContain('...customs.map((c) => customStatusFilter(c.id)),');
+    expect(c.indexOf("...customs.map((c) => customStatusFilter(c.id)),")).toBeLessThan(c.indexOf("    'WON',\n    'LOST',"));
+    expect(c).toContain('Set Status');
+    expect(c).toContain('if (current || pending) return; // the current status sends nothing and adds no history');
+    expect(c).toContain('openEditor(k);'); // same Change Status / Confirm Enquiry / Not Proceeding popup
+    expect(c).toContain('openAdd(); }}');
+    expect(c).toContain('aria-pressed={current}');
+    expect(c).toContain('Current</span>'); // not colour alone
+    expect(c).toContain('restoreFocus()'); // focus returns to the button that opened the popup
+    expect(c).toMatch(/min-h-12[^']*text-lg[^']*\[overflow-wrap:anywhere\]/); // 48px, 18px, long names wrap
+    expect(c).toContain("if (key === 'WON') return current ? 'border-green-800 bg-green-700 text-white'");
+    expect(c).toContain("if (key === 'LOST') return current ? 'border-slate-800 bg-slate-700 text-white'");
+    expect(c).toContain('border-dashed border-blue-700'); // outlined Add New Status
+  });
+});

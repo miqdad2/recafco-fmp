@@ -15834,3 +15834,37 @@ Changed: `new-user-wizard.tsx`, `actions.ts`, `administration/users/page.tsx` (b
   - No sideways scrolling on the dashboard, All Enquiries, an enquiry page and Follow-ups at 390x844, 1093x614, 1280x600, 1366x650 and 1920x1080 (manager and viewer). The dashboard has no page scroll at 1280x600, 1366x650 and 1920x1080 for both. The popup stays in the viewport with a 60-character name; smallest text 16px; menu items 48px.
 - Checks: `pnpm.cmd lint` exit 0; `pnpm.cmd typecheck` 12/12; `pnpm.cmd build` 8/8 (`next-env.d.ts` restored). API 2567/2567; database package 13/13. Web 1799/1800; the only failure is the pre-existing `email-login-identity.test.ts` login-page placeholder test.
 - Limitations: no rename or delete (an unused custom status stays in the menus); with many custom statuses the menu scrolls within itself (End and arrow keys reach "Add New Status"); on short desktop windows the dashboard preview shows a long custom status on one line with an ellipsis (full name in the tooltip and on the enquiry page).
+
+
+### FMP-SALES-19 — "Set Status" buttons on the enquiry page (2026-11-09)
+
+- Presentation only: no API, schema, migration, permission or reporting change.
+- The enquiry page now shows Add Activity (red) on top. Below it is a "Set Status" area with one button per status, in this order:
+  - system in-progress statuses from `STATUS_ORDER`;
+  - every custom status from the shared custom-status list;
+  - Confirmed, Not Proceeding, then an outlined "+ Add New Status".
+- The buttons wrap into rows; there is no dropdown and no "More" menu. The current-status badge stays beside the enquiry name. A short line says any status can be chosen, so the buttons don't read as sequential steps.
+- Implementation: `EnquiryStatusControl` gained `layout="buttons"` and `lockedReason`. The buttons reuse the component's existing popups and save logic:
+  - Change Status with Save Status;
+  - Confirm Enquiry with its date and notes;
+  - Not Proceeding with its required reason;
+  - the Status Name popup with Save & Apply.
+  Saving, duplicate-submit protection, conflict handling, the toast and `router.refresh()` work as before. The dashboard and list previews keep the menu (default layout).
+- Styling:
+  - Buttons are 48px tall with 18px text.
+  - In-progress statuses are blue, Confirmed green, Not Proceeding grey, Add New Status dashed blue. All have visible borders, hover states and a focus ring.
+  - The current status is filled, with a checkmark, "Current" and `aria-pressed`. Clicking it does nothing: no request and no history entry.
+  - Long custom names wrap inside their button.
+- Focus returns to the button that opened a popup. When an enquiry is Confirmed and linked to a contract, the area shows "This confirmed enquiry is linked to a contract, so its status cannot be changed." instead of buttons. Viewers and readers without sales.update see only the badge, as before; the API still refuses their changes (403).
+- Verified in the throw-away review_tmp schema (identity checked; dropped afterwards; genuine data unchanged: 3 enquiries, 1 follow-up, 35 contracts, 12 users):
+  - With 6 custom statuses (4 long), all 15 buttons appear in order, each 48px with 18px text. There is no Change Status dropdown on the page, and Add Activity comes first.
+  - Clicking the current status opens nothing and adds no history.
+  - Keyboard: Enter on Follow-up Needed opens the popup with it preselected; Escape returns focus to that button.
+  - Double-clicking Save Status records one update. The highlighted button, the badge beside the name and the history agree within about 300ms after each save, without a manual reload (9 consecutive saves, 3 of them double-clicked; one history entry per save). One early reading caught the badge before its refresh had shown.
+  - Confirmed opens Confirm Enquiry with date, notes and Save Confirmation.
+  - Not Proceeding without a reason shows "Please give a short reason…" and saves nothing; with a reason it saves.
+  - Reopening to a custom status highlights that custom button.
+  - "+ Add New Status" focuses Status Name. Save & Apply (double-clicked) creates one status; the new button appears as Current and focus returns to "+ Add New Status".
+  - The linked enquiry shows its reason and no buttons. The viewer and the other-department reader see the badge and no buttons (API 403).
+  - No sideways scrolling, no button outside its row and no clipped label at 390x844, 1093x614 (125% zoom), 1280x600, 1366x650 and 1920x1080 with the sidebar. The page scrolls normally.
+- Checks: `pnpm.cmd lint` exit 0; `pnpm.cmd typecheck` 12/12; `pnpm.cmd build` 8/8 (`next-env.d.ts` restored). API 2567/2567. Web 1801/1802; the only failure is the pre-existing `email-login-identity.test.ts` login-page placeholder test.

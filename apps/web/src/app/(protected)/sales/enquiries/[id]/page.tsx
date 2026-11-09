@@ -146,7 +146,7 @@ export default async function EnquiryDetailPage({
         </div>
         {canUpdate && (
           <div className="mt-5 border-t border-border pt-5">
-            <EnquiryActions enquiryId={e.id} companyName={e.companyName} today={today} statusSlot={<EnquiryStatusControl enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} customStatus={e.customStatus} canEdit={canUpdate} today={today} />} />
+            <EnquiryActions enquiryId={e.id} companyName={e.companyName} today={today} statusSlot={<EnquiryStatusControl layout="buttons" lockedReason={e.status === 'WON' && e.hasContract ? 'This confirmed enquiry is linked to a contract, so its status cannot be changed.' : null} enquiryId={e.id} enquiryNumber={e.enquiryNumber} companyName={e.companyName} status={e.status} customStatus={e.customStatus} canEdit={canUpdate} today={today} />} />
           </div>
         )}
       </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, ChevronDown, Flag, Loader2, Plus, TriangleAlert, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, Flag, Loader2, Lock, Plus, TriangleAlert, X } from 'lucide-react';
 import type { SalesCustomStatus, SalesStatus } from '@/lib/sales-api';
 import { addCustomStatusAction, changeEnquiryStatusAction } from '../actions';
 import { CUSTOM_STATUS_PREFIX, customStatusFilter, matchesStatusFilter, STATUS_LABELS, STATUS_ORDER, statusKey } from '../_lib/sales-format';
@@ -40,6 +40,10 @@ interface Props {
   filter?: string | undefined;
   /** Name of that filter for the explanation, e.g. "Active". */
   filterLabel?: string | undefined;
+  /** FMP-SALES-19 — 'buttons': every status as a visible button under a "Set Status" heading (enquiry page). Default 'menu'. */
+  layout?: 'menu' | 'buttons';
+  /** FMP-SALES-19 — when the status cannot be changed (e.g. linked to a contract): the short reason shown instead of buttons. */
+  lockedReason?: string | null | undefined;
 }
 
 /** Tab / Shift+Tab stay inside the popup (same behaviour as the Add Activity and New Enquiry popups). */
@@ -60,7 +64,7 @@ function keepFocusInside(e: React.KeyboardEvent<HTMLDialogElement>): void {
 
 type Outcome = { kind: 'leaves'; text: string } | null;
 
-export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, status, customStatus, canEdit, today, filter, filterLabel }: Props): React.JSX.Element | null {
+export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, status, customStatus, canEdit, today, filter, filterLabel, layout = 'menu', lockedReason }: Props): React.JSX.Element | null {
   const uid = useId();
   const router = useRouter();
   const known = useCustomStatuses();
@@ -85,6 +89,12 @@ export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, st
   const [addOutcome, setAddOutcome] = useState<Outcome>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  // The button that opened a popup; focus goes back to it when the popup closes (status buttons, or the menu trigger).
+  const returnTo = useRef<HTMLElement | null>(null);
+  const restoreFocus = (): void => {
+    const el = returnTo.current;
+    (el && el.isConnected ? el : trigger.current)?.focus();
+  };
   const menu = useRef<HTMLUListElement>(null);
   const [dropUp, setDropUp] = useState(false);
 
@@ -270,8 +280,72 @@ export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, st
   const savedBadge = <StatusBadge status={codeOf(saved)} customStatus={customOf(saved)} />;
   const menuItemClass = 'flex min-h-12 w-full items-center px-4 py-2 text-left text-lg font-semibold text-slate-900 [overflow-wrap:anywhere] hover:bg-amber-100 focus:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus';
 
+  // FMP-SALES-19 — the enquiry page's "Set Status" buttons: the same statuses, in the same order as the menu (system
+  // in-progress statuses, then custom ones, then Confirmed and Not Proceeding), from the same definitions and custom-status list.
+  const buttonKeys: string[] = [
+    ...(STATUS_ORDER.filter((x) => x !== 'WON' && x !== 'LOST') as string[]),
+    ...customs.map((c) => customStatusFilter(c.id)),
+    'WON',
+    'LOST',
+  ];
+  const tone = (key: string, current: boolean): string => {
+    if (key === 'WON') return current ? 'border-green-800 bg-green-700 text-white' : 'border-green-600 bg-green-50 text-green-900 hover:bg-green-100';
+    if (key === 'LOST') return current ? 'border-slate-800 bg-slate-700 text-white' : 'border-slate-400 bg-slate-100 text-slate-900 hover:bg-slate-200';
+    return current ? 'border-blue-800 bg-blue-700 text-white' : 'border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100';
+  };
+  const STATUS_BTN = 'inline-flex min-h-12 max-w-full items-center gap-2 rounded-lg border-2 px-4 py-2 text-left text-lg font-semibold leading-snug [overflow-wrap:anywhere] transition focus:outline-none focus-visible:ring-4 focus-visible:ring-focus focus-visible:ring-offset-2';
+
+  const statusButtons = (
+    <section aria-labelledby={`${uid}-set`} data-status-buttons={enquiryId}>
+      <h2 id={`${uid}-set`} className="text-xl font-bold text-text-primary">Set Status</h2>
+      {lockedReason ? (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-lg text-slate-900" data-status-locked>
+          <Lock className="mt-1 size-5 shrink-0 text-slate-700" aria-hidden="true" /> {lockedReason}
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-base text-text-secondary">Choose the status that fits now. Any status can be chosen.</p>
+          <div role="group" aria-labelledby={`${uid}-set`} className="mt-3 flex flex-wrap gap-2">
+            {buttonKeys.map((k) => {
+              const current = norm(k) === norm(saved);
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={current}
+                  aria-label={current ? `${labelOf(k)} (current status)` : `Set status to ${labelOf(k)}`}
+                  onClick={(e) => {
+                    if (current || pending) return; // the current status sends nothing and adds no history
+                    returnTo.current = e.currentTarget;
+                    openEditor(k);
+                  }}
+                  className={`${STATUS_BTN} ${tone(k, current)} ${current ? 'cursor-default' : ''}`}
+                  data-status-button={k}
+                  data-current={current ? 'true' : undefined}
+                >
+                  {current && <Check className="size-5 shrink-0" aria-hidden="true" />}
+                  <span>{labelOf(k)}</span>
+                  {current && <span className="rounded bg-white/20 px-1.5 text-base font-bold">Current</span>}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={(e) => { returnTo.current = e.currentTarget; openAdd(); }}
+              className={`${STATUS_BTN} border-dashed border-blue-700 bg-white text-blue-800 hover:bg-blue-50`}
+              data-add-status
+            >
+              <Plus className="size-5 shrink-0" aria-hidden="true" /> Add New Status
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+
   return (
     <>
+      {layout === 'buttons' ? statusButtons : (
       <div ref={wrap} className="relative inline-block">
         <button
           type="button"
@@ -311,20 +385,21 @@ export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, st
             role="menu" aria-label={`Choose a new status for ${companyName}`} className={`absolute left-0 z-40 w-72 max-w-[85vw] overflow-y-auto rounded-lg border-2 border-slate-500 bg-white py-1 shadow-xl max-h-[70vh] ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
             {options.map((x) => (
               <li key={x} role="none">
-                <button type="button" role="menuitem" onClick={() => openEditor(x)} className={menuItemClass} data-status-option={x}>
+                <button type="button" role="menuitem" onClick={() => { returnTo.current = null; openEditor(x); }} className={menuItemClass} data-status-option={x}>
                   {labelOf(x)}
                 </button>
               </li>
             ))}
             <li role="separator" className="my-1 border-t-2 border-slate-300" />
             <li role="none">
-              <button type="button" role="menuitem" onClick={openAdd} className={`${menuItemClass} gap-2 text-blue-900`} data-add-status>
+              <button type="button" role="menuitem" onClick={() => { returnTo.current = null; openAdd(); }} className={`${menuItemClass} gap-2 text-blue-900`} data-add-status>
                 <Plus className="size-5 shrink-0" aria-hidden="true" /> Add New Status
               </button>
             </li>
           </ul>
         )}
       </div>
+      )}
 
       <dialog
         ref={dialog}
@@ -335,7 +410,7 @@ export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, st
           if (outcome) router.refresh();
           setOutcome(null);
           reset();
-          trigger.current?.focus();
+          restoreFocus();
         }}
         onClick={(e) => {
           if (e.target === dialog.current) cancel();
@@ -436,7 +511,7 @@ export function EnquiryStatusControl({ enquiryId, enquiryNumber, companyName, st
           setAddOutcome(null);
           setError(null);
           setFieldErrors({});
-          trigger.current?.focus();
+          restoreFocus();
         }}
         onClick={(e) => {
           if (e.target === addDialog.current) cancelAdd();

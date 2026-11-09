@@ -3441,3 +3441,15 @@ Selected Job Progress gets a compact **Technical Release** box: flow **Confirmed
 ### Custom statuses + "Add New Status" (FMP-SALES-18)
 
 `sales/_components/custom-statuses.tsx` — `CustomStatusesProvider` (filled once by `sales/layout.tsx` from `GET /sales/statuses`) and `useCustomStatuses()` for client components. `sales-format.ts`: `statusKey(status, customStatus)` (system code or `custom:<id>`), `statusText()`, `customStatusFilter(id)`, `matchesStatusFilter(filter, key)`, `statusFilterLabel(filter, customStatuses)`, `STATUS_BADGE.CUSTOM` (teal). `StatusBadge` / `CurrentStatus` take `customStatus`; custom badges wrap (`[overflow-wrap:anywhere]`) and carry `title` + `data-status-badge="custom"`. `EnquiryStatusControl` takes `customStatus`; its menu lists custom statuses after the system ones, then a `role="separator"` and `[data-add-status]` "+ Add New Status", which opens `dialog[data-add-status-dialog]` (one `[data-new-status-name]` field, read-only while saving so focus can return after an error; Save & Apply / Cancel) and calls `addCustomStatusAction` (API create-and-apply in one transaction). Status filter selects use `min-w-0 max-w-72` so long names never widen the page. Short windows (globals.css FMP-SALES-17 block): `.sd-conv-figure` puts the conversion percentage beside its sentence; `.sd-recent [data-status-badge="custom"]` keeps a long custom status on one line. The read-only note sits in the Sales header row (`[data-view-only-note]`).
+
+
+### Set Status buttons (FMP-SALES-19)
+
+`EnquiryStatusControl` `layout="buttons"` (enquiry page only; the default `"menu"` stays in previews):
+- `section[data-status-buttons]` with an "Set Status" h2 and a `role="group"` of `[data-status-button="<key>"]` buttons (keys from `STATUS_ORDER` + `customStatusFilter(id)`).
+- The current status has `aria-pressed`, `data-current="true"`, a check icon and "Current".
+- Tones: blue in-progress, green WON, slate LOST, dashed-blue `[data-add-status]`. Buttons are 48px, `text-lg`, `[overflow-wrap:anywhere]`.
+- Buttons open the existing popups; `returnTo` / `restoreFocus()` send focus back to the button that opened them.
+- `lockedReason` replaces the buttons with `[data-status-locked]` text.
+
+`EnquiryActions` stacks Add Activity above the status slot.
